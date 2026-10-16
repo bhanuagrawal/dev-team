@@ -159,6 +159,7 @@ def research_collect(project: Path, log: RunLog) -> dict:
         "constraints": {
             "frozen_paths_count": len(profile.get("frozen_paths", [])),
             "max_queue": MAX_QUEUE,
+            "standing_decisions": profile.get("standing_decisions", []),
             "policy": ("respect the freeze: no new domain features without owner "
                        "sign-off; motion targets may only come from research."
                        "codebase.remaining; propose issues_to_file for anything "
@@ -219,7 +220,10 @@ Rules:
 - no new domain features unless the research/constraints say the freeze lifted.
 - issues_to_file ONLY for decisions needing the owner (e.g. production
   promotion, re-enabling disabled features, analytics instrumentation
-  sign-off). Do not re-file an issue that recent_runs/notes or the described
+  sign-off). NEVER re-file or re-raise anything listed in
+  constraints.standing_decisions — those are answered policy; the data behind
+  them may be reported as facts, not as an open question. Do not re-file an
+  issue that recent_runs/notes or the described
   consensus already answers; check before queueing one.
 
 
