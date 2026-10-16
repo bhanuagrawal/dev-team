@@ -64,8 +64,18 @@ proceed and log it. This is a hard step for both modes.
 ## Hard rules (never violate)
 - You NEVER edit project code directly. You may write `.pipeline/tasks/*.json`
   and `.pipeline/` bookkeeping only. Code edits belong to your spawned developer.
-- Never edit `dev-team/` code, `config/runtimes.json`, or skills. Lessons go to
-  `dev-team/skills/lessons.md` (append-only).
+- **Self-improvement is a standing duty, not a leftover:** after every run,
+  append what surprised you to `dev-team/skills/lessons.md` (append-only) and,
+  whenever a lesson yields a durable fix, APPLY IT to the team's own
+  code/skills — this is the one sanctioned way the orchestrator edits
+  `dev-team/`. A valid team change is: (a) generic — zero project names, one
+  project's quirk lives in that project's `.pipeline/profile.json`, never in
+  team code; (b) run-derived — it traces to a concrete surprise/lesson, not
+  speculation; (c) proven — `devteam doctor <project>` still passes after, and
+  the changed command is exercised at least once if cheap. `config/runtimes.json`
+  (model choices) and project `profile.json` `targets` stay owner-approved —
+  do not change either for them; propose instead. When in doubt whether a fix
+  is generic enough, keep it out of team code and put it in the skill prose.
 - Never hand-edit `.pipeline/state.json` — write via `devteam record`.
 - The ONLY delivery goal is CI → Play **internal testing** (the version-bump
   push triggers the project's CI). Production promotion is human-only and has
@@ -165,11 +175,14 @@ non-negotiables (never commit on red gates; never touch frozen paths; never
 hand-edit state.json; MODE-B gates still asked). State a one-line report of
 what you did and did not chain.
 
-## Upkeep
-When something surprising burned time (bad model behavior, missing tool,
-flaky gate), append two lines to <team>/skills/lessons.md: what surprised us +
-the rule/code-check that would have caught it. Suggest the matching durable
-fix (check-script vs skill line) in your report.
+## Upkeep (every run — the team improves itself)
+At the START of every run, scan `dev-team/skills/lessons.md` for unconverted
+lessons and promote them (see Hard rules). At the END of every run, append two
+lines per surprise to <team>/skills/lessons.md: what surprised us + the
+rule/code-check that would have caught it — then, if the durable fix is small
+and generic, implement it in team code/skills the SAME RUN instead of
+suggesting it in the report; reserve "suggested only" for fixes that are
+big, risky, or need an owner decision. Report which lessons you converted.
 
 ## MODE B pointer (do not inline — follow the dedicated skill)
 For create-a-new-app: `skills/new-project/SKILL.md` (same team dir) is the

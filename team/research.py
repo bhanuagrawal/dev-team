@@ -143,7 +143,11 @@ def research_collect(project: Path, log: RunLog) -> dict:
                 "shipped_versions_in_state": shipped_versions,
                 "last_success_date": state.get("last_success_date"),
                 "runs_recorded": len(state.get("runs", [])),
-                "queue": state.get("queue", []),
+                "recent_runs": [
+                    {"date": r.get("date"), "task_id": r.get("task_id"),
+                     "result": r.get("result"), "note": (r.get("note") or "")[:300]}
+                    for r in state.get("runs", [])[-8:]],
+                "queue_history": state.get("queue", []),
                 "insights": state.get("insights", {}),
             },
             "stages": {
@@ -197,9 +201,17 @@ Decide what to BUILD NEXT. Output STRICT JSON only (no prose, no code fence):
 Rules:
 - queue ordering = execution order; at most {max_queue} entries.
 - motion tasks may ONLY target listed remaining surfaces (copy the label exactly).
+  If codebase.remaining is empty, queue must contain NO motion entries — any
+  motion proposal without a listed surface is rejected by validation.
+- repo.recent_runs is the ledger of what was ALREADY executed/blocked/rejected.
+  Do NOT repeat those tasks; build on their findings and note outcomes instead.
+  A previously proposed item that recent_runs shows blocked/rejected must not
+  reappear unless the underlying cause clearly changed.
 - no new domain features unless the research/constraints say the freeze lifted.
 - issues_to_file ONLY for decisions needing a human (e.g. production promotion,
-  re-enabling disabled features, analytics instrumentation sign-off).
+  re-enabling disabled features, analytics instrumentation sign-off). Do not
+  re-file an issue that recent_runs/notes or the described consensus already
+  answers; check before queueing one.
 
 
 RESPOND WITH JSON ONLY."""
@@ -215,12 +227,26 @@ def _extract_json(text: str) -> dict:
     return json.loads(raw[start:end + 1])
 
 
-def _validate(result: dict) -> str | None:
+def _validate(result: dict, research: dict | None = None) -> str | None:
     if "queue" not in result or not isinstance(result["queue"], list):
         return "missing list 'queue'"
+    remaining: list[dict] = []
+    if research is not None:
+        remaining = (research.get("signals", {}).get("codebase", {})
+                     .get("remaining")) or []
     for q in result["queue"][:MAX_QUEUE]:
         if not q.get("type") or not q.get("label") or not q.get("reason"):
             return "queue entry missing type/label/reason"
+        if q.get("type") == "motion":
+            labels = {r.get("label"): set(r.get("paths") or []) for r in remaining}
+            if q["label"] not in labels:
+                return (f"motion queue entry '{q['label']}' is not a listed "
+                        "remaining surface — motion targets may only come from "
+                        "codebase.remaining" + (" (it is empty now)" if not remaining else ""))
+            tgt = q.get("target") or ""
+            if tgt and tgt != q["label"] and tgt not in labels[q["label"]]:
+                return (f"motion target '{tgt}' is not one of the surface's "
+                        f"listed paths {sorted(labels[q['label']])}")
     if "insights" not in result or not isinstance(result.get("insights"), dict):
         return "missing object 'insights'"
     if not isinstance(result.get("issues_to_file", []), list):
@@ -325,7 +351,7 @@ def research_run(project: Path, log: RunLog, use_llm: bool = True) -> None:
         raw = _llm(prompt, log)
         try:
             result = _extract_json(raw)
-            err = _validate(result)
+            err = _validate(result, research)
             if not err:
                 break
         except json.JSONDecodeError as e:

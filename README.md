@@ -18,6 +18,15 @@ core (gates, worktree plumbing, version-truth release, ledger, alarms). The
 agents define the rest in skills, and development leans on **official
 Google/JetBrains skills refreshed before every coding session**.
 
+## Self-improvement loop (standing)
+
+The team gets better every run, and stays **extremely generic**: every run logs
+surprises in `skills/lessons.md`, and lessons that yield durable fixes get
+implemented into team code/skills **in the same run** — fixes must be
+project-agnostic (project quirks live in `<project>/.pipeline/profile.json`),
+run-derived, and proven with `devteam doctor`. See
+`skills/dev-team/SKILL.md` → Hard rules + Upkeep for the contract.
+
 ## The skills (the actual "team brain")
 - `skills/dev-team/` — orchestrator contract: mode selection, nightly runbook,
   fallback spawning, alarms.
@@ -25,8 +34,10 @@ Google/JetBrains skills refreshed before every coding session**.
   CI ymls, MVI event-core files).
 - `skills/android-code/` — coding-style law for dev subagents.
 - `skills/checks/` — executable expertise (localization completeness…).
-- `skills/lessons.md` — appended after every surprise; converted into durable
-  fixes by the human or the orchestrator.
+- `skills/lessons.md` — appended after every surprise; the orchestrator's
+  standing duty (see `skills/dev-team/SKILL.md` → Upkeep / Hard rules) is to
+  promote lessons into durable, generic fixes in team code/skills the same run
+  — never project-specific, always proven by `devteam doctor`.
 
 ## Deterministic core (cli.py + team/)
 ```
@@ -59,6 +70,10 @@ cli.py  team/  prompts/developer.md  scripts/nightly.sh
 config/runtimes.json            # role → runtime → model
 skills/                          # the real team brain (above)
 ```
+The team repo can live anywhere — it currently sits in `~/Documents/AI/dev-team`
+alongside the other agent systems. Projects resolve by name from
+`DEVTEAM_PROJECTS_HOME` (optional env override), the team's parent folder, and
+`~/AndroidStudioProjects` (in that order); absolute paths always work.
 
 ## Adding a project (existing repo)
 `python3 cli.py onboard <path>` → review `.pipeline/profile.json` →
