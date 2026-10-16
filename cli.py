@@ -28,8 +28,12 @@ CORE_MOTION_TOKENS = scan.CORE_MOTION_TOKENS
 
 def language_conventions(project: Path) -> list[str]:
     """Convention sources for the developer subagent: the team's universal
-    android-code skill, plus any in-repo architecture/conventions doc."""
+    android-code skill, plus any in-repo architecture/conventions doc.
+    KMP (composeApp) projects additionally get the kmp-compose-multiplatform
+    skill (Google-architecture-grounded) — KMP is not Android-idiom territory."""
     conv = [str(TEAM_ROOT / "skills" / "android-code" / "SKILL.md")]
+    if (project / "composeApp").is_dir():
+        conv.append(str(Path.home() / ".agents/skills/kmp-compose-multiplatform/SKILL.md"))
     for name in ("ARCHITECTURE.md", "AGENTS.md"):
         p = project / name
         if p.exists() and p.stat().st_size < 60_000:
