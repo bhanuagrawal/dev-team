@@ -233,6 +233,26 @@ def profile_reference_fill(profile: dict, project: Path) -> None:
     profile.pop("pickers", None)
 
 
+# outcome contract helpers — the orchestrator's duty is to relay, not remember:
+# upgrades/capability-asks flagged by the research agents are printed BY CODE
+# at record time; the run banner must quote what was printed.
+def print_agent_flags(project: Path) -> None:
+    state = state_of(project)
+    flags = state.get("upgrades", [])
+    if not flags:
+        try:
+            flags = json.loads((Path(project) / ".pipeline" / "research.json")
+                               .read_text()).get("upgrades", [])
+        except Exception:
+            flags = []
+    if not flags:
+        return
+    print("--- AGENT FLAGS (upgrades surfaced by research — quote these in the run banner) ---")
+    for u in flags:
+        print(f"  · {u.get('title', '?')} — {u.get('benefit', '?')}")
+        print(f"    how: {u.get('how', '?')}")
+
+
 # --------------------------------------------------------------------------- #
 # orchestrator-facing deterministic commands
 # --------------------------------------------------------------------------- #
@@ -363,6 +383,9 @@ def cmd_record(args: argparse.Namespace) -> None:
     save_state(project, state)
     scribe.update(project)
     print(f"recorded: {entry['result']} {entry['task_id']}")
+    # The orchestrator relays the research agents' flags mechanically —
+    # code prints them here on EVERY record; the run banner quotes this block.
+    print_agent_flags(project)
 
 
 def cmd_pick(args: argparse.Namespace) -> int:

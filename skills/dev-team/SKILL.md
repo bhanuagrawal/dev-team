@@ -180,6 +180,11 @@ things an agent can decide. Question budget: zero unless a gate truly blocks.
     / `❓ OWNER ASK: <the decision>` / `🛠 TEAM SHIP: <what landed>` — plus what
     ran, and next step. An analysis-only report with no ask and no ship fails
     the run-outcome contract.
+10b. **Relay, don't remember**: `devteam record` prints an `AGENT FLAGS` block
+    (the research agents' upgrade/capability asks) on EVERY outcome. The run
+    banner MUST quote that block verbatim in its final report — dropping it is
+    a run-report failure even when the build shipped. If record printed no
+    block, the banner says "no agent flags pending".
 
 ## Interactive (human-present) sessions
 Same procedure; `supervised` tasks become available when a human is with you —
