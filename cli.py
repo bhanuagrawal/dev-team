@@ -311,6 +311,37 @@ def cmd_developer_prompt(args: argparse.Namespace) -> None:
 def cmd_queue(args: argparse.Namespace) -> None:
     project = resolve_project(args.project)
     state = state_of(project)
+    action = getattr(args, "action", None)
+    if action == "add":
+        from team import queue as qmod
+        if args.spec:
+            entry = json.loads(Path(args.spec).read_text())
+        else:
+            if not args.label:
+                raise SystemExit("queue add needs --spec or --label")
+            entry = {"type": args.type or "feature", "label": args.label,
+                     "target": args.target or "",
+                     "reason": args.reason or "added by the orchestrator"}
+            if args.risk:
+                entry["risk"] = args.risk
+        if args.supersedes:
+            known = {qmod._norm(qmod.label_of(q)) for q in state.get("queue", [])}
+            known |= {qmod._norm(q.get("id", "")) for q in state.get("queue", [])}
+            unknown = [s for s in args.supersedes if qmod._norm(s) not in known]
+            if unknown:
+                raise SystemExit(f"--supersedes names not in the queue: {unknown} "
+                                 "— judge only tasks that are actually queued")
+            entry["supersedes"] = list(entry.get("supersedes") or []) + list(args.supersedes)
+        block = qmod.add_task(state, entry, source="orchestrator",
+                              position=args.position)
+        save_state(project, state)
+        print(block)
+        print(json.dumps(state.get("queue", []), indent=2))
+        return
+    if action == "review":
+        from team import queue as qmod
+        print(qmod.review(state))
+        return
     queue = state.get("queue", [])
     if args.done:
         before = len(queue)
@@ -567,7 +598,14 @@ def main() -> None:
     pk = sub.add_parser("pick"); pk.add_argument("project"); pk.add_argument("--supervised", action="store_true"); pk.set_defaults(fn=cmd_pick)
     w = sub.add_parser("worktree-start"); w.add_argument("project"); w.add_argument("--task-id", required=True); w.set_defaults(fn=cmd_worktree_start)
     dp = sub.add_parser("developer-prompt"); dp.add_argument("project"); dp.add_argument("task_spec"); dp.add_argument("--template", choices=["motion", "generic", "auto"], default="auto"); dp.set_defaults(fn=cmd_developer_prompt)
-    q = sub.add_parser("queue"); q.add_argument("project"); q.add_argument("--done"); q.set_defaults(fn=cmd_queue)
+    q = sub.add_parser("queue"); q.add_argument("project"); q.add_argument("--done")
+    q.add_argument("action", nargs="?", choices=["add", "review"])
+    q.add_argument("--spec"); q.add_argument("--type")
+    q.add_argument("--label"); q.add_argument("--target"); q.add_argument("--reason")
+    q.add_argument("--risk"); q.add_argument("--position", choices=["head", "tail"],
+                                             default="head")
+    q.add_argument("--supersedes", action="append", default=[])
+    q.set_defaults(fn=cmd_queue)
     rh = sub.add_parser("run-headless"); rh.add_argument("project"); rh.add_argument("--task-spec", required=True); rh.add_argument("--supervised", action="store_true"); rh.set_defaults(fn=cmd_run_headless)
     v = sub.add_parser("verify");      v.add_argument("project"); v.add_argument("--worktree"); v.add_argument("--skip-gradle", action="store_true"); v.set_defaults(fn=cmd_verify)
     r = sub.add_parser("release");     r.add_argument("project"); r.add_argument("--worktree", required=True); r.add_argument("--task-spec", required=True); r.set_defaults(fn=cmd_release)

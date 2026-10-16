@@ -118,10 +118,11 @@ things an agent can decide. Question budget: zero unless a gate truly blocks.
    codebase + repo signals; ONE synthesis call; updates state.json queue —
    no-LLM fallback writes research.json for you to read). Research defaults to
    EXECUTABLE work (motion/bugfix/feature); investigations are capped at 2 and
-   must each name the owner decision or code task they feed. If research adds
-   nothing executable → `devteam alarm` + OWNER ASK, then stop (see the
-   run-outcome contract). No inventing work to fill silence; no analysis-only
-   endings.
+   must each name the owner decision or code task they feed. Every refill runs
+   an IMPACT REVIEW (below): the synthesis must judge each already-queued task
+   and the CLI prints a `QUEUE IMPACT` block. If research adds nothing executable
+   → `devteam alarm` + OWNER ASK, then stop (see the run-outcome contract). No
+   inventing work to fill silence; no analysis-only endings.
 3. DETERMINISTIC PICK (runbook step 3 is code now):
    `python3 <team>/cli.py pick <project>` [--supervised]
    → returns the next task spec file + worktree/prompt command bundle:
@@ -183,8 +184,10 @@ things an agent can decide. Question budget: zero unless a gate truly blocks.
 10b. **Relay, don't remember**: `devteam record` prints an `AGENT FLAGS` block
     (the research agents' upgrade/capability asks) on EVERY outcome. The run
     banner MUST quote that block verbatim in its final report — dropping it is
-    a run-report failure even when the build shipped. If record printed no
-    block, the banner says "no agent flags pending".
+    a run-report failure even when the build shipped. The same rule applies to
+    any `QUEUE IMPACT` block printed by research or `queue add`: quote it, so a
+    superseded or dropped task is never silent. If record printed no block, the
+    banner says "no agent flags pending".
 
 ## Interactive (human-present) sessions
 Same procedure; `supervised` tasks become available when a human is with you —
@@ -211,6 +214,31 @@ fixes itself instead of idling:
 4. Orchestration reruns research → pick → developer → verify → release
    **automatically, max 2 loops**, without a new owner ask; after loop 2 stop
    honestly with the alarm + a run report (never a silent red main).
+
+## Queue admissions & impact review (owner requirement 2026-10-16)
+A new task never enters the queue in isolation. **Every admission — a research
+refill or an explicit orchestrator add — must judge the impact on the tasks
+already queued**, because new work can make older entries irrelevant (already
+covered, same target + type, or a better replacement). Rule: *propose in the
+agent, judge and apply in code; never drop silently.*
+
+- Research refill: the synthesis reviews `signals.repo.current_queue` and, for
+  each entry, either carries it forward, lists its exact label in a new entry's
+  `"supersedes"`, or lists it in top-level `"dropped"` with a reason.
+  Validation rejects unknown labels. Any queued task that simply vanishes is
+  recorded as an *unexplained drop* and flagged.
+- Explicit add: `python3 <team>/cli.py queue <project> add --spec <spec.json>`
+  (or `--type/--label/--target/--reason`, plus repeatable `--supersedes LABEL`
+  and `--position head|tail`). Code folds same-type/same-target work into the
+  new entry and reports the impact.
+- Both paths print `QUEUE IMPACT (…)`: `+ added`, `x superseded/replaced`,
+  `x obsolete` (target already shipped), `! dropped`, `= kept`. Quote it in the
+  run banner.
+- Every verdict is preserved in `state['queue_events']` (append-only) — nothing
+  is ever deleted silently, so a dropped task can always be restored.
+- Standalone check anytime: `python3 <team>/cli.py queue <project> review`
+  (read-only) flags queued entries whose target already shipped and internal
+  duplicates.
 
 ## DIRECT AGENT INVOCATION (scope-limited runs)
 The owner may ask for ONE agent only, and that must work:

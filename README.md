@@ -48,6 +48,7 @@ run-derived, and proven with `devteam doctor`. See
 python3 cli.py status|onboard|scan <project>
 python3 cli.py worktree-start <project> --task-id ID
 python3 cli.py developer-prompt <project> <spec.json>
+python3 cli.py queue <project> [add|review]   # admission + impact review
 python3 cli.py verify <project> --worktree <path>
 python3 cli.py release <project> --worktree <path> --task-spec <spec.json>
 python3 cli.py record <project> --result shipped|failed|blocked …
@@ -56,6 +57,14 @@ python3 cli.py poll / alarm / setup
 Only here, only these: gates (frozen-paths scope, 15-locale check, build+test),
 worktrees, tag-truth version bump + push, state ledger, alarms. Zero LLM, zero
 project names.
+
+### Queue impact review
+Any task entering the queue — a research refill or an orchestrator
+`queue add` — is judged against the tasks already queued: new work can make an
+older entry irrelevant (same target + type, already covered, or superseded).
+Code records every verdict in `state['queue_events']` and prints a
+`QUEUE IMPACT` block (`+ added`, `x superseded/replaced`, `x obsolete`,
+`! dropped`, `= kept`) for the run banner; nothing is ever dropped silently.
 
 ## Delivery goal (both modes)
 Version-bump push → project's own GitHub Actions → **Play Console internal

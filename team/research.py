@@ -19,6 +19,7 @@ from pathlib import Path
 
 from . import scan
 from .core import RunLog, now_iso, profile_of, run, save_state, state_of
+from . import queue as queue_mod
 
 MAX_QUEUE = 6
 
@@ -196,7 +197,8 @@ def research_collect(project: Path, log: RunLog) -> dict:
                     {"date": r.get("date"), "task_id": r.get("task_id"),
                      "result": r.get("result"), "note": (r.get("note") or "")[:300]}
                     for r in state.get("runs", [])[-8:]],
-                "queue_history": state.get("queue", []),
+                "current_queue": state.get("queue", []),
+                "queue_impact_log": state.get("queue_events", [])[-8:],
                 "insights": state.get("insights", {}),
             },
             "stages": {
@@ -241,9 +243,13 @@ Decide what to BUILD NEXT. Output STRICT JSON only (no prose, no code fence):
 {{
   "insights": {{"headline": "one line", "analysis": "2-5 sentences grounded in the numbers"}},
   "queue": [
-    {{"type": "motion|bugfix|investigation", "label": "...",
+    {{"type": "motion|bugfix|feature|investigation", "label": "...",
       "target": "<exact surface path for motion; short topic otherwise>",
-      "priority": 1, "reason": "one line grounded in research"}}
+      "priority": 1, "reason": "one line grounded in research",
+      "supersedes": ["<exact label of an already-queued task this makes irrelevant>"]}}
+  ],
+  "dropped": [
+    {{"label": "<exact label of an already-queued task you are removing>", "reason": "one line why it is no longer queued"}}
   ],
   "issues_to_file": [
     {{"title": "...", "body": "what + why + recommended action + effort/risk"}}
@@ -260,6 +266,14 @@ Rules:
   would unlock one (e.g. a feature proposal for approval, a freeze lift, a
   promotion) — never a "what should we do?" question.
 - queue ordering = execution order; at most {max_queue} entries.
+- IMPACT REVIEW (required): signals.repo.current_queue is the queue already
+  waiting to be built. Judge EVERY entry's fate before proposing. If your plan
+  makes an entry irrelevant — already covered by new work, same target+type, or
+  a better replacement — list its exact label in the relevant new entry's
+  "supersedes". If you remove an entry for any other reason, list it in
+  top-level "dropped" with a one-line reason. A queued task must never vanish
+  without a verdict: code records every verdict and prints the impact block.
+  Labels MUST match current_queue exactly (validation rejects unknown labels).
 - motion tasks may ONLY target listed remaining surfaces (copy the label exactly).
   If codebase.remaining is empty, queue must contain NO motion entries — any
   motion proposal without a listed surface is rejected by validation.
@@ -325,6 +339,28 @@ def _validate(result: dict, research: dict | None = None) -> str | None:
         return "missing object 'insights'"
     if not isinstance(result.get("issues_to_file", []), list):
         return "'issues_to_file' must be a list"
+    if not isinstance(result.get("dropped", []), list):
+        return "'dropped' must be a list"
+    # Impact review is judged: every supersede/drop label must name a task that
+    # is actually queued (no inventing, no ghost labels).
+    if research is not None:
+        queued = {queue_mod._norm(queue_mod.label_of(q))
+                  for q in (research.get("signals", {}).get("repo", {})
+                            .get("current_queue") or [])}
+        claims = []
+        for q in result["queue"]:
+            claims += [(lbl, "supersedes") for lbl in (q.get("supersedes") or [])]
+        claims += [(d.get("label"), "dropped") for d in result.get("dropped", [])]
+        for lbl, field in claims:
+            if not lbl:
+                continue
+            if not queued:
+                return (f"{field} names '{lbl}' but signals.repo.current_queue "
+                        "is empty — there is nothing to supersede or drop")
+            if queue_mod._norm(lbl) not in queued:
+                return (f"{field} label '{lbl}' is not in "
+                        "signals.repo.current_queue — impact review may only name "
+                        "already-queued tasks, or add new work to the queue")
     if result["queue"]:
         if sum(1 for q in result["queue"] if q.get("type") == "investigation") > 2:
             return "at most 2 investigation entries per cycle"
@@ -355,7 +391,11 @@ def _llm(prompt: str, log: RunLog, timeout: int = 900) -> str:
 
 def research_apply(project: Path, result: dict, log: RunLog) -> None:
     state = state_of(project)
-    state["queue"] = result.get("queue", [])[:MAX_QUEUE]
+    new_queue = result.get("queue", [])[:MAX_QUEUE]
+    # Not a silent overwrite: judge what the new plan makes irrelevant, record
+    # every verdict, and print the impact block for the run banner.
+    block = queue_mod.apply_plan(state, new_queue, source="research",
+                                 explicit_drops=result.get("dropped", []))
     state["insights"] = result.get("insights", {})
     state["last_research_at"] = now_iso()
     from pathlib import Path as _P
@@ -365,6 +405,8 @@ def research_apply(project: Path, result: dict, log: RunLog) -> None:
     except Exception:
         pass
     save_state(project, state)
+    for line in block.splitlines():
+        log(line)
     for issue in result.get("issues_to_file", []):
         title, body = issue.get("title", ""), issue.get("body", "")
         if not title:
