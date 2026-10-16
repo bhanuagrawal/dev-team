@@ -24,15 +24,24 @@ def agent_requirements(profile: dict, project: Path) -> dict[str, list[tuple[str
     ga4 = conns.get("ga4")
     ga4_checks: list[tuple[str, bool, str]] = []
     if ga4:
-        ga4_checks = [
-            ("connections.ga4.property declared", bool(ga4.get("property")),
-             "add the GA4 property id"),
-            ("service-account key file exists", _has(ga4.get("key_file", "")),
-             "place a key file at connections.ga4.key_file (or update the path)"),
-            ("gcloud CLI available", bool(shutil.which("gcloud")), "install gcloud SDK"),
-            ("runtime token scope", True,  # verified live at pull time
-             "research agent requests analytics.readonly automatically"),
-        ]
+        key_needed = bool(ga4.get("key_file"))
+        if key_needed:
+            ga4_checks.append(("service-account key file exists", _has(ga4.get("key_file", "")),
+                               "place a key file at connections.ga4.key_file (or update the path)"))
+        else:
+            # simple default: owner's shared Google login (one-time gcloud ADC),
+            # no per-project key file — verify the token mints now
+            adc_ok = run(["gcloud", "auth", "application-default", "print-access-token",
+                          "--scopes", "https://www.googleapis.com/auth/analytics.readonly"],
+                         None, timeout=60).returncode == 0
+            ga4_checks += [
+                ("connections.ga4.property declared", bool(ga4.get("property")),
+                 "add the GA4 property id"),
+                ("owner gcloud login can mint analytics.readonly token", adc_ok,
+                 "one-time: gcloud auth application-default login --scopes=https://www.googleapis.com/auth/analytics.readonly"
+                 " (shared across ALL projects)"),
+            ]
+        ga4_checks.append(("gcloud CLI available", bool(shutil.which("gcloud")), "install gcloud SDK"))
 
     dev = rt.get("developer", {})
     dev_rt_name = dev.get("runtime") or ""

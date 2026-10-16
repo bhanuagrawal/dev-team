@@ -65,24 +65,44 @@ def _ga4_pull(project: Path, profile: dict) -> dict:
     prop = conf.get("property")
     if not prop:
         return {"status": "unavailable", "reason":
-                "project has not declared connections.ga4 (property + key_file) — "
+                "project has not declared connections.ga4.property — "
                 "run `devteam doctor` and answer the owner-ask"}
     key_src = conf.get("key_file", "")
     key = Path(key_src).expanduser() if key_src else None
-    if not key_src or not key.exists():
-        return {"status": "unavailable", "reason":
-                f"service-account key missing at connections.ga4.key_file = {key_src!r}"}
-    try:
-        keydata = json.loads(key.read_text())
-        account = keydata.get("client_email", "")
+    if key_src and key and key.exists():
+        # per-project service account (the MindfulLauncher pattern)
+        try:
+            account = json.loads(key.read_text()).get("client_email", "")
+        except Exception:
+            return {"status": "unavailable", "reason": f"unreadable key file {key_src}"}
         run(["gcloud", "auth", "activate-service-account", "--key-file", str(key)],
             project, timeout=120)
         tok = run(["gcloud", "auth", "print-access-token", "--account", account,
                    "--scopes", "https://www.googleapis.com/auth/analytics.readonly"],
                   project, timeout=120)
-        if tok.returncode != 0 or not tok.stdout.strip():
-            return {"status": "unavailable", "reason": "gcloud token failed"}
-        token = tok.stdout.strip()
+        token = (tok.stdout or "").strip()
+        if tok.returncode != 0 or not token:
+            return {"status": "unavailable", "reason": "gcloud SA token failed"}
+    else:
+        # simple default (owner decision 2026-10-16): ONE shared Google login for
+        # all projects — `gcloud auth application-default login` once on this
+        # machine; every project then declares only its GA4 property id, and
+        # read access follows the owner's account exactly.
+        tok = run(["gcloud", "auth", "application-default", "print-access-token",
+                   "--scopes", "https://www.googleapis.com/auth/analytics.readonly"],
+                  project, timeout=60)
+        if tok.returncode != 0 or not (tok.stdout or "").strip():
+            # login without the analytics scope consented — try the default set
+            tok = run(["gcloud", "auth", "application-default", "print-access-token"],
+                      project, timeout=60)
+        token = (tok.stdout or "").strip()
+        if tok.returncode != 0 or not token:
+            return {"status": "unavailable", "reason":
+                    "GA property declared but no owner auth yet: run "
+                    "`gcloud auth application-default login --scopes=https://www.googleapis.com/auth/analytics.readonly` "
+                    "once (shared across all projects), or place a SA key at connections.ga4.key_file"}
+
+    try:
 
         def query(dims: list[str], metrics: list[str], days: int,
                   event_filter: str | None = None) -> dict | None:
@@ -375,9 +395,10 @@ def capability_upgrades(signals: dict, profile: dict) -> list[dict]:
             "title": "Connect app analytics (GA4 / Firebase)",
             "benefit": "uninstall rate, new-user trend and churn events turn "
                        "priority calls from vibes to numbers",
-            "how": "declare profile.connections.ga4 {property, key_file} with a "
-                   "service-account JSON; `devteam doctor` verifies; research "
-                   "then pulls real numbers every run",
+            "how": "declare profile.connections.ga4 {property: <GA4 property id>} "
+                   "— auth is the shared owner login (gcloud auth application-default "
+                   "login --scopes=https://www.googleapis.com/auth/analytics.readonly, "
+                   "one time, all projects); `devteam doctor` verifies",
         })
     if not profile.get("connections", {}).get("play_reviews"):
         up.append({
