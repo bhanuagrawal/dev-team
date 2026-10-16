@@ -46,6 +46,20 @@ def cmd_onboard(args: argparse.Namespace) -> None:
     pdir = pipeline_dir(project)
     pdir.mkdir(parents=True, exist_ok=True)
 
+    # --- layout: standard Android (app/src/main) or KMP (composeApp) -----------
+    kmp = False
+    if not (project / "app/src/main/java").exists():
+        kmp_srcs = [d for d in ("androidMain/kotlin", "commonMain/kotlin")
+                    if any((project / "composeApp/src" / d).rglob("*.kt"))]
+        if not kmp_srcs:
+            raise SystemExit(f"v1 onboarding supports standard Android (app/src/main) "
+                             f"or KMP (composeApp) layouts — got none in {project}")
+        kmp = True
+        module_src = project / "composeApp/src"
+        # UI (Compose) lives in androidMain when present; commonMain is fallback
+        src_leaf = kmp_srcs[0]
+        src_tree = module_src / src_leaf
+
     # --- environment detection -------------------------------------------------
     remote = subprocess.run(["git", "remote", "get-url", "origin"], cwd=project,
                             capture_output=True, text=True).stdout.strip()
@@ -55,25 +69,20 @@ def cmd_onboard(args: argparse.Namespace) -> None:
     src_root = None
     gradle = project / "app" / "build.gradle"
     if not gradle.exists():
-        cands = list(project.rglob("build.gradle"))
+        cands = list(project.rglob("build.gradle.kts"))
+        cands += [p for p in project.rglob("*.gradle*") if p.name in ("build.gradle", "build.gradle.kts")]
         gradle = next((g for g in cands if re.search(r"versionCode|versionName", g.read_text(errors="ignore"))), None)
-    pkg_dirs = sorted((project / "app/src/main/java").glob("*/*/*")
-                      ) if (project / "app/src/main/java").exists() else []
-    if pkg_dirs:
-        src_root = "app/src/main/java/" + "/".join(p.with_suffix("").name for p in pkg_dirs[:1])
-        # walk to deepest common package dir
-        base = project / "app/src/main/java"
-        cur = pkg_dirs[0]
-    if not (project / "app/src/main/java").exists():
-        raise SystemExit(f"v1 onboarding supports standard Android projects (kotlin/java "
-                         f"src under app/src/main) — got none in {project}")
-
-    # deepest package dir = last path component chain with .kt files
-    pkg_paths = [p for p in (project / "app/src/main/java").glob("*/*/*") if p.is_dir()]
-    src_root = "app/src/main/java"
-    if pkg_paths:
-        pkg = pkg_paths[0].relative_to(project / "app/src/main/java")
-        src_root = "app/src/main/java/" + pkg.as_posix()
+    if kmp:
+        pkg_paths = [p for p in src_tree.glob("*/*/*") if p.is_dir() and any(p.rglob("*.kt"))]
+        pkg = pkg_paths[0].relative_to(src_tree) if pkg_paths else None
+        src_root = (f"composeApp/src/{src_leaf}/" + pkg.as_posix()
+                    if pkg else f"composeApp/src/{src_leaf}")
+    else:
+        pkg_paths = [p for p in (project / "app/src/main/java").glob("*/*/*") if p.is_dir()]
+        src_root = "app/src/main/java"
+        if pkg_paths:
+            pkg = pkg_paths[0].relative_to(project / "app/src/main/java")
+            src_root = "app/src/main/java/" + pkg.as_posix()
 
     # --- project source facts --------------------------------------------------
     from team import scan as tscan
@@ -121,6 +130,37 @@ def cmd_onboard(args: argparse.Namespace) -> None:
 
     version_file = gradle.relative_to(project).as_posix()
 
+    # CI workflow + trigger detection: prefer the version-bump shipper workflow,
+    # else take the first workflow that exists; a tag-gated `on.push.tags`
+    # trigger means delivery requires pushing the version tag, not just main.
+    ci_workflow, ci_trigger = "ship-on-version-bump.yml", "bump"
+    wf_dir = project / ".github/workflows"
+    if wf_dir.is_dir():
+        workflows = sorted(wf_dir.glob("*.yml")) + sorted(wf_dir.glob("*.yaml"))
+        chosen = next((w for w in workflows if "ship-on-version-bump" in w.name),
+                      workflows[0] if workflows else None)
+        if chosen:
+            ci_workflow = chosen.name
+            if re.search(r"^\s*tags:\s*$", chosen.read_text(errors="ignore"), re.M) \
+                    and not re.search(r"^\s*(branches|paths):\s*$", chosen.read_text(errors="ignore"), re.M):
+                ci_trigger = "tag"
+    module = version_file.split("/")[0] if kmp else "app"
+    if kmp:
+        frozen = [f"{module}/src/commonMain/**/common/**",
+                  f"{module}/src/commonMain/**/domain/**",
+                  f"{module}/src/iosMain/**",
+                  f"{module}/src/androidMain/**/data/**",
+                  version_file, ".github/workflows/**"]
+        allowed = [f"{module}/src/androidMain/**/ui/**", f"{module}/src/androidMain/navigation/**",
+                   f"{module}/src/commonMain/**/ui/events/**", f"{module}/src/androidMain/res/values*/*.xml"]
+    else:
+        frozen = [f"{module}/src/main/java/**/data/**", f"{module}/src/main/java/**/domain/**",
+                  f"{module}/src/main/java/**/model/**", f"{module}/src/main/java/**/repository/**",
+                  f"{module}/src/main/java/**/config/FeatureFlags.kt",
+                  f"{module}/build.gradle"]
+        allowed = [f"{module}/src/main/java/**/ui/**", f"{module}/src/main/java/**/theme/**",
+                   f"{module}/src/main/res/values*/strings.xml"]
+
     # --- draft queue from discovery --------------------------------------------
     profile = {
         "name": project.name,
@@ -132,16 +172,14 @@ def cmd_onboard(args: argparse.Namespace) -> None:
         "whatsnew_file": ("distribution/whatsnew/whatsnew-en-US"
                           if (project / "distribution/whatsnew/whatsnew-en-US").exists()
                           else None),
-        "ci_workflow": "ship-on-version-bump.yml",
+        "ci_workflow": ci_workflow,
+        "ci_trigger": ci_trigger,
         "java_home": "/Applications/Android Studio.app/Contents/jbr/Contents/Home",
-        "verify": {"compile": ":app:compileDebugKotlin",
-                   "test": ":app:testDebugUnitTest"},
-        "frozen_paths": ["app/src/main/java/**/data/**", "app/src/main/java/**/domain/**",
-                         "app/src/main/java/**/model/**", "app/src/main/java/**/repository/**",
-                         "app/src/main/java/**/config/FeatureFlags.kt",
-                         "app/build.gradle"],
-        "allowed_paths": ["app/src/main/java/**/ui/**", "app/src/main/java/**/theme/**",
-                          "app/src/main/res/values*/strings.xml"],
+        "verify": {"compile": f":{module}:compileDebugKotlin",
+                   "test": f":{module}:testDebugUnitTest"},
+        "frozen_paths": frozen,
+        "allowed_paths": allowed,
+
         "shared_components_dir": (comps_dir.relative_to(tree).as_posix()
                                   if comps_dir else None),
         "components_dir": (comps_dir.relative_to(tree).as_posix()

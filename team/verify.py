@@ -58,8 +58,24 @@ def gradle_task(worktree: Path, task: str, timeout: int, log) -> tuple[bool, str
     if r.returncode == 0:
         log(f"  ok: {task}")
         return True, ""
-    tail = (r.stdout + r.stderr)[-4000:]
+    out = (r.stdout + r.stderr)
+    tail = out[-4000:]
+    # Task-name fallback: Kotlin variants got renamed `compileDebugKotlinAndroid`
+    # (KGP 2.x) while pure-Android modules keep `compileDebugKotlin` — profiles
+    # written for one scheme shouldn't fail gate runs under the other.
+    if "Cannot locate tasks that match" in out or "Task not found" in out:
+        alt = (task.replace("KotlinAndroid", "Kotlin")
+               if "KotlinAndroid" in task
+               else (task + "Android" if task.endswith("Kotlin") else None))
+        if alt:
+            log(f"  {task} not found in this project — retrying as {alt}")
+            r = run(["./gradlew", alt], worktree, timeout=timeout, env=GRADLE_ENV)
+            if r.returncode == 0:
+                log(f"  ok: {alt}")
+                return True, ""
+            tail = (r.stdout + r.stderr)[-4000:]
     return False, f"{task} FAILED:\n{tail}"
+
 
 
 def verify_all(project: Path, worktree: Path, base: str, log, gradle: bool = True) -> tuple[bool, list[str]]:

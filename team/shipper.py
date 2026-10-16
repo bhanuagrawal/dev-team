@@ -22,8 +22,9 @@ def remote_latest_version(project: Path) -> tuple[int, int, int] | None:
             cwd=project, timeout=60)
     if r.returncode != 0:
         return None
-    rx = rf"refs/tags/{re.escape(prefix)}(\d+)\.(\d+)\.(\d+)$"
-    versions = [(int(a), int(b), int(c)) for a, b, c in re.findall(rx, r.stdout, re.M)]
+    # patch segment optional: v1.5 counts as (1,5,0)
+    rx = rf"refs/tags/{re.escape(prefix)}(\d+)\.(\d+)(?:\.(\d+))?$"
+    versions = [(int(a), int(b), int(c or 0)) for a, b, c in re.findall(rx, r.stdout, re.M)]
     return max(versions) if versions else None
 
 
@@ -36,9 +37,12 @@ def bump_version_file(worktree: Path, new: tuple[int, int, int], log: RunLog) ->
 
     # Generic: bump whichever versionName/versionCode constants exist in the file
     # (Android Gradle convention used by this project; CI parses them back).
+    # versionName may be 1-3 segments (some projects use "1.4", most "1.2.3");
+    # always write major.minor.patch — CI computes the code from the same scheme.
     new_text, n_name = re.subn(
-        r'(versionName[\s\S]{0,70}?["\'])(\d+\.\d+\.\d+)(["\'])',
+        r'(versionName[\s\S]{0,70}?["\'])(\d+(?:\.\d+){0,2})(["\'])',
         rf"\g<1>{name}\g<3>", text, count=1)
+
     new_text, n_code = re.subn(
         r'(versionCode[\s\S]{0,70}?[?:=\s])(\d{4,})(\s*\)?)',
         rf"\g<1>{code}\g<3>", new_text, count=1)
@@ -91,7 +95,21 @@ def push_and_deliver(project: Path, worktree: Path, task: dict, new_version: str
         if r.returncode != 0:
             return {"delivered": False, "error": "push failed twice", "ci": {}}
     log("pushed to origin main")
+    # Tag-gated CI: some projects release on `v*` tags only — the bump push
+    # alone would never deliver. Push the version tag when profile says so.
+    if profile_of(project).get("ci_trigger", "bump") == "tag":
+        tag = f'{profile_of(project).get("tag_prefix", "v")}{new_version}'
+        r = git(["tag", tag], cwd=worktree)
+        if r.returncode != 0:
+            log(f"tag {tag} not created locally (may already exist)")
+        else:
+            r = git(["push", "origin", tag], cwd=worktree, timeout=120)
+            if r.returncode == 0:
+                log(f"pushed tag {tag} → CI (tag-gated delivery)")
+            else:
+                log(f"tag push failed: {(r.stdout + r.stderr)[-200:]}")
     ci = await_ci(project, sha, log)
+
     return {"delivered": True, "commit": sha, "version": new_version, "ci": ci}
 
 
