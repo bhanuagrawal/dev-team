@@ -199,6 +199,15 @@ Decide what to BUILD NEXT. Output STRICT JSON only (no prose, no code fence):
   ]
 }}
 Rules:
+- Buildability bias: the pipeline must be able to END EVERY RUN IN A BUILD.
+  Queue executable work (motion/bugfix/feature) first; investigations are
+  capped at 2 entries and each MUST, in its "reason", name the owner decision
+  or the code task it feeds — a decision-linked investigation is fine,
+  analysis-for-its-own-sake is not.
+- An issues_to_file entry counts as the run's OWNER ASK; if you can see no
+  buildable work at all, your job is the ask: file the decision issue that
+  would unlock one (e.g. a feature proposal for approval, a freeze lift, a
+  promotion) — never a "what should we do?" question.
 - queue ordering = execution order; at most {max_queue} entries.
 - motion tasks may ONLY target listed remaining surfaces (copy the label exactly).
   If codebase.remaining is empty, queue must contain NO motion entries — any
@@ -208,10 +217,10 @@ Rules:
   A previously proposed item that recent_runs shows blocked/rejected must not
   reappear unless the underlying cause clearly changed.
 - no new domain features unless the research/constraints say the freeze lifted.
-- issues_to_file ONLY for decisions needing a human (e.g. production promotion,
-  re-enabling disabled features, analytics instrumentation sign-off). Do not
-  re-file an issue that recent_runs/notes or the described consensus already
-  answers; check before queueing one.
+- issues_to_file ONLY for decisions needing the owner (e.g. production
+  promotion, re-enabling disabled features, analytics instrumentation
+  sign-off). Do not re-file an issue that recent_runs/notes or the described
+  consensus already answers; check before queueing one.
 
 
 RESPOND WITH JSON ONLY."""
@@ -251,6 +260,14 @@ def _validate(result: dict, research: dict | None = None) -> str | None:
         return "missing object 'insights'"
     if not isinstance(result.get("issues_to_file", []), list):
         return "'issues_to_file' must be a list"
+    if result["queue"]:
+        if sum(1 for q in result["queue"] if q.get("type") == "investigation") > 2:
+            return "at most 2 investigation entries per cycle"
+        executable = any(q.get("type") in ("motion", "bugfix", "feature")
+                         for q in result["queue"])
+        if not executable and not result.get("issues_to_file"):
+            return ("queue has no executable work and no owner-ask issue — "
+                    "a run must end in a build, an owner ask, or both")
     return None
 
 

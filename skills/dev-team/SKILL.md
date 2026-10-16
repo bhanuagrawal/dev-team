@@ -92,14 +92,36 @@ proceed and log it. This is a hard step for both modes.
 - run logs:           `<project>/.pipeline/runs/<run_id>.log`
 - task specs:         `<project>/.pipeline/tasks/<task_id>.json`
 
+## Run-outcome contract (every run, both modes)
+A run ends in EXACTLY ONE of these — never in silence:
+- ✅ **BUILD SHIPPED** — version bump pushed → project CI → internal testing. This
+  is the default terminal state whenever the queue holds (or research can
+  legitimately refill with) buildable work.
+- ❓ **OWNER ASK** — the ONLY questions you ever ask are ones no agent can
+  answer: production promotion, a freeze lift/sign-off, a kill-switch flip,
+  discard-vs-keep on user WIP. Even then: ask AFTER squeezing every
+  non-blocking stage, and if all you have is analysis, convert it — a decision
+  issue + a made-ready task spec that becomes buildable on "yes".
+- 🛠 **TOOLING/TEAM SHIP** — if genuinely nothing in the APP is buildable but a
+  team skill/code lesson conversion or research-export hardening lands, ship
+  that (team repo commit) and say so; analysis-only runs are failures.
+If the queue is empty: refill via research (which must now default to
+executable work — see its prompt rules). If research still yields nothing
+executable, the run's deliverable is the OWNER ASK (alarm + question) — that
+is "stopping honestly", not idling. Never ask what to do; never ask about
+things an agent can decide. Question budget: zero unless a gate truly blocks.
+
 ## Nightly run procedure (also works interactively)
 1. `python3 <team>/cli.py status <project>` — see queue, shipped, last run.
-2. If nothing unanimated remains (all shipped/animated) → REFILL the queue:
+2. If nothing executable remains → REFILL the queue:
    run `python3 <team>/cli.py research <project>` (code agent: pulls GA4 +
    codebase + repo signals; ONE synthesis call; updates state.json queue —
-   no-LLM fallback writes research.json for you to read). If research adds
-   nothing actionable → `devteam alarm` then report and stop. No inventing
-   work to fill silence.
+   no-LLM fallback writes research.json for you to read). Research defaults to
+   EXECUTABLE work (motion/bugfix/feature); investigations are capped at 2 and
+   must each name the owner decision or code task they feed. If research adds
+   nothing executable → `devteam alarm` + OWNER ASK, then stop (see the
+   run-outcome contract). No inventing work to fill silence; no analysis-only
+   endings.
 3. DETERMINISTIC PICK (runbook step 3 is code now):
    `python3 <team>/cli.py pick <project>` [--supervised]
    → returns the next task spec file + worktree/prompt command bundle:
@@ -153,7 +175,11 @@ proceed and log it. This is a hard step for both modes.
      [--task-spec .pipeline/tasks/<id>.json] [--version <ver>] [--commit <sha>]
      --note "<one line>"`
 10. `python3 <team>/cli.py alarm <project>` — staleness/CI reconciliation;
-    may file a GitHub Issue. Then report outcome to the user/feed.
+    may file a GitHub Issue. Then report the OUTCOME BANNER to the user/feed,
+    one of the three contract states — e.g. `✅ SHIPPED vX → internal testing`
+    / `❓ OWNER ASK: <the decision>` / `🛠 TEAM SHIP: <what landed>` — plus what
+    ran, and next step. An analysis-only report with no ask and no ship fails
+    the run-outcome contract.
 
 ## Interactive (human-present) sessions
 Same procedure; `supervised` tasks become available when a human is with you —

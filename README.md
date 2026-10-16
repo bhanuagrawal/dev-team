@@ -18,6 +18,10 @@ core (gates, worktree plumbing, version-truth release, ledger, alarms). The
 agents define the rest in skills, and development leans on **official
 Google/JetBrains skills refreshed before every coding session**.
 
+## Run-outcome contract
+
+Every run ends in **a build shipped to internal testing, an owner ask, or a team/tooling ship — never in silent analysis-only**. The orchestrator asks questions only when a genuinely owner-gated decision blocks the path (production promotion, freeze lifts, kill-switch flips), then continues to a build. See `skills/dev-team/SKILL.md` → Run-outcome contract.
+
 ## Self-improvement loop (standing)
 
 The team gets better every run, and stays **extremely generic**: every run logs
