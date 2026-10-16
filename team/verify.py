@@ -28,13 +28,22 @@ def changed_files(worktree: Path, base: str) -> list[str]:
 
 
 def scope_check(profile: dict, files: list[str]) -> tuple[bool, str]:
-    """(ok, message). Hard rule: nothing under frozen_paths may appear."""
+    """(ok, message). Hard rule: nothing under frozen_paths may appear —
+    except paths covered by an owner-approved constraint_lift recorded in the
+    profile ({"paths": [...], "decided_by": "..."} — engine reads the profile,
+    the OWNER records the decision; orchestrator cannot invent a lift)."""
     import fnmatch
+    lifted = []
+    for lift in profile.get("constraint_lifts", []) or []:
+        lifted += lift.get("paths", [])
     frozen = []
     for f in files:
         for pat in profile["frozen_paths"]:
-            if fnmatch.fnmatch(f, pat):
-                frozen.append(f"{f}  (matches {pat})")
+            if not fnmatch.fnmatch(f, pat):
+                continue
+            if any(fnmatch.fnmatch(f, lp) for lp in lifted):
+                continue
+            frozen.append(f"{f}  (matches {pat})")
     if frozen:
         return False, "FROZEN PATH VIOLATION:\n  " + "\n  ".join(frozen)
     if not files:

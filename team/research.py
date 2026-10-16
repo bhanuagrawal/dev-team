@@ -27,6 +27,35 @@ MAX_QUEUE = 6
 # collectors
 # --------------------------------------------------------------------------- #
 
+def _ci_pull(project: Path, profile: dict) -> dict:
+    """Recent runs of the project's delivery workflow. A red delivery run is
+    the product's fire: research must see it and escalate restoring delivery
+    to the highest priority (owner decision 2026-10-16 — self-healing loop)."""
+    wf = profile.get("ci_workflow")
+    slug = profile.get("repo_slug")
+    out: dict = {"workflow": wf, "status": "unknown"}
+    if not wf or not slug:
+        out["reason"] = "profile lacks ci_workflow/repo_slug"
+        return out
+    r = run(["gh", "run", "list", "-R", slug, "--workflow", wf, "-L", "5",
+             "--json", "databaseId,status,conclusion,headSha,event,createdAt"],
+            project, timeout=60)
+    if r.returncode != 0:
+        return {"workflow": wf, "status": "unavailable",
+                "reason": (r.stdout + r.stderr)[:200]}
+    runs = json.loads(r.stdout or "[]")
+    out["runs"] = runs[:5]
+    if runs:
+        out["last_conclusion"] = runs[0].get("conclusion")
+        if runs[0].get("conclusion") == "failure":
+            v = run(["gh", "run", "view", str(runs[0]["databaseId"]),
+                     "--log-failed", "-R", slug], project, timeout=120)
+            # keep the tail only — the interesting lines for an upload/policy
+            # rejection live right above the error line
+            out["failure_log_tail"] = (v.stdout + v.stderr)[-1500:]
+    return out
+
+
 def _ga4_pull(project: Path, profile: dict) -> dict:
     """GA4 via service account — the documented runReport pattern. The project
     DECLARES its connection in profile['connections']['ga4']
@@ -123,9 +152,9 @@ def research_collect(project: Path, log: RunLog) -> dict:
     latest = None
     r = run(["git", "-C", str(project), "ls-remote", "--tags", "origin", "refs/tags/v*"],
             project, timeout=60)
-    versions = re.findall(r"refs/tags/v(\d+)\.(\d+)\.(\d+)$", r.stdout or "", re.M)
+    versions = re.findall(r"refs/tags/v(\d+)\.(\d+)(?:\.(\d+))?$", r.stdout or "", re.M)
     if versions:
-        latest = ".".join(max(versions, key=lambda v: tuple(map(int, v))))
+        latest = ".".join(max(versions, key=lambda v: tuple(int(x or 0) for x in v)))
     shipped_versions = sorted({s.get("version", "?") for s in state.get("shipped", [])})
     research = {
         "generated_at": now_iso(),
@@ -155,6 +184,7 @@ def research_collect(project: Path, log: RunLog) -> dict:
                 "conventions": len(profile.get("conventions", [])),
                 "notes": profile.get("notes", ""),
             },
+            "ci": _ci_pull(project, profile),
         },
         "constraints": {
             "frozen_paths_count": len(profile.get("frozen_paths", [])),
@@ -213,6 +243,11 @@ Rules:
 - motion tasks may ONLY target listed remaining surfaces (copy the label exactly).
   If codebase.remaining is empty, queue must contain NO motion entries — any
   motion proposal without a listed surface is rejected by validation.
+- signals.ci: a red delivery (workflow failure, e.g. a store upload or policy
+  rejection) is the product's fire — restoring delivery outranks everything.
+  When signals.ci.last_conclusion is "failure", the FIRST queue entry must be
+  a bugfix/feature that restores the delivery (grounded in failure_log_tail;
+  name the exact files to change). Validation code enforces this ordering.
 - repo.recent_runs is the ledger of what was ALREADY executed/blocked/rejected.
   Do NOT repeat those tasks; build on their findings and note outcomes instead.
   A previously proposed item that recent_runs shows blocked/rejected must not
@@ -250,6 +285,12 @@ def _validate(result: dict, research: dict | None = None) -> str | None:
     for q in result["queue"][:MAX_QUEUE]:
         if not q.get("type") or not q.get("label") or not q.get("reason"):
             return "queue entry missing type/label/reason"
+        if research is not None:
+            ci_last = (research.get("signals", {}).get("ci", {}) or {}).get("last_conclusion")
+            if q is result["queue"][0] and ci_last == "failure" \
+                    and q.get("type") not in ("bugfix", "feature"):
+                return ("signals.ci is red — the first queue entry must be the "
+                        "bugfix/feature that restores delivery")
         if q.get("type") == "motion":
             labels = {r.get("label"): set(r.get("paths") or []) for r in remaining}
             if q["label"] not in labels:

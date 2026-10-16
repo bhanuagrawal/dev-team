@@ -190,6 +190,23 @@ say so in your report, then run the task with the human watching.
 - alarm Issue exists with [dev-team] title → start at `status`, diagnose from
   `.pipeline/runs/`, fix cause (model missing, gh auth, CI red), re-run.
 
+## Self-healing delivery loop (owner decision 2026-10-16)
+When a run's release could not deliver (red delivery workflow — a store
+upload/policy rejection, e.g. Play target-API level increases), the pipeline
+fixes itself instead of idling:
+1. `research` always collects `signals.ci` (last delivery-workflow conclusion
+   + failure log tail) and MUST queue the delivery-restoring bugfix/feature as
+   the first queue entry (validator-enforced whenever `last_conclusion=failure`).
+2. `pick` escalates that queue head ABOVE motion surfaces whenever the last
+   recorded run result is `failed`.
+3. Engine/hostile-file frustration is resolved through
+   `profile['constraint_lifts']` — {"paths", "decided_by", "note"} recorded by
+   the OWNER in the profile; `verify.scope_check` honors them and the freeze
+   stays absolute for everything else. Orchestrator never invents a lift.
+4. Orchestration reruns research → pick → developer → verify → release
+   **automatically, max 2 loops**, without a new owner ask; after loop 2 stop
+   honestly with the alarm + a run report (never a silent red main).
+
 ## DIRECT AGENT INVOCATION (scope-limited runs)
 The owner may ask for ONE agent only, and that must work:
 - "run only the developer agent" → spawn the developer subagent on the given

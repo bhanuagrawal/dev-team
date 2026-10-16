@@ -119,6 +119,24 @@ def scan_surfaces(project: Path) -> list[dict]:
 
 
 def next_task(project: Path, seq: int, supervised: bool = False) -> dict | None:
+    state = state_of(project)
+    # Delivery-first escalation (owner decision 2026-10-16: the pipeline is
+    # self-healing — when the last run FAILED, restoring delivery (the research
+    # queue's executable head) outranks motion polish; the orchestrator reruns
+    # without re-asking, max 2 redelivery loops).
+    if (state.get("last_run", {}) or {}).get("result") == "failed":
+        for q in state.get("queue", [])[:1]:
+            if q.get("type") in ("bugfix", "feature") and q.get("target"):
+                return {
+                    "id": "dt-" + re.sub(r"[^a-z0-9]+", "-", q["label"].lower())[:30].strip("-")
+                          + f"-{seq:03d}",
+                    "type": q["type"],
+                    "surface": {"label": q["label"],
+                                "targets": (q["target"] if isinstance(q["target"], list)
+                                            else [q["target"]])},
+                    "risk": q.get("risk", "safe"),
+                    "created": now_iso(),
+                }
     for t in scan_surfaces(project):
         if t.get("status") != "unanimated":
             continue
@@ -128,7 +146,6 @@ def next_task(project: Path, seq: int, supervised: bool = False) -> dict | None:
     # surfaces exhausted → the research queue refills (priority-1 entry only;
     # the nightly rhythm is ONE task per run). queue entries carry their own
     # target; investigation-type stays orchestrator-run, not a code task.
-    state = state_of(project)
     for q in state.get("queue", [])[:1]:
         if q.get("type") not in ("bugfix", "feature") or not q.get("target"):
             continue
