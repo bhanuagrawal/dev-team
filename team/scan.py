@@ -118,45 +118,60 @@ def scan_surfaces(project: Path) -> list[dict]:
     return out
 
 
+def _norm_label(text: str) -> str:
+    return re.sub(r"[^a-z0-9]+", " ", (text or "").lower()).strip()
+
+
+def _shipped_labels(state: dict) -> set[str]:
+    """Normalized labels of delivered work (the ledger's task identity)."""
+    return {_norm_label(s.get("label")) for s in state.get("shipped", [])
+            if s.get("label")}
+
+
+def _queue_task(q: dict, seq: int) -> dict:
+    """A code task derived from one queue entry (bugfix|feature)."""
+    return {
+        "id": "dt-" + re.sub(r"[^a-z0-9]+", "-", q["label"].lower())[:30].strip("-")
+              + f"-{seq:03d}",
+        "type": q["type"],
+        "surface": {"label": q["label"],
+                    "targets": (q["target"] if isinstance(q["target"], list)
+                                else [q["target"]])},
+        "risk": q.get("risk", "safe"),
+        "created": now_iso(),
+    }
+
+
 def next_task(project: Path, seq: int, supervised: bool = False) -> dict | None:
     state = state_of(project)
+    # A queue entry whose label is already in the shipped ledger is delivered
+    # work — never serve it again (label-level; a feature may legitimately
+    # re-touch a shipped path, so path matching stays out of this check).
+    shipped_labels = _shipped_labels(state)
+
+    def _code_task(q: dict) -> bool:
+        return (q.get("type") in ("bugfix", "feature") and q.get("target")
+                and _norm_label(q.get("label")) not in shipped_labels)
+
     # Delivery-first escalation (owner decision 2026-10-16: the pipeline is
     # self-healing — when the last run FAILED, restoring delivery (the research
     # queue's executable head) outranks motion polish; the orchestrator reruns
     # without re-asking, max 2 redelivery loops).
     if (state.get("last_run", {}) or {}).get("result") == "failed":
-        for q in state.get("queue", [])[:1]:
-            if q.get("type") in ("bugfix", "feature") and q.get("target"):
-                return {
-                    "id": "dt-" + re.sub(r"[^a-z0-9]+", "-", q["label"].lower())[:30].strip("-")
-                          + f"-{seq:03d}",
-                    "type": q["type"],
-                    "surface": {"label": q["label"],
-                                "targets": (q["target"] if isinstance(q["target"], list)
-                                            else [q["target"]])},
-                    "risk": q.get("risk", "safe"),
-                    "created": now_iso(),
-                }
+        for q in state.get("queue", []):
+            if _code_task(q):
+                return _queue_task(q, seq)
     for t in scan_surfaces(project):
         if t.get("status") != "unanimated":
             continue
         if t.get("risk") == "supervised" and not supervised:
             continue
         return task_for(profile_of(project), t, seq)
-    # surfaces exhausted → the research queue refills (priority-1 entry only;
-    # the nightly rhythm is ONE task per run). queue entries carry their own
-    # target; investigation-type stays orchestrator-run, not a code task.
-    for q in state.get("queue", [])[:1]:
-        if q.get("type") not in ("bugfix", "feature") or not q.get("target"):
-            continue
-        return {
-            "id": "dt-" + re.sub(r"[^a-z0-9]+", "-", q["label"].lower())[:30].strip("-")
-                  + f"-{seq:03d}",
-            "type": q["type"],
-            "surface": {"label": q["label"],
-                        "targets": (q["target"] if isinstance(q["target"], list)
-                                    else [q["target"]])},
-            "risk": q.get("risk", "safe"),
-            "created": now_iso(),
-        }
+    # surfaces exhausted → the research queue refills (first eligible entry
+    # only; the nightly rhythm is ONE task per run). Entries already shipped
+    # are skipped, otherwise a stale head would block the queue forever;
+    # investigation-type stays orchestrator-run, not a code task.
+    for q in state.get("queue", []):
+        if _code_task(q):
+            return _queue_task(q, seq)
     return None

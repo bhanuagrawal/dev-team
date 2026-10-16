@@ -55,17 +55,45 @@ def bump_version_file(worktree: Path, new: tuple[int, int, int], log: RunLog) ->
     return name
 
 
-def write_whatsnew(worktree: Path, label: str) -> None:
+def _whatsnew_text(task: dict) -> str:
+    """Honest Play release notes per task TYPE.
+
+    The motion template used to be written for every release, so a feature or
+    bugfix release claimed "No functional changes — all existing features behave
+    exactly as before" (false, and exactly backwards for a behaviour change).
+    A spec may supply an explicit `whatsnew` string; otherwise this per-type
+    default is used.
+    """
+    explicit = (task.get("whatsnew") or "").strip()
+    if explicit:
+        return explicit if explicit.endswith("\n") else explicit + "\n"
+    label = (task.get("surface", {}) or {}).get("label") or "the app"
+    label = str(label).lower()
+    ttype = task.get("type", "motion")
+    if ttype == "motion":
+        return (f"✓ Motion polish on the {label} — smoother transitions and clearer "
+                "feedback on actions, matching the recent design pass\n"
+                "✓ No functional changes — all existing features behave exactly as before\n")
+    if ttype == "bugfix":
+        return (f"✓ Fixed an issue with the {label}\n"
+                "✓ Nothing else changed — everything you already use behaves the same way\n")
+    # feature / anything else that changes behaviour: never claim "no changes"
+    return (f"✓ New in this update: {label}\n"
+            "✓ Everything you already use keeps working the same way\n")
+
+
+def write_whatsnew(worktree: Path, task) -> None:
+    """Write the release note for `task`. Accepts a task spec dict, or a bare
+    label string (legacy caller shape → motion template)."""
+    if isinstance(task, str):
+        task = {"type": "motion", "surface": {"label": task}}
     profile = profile_of(worktree)
     wf_rel = profile.get("whatsnew_file")
     if not wf_rel:
         return
     wf = worktree / wf_rel
     if wf.exists():
-        wf.write_text(
-            f"✓ Motion polish on the {label.lower()} — smoother transitions and clearer "
-            "feedback on actions, matching the recent design pass\n"
-            "✓ No functional changes — all existing features behave exactly as before\n")
+        wf.write_text(_whatsnew_text(task))
 
 
 def push_and_deliver(project: Path, worktree: Path, task: dict, new_version: str,

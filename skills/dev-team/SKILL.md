@@ -19,7 +19,7 @@ presence-driven: once connected, it disappears from reports automatically.
 Examples: GA4/Firebase analytics → numbers instead of vibes for priorities;
 store reviews → churn reasons from users who uninstall same-day; Play vitals
 → per-release regression checks. This is how a brand-new app (no analytics
-yet) gets the same research pipeline as MindfulLauncher — just with an
+yet) gets the same research pipeline as an established project — just with an
 explicit "here's what connecting this would buy you" line.
 
 ## MODE SELECTION (do this first, every invocation)
@@ -70,7 +70,10 @@ proceed and log it. This is a hard step for both modes.
   code/skills — this is the one sanctioned way the orchestrator edits
   `dev-team/`. A valid team change is: (a) generic — zero project names, one
   project's quirk lives in that project's `.pipeline/profile.json`, never in
-  team code; (b) run-derived — it traces to a concrete surprise/lesson, not
+  team code (now ENFORCED, not just prose: `doctor` greps the team's code/skills
+  for every registered project's name and BLOCKS on any hit — only
+  `skills/lessons.md`, the append-only surprises log, may name a project);
+  (b) run-derived — it traces to a concrete surprise/lesson, not
   speculation; (c) proven — `devteam doctor <project>` still passes after, and
   the changed command is exercised at least once if cheap. `config/runtimes.json`
   (model choices) and project `profile.json` `targets` stay owner-approved —

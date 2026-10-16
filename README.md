@@ -3,7 +3,7 @@
 A small standalone team (this repo) that operates on app projects on this
 machine. **Two modes, both agent-driven:**
 
-- **MODE A — operate an existing project** (MindfulLauncher today): nightly
+- **MODE A — operate an existing project** (a real project today): nightly
   pipeline — status → task → worktree → developer subagent → gates → release
   → version-bump push → CI → Play internal testing.
 - **MODE B — create a new app from an idea** (`skills/new-project/SKILL.md`):

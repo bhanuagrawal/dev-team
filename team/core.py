@@ -37,7 +37,7 @@ def today() -> str:
 
 
 def resolve_project(name_or_path: str) -> Path:
-    """Accept 'MindfulLauncher' (searched in PROJECTS_BASES) or an absolute path."""
+    """Accept a project name (searched in PROJECTS_BASES) or an absolute path."""
     p = Path(name_or_path).expanduser()
     if p.is_absolute() and (p / ".git").exists():
         return p

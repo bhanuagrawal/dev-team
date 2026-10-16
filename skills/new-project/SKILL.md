@@ -72,8 +72,9 @@ off-machine (you generate; they never generate).
 keytool -genkeypair -v -keystore config/keystore.jks -alias upload \
   -keyalg RSA -keysize 2048 -validity 10000 -storepass $PW -keypass $PW \
   -dname "CN=<name>"
-gh repo create bhanuagrawal/<slug> --private --source . --push
-gh secret set RELEASE_KEYSTORE_BASE64 -R bhanuagrawal/<slug> --body "$(base64 -i config/keystore.jks)"
+OWNER="$(gh api user -q .login)"   # authenticated account — never hard-coded in the skill
+gh repo create "$OWNER/<slug>" --private --source . --push
+gh secret set RELEASE_KEYSTORE_BASE64 -R "$OWNER/<slug>" --body "$(base64 -i config/keystore.jks)"
 gh secret set KEYSTORE_PASSWORD/KEY_ALIAS/KEY_PASSWORD -R ... (keystore PW/alias/pw)
 gh secret set PLAY_SERVICE_ACCOUNT_JSON -R ... --body-file <userProvided.json>   # when they give it
 ```
@@ -101,7 +102,7 @@ Then close with the consolidated report: what's live, what's pending gates,
 the next-build trigger (manual phrase / schedule time).
 Status summary to owner: what's live, what's pending gates, next build time.
 
-## STAGE MODEL (an app reaches MindfulLauncher-state in stages — never block on a future one)
+## STAGE MODEL (an app reaches steady-state in stages — never block on a future one)
 - **Stage 1 (agent, now):** scaffold from official template → GitHub repo (agent-created, private default, package derived from app name) → keystore generated + 4 secrets → CI workflow committed → **first v1.0.0 tag push = GREEN CI build on GitHub Actions** even with zero Play access (upload auto-DEFERRED — see reference workflow's conditional upload step). Firebase deferred by default (Noop tracker).
 - **Stage 2 (after owner gate):** owner provides Play service-account JSON → agent sets the secret → the conditional turns ON → next release lands on internal testing automatically. Agent verifies + records.
 - **Stage 3 (later, owner-triggered):** Firebase project + google-services.json → agent integrates + swaps Noop. 

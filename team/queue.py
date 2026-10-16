@@ -54,13 +54,30 @@ def targets_of(entry: dict) -> list[str]:
     return []
 
 
+def shipped_from_state(state: dict) -> tuple[list[str], list[str]]:
+    """(shipped_targets, shipped_labels) read from the ledger. Labels are the
+    task-level identity of delivered work; targets are the file paths it
+    touched. Both shapes are needed — see verdict_for."""
+    shipped = [s.get("target") for s in state.get("shipped", []) if s.get("target")]
+    labels = [s.get("label") for s in state.get("shipped", []) if s.get("label")]
+    return shipped, labels
+
+
 def verdict_for(old: dict, incoming: list[dict],
-                shipped: set[str]) -> tuple[str, str, str]:
+                shipped: set[str],
+                shipped_labels: set[str] | None = None) -> tuple[str, str, str]:
     """Judge ONE already-queued entry against the incoming plan.
     Returns (verdict, reason, superseded_by); verdict ∈ keep|superseded|redundant."""
     olabel = label_of(old)
     otargs = set(targets_of(old))
     otype = old.get("type")
+    # A queue entry whose LABEL already appears in the shipped ledger is work
+    # that was already delivered — whatever its type. This is label-level only:
+    # a bugfix/feature may legitimately re-touch a shipped *path*, so the
+    # path-overlap test below stays motion-only (see lesson 2026-10-16 #37).
+    if shipped_labels and _norm(olabel) in shipped_labels:
+        return ("redundant",
+                "already shipped (its task label is in the shipped ledger)", "")
     # A MOTION task whose surface already shipped has nothing left to do. A
     # bugfix/feature on shipped code is normal work, so only motion is judged
     # obsolete this way.
@@ -88,12 +105,13 @@ def verdict_for(old: dict, incoming: list[dict],
 
 
 def judge(existing: list[dict], incoming: list[dict],
-          shipped_targets=()) -> list[dict]:
+          shipped_targets=(), shipped_labels=()) -> list[dict]:
     """Verdicts for every already-queued entry, in queue order."""
     shipped = {str(x) for x in shipped_targets}
+    labels = {_norm(x) for x in shipped_labels if x}
     out = []
     for old in existing or []:
-        verdict, reason, by = verdict_for(old, incoming or [], shipped)
+        verdict, reason, by = verdict_for(old, incoming or [], shipped, labels)
         out.append({"label": label_of(old), "entry": old, "verdict": verdict,
                     "reason": reason, "superseded_by": by})
     return out
@@ -143,8 +161,8 @@ def add_task(state: dict, entry: dict, source: str = "orchestrator",
     irrelevant (recording every verdict), and place it head|tail. Mutates
     `state` in place; the caller saves."""
     existing = list(state.get("queue", []))
-    shipped = [s.get("target") for s in state.get("shipped", []) if s.get("target")]
-    verdicts = judge(existing, [entry], shipped)
+    shipped, shipped_labels = shipped_from_state(state)
+    verdicts = judge(existing, [entry], shipped, shipped_labels)
     kept = [v["entry"] for v in verdicts if v["verdict"] == "keep"]
     queue = [entry] + kept if position == "head" else kept + [entry]
     state["queue"] = queue
@@ -170,8 +188,8 @@ def apply_plan(state: dict, incoming: list[dict], source: str = "research",
                 "target": d.get("target"), "supersedes": [d.get("label")],
                 "reason": d.get("reason") or "dropped from the new plan"}
                for d in (explicit_drops or []) if d.get("label")]
-    shipped = [s.get("target") for s in state.get("shipped", []) if s.get("target")]
-    verdicts = judge(existing, new_queue + markers, shipped)
+    shipped, shipped_labels = shipped_from_state(state)
+    verdicts = judge(existing, new_queue + markers, shipped, shipped_labels)
     carried = {_norm(label_of(q)) for q in new_queue}
     unexplained = [v["entry"] for v in verdicts
                    if v["verdict"] == "keep" and _norm(v["label"]) not in carried]
@@ -193,11 +211,13 @@ def review(state: dict) -> str:
     earlier copy is shadowed by a later one) — the same judgments, applied
     without admitting anything new."""
     queue = list(state.get("queue", []))
-    shipped = {s.get("target") for s in state.get("shipped", []) if s.get("target")}
+    shipped, shipped_labels = shipped_from_state(state)
+    shipped_labels = {_norm(x) for x in shipped_labels if x}
     verdicts = []
     for i, q in enumerate(queue):
         # later entries supersede an earlier duplicate of the same task
-        verdict, reason, by = verdict_for(q, queue[i + 1:], shipped)
+        verdict, reason, by = verdict_for(q, queue[i + 1:], shipped,
+                                          shipped_labels)
         verdicts.append({"label": label_of(q), "entry": q, "verdict": verdict,
                          "reason": reason, "superseded_by": by})
     return impact_block("queue-review", [], verdicts)

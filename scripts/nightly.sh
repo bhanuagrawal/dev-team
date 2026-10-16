@@ -6,7 +6,9 @@
 # usage: nightly.sh <ProjectName>
 set -u
 TEAM="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-PROJECT="${1:-MindfulLauncher}"
+# No default project: the team is project-independent (a baked-in default was
+# a project reference inside team code). Require the name explicitly.
+PROJECT="${1:?usage: nightly.sh <ProjectName>}"
 export JAVA_HOME="/Applications/Android Studio.app/Contents/jbr/Contents/Home"
 export PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:$PATH"
 mkdir -p "$TEAM/logs"

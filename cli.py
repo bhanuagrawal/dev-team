@@ -384,7 +384,7 @@ def cmd_release(args: argparse.Namespace) -> int:
     new = (latest[0], latest[1], latest[2] + 1)
     task = json.loads(Path(args.task_spec).read_text())
     name = shipper.bump_version_file(worktree, new, log)
-    shipper.write_whatsnew(worktree, task["surface"]["label"])
+    shipper.write_whatsnew(worktree, task)
     res = shipper.push_and_deliver(project, worktree, task, name, log)
     print(json.dumps(res, indent=2))
     return 0 if res.get("delivered") else 1
@@ -618,7 +618,7 @@ def main() -> None:
     a = sub.add_parser("alarm");       a.add_argument("project"); a.set_defaults(fn=cmd_alarm)
     rs = sub.add_parser("research");   rs.add_argument("project"); rs.add_argument("--no-llm", action="store_true"); rs.set_defaults(fn=cmd_research)
     do = sub.add_parser("doctor");     do.add_argument("project"); do.set_defaults(fn=cmd_doctor)
-    st = sub.add_parser("setup");  st.add_argument("--project", default="MindfulLauncher")
+    st = sub.add_parser("setup");  st.add_argument("--project", required=True)
     st.add_argument("--schedule", choices=["manual", "auto"], default="manual")
     st.add_argument("--at", default=None); st.add_argument("--strict", action="store_true"); st.set_defaults(fn=cmd_setup)
     sch = sub.add_parser("schedules"); sch.set_defaults(fn=cmd_schedules)

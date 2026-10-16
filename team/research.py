@@ -71,7 +71,7 @@ def _ga4_pull(project: Path, profile: dict) -> dict:
     key_src = conf.get("key_file", "")
     key = Path(key_src).expanduser() if key_src else None
     if key_src and key and key.exists():
-        # per-project service account (the MindfulLauncher pattern)
+        # per-project service-account key file (declared per project in its profile)
         try:
             account = json.loads(key.read_text()).get("client_email", "")
         except Exception:
