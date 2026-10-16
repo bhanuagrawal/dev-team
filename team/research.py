@@ -216,7 +216,7 @@ def research_collect(project: Path, log: RunLog) -> dict:
                        "needing a human decision"),
         },
     }
-    research["upgrades"] = capability_upgrades(research["signals"], profile)
+    research["upgrades"] = capability_upgrades(research["signals"], profile, project)
     dest = project / ".pipeline" / "research.json"
     dest.parent.mkdir(parents=True, exist_ok=True)
     dest.write_text(json.dumps(research, indent=2) + "\n")
@@ -383,12 +383,13 @@ def research_apply(project: Path, result: dict, log: RunLog) -> None:
 # entry
 # --------------------------------------------------------------------------- #
 
-def capability_upgrades(signals: dict, profile: dict) -> list[dict]:
+def capability_upgrades(signals: dict, profile: dict, project: Path | None = None) -> list[dict]:
     """Deterministic advisory tier: what the OWNER could connect to make the
     pipeline smarter. Presence-driven — a satisfied upgrade drops out
     automatically. Never hardcoded to a project; collectors may grow."""
     up: list[dict] = []
     ga4 = signals.get("ga4", {})
+    ga4c = (profile.get("connections") or {}).get("ga4") or {}
     if ga4.get("status") != "ok" or ga4.get("new_users_7d") is None:
         up.append({
             "id": "analytics",
@@ -400,6 +401,30 @@ def capability_upgrades(signals: dict, profile: dict) -> list[dict]:
                    "login --scopes=https://www.googleapis.com/auth/analytics.readonly, "
                    "one time, all projects); `devteam doctor` verifies",
         })
+    elif project is not None:
+        # connected but reading flat zero — first suspect is no instrumentation,
+        # i.e. the app ships no Firebase Analytics SDK at all
+        import re as _re
+        gradle_text = ""
+        for cand in ("composeApp/build.gradle.kts", "app/build.gradle",
+                     "app/build.gradle.kts", "gradle/libs.versions.toml"):
+            f = project / cand
+            if f.exists():
+                gradle_text += f.read_text(errors="ignore")
+        instrumented = bool(_re.search(
+            r"firebase-analytics|FirebaseAnalytics|play.services.analytics|analytics-ktx",
+            gradle_text))
+        flat = not any((ga4.get(k) or 0) for k in ("new_users_7d", "active_users_7d"))
+        if not instrumented and flat:
+            up.append({
+                "id": "analytics-instrumentation",
+                "title": "Instrument the app with the Firebase Analytics SDK",
+                "benefit": "the GA4 connection is live but the app emits no events "
+                           "(no SDK) — numbers stay zeros; priorities stay vibes",
+                "how": "owner: create/link the app in the Firebase console and "
+                       "download google-services.json; dev-team feature task wires "
+                       "firebase-analytics into androidMain (owner approves in next intake)",
+            })
     if not profile.get("connections", {}).get("play_reviews"):
         up.append({
             "id": "store-reviews",
