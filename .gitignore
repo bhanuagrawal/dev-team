@@ -1,0 +1,10 @@
+# Python
+__pycache__/
+*.py[cod]
+
+# Run logs (machine-local, may contain local paths)
+logs/
+*.log
+
+# Nightly single-instance lock
+.nightly.lock/
