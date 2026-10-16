@@ -15,7 +15,15 @@ from pathlib import Path
 from typing import Any
 
 TEAM_ROOT = Path(__file__).resolve().parent.parent
-PROJECTS_BASE = TEAM_ROOT.parent  # dev-team lives inside AndroidStudioProjects/
+
+# Projects may live beside the team (Documents/AI) or in the Android Studio
+# folder. Order matters; DEVTEAM_PROJECTS_HOME overrides everything.
+PROJECTS_BASES = [
+    Path(os.environ["DEVTEAM_PROJECTS_HOME"]) if os.environ.get("DEVTEAM_PROJECTS_HOME") else None,
+    TEAM_ROOT.parent,
+    Path.home() / "AndroidStudioProjects",
+]
+PROJECTS_BASES = [b for b in PROJECTS_BASES if b is not None]
 
 RUNTIMES_PATH = TEAM_ROOT / "config" / "runtimes.json"
 
@@ -29,14 +37,17 @@ def today() -> str:
 
 
 def resolve_project(name_or_path: str) -> Path:
-    """Accept 'MindfulLauncher' (sibling of team root) or an absolute path."""
+    """Accept 'MindfulLauncher' (searched in PROJECTS_BASES) or an absolute path."""
     p = Path(name_or_path).expanduser()
     if p.is_absolute() and (p / ".git").exists():
         return p
-    cand = PROJECTS_BASE / p.name if p.name == name_or_path else PROJECTS_BASE / name_or_path
-    if (cand / ".git").exists():
-        return cand
-    raise SystemExit(f"not a git repo / not found: {name_or_path} (looked in {PROJECTS_BASE})")
+    for base in PROJECTS_BASES:
+        cand = base / name_or_path
+        if (cand / ".git").exists():
+            return cand
+    raise SystemExit(
+        f"not found: {name_or_path} — tried {', '.join(str(b) for b in PROJECTS_BASES)}; "
+        "pass an absolute path or run from the project's folder")
 
 
 def pipeline_dir(project: Path) -> Path:
