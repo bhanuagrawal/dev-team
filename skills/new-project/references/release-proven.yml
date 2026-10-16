@@ -1,0 +1,99 @@
+name: Release to Play (internal)
+
+# Created by dev-team. Triggers:
+#   1. pushing a version tag like v1.0 (manual/human releases)
+#   2. workflow_call from ship-on-version-bump.yml — the dev-team pipeline
+#      ships on version bumps to main, then tags the commit afterwards.
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_call:
+    inputs:
+      version:
+        description: 'Version to release, without the leading v (e.g. 1.0.0)'
+        required: true
+        type: string
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Gradle (with cache)
+        uses: gradle/actions/setup-gradle@v4
+
+      # ── Derive versions from the tag ──────────────────────────────────────────
+      # versionName = the tag without the leading 'v'  (1.0.1 -> 1.0.1)
+      # versionCode = deterministic semver encoding     (1.0.1 -> 10001)
+      - name: Compute version
+        run: |
+          TAG="${{ inputs.version != '' && inputs.version || '' }}"
+          [ -n "$TAG" ] || TAG="${GITHUB_REF_NAME#v}"
+          IFS='.' read -r MAJOR MINOR PATCH <<< "$TAG"
+          PATCH="${PATCH:-0}"
+          echo "VERSION_NAME=$TAG" >> "$GITHUB_ENV"
+          echo "VERSION_CODE=$((MAJOR * 10000 + MINOR * 100 + PATCH))" >> "$GITHUB_ENV"
+
+      # ── Recreate signing material from secrets (never committed) ───────────────
+      - name: Restore keystore
+        run: |
+          echo "${{ secrets.RELEASE_KEYSTORE_BASE64 }}" | base64 --decode > "$RUNNER_TEMP/release.jks"
+          cat > "$GITHUB_WORKSPACE/keystore.properties" <<EOF
+          storeFile=$RUNNER_TEMP/release.jks
+          storePassword=${{ secrets.KEYSTORE_PASSWORD }}
+          keyAlias=${{ secrets.KEY_ALIAS }}
+          keyPassword=${{ secrets.KEY_PASSWORD }}
+          EOF
+
+      # ── Build the signed bundle (version injected via env) ────────────────────
+      - name: Build release AAB
+        env:
+          VERSION_NAME: ${{ env.VERSION_NAME }}
+          VERSION_CODE: ${{ env.VERSION_CODE }}
+        run: ./gradlew :composeApp:bundleRelease
+
+      - name: Upload AAB as workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: composeApp-release-${{ env.VERSION_NAME }}
+          path: composeApp/build/outputs/bundle/release/composeApp-release.aab
+
+      # ── Guard: Play Console rejects release notes longer than 500 chars ────────
+      - name: Truncate whatsnew to 500 chars
+        run: |
+          python3 - <<'EOF'
+          import pathlib
+          p = pathlib.Path("distribution/whatsnew/whatsnew-en-US")
+          text = p.read_text(encoding="utf-8")
+          if len(text) > 500:
+              p.write_text(text[:500], encoding="utf-8")
+              print(f"Truncated from {len(text)} to 500 chars")
+          else:
+              print(f"OK: {len(text)} chars")
+          EOF
+
+      # ── Publish to the Play "internal" track with curated release notes ───────
+      # STAGED: deferred if Play credentials aren't wired yet — CI stays GREEN,
+      # the upload activates itself the moment PLAY_SERVICE_ACCOUNT_JSON exists.
+      - name: Upload to Play Console (internal testing)
+        if: ${{ secrets.PLAY_SERVICE_ACCOUNT_JSON != '' }}
+        uses: r0adkll/upload-google-play@v1
+        with:
+          serviceAccountJsonPlainText: ${{ secrets.PLAY_SERVICE_ACCOUNT_JSON }}
+          packageName: {{PACKAGE}}
+          releaseFiles: composeApp/build/outputs/bundle/release/composeApp-release.aab
+          tracks: internal
+          status: completed
+          whatsNewDirectory: distribution/whatsnew
+
+      - name: Play upload deferred (gate pending)
+        if: ${{ secrets.PLAY_SERVICE_ACCOUNT_JSON == '' }}
+        run: echo "Play internal-testing upload DEFERRED — PLAY_SERVICE_ACCOUNT_JSON not set yet. Build is green; artifact available above."

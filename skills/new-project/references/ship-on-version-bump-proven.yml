@@ -1,0 +1,65 @@
+name: Ship on version bump
+
+# Created by dev-team. When a version bump lands on main, CI runs the release
+# job and then tags the commit afterwards (a failed build never leaves a tag).
+# Human tag pushes still work exactly as before via release.yml.
+
+on:
+  push:
+    branches: [main]
+    paths: ['{{VERSION_FILE}}']
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.detect.outputs.version }}
+      should_ship: ${{ steps.detect.outputs.should_ship }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Detect version and whether it is already released
+        id: detect
+        run: |
+          VERSION=$(sed -n 's/.*versionName *= *"\([^"]*\)".*/\1/p' {{VERSION_FILE}} | head -1)
+          if [ -z "$VERSION" ]; then
+            echo "Could not parse versionName from {{VERSION_FILE}} — not shipping."
+            echo "should_ship=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          if git rev-parse "v$VERSION" >/dev/null 2>&1; then
+            echo "Tag v$VERSION already exists — nothing to ship."
+            echo "should_ship=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "Version $VERSION has no tag yet — shipping."
+            echo "should_ship=true" >> "$GITHUB_OUTPUT"
+          fi
+
+  release:
+    needs: check
+    if: needs.check.outputs.should_ship == 'true'
+    uses: ./.github/workflows/release.yml
+    with:
+      version: ${{ needs.check.outputs.version }}
+    secrets: inherit
+
+  tag:
+    needs: [check, release]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      # Tagged only after a successful release so a failed build never leaves a
+      # tag behind. Pushed tags are treated as immutable.
+      - name: Tag the released commit
+        run: |
+          VERSION="${{ needs.check.outputs.version }}"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -a "v$VERSION" -m "Release $VERSION"
+          git push origin "v$VERSION"

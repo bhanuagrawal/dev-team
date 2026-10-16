@@ -1,0 +1,31 @@
+{
+  "roles": {
+    "developer": {
+      "runtime": "opencode",
+      "model": "opencode-go/glm-5.3-flash",
+      "fallback": [
+        {"runtime": "claude", "model": "sonnet"}
+      ],
+      "timeout_s": 3600,
+      "invocation": {
+        "opencode": ["opencode", "run", "--auto", "--model", "{model}", "{prompt}"],
+        "claude": ["claude", "-p", "{prompt}", "--model", "{model}",
+                   "--permission-mode", "acceptEdits", "--max-turns", "50",
+                   "--output-format", "text"]
+      }
+    },
+    "reviewer": {
+      "runtime": "opencode",
+      "model": "opencode-go/glm-5.3-flash"
+    },
+    "orchestrator": {
+      "runtime": "opencode",
+      "model": "opencode-go/glm-5.3-flash",
+      "note": "reserved: interactive chat-orchestrator mode (v2)"
+    },
+    "product_synthesis": {
+      "runtime": "opencode",
+      "model": "opencode-go/glm-5.3-flash"
+    }
+  }
+}
