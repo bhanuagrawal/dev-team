@@ -1,7 +1,8 @@
 """Shipper — generic. Version bump + whatsnew + commit + push origin main.
 CI (owned by the project, not this team) then delivers to the Play
-internal-testing track. Production promotion is human-only and this team
-structurally has no path to it.
+internal-testing track. Production promotion is human-only — this team
+structurally has no path to it, and never raises it as an ask or a filed
+issue.
 
 All project facts come from profile.json: version file, tag scheme, repo slug,
 whatsnew path. The version bump regexes are the ONLY project-shaped code here

@@ -20,7 +20,7 @@ Google/JetBrains skills refreshed before every coding session**.
 
 ## Run-outcome contract
 
-Every run ends in **a build shipped to internal testing, an owner ask, or a team/tooling ship — never in silent analysis-only**. The orchestrator asks questions only when a genuinely owner-gated decision blocks the path (production promotion, freeze lifts, kill-switch flips), then continues to a build. See `skills/dev-team/SKILL.md` → Run-outcome contract.
+Every run ends in **a build shipped to internal testing, an owner ask, or a team/tooling ship — never in silent analysis-only**. The orchestrator asks questions only when a genuinely owner-gated decision blocks the path (a freeze lift, a kill-switch flip, a scope-subtraction sign-off), then continues to a build. Production promotion is never one of those asks — it stays human-only. See `skills/dev-team/SKILL.md` → Run-outcome contract.
 
 ## Self-improvement loop (standing)
 
@@ -70,7 +70,7 @@ Code records every verdict in `state['queue_events']` and prints a
 ## Delivery goal (both modes)
 Version-bump push → project's own GitHub Actions → **Play Console internal
 testing**. Production promotion stays human-only; the team has no production
-path.
+path and never raises it as an ask or an issue.
 
 ## The local-checkout lesson
 Machine-local checkouts can be stale/diverged. ALL code reads/scans/dev happen
@@ -112,7 +112,7 @@ Say it in plain language to any agent with this skill loaded →
 
 Version-bump push → project's own GitHub Actions → **Play Console internal
 testing**. Production promotion stays human-only; this team has no production
-path by construction.
+path by construction and never raises it as an ask or an issue.
 
 ## Key routes
 

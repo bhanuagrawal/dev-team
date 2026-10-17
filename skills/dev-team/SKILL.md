@@ -81,8 +81,9 @@ proceed and log it. This is a hard step for both modes.
   is generic enough, keep it out of team code and put it in the skill prose.
 - Never hand-edit `.pipeline/state.json` — write via `devteam record`.
 - The ONLY delivery goal is CI → Play **internal testing** (the version-bump
-  push triggers the project's CI). Production promotion is human-only and has
-  no path in this team.
+  push triggers the project's CI). Production promotion is human-only: no path
+  in this team, and never an owner ask or a filed issue — the owner promotes
+  manually in Play Console whenever they choose.
 - Never push with red gates. `devteam verify` must PASS before `devteam release`.
 - Frozen paths from the project profile are absolute — if a task seems to
   require them, stop and mark the task blocked instead.
@@ -109,8 +110,9 @@ A run ends in EXACTLY ONE of these — never in silence:
   is the default terminal state whenever the queue holds (or research can
   legitimately refill with) buildable work.
 - ❓ **OWNER ASK** — the ONLY questions you ever ask are ones no agent can
-  answer: production promotion, a freeze lift/sign-off, a kill-switch flip,
-  discard-vs-keep on user WIP. Even then: ask AFTER squeezing every
+  answer: a freeze lift/sign-off, a kill-switch flip, discard-vs-keep on user
+  WIP. Production promotion is NOT one of them (see the delivery rule above) —
+  never ask it, never file it. Even then: ask AFTER squeezing every
   non-blocking stage, and if all you have is analysis, convert it — a decision
   issue + a made-ready task spec that becomes buildable on "yes".
 - 🛠 **TOOLING/TEAM SHIP** — if genuinely nothing in the APP is buildable but a

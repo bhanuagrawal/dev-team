@@ -264,7 +264,8 @@ Rules:
 - An issues_to_file entry counts as the run's OWNER ASK; if you can see no
   buildable work at all, your job is the ask: file the decision issue that
   would unlock one (e.g. a feature proposal for approval, a freeze lift, a
-  promotion) — never a "what should we do?" question.
+  scope subtraction) — never a "what should we do?" question. Production
+  promotion is NOT unlockable work: it is human-only (see the rule below).
 - queue ordering = execution order; at most {max_queue} entries.
 - IMPACT REVIEW (required): signals.repo.current_queue is the queue already
   waiting to be built. Judge EVERY entry's fate before proposing. If your plan
@@ -287,9 +288,14 @@ Rules:
   A previously proposed item that recent_runs shows blocked/rejected must not
   reappear unless the underlying cause clearly changed.
 - no new domain features unless the research/constraints say the freeze lifted.
-- issues_to_file ONLY for decisions needing the owner (e.g. production
-  promotion, re-enabling disabled features, analytics instrumentation
-  sign-off). NEVER re-file or re-raise anything listed in
+- issues_to_file ONLY for decisions needing the owner (e.g. re-enabling
+  disabled features, analytics instrumentation sign-off, a freeze lift).
+  PRODUCTION PROMOTION IS NEVER SUCH A DECISION: promoting a built release
+  beyond internal testing is human-only and the owner's own manual step in Play
+  Console. Never ask about it, never file an issue about it, never queue work
+  for it — a release sitting on internal testing is the run's DELIVERABLE and
+  may be reported as a fact, never as an open question.
+  NEVER re-file or re-raise anything listed in
   constraints.standing_decisions — those are answered policy; the data behind
   them may be reported as facts, not as an open question. Do not re-file an
   issue that recent_runs/notes or the described
