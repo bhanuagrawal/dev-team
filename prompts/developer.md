@@ -35,6 +35,11 @@ HARD RULES:
 4. Do NOT commit. Do NOT push. Do NOT bump versions. Leave all changes UNCOMMITTED
    in the working tree; the pipeline commits after its own gates pass.
 5. Self-check before finishing: run {compile_cmd} and make sure it is green.
+6. Device hygiene: if you need an emulator, start it through
+   `with-emulator <avd> -- <command...>` (teardown is guaranteed by an EXIT
+   trap). If you start one by hand, `android emulator stop <avd>` before you
+   finish. NEVER stop an emulator you did not start — the owner may have one
+   open deliberately. A run-end check stops anything this run leaked.
 
 WHAT TO BUILD (motion that communicates state — purposeful, not decorative):
 - Staggered entrance via shared EntranceFadeSlide for title/list/controls.

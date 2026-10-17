@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
 """dev-team CLI — deterministic bookkeeping and gates ONLY.
 
-The orchestrator is an AGENTIC TOOL (opencode / claude / ...) running with the
-dev-team skill: it decides and drives; native subagents develop. This CLI
-exposes the deterministic actions that agent needs, and nothing project-shaped
-is hardcoded here — every project fact comes from <project>/.pipeline/profile.json.
+The orchestrator is ANY agentic tool running with the dev-team skill: it decides
+and drives; native subagents develop. This CLI exposes the deterministic actions
+that agent needs, and nothing project-shaped is hardcoded here — every project
+fact comes from <project>/.pipeline/profile.json. No vendor or binary is baked
+in either: headless launches come from roles.<role>.command or DEVTEAM_AGENT_CMD.
 """
 from __future__ import annotations
 
@@ -17,13 +18,33 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from team import alarm, scribe, scan, scheduler, shipper  # noqa: E402
+from team import alarm, emulator, scribe, scan, scheduler, shipper  # noqa: E402
 from team.core import (  # noqa: E402
-    RunLog, TEAM_ROOT, load_json, now_iso, pipeline_dir, profile_of,
-    resolve_project, run as sys_run, runtimes, save_json, save_state, state_of, today,
+    RunLog, TEAM_ROOT, agent_argv, load_json, now_iso, pipeline_dir, profile_of,
+    resolve_model, resolve_project, role_cfg, run as sys_run, runtimes,
+    save_json, save_state, state_of, today,
 )
 
 CORE_MOTION_TOKENS = scan.CORE_MOTION_TOKENS
+
+
+def task_spec_path(project: Path, spec: str) -> Path:
+    """Resolve a task-spec argument the way every doc names it.
+
+    The runbook/README name specs project-relative (`.pipeline/tasks/<id>.json`),
+    but a shell resolves that against the CWD — which for an orchestrator is the
+    TEAM dir, not the project. A correct command then dies with a bare
+    FileNotFoundError (observed live on `developer-prompt`). Accept the
+    documented shape: CWD first, then the project, then the team dir.
+    """
+    p = Path(spec)
+    if p.exists():
+        return p
+    for base in (project, TEAM_ROOT):
+        cand = base / spec
+        if cand.exists():
+            return cand
+    raise SystemExit(f"task spec not found: {spec} (tried CWD, {project}, {TEAM_ROOT})")
 
 
 def language_conventions(project: Path) -> list[str]:
@@ -282,7 +303,10 @@ def cmd_run_headless(args: argparse.Namespace) -> int:
     from team import developer
     project = resolve_project(args.project)
     log = RunLog(project, "headless-" + today())
-    task = load_json(Path(args.task_spec))
+    # Emulator bookkeeping (run start): remember what was ALREADY running so the
+    # run end can stop only what this run started, never the owner's emulator.
+    emulator.record_baseline(project, log, reset=True)
+    task = load_json(task_spec_path(project, args.task_spec))
     if not task:
         raise SystemExit(f"bad task spec: {args.task_spec}")
     if not args.supervised and task.get("risk") == "supervised":
@@ -298,10 +322,42 @@ def cmd_run_headless(args: argparse.Namespace) -> int:
     return 0 if res.get("status") in ("done", "blocked") else 1
 
 
+def cmd_run_orchestrator(args: argparse.Namespace) -> int:
+    """Boot the orchestrator: an agentic tool of the ENVIRONMENT's choosing,
+    running with the dev-team skill. No vendor is baked in — the launch command
+    comes from roles.orchestrator.command or DEVTEAM_AGENT_CMD."""
+    project = resolve_project(args.project)
+    cfg = role_cfg("orchestrator")
+    log = RunLog(project, "orchestrator-" + today())
+    # Emulator bookkeeping (run start) — see run_headless for why it is a baseline.
+    emulator.record_baseline(project, log, reset=True)
+    prompt = args.prompt or (
+        "You are the dev-team orchestrator. Load and follow the dev-team skill in "
+        "full. Run tonight's pipeline: status → pick the next safe unanimated "
+        "surface → worktree-start → developer-prompt → spawn the developer as a "
+        "native subagent (model from runtimes.json) → verify the worktree → "
+        "release on green → record → alarm. Project: "
+        f"{project.name} (absolute path: {project}). Report a compact summary of "
+        "what shipped.")
+    argv = agent_argv(cfg, prompt)
+    if not argv:
+        raise SystemExit(
+            "no orchestrator command — set roles.orchestrator.command in "
+            "config/runtimes.json or export DEVTEAM_AGENT_CMD "
+            "(e.g. '<your-tool> run --model {model} {prompt}')")
+    print(f"orchestrator: {argv[0]} | model {resolve_model(cfg) or 'tool default'} "
+          f"| project {project}", flush=True)
+    # capture=False: the orchestrator's output streams to the caller's stdio
+    # (launchd log) instead of being buffered until exit.
+    r = sys_run(argv, None, timeout=args.timeout, capture=False)
+    return r.returncode
+
+
 def cmd_developer_prompt(args: argparse.Namespace) -> None:
     project = resolve_project(args.project)
     profile = profile_of(project)
-    task = load_json(Path(args.task_spec)) or json.loads(Path(args.task_spec).read_text())
+    task = load_json(task_spec_path(project, args.task_spec)) \
+        or json.loads(task_spec_path(project, args.task_spec).read_text())
     paths = task["surface"].get("targets") or []
     from team.developer import build_prompt
     print(build_prompt(project, profile, task, paths,
@@ -368,10 +424,31 @@ def cmd_verify(args: argparse.Namespace) -> int:
         base = "HEAD"
     ok, failures = gates.verify_all(project, tree, base, log,
                                     gradle=not args.skip_gradle)
+    # Run-end emulator teardown: warn-only by owner decision (never flips the
+    # gate). A skill asks an agent to stop its emulator; this is what holds when
+    # it forgets — orphans are stopped and named in the run log. leak_check
+    # emits through `log`, so there is no second print here.
+    emulator.leak_check(project, log)
     print("VERIFY: PASS" if ok else "VERIFY: FAIL")
     for f in failures:
         print(f)
     return 0 if ok else 1
+
+
+def cmd_emulators(args: argparse.Namespace) -> int:
+    """Emulator lifecycle bookkeeping. `--record` at run start (snapshot what is
+    already running), plain invocation at run end (stop anything that appeared
+    since, warn-only). Never touches a pre-existing emulator."""
+    project = resolve_project(args.project)
+    log = RunLog(project, "emulators-" + today())
+    if args.record:
+        emulator.record_baseline(project, log, reset=args.reset)
+        print("emulator baseline recorded")
+        return 0
+
+    clean, msg = emulator.leak_check(project)
+    print(msg)
+    return 0  # warn-only: a leak is hygiene debt, not a failed run
 
 
 def cmd_release(args: argparse.Namespace) -> int:
@@ -382,7 +459,7 @@ def cmd_release(args: argparse.Namespace) -> int:
     if latest is None:
         raise SystemExit("no v* tags on origin; cannot compute next version")
     new = (latest[0], latest[1], latest[2] + 1)
-    task = json.loads(Path(args.task_spec).read_text())
+    task = json.loads(task_spec_path(project, args.task_spec).read_text())
     name = shipper.bump_version_file(worktree, new, log)
     shipper.write_whatsnew(worktree, task)
     res = shipper.push_and_deliver(project, worktree, task, name, log)
@@ -393,7 +470,8 @@ def cmd_release(args: argparse.Namespace) -> int:
 def cmd_record(args: argparse.Namespace) -> None:
     project = resolve_project(args.project)
     state = state_of(project)
-    task = json.loads(Path(args.task_spec).read_text()) if args.task_spec else {}
+    task = json.loads(task_spec_path(project, args.task_spec).read_text()) \
+        if args.task_spec else {}
     entry = {"date": today(), "task_id": args.task or task.get("id", "?"),
              "result": args.result, "note": args.note or "",
              "finished": now_iso()}
@@ -607,7 +685,9 @@ def main() -> None:
     q.add_argument("--supersedes", action="append", default=[])
     q.set_defaults(fn=cmd_queue)
     rh = sub.add_parser("run-headless"); rh.add_argument("project"); rh.add_argument("--task-spec", required=True); rh.add_argument("--supervised", action="store_true"); rh.set_defaults(fn=cmd_run_headless)
+    ro = sub.add_parser("run-orchestrator"); ro.add_argument("project"); ro.add_argument("--prompt"); ro.add_argument("--timeout", type=int, default=5400); ro.set_defaults(fn=cmd_run_orchestrator)
     v = sub.add_parser("verify");      v.add_argument("project"); v.add_argument("--worktree"); v.add_argument("--skip-gradle", action="store_true"); v.set_defaults(fn=cmd_verify)
+    em = sub.add_parser("emulators");  em.add_argument("project"); em.add_argument("--record", action="store_true"); em.add_argument("--reset", action="store_true"); em.set_defaults(fn=cmd_emulators)
     r = sub.add_parser("release");     r.add_argument("project"); r.add_argument("--worktree", required=True); r.add_argument("--task-spec", required=True); r.set_defaults(fn=cmd_release)
     rec = sub.add_parser("record"); rec.add_argument("project")
     rec.add_argument("--task"); rec.add_argument("--task-spec"); rec.add_argument("--result", required=True,

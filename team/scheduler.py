@@ -2,7 +2,7 @@
 the Play internal-testing track. Idempotent — safe to re-run.
 
 What it sets up:
-  1. environment checks (git, gh auth, python3, opencode, JDK/JBR, android sdk)
+  1. environment checks (git, gh auth, python3, JDK/JBR, android sdk)
   2. project onboarding if missing (.pipeline/profile.json + state.json)
   3. launchd LaunchAgent running scripts/nightly.sh <project> daily at --at HH:MM
   4. global skill symlink so any agent CLI can operate the team (dev-team skill)
@@ -14,7 +14,7 @@ import re
 import subprocess
 from pathlib import Path
 
-from .core import TEAM_ROOT, pipeline_dir, run
+from .core import TEAM_ROOT, agent_argv, pipeline_dir, role_cfg, run
 
 LAUNCH_LABEL = "com.devteam.nightly"
 DEFAULT_AT = "23:10"
@@ -61,28 +61,30 @@ def pick_free_slot(pref_at: str | None, exclude_project: str | None = None) -> t
 def env_checks() -> list[str]:
     problems = []
     def which(cmd: str) -> str | None:
-        r = run(["/usr/bin/which", cmd], None, timeout=30) if False else subprocess.run(
-            ["/usr/bin/which", cmd], capture_output=True, text=True, timeout=30)
+        r = subprocess.run(["/usr/bin/which", cmd], capture_output=True, text=True,
+                           timeout=30)
         return None if r.returncode != 0 else r.stdout.strip()
-    for cmd in ("git", "python3", "gh", "opencode"):
+    for cmd in ("git", "python3", "gh"):
         if not which(cmd):
             problems.append(f"'{cmd}' not found on PATH")
     r = run(["gh", "auth", "status"], None, timeout=45)
     if r.returncode != 0:
         problems.append("gh is not authenticated (needed for CI polling + issue filing). Run: gh auth login")
-    if not which("opencode"):
-        problems.append("opencode CLI not found — developer runtime default will not launch")
-    r = run(["gh", "auth", "status"], None, timeout=45)
+    # headless spawn is optional (native subagents are the primary path); if the
+    # environment declares one, its binary must exist. No vendor is assumed.
+    argv = agent_argv(role_cfg("developer"), "x") or []
+    if argv and not which(argv[0]):
+        problems.append(f"headless agent command '{argv[0]}' not found on PATH "
+                        "(unset it to use native subagents)")
     return problems
 
 
 def install_skill_symlinks() -> list[str]:
-    """Global, project-independent: one skill, visible to every agent CLI."""
+    """Global, project-independent: one skill, visible to every agent CLI.
+    The tool-neutral location is the single target — no per-vendor paths."""
     made, skipped = [], []
     home = Path.home()
-    targets = [home / ".agents" / "skills" / "dev-team",
-               home / ".claude" / "skills" / "dev-team",
-               home / ".opencode" / "skill" / "dev-team"]
+    targets = [home / ".agents" / "skills" / "dev-team"]
     src = TEAM_ROOT / "skills" / "dev-team"
     for dst in targets:
         dst.parent.mkdir(parents=True, exist_ok=True)
@@ -96,18 +98,33 @@ def install_skill_symlinks() -> list[str]:
     return made, skipped
 
 
+def _loaded_job_plist(label: str) -> str | None:
+    """Path of the plist a loaded launchd job was bootstrapped from, or None."""
+    r = subprocess.run(["launchctl", "print", f"gui/{os.getuid()}/{label}"],
+                       capture_output=True, text=True, timeout=60)
+    if r.returncode != 0:
+        return None
+    m = re.search(r"^\s*path = (.+?)\s*$", r.stdout, re.M)
+    return m.group(1) if m else None
+
+
 def install_launchd(project_name: str, at: str, label: str | None = None) -> Path:
     hh, mm = [int(x) for x in at.split(":")]
     library = Path.home() / "Library" / "LaunchAgents"
     library.mkdir(parents=True, exist_ok=True)
-    plist = library / f"{(label or project_label(project_name))}.plist"
+    # A launchd job's Label must be UNIQUE per schedule: two plists sharing one
+    # Label (the legacy com.devteam.nightly is the classic case) can only ever
+    # have ONE loaded, so a second project's nightly silently never fires.
+    # The file name is already per-project — make the Label inside match it.
+    label = label or project_label(project_name)
+    plist = library / f"{label}.plist"
     nightly = TEAM_ROOT / "scripts" / "nightly.sh"
     logs = TEAM_ROOT / "logs"
     logs.mkdir(parents=True, exist_ok=True)
     body = f"""<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0"><dict>
-  <key>Label</key><string>{LAUNCH_LABEL}</string>
+  <key>Label</key><string>{label}</string>
   <key>ProgramArguments</key><array>
     <string>/bin/bash</string>
     <string>-c</string>
@@ -120,9 +137,17 @@ def install_launchd(project_name: str, at: str, label: str | None = None) -> Pat
   </dict>
 </dict></plist>"""
     plist.write_text(body)
-    label = plist.stem
-    subprocess.run(["launchctl", "bootout", f"gui/{os.getuid()}/{label}"],
-                   capture_output=True, timeout=60)
+    # Boot out our own label, plus any job loaded from THIS exact plist path
+    # under a different (legacy) label — a re-install then migrates cleanly and
+    # never leaves a duplicate job pointed at the same file.
+    to_boot = {label}
+    legacy_path = _loaded_job_plist(LAUNCH_LABEL)
+    if LAUNCH_LABEL != label and legacy_path and \
+            Path(legacy_path).resolve() == plist.resolve():
+        to_boot.add(LAUNCH_LABEL)
+    for lbl in to_boot:
+        subprocess.run(["launchctl", "bootout", f"gui/{os.getuid()}/{lbl}"],
+                       capture_output=True, timeout=60)
     r = subprocess.run(["launchctl", "bootstrap", f"gui/{os.getuid()}", str(plist)],
                        capture_output=True, text=True, timeout=60)
     if r.returncode != 0 and "in_progress" not in (r.stdout + r.stderr) and "Operation now" not in (r.stdout + r.stderr):

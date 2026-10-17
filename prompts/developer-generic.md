@@ -27,6 +27,11 @@ HARD RULES:
 6. Respect the project's package placement law (see conventions): shared
    utilities in the shared package, feature files in the feature package,
    no direct feature-to-feature imports.
+7. Device hygiene: if you need an emulator, start it through
+   `with-emulator <avd> -- <command...>` (teardown is guaranteed by an EXIT
+   trap). If you start one by hand, `android emulator stop <avd>` before you
+   finish. NEVER stop an emulator you did not start — the owner may have one
+   open deliberately. A run-end check stops anything this run leaked.
 
 RESEARCH CONTEXT TO SOLVE (the reason this task exists):
 {research_context}

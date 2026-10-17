@@ -1,14 +1,17 @@
 """Developer role executor — HEADLESS FALLBACK + BAKEOFF UTILITY.
 
 PRIMARY PATH (per design): the orchestrator IS an agentic tool; per the
-dev-team skill it spawns the developer as its own NATIVE SUBAGENT (Claude
-Task-style, opencode agents, etc.) with the prompt from prompts/developer.md
+dev-team skill it spawns the developer as its own NATIVE SUBAGENT (whatever
+subagent mechanism that tool provides) with the prompt from prompts/developer.md
 and the model from config/runtimes.json roles.developer.model.
 
 This module exists only for:
   a) tools that cannot spawn subagents (the skill's documented fallback:
-     `spawn = subprocess of the configured runtime`), and
+     a headless spawn from the environment-provided agent command), and
   b) A/B model bakeoffs on the same task spec.
+
+No vendor, binary or CLI is named here — the headless command is supplied by
+the environment (roles.developer.command or DEVTEAM_AGENT_CMD).
 
 Gates never change with the spawn mechanism: acceptance = diff in scope +
 verify gates green, run by team code.
@@ -20,44 +23,34 @@ import subprocess
 from pathlib import Path
 
 from . import verify
-from .core import RunLog, git, now_iso, profile_of, run, runtimes, state_of
+from .core import (
+    RunLog, agent_argv, git, now_iso, profile_of, role_cfg as _role_cfg,
+    run, state_of,
+)
 
 RUN_BASE = ".pipeline/worktrees"
 
 
-def _candidate_invocations(role_cfg: dict, prompt: str) -> list[tuple[str, list[str]]]:
-    out = []
-    for v in [role_cfg] + role_cfg.get("fallback", []):
-        rt = v.get("runtime")
-        if not rt or rt not in role_cfg.get("invocation", {}):
-            continue
-        model = v.get("model", "")
-        argv = []
-        for a in role_cfg["invocation"][rt]:
-            argv.append(prompt if a == "{prompt}" else a.replace("{model}", model))
-        out.append((rt, argv))
-    return out
-
-
-def _spawn(prompt: str, worktree: Path, log: RunLog, role_cfg: dict,
+def _spawn(prompt: str, worktree: Path, log: RunLog, cfg: dict,
            timeout: int = 3600) -> tuple[bool, str]:
-    env = {"JAVA_HOME": verify.GRADLE_ENV["JAVA_HOME"], "TERM": "dumb"}
-    for rt, argv in _candidate_invocations(role_cfg, prompt):
-        log(f"~ spawning developer runtime: {rt} (≤{timeout}s)")
-        try:
-            r = run(argv, worktree, timeout=timeout, env=env)
-        except subprocess.TimeoutExpired:
-            log(f"  developer runtime {rt} TIMEOUT")
-            return False, f"runtime {rt} timed out after {timeout}s"
-        if r.returncode == 0:
-            log("  developer finished (rc=0)")
-            return True, ""
-        tail = (r.stdout or "") + (r.stderr or "")
-        if r.returncode == 127 or "not found" in tail.lower()[:200]:
-            log(f"  runtime {rt} not launched — trying fallback")
-            continue
-        return False, tail[-4000:] or f"runtime {rt} exited rc={r.returncode}"
-    return False, "no developer runtime could be launched"
+    argv = agent_argv(cfg, prompt)
+    if not argv:
+        log("no agent command configured — the host tool must spawn the developer "
+            "natively (or set roles.developer.command / DEVTEAM_AGENT_CMD)")
+        return False, ("no agent command configured for a headless spawn — "
+                       "use the native subagent path")
+    log(f"~ spawning developer headless ({argv[0]}, ≤{timeout}s)")
+    try:
+        r = run(argv, worktree, timeout=timeout,
+                env={"JAVA_HOME": verify.GRADLE_ENV["JAVA_HOME"], "TERM": "dumb"})
+    except subprocess.TimeoutExpired:
+        log("  developer TIMEOUT")
+        return False, f"developer timed out after {timeout}s"
+    if r.returncode == 0:
+        log("  developer finished (rc=0)")
+        return True, ""
+    tail = (r.stdout or "") + (r.stderr or "")
+    return False, tail[-4000:] or f"agent command exited rc={r.returncode}"
 
 
 def prepare_worktree(project: Path, task_id: str, log: RunLog) -> tuple[Path, str] | None:
@@ -94,8 +87,8 @@ def execute(project: Path, task: dict, log: RunLog, max_attempts: int = 2) -> di
 
     task_paths = task["surface"].get("targets") or []
     prompt = build_prompt(project, profile, task, task_paths)
-    role_cfg = runtimes()["roles"]["developer"]
-    timeout = role_cfg.get("timeout_s", 3600)
+    cfg = _role_cfg("developer")
+    timeout = cfg.get("timeout_s", 3600)
 
     attempts: list[dict] = []
     files: list[str] = []
@@ -103,7 +96,11 @@ def execute(project: Path, task: dict, log: RunLog, max_attempts: int = 2) -> di
     err = ""
     for attempt in range(1, max_attempts + 1):
         log(f"=== attempt {attempt}/{max_attempts} ===")
-        ok_spawn, _ = _spawn(prompt, worktree, log, role_cfg, timeout)
+        ok_spawn, spawn_err = _spawn(prompt, worktree, log, cfg, timeout)
+        if not ok_spawn:
+            log(f"FATAL: headless spawn unavailable: {spawn_err}")
+            return {"status": "error", "worktree": str(worktree),
+                    "error": spawn_err, "files": [], "attempts": attempts}
         files = verify.changed_files(worktree, base)
         if (worktree / "PIPELINE_BLOCKER.md").exists():
             msg = (worktree / "PIPELINE_BLOCKER.md").read_text()[:2000]
@@ -126,7 +123,10 @@ def execute(project: Path, task: dict, log: RunLog, max_attempts: int = 2) -> di
                 "attempts": attempts, "error": err}
 
     git(["add", "-A"], cwd=worktree)
-    rc = git(["commit", "-m", f"feat(ui): add motion to {task['surface']['label'].lower()}"],
+    # Type-aware subject — headless work is not always "motion" (see shipper).
+    prefix = {"motion": "feat", "feature": "feat", "bugfix": "fix"}.get(
+        task.get("type", "motion"), "chore")
+    rc = git(["commit", "-m", f"{prefix}(ui): {task['surface']['label'].lower()}"],
              cwd=worktree)
     if rc.returncode != 0:
         return {"status": "failed", "worktree": str(worktree), "attempts": attempts,
@@ -136,11 +136,33 @@ def execute(project: Path, task: dict, log: RunLog, max_attempts: int = 2) -> di
             "files": files, "attempts": attempts, "error": ""}
 
 
+def _check_targets_are_paths(task_paths: list[str]) -> None:
+    """Fail fast when surface.targets holds prose instead of repo-relative paths.
+
+    The first target is rendered verbatim as the developer's allow-list
+    ("Edit ONLY files under: <targets>"), so a descriptive sentence there does not
+    just mislead — it silently REPLACES the file allow-list and can hard-block the
+    real files. Narrative belongs in the queue entry's `reason` (injected as
+    "RESEARCH CONTEXT TO SOLVE") or in a plan doc under docs/progress/.
+    """
+    prose = [str(t) for t in (task_paths or [])
+             if any(c.isspace() for c in str(t))
+             or (len(str(t)) > 80 and "/" not in str(t))]
+    if prose:
+        raise ValueError(
+            "surface.targets must be repo-relative PATHS (files, dirs or globs), not "
+            f"prose — got {prose[0]!r}. This is rendered verbatim as the developer's "
+            "'Edit ONLY files under:' allow-list. Move the description to the queue "
+            "entry's `reason` (shown as RESEARCH CONTEXT) or to a plan doc, and list "
+            "real paths in `targets`.")
+
+
 def build_prompt(project: Path, profile: dict, task: dict, task_paths: list[str],
                  tpl_override: str | None = None) -> str:
     """Deterministic prompt builder — used for BOTH the native-subagent path
     (the orchestrator calls it via `devteam developer-prompt`) and the
     watchdog/subprocess fallback. The orchestrator must not re-derive it."""
+    _check_targets_are_paths(task_paths)
     ttype = tpl_override or task.get("type", "motion")
     tpl_name = ("developer.md" if ttype == "motion" else "developer-generic.md")
     tpl = (Path(__file__).resolve().parent.parent / "prompts" / tpl_name).read_text()
@@ -196,7 +218,7 @@ def build_prompt(project: Path, profile: dict, task: dict, task_paths: list[str]
         theme=profile["theme_dir"],
         target_area="\n  - ".join(task_paths),
         allowed_paths="\n  - ".join(profile["allowed_paths"]),
-        frozen_paths="\n  - ".join(profile["frozen_paths"]),
+        frozen_paths=frozen_txt,
         compile_cmd=v["compile"],
         test_cmd=v.get("test", "(skip; profile defines no test gate)"),
         conventions="\n  - ".join(profile.get("conventions", [])),

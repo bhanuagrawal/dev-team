@@ -12,8 +12,8 @@ import shutil
 from pathlib import Path
 
 from .core import (
-    PROJECTS_BASES, TEAM_ROOT, now_iso, profile_of, run, runtimes,
-    save_state, state_of,
+    PROJECTS_BASES, TEAM_ROOT, agent_argv, now_iso, profile_of, resolve_model,
+    run, runtimes, save_state, state_of,
 )
 
 
@@ -48,13 +48,16 @@ def agent_requirements(profile: dict, project: Path) -> dict[str, list[tuple[str
         ga4_checks.append(("gcloud CLI available", bool(shutil.which("gcloud")), "install gcloud SDK"))
 
     dev = rt.get("developer", {})
-    dev_rt_name = dev.get("runtime") or ""
+    dev_argv = agent_argv(dev, "x") or []
+    dev_bin = dev_argv[0] if dev_argv else ""
     dev_checks = [
-        (f"developer runtime CLI present ({dev_rt_name})",
-         bool(shutil.which(dev_rt_name)), f"install the {dev_rt_name} CLI"),
-        ("java_home exists", _has(profile.get("java_home")), "set profile.java_home"),
-        ("developer model configured", bool(dev.get("model")),
+        ("developer model configured", bool(resolve_model(dev)),
          "set roles.developer.model in runtimes.json"),
+        (f"headless agent command available ({dev_bin})" if dev_bin
+         else "headless agent command not set — native subagents are the primary path",
+         bool(shutil.which(dev_bin)) if dev_bin else True,
+         f"install '{dev_bin}' on PATH, or drop the command and use native subagents"),
+        ("java_home exists", _has(profile.get("java_home")), "set profile.java_home"),
     ]
 
     ship_checks = [
@@ -68,7 +71,7 @@ def agent_requirements(profile: dict, project: Path) -> dict[str, list[tuple[str
 
     syn = rt.get("product_synthesis", {})
     synthesis_checks = [
-        ("product_synthesis model configured", bool(syn.get("model")),
+        ("product_synthesis model configured", bool(resolve_model(syn)),
          "set roles.product_synthesis.model in runtimes.json"),
     ]
 

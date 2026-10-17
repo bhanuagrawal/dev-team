@@ -50,6 +50,7 @@ python3 cli.py worktree-start <project> --task-id ID
 python3 cli.py developer-prompt <project> <spec.json>
 python3 cli.py queue <project> [add|review]   # admission + impact review
 python3 cli.py verify <project> --worktree <path>
+python3 cli.py emulators <project> [--record [--reset]]   # emulator teardown
 python3 cli.py release <project> --worktree <path> --task-spec <spec.json>
 python3 cli.py record <project> --result shipped|failed|blocked …
 python3 cli.py poll / alarm / setup
@@ -80,13 +81,14 @@ touched.
 ## Layout
 ```
 cli.py  team/  prompts/developer.md  scripts/nightly.sh
-config/runtimes.json            # role → runtime → model
+config/runtimes.json            # role → model (no vendor pinned)
 skills/                          # the real team brain (above)
 ```
 The team repo can live anywhere — it currently sits in `~/Documents/AI/dev-team`
 alongside the other agent systems. Projects resolve by name from
-`DEVTEAM_PROJECTS_HOME` (optional env override), the team's parent folder, and
-`~/AndroidStudioProjects` (in that order); absolute paths always work.
+`DEVTEAM_PROJECTS_HOME` (optional env override), the team's parent folder,
+`~/AndroidStudioProjects`, and `~/KMPProjects` (in that order); absolute paths
+always work.
 
 ## Adding a project (existing repo)
 `python3 cli.py onboard <path>` → review `.pipeline/profile.json` →
@@ -101,7 +103,7 @@ Say it in plain language to any agent with this skill loaded →
 
 | Layer | Who | What |
 |---|---|---|
-| Orchestrator | any agentic tool (opencode, Claude Code, …) running **with the dev-team skill** | decide + drive: pick task, prepare sandbox, spawn developer, gate, release, record |
+| Orchestrator | any agentic tool running **with the dev-team skill** | decide + drive: pick task, prepare sandbox, spawn developer, gate, release, record |
 | Developer | the orchestrator's **native subagent** (model from `config/runtimes.json`) | edit code in the task worktree, per `prompts/developer.md` |
 | Python | `cli.py` + `team/*` — deterministic only | gates (scope/localization/build/test), worktree plumbing, version bump, state bookkeeping, alarms. Zero LLM, zero project names. |
 | Scheduler | macOS launchd (`com.devteam.nightly`) | boots the orchestrator daily at the configured time |
@@ -120,6 +122,7 @@ python3 cli.py onboard <project>         # detect + write profile draft (idempot
 python3 cli.py worktree-start <project> --task-id ID
 python3 cli.py developer-prompt <project> <spec.json>
 python3 cli.py verify <project> --worktree <path>
+python3 cli.py emulators <project>        # stop emulators this run leaked (warn-only)
 python3 cli.py release <project> --worktree <path> --task-spec <spec.json>
 python3 cli.py record <project> --result shipped|failed|blocked …
 python3 cli.py alarm <project>           # staleness + CI reconciliation → GitHub Issue
@@ -143,7 +146,8 @@ team/                   core, scan, verify, developer (headless fallback),
                         shipper, alarm, scribe, scheduler (launchd)
 prompts/developer.md    the developer contract (prompt template)
 scripts/nightly.sh      launchd entry: boots the orchestrator agentic tool
-config/runtimes.json    role → runtime → model (per-tool headless invocation)
+config/runtimes.json    role → model (only the model is pinned; headless
+                        launch comes from the environment, never a vendor)
 skills/dev-team/        THE skill: what any agentic orchestrator must do
 skills/checks/          executable expertise (localization completeness …)
 ```

@@ -118,49 +118,82 @@ def write_whatsnew(worktree: Path, task) -> None:
         wf.write_text(_whatsnew_text(task))
 
 
-def push_and_deliver(project: Path, worktree: Path, task: dict, new_version: str,
-                     log: RunLog) -> dict:
-    profile = profile_of(project)
-    label = task["surface"]["label"]
-    git(["add", "-A"], cwd=worktree)
-    rc = git(["commit", "-m",
-              f"chore: bump version to {new_version} for {label.lower()} motion (dev-team)"],
-             cwd=worktree)
-    if rc.returncode != 0:
-        return {"delivered": False, "error": "bump commit failed", "ci": {}}
+def bump_subject(task: dict, new_version: str) -> str:
+    """Commit subject for the version-bump commit, named for the task's real
+    kind. It used to say "... motion" for every release, so a feature or bugfix
+    release mislabelled history (`git log`) even though the Play release notes
+    were already type-aware."""
+    label = (task.get("surface", {}) or {}).get("label") or "app"
+    kind = task.get("type", "motion")
+    return f"chore: bump version to {new_version} for {str(label).lower()} {kind} (dev-team)"
 
-    sha = git(["rev-parse", "HEAD"], cwd=worktree).stdout.strip()
-    log(f"pushing {sha[:8]} → origin {profile['main_branch']} "
-        "(CI → build → internal testing)")
+
+def push_and_deliver(project: Path, worktree: Path, task: dict, new_version: str,
+                     log: RunLog, max_retries: int = 3) -> dict:
+    """Push version bump and monitor CI until success, retrying up to max_retries times.
+
+    Each retry creates a fresh version bump commit (the previous one is already on
+    main, so the next bump increments from there). CI is monitored after each
+    attempt; if it fails or times out, the loop retries with a new push.
+    """
+    profile = profile_of(project)
     branch = profile["main_branch"]
-    r = git(["push", "origin", f"HEAD:{branch}"], cwd=worktree, timeout=180)
-    if r.returncode != 0:
-        log("push rejected — remote moved since base; rebasing")
-        git(["fetch", "origin"], cwd=project, timeout=120)
-        rb = git(["rebase", f"origin/{branch}"], cwd=worktree, timeout=180)
-        if rb.returncode != 0:
-            git(["rebase", "--abort"], cwd=worktree)
-            return {"delivered": False, "error": "push rejected and rebase failed", "ci": {}}
+
+    for attempt in range(1, max_retries + 1):
+        if attempt > 1:
+            log(f"retry {attempt}/{max_retries}: re-bumping version and re-pushing")
+            # Fetch the latest remote tags to compute the next version
+            latest = remote_latest_version(project)
+            if latest is None:
+                return {"delivered": False, "error": "no remote tags for retry", "ci": {}}
+            new_version = ".".join(map(str, (latest[0], latest[1], latest[2] + 1)))
+            bump_version_file(worktree, (latest[0], latest[1], latest[2] + 1), log)
+
+        git(["add", "-A"], cwd=worktree)
+        rc = git(["commit", "-m", bump_subject(task, new_version)], cwd=worktree)
+        if rc.returncode != 0:
+            return {"delivered": False, "error": "bump commit failed", "ci": {}}
+
+        sha = git(["rev-parse", "HEAD"], cwd=worktree).stdout.strip()
+        log(f"pushing {sha[:8]} → origin {branch} "
+            "(CI → build → internal testing)")
         r = git(["push", "origin", f"HEAD:{branch}"], cwd=worktree, timeout=180)
         if r.returncode != 0:
-            return {"delivered": False, "error": "push failed twice", "ci": {}}
-    log("pushed to origin main")
-    # Tag-gated CI: some projects release on `v*` tags only — the bump push
-    # alone would never deliver. Push the version tag when profile says so.
-    if profile_of(project).get("ci_trigger", "bump") == "tag":
-        tag = f'{profile_of(project).get("tag_prefix", "v")}{new_version}'
-        r = git(["tag", tag], cwd=worktree)
-        if r.returncode != 0:
-            log(f"tag {tag} not created locally (may already exist)")
-        else:
-            r = git(["push", "origin", tag], cwd=worktree, timeout=120)
-            if r.returncode == 0:
-                log(f"pushed tag {tag} → CI (tag-gated delivery)")
+            log("push rejected — remote moved since base; rebasing")
+            git(["fetch", "origin"], cwd=project, timeout=120)
+            rb = git(["rebase", f"origin/{branch}"], cwd=worktree, timeout=180)
+            if rb.returncode != 0:
+                git(["rebase", "--abort"], cwd=worktree)
+                return {"delivered": False, "error": "push rejected and rebase failed", "ci": {}}
+            r = git(["push", "origin", f"HEAD:{branch}"], cwd=worktree, timeout=180)
+            if r.returncode != 0:
+                return {"delivered": False, "error": "push failed twice", "ci": {}}
+        log("pushed to origin main")
+        # Tag-gated CI: some projects release on `v*` tags only — the bump push
+        # alone would never deliver. Push the version tag when profile says so.
+        if profile.get("ci_trigger", "bump") == "tag":
+            tag = f'{profile.get("tag_prefix", "v")}{new_version}'
+            r = git(["tag", tag], cwd=worktree)
+            if r.returncode != 0:
+                log(f"tag {tag} not created locally (may already exist)")
             else:
-                log(f"tag push failed: {(r.stdout + r.stderr)[-200:]}")
-    ci = await_ci(project, sha, log)
+                r = git(["push", "origin", tag], cwd=worktree, timeout=120)
+                if r.returncode == 0:
+                    log(f"pushed tag {tag} → CI (tag-gated delivery)")
+                else:
+                    log(f"tag push failed: {(r.stdout + r.stderr)[-200:]}")
+        ci = await_ci(project, sha, log)
 
-    return {"delivered": True, "commit": sha, "version": new_version, "ci": ci}
+        if ci.get("conclusion") == "success":
+            return {"delivered": True, "commit": sha, "version": new_version, "ci": ci}
+
+        if attempt < max_retries:
+            log(f"CI {ci.get('conclusion', 'unknown')} on attempt {attempt}/{max_retries} — retrying")
+        else:
+            log(f"CI failed after {max_retries} attempts — giving up")
+
+    return {"delivered": False, "error": f"CI failed after {max_retries} attempts",
+            "ci": ci, "commit": sha, "version": new_version}
 
 
 def await_ci(project: Path, sha: str, log: RunLog, max_wait_s: int = 1800) -> dict:

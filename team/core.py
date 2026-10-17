@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import os
+import shlex
 import subprocess
 import sys
 from datetime import datetime, timezone
@@ -16,12 +17,14 @@ from typing import Any
 
 TEAM_ROOT = Path(__file__).resolve().parent.parent
 
-# Projects may live beside the team (Documents/AI) or in the Android Studio
-# folder. Order matters; DEVTEAM_PROJECTS_HOME overrides everything.
+# Projects may live beside the team (Documents/AI), in the Android Studio
+# folder, or in the KMP projects folder. Order matters; DEVTEAM_PROJECTS_HOME
+# overrides everything.
 PROJECTS_BASES = [
     Path(os.environ["DEVTEAM_PROJECTS_HOME"]) if os.environ.get("DEVTEAM_PROJECTS_HOME") else None,
     TEAM_ROOT.parent,
     Path.home() / "AndroidStudioProjects",
+    Path.home() / "KMPProjects",
 ]
 PROJECTS_BASES = [b for b in PROJECTS_BASES if b is not None]
 
@@ -92,6 +95,50 @@ def save_state(project: Path, state: dict) -> None:
 
 def runtimes() -> dict:
     return load_json(RUNTIMES_PATH, {})
+
+
+# --------------------------------------------------------------------------- #
+# roles: model + the tool-agnostic headless launch contract
+#
+# The team is agentic-tool agnostic BY DESIGN: the orchestrator is whatever
+# agentic tool loads the dev-team skill, and it develops through its own native
+# subagents. The model is the ONLY thing the team pins per role. Nothing here
+# names a vendor, a binary or a CLI.
+#
+# For tools that cannot spawn subagents (and for A/B bakeoffs) a headless
+# launch is available — but the command is supplied by the ENVIRONMENT, never
+# baked in:
+#   * roles.<role>.command  — an argv template in config/runtimes.json, or
+#   * DEVTEAM_AGENT_CMD     — the same template from the environment.
+# Templates may use {model} and {prompt} placeholders.
+# --------------------------------------------------------------------------- #
+
+def role_cfg(role: str) -> dict:
+    """Config for one role (developer | reviewer | orchestrator |
+    product_synthesis). Missing roles come back as {}."""
+    return (runtimes().get("roles") or {}).get(role) or {}
+
+
+def resolve_model(cfg: dict) -> str:
+    """The single chokepoint every role reads its model from."""
+    return (cfg or {}).get("model", "") or ""
+
+
+def agent_argv(cfg: dict, prompt: str) -> list[str] | None:
+    """Headless launch argv for a role, or None when the environment supplies
+    no agent command (the caller must then use its tool's native subagent
+    mechanism — the primary path)."""
+    template = (cfg or {}).get("command")
+    if isinstance(template, str):
+        template = shlex.split(template)
+    if not template:
+        raw = (os.environ.get("DEVTEAM_AGENT_CMD") or "").strip()
+        if not raw:
+            return None
+        template = shlex.split(raw)
+    model = resolve_model(cfg)
+    return [prompt if a == "{prompt}" else a.replace("{model}", model)
+            for a in template]
 
 
 def git(args: list[str], cwd: Path, timeout: int = 300, env: dict | None = None,

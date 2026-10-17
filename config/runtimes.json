@@ -1,31 +1,18 @@
 {
+  "_comment": "Role -> model. This is the ONLY thing the team pins per role: the orchestrator is whatever agentic tool loads the dev-team skill and it develops through its own native subagents, so no vendor/binary/CLI appears anywhere in this file. Optional per-role 'command' (argv template with {model}/{prompt}) exists only for tools that cannot spawn subagents, and for A/B bakeoffs; DEVTEAM_AGENT_CMD provides the same template from the environment.",
   "roles": {
     "developer": {
-      "runtime": "opencode",
-      "model": "opencode-go/glm-5.3-flash",
-      "fallback": [
-        {"runtime": "claude", "model": "sonnet"}
-      ],
-      "timeout_s": 3600,
-      "invocation": {
-        "opencode": ["opencode", "run", "--auto", "--model", "{model}", "{prompt}"],
-        "claude": ["claude", "-p", "{prompt}", "--model", "{model}",
-                   "--permission-mode", "acceptEdits", "--max-turns", "50",
-                   "--output-format", "text"]
-      }
+      "model": "opencode/deepseek-v4.1-flash-free",
+      "timeout_s": 3600
     },
     "reviewer": {
-      "runtime": "opencode",
-      "model": "opencode-go/glm-5.3-flash"
+      "model": "opencode/deepseek-v4.1-flash-free"
     },
     "orchestrator": {
-      "runtime": "opencode",
-      "model": "opencode-go/glm-5.3-flash",
-      "note": "reserved: interactive chat-orchestrator mode (v2)"
+      "model": "opencode/deepseek-v4.1-flash-free"
     },
     "product_synthesis": {
-      "runtime": "opencode",
-      "model": "opencode-go/glm-5.3-flash"
+      "model": "opencode/deepseek-v4.1-flash-free"
     }
   }
 }

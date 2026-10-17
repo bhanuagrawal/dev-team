@@ -86,6 +86,14 @@ proceed and log it. This is a hard step for both modes.
 - Never push with red gates. `devteam verify` must PASS before `devteam release`.
 - Frozen paths from the project profile are absolute — if a task seems to
   require them, stop and mark the task blocked instead.
+- **Emulators are torn down, never abandoned.** A run that needs an AVD records
+  a start-of-run baseline (`cli.py emulators <project> --record --reset`;
+  `run-headless`/`run-orchestrator` do this automatically) and checks it at run
+  end (`cli.py verify` and `nightly.sh` call `cli.py emulators <project>`).
+  The check stops ONLY emulators that appeared during this run and never one
+  the owner had open deliberately. Tell the developer subagent to start an AVD
+  through `with-emulator <avd> -- <cmd>` (teardown guaranteed by an EXIT trap).
+  A leak is warn-only: it never reds a gate, but the run report must mention it.
 
 ## Where everything lives
 - team code/scripts:  `<this skill's dir>/../..`  (the dev-team repo)
@@ -151,8 +159,7 @@ things an agent can decide. Question budget: zero unless a gate truly blocks.
    → WORKTREE_PATH / WORKTREE_BRANCH / WORKTREE_BASE.
 6. Get the exact developer prompt (keep it verbatim):
    `python3 <team>/cli.py developer-prompt <project> .pipeline/tasks/<id>.json`
-7. SPAWN THE DEVELOPER AS A SUBAGENT — your tool's own mechanism, e.g.
-   the Task/subagents tool (Claude Code) or the agents mechanism (opencode):
+7. SPAWN THE DEVELOPER AS A SUBAGENT — your tool's own native mechanism:
    - agent prompt = the exact prompt from step 6
    - run with cwd = WORKTREE_PATH (pass this in the subagent's initial
      instruction: "work ONLY inside directory <WORKTREE_PATH>")
@@ -217,6 +224,11 @@ fixes itself instead of idling:
 4. Orchestration reruns research → pick → developer → verify → release
    **automatically, max 2 loops**, without a new owner ask; after loop 2 stop
    honestly with the alarm + a run report (never a silent red main).
+5. **CI retry on release** (owner decision 2026-10-17): `push_and_deliver` monitors
+   CI after each push and retries up to **3 attempts** if CI fails or times out.
+   Each retry creates a fresh version bump commit (incrementing from the latest
+   remote tag) and re-pushes. If all 3 attempts fail, the run records `failed`
+   and the alarm files a GitHub Issue.
 
 ## Queue admissions & impact review (owner requirement 2026-10-16)
 A new task never enters the queue in isolation. **Every admission — a research

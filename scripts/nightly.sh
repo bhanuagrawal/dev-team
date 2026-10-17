@@ -1,7 +1,7 @@
 #!/bin/bash
-# nightly.sh — launchd entry point. Runs the AGENTIC orchestrator (not Python):
-# it boots the configured orchestrator runtime with the dev-team skill loaded,
-# operating on the given project.
+# nightly.sh — launchd entry point. Runs the AGENTIC orchestrator via
+# `opencode run --auto` (a new OpenCode session each night), operating on
+# the given project.
 #
 # usage: nightly.sh <ProjectName>
 set -u
@@ -32,10 +32,28 @@ else
 fi
 echo "=== nightly start $(date '+%F %T') project=$PROJECT ===" >> "$TEAM/logs/launchd.log"
 
-MODEL=$(python3 -c "import json;print(json.load(open('$TEAM/config/runtimes.json'))['roles']['orchestrator'].get('model',''))" 2>/dev/null)
-RT=$(python3 -c "import json;print(json.load(open('$TEAM/config/runtimes.json'))['roles']['orchestrator'].get('runtime','opencode'))" 2>/dev/null)
+# Read the orchestrator model from runtimes.json
+MODEL=$(python3 -c "
+import json, pathlib
+cfg = json.loads(pathlib.Path('$TEAM/config/runtimes.json').read_text())
+print(cfg.get('roles', {}).get('orchestrator', {}).get('model', ''))
+" 2>/dev/null)
 
-PROMPT="You are the dev-team orchestrator. Load and follow the dev-team skill in full. Run tonight's pipeline: status → pick the next safe unanimated surface → worktree-start → developer-prompt → spawn the developer as a native subagent (model from runtimes.json) → verify the worktree → release on green → record → alarm. Project: $PROJECT (absolute path: $(dirname "$TEAM")/$PROJECT). Report a compact summary of what shipped."
+if [ -z "$MODEL" ]; then
+  echo "ERROR: no orchestrator model in config/runtimes.json" >> "$TEAM/logs/launchd.log"
+  rm -rf "$LOCK"
+  exit 1
+fi
+
+PROMPT="Run workflow for $PROJECT."
+
+# Emulator baseline (run start): snapshot what is ALREADY running so run end can
+# tell the orchestrator's emulator apart from one the owner opened deliberately.
+python3 "$TEAM/cli.py" emulators "$PROJECT" --record --reset >> "$TEAM/logs/launchd.log" 2>&1
+
+# The orchestrator is ANY agentic tool — nothing vendor-specific is launched
+# here. The command template comes from roles.orchestrator.command in
+# config/runtimes.json, or from DEVTEAM_AGENT_CMD in the environment.
 
 # watchdog: a hung orchestrator session must not block every future night (90 min cap)
 run_capped() {
@@ -49,22 +67,16 @@ run_capped() {
   return $rc
 }
 
-case "$RT" in
-  opencode)
-    if [ -n "$MODEL" ]; then
-      run_capped 5400 opencode run --auto --model "$MODEL" "$PROMPT"
-    else
-      run_capped 5400 opencode run --auto "$PROMPT"
-    fi
-    ;;
-  claude)
-    run_capped 5400 claude -p "$PROMPT" --permission-mode acceptEdits --max-turns 50
-    ;;
-  *)
-    echo "unknown orchestrator runtime: $RT" >> "$TEAM/logs/launchd.log"
-    exit 1
-    ;;
-esac
+run_capped 5400 opencode run --title "dev-team $PROJECT $(date +%F)" --model "$MODEL" --auto "$PROMPT"
+RC=$?
+if [ $RC -ne 0 ]; then
+  echo "=== orchestrator exited rc=$RC ===" >> "$TEAM/logs/launchd.log"
+fi
+
+# Emulator teardown (run end). A watchdog kill above can orphan an emulator the
+# orchestrator started; this stops only what appeared after the run began, and
+# only ever the ones this run started (see team/emulator.py).
+python3 "$TEAM/cli.py" emulators "$PROJECT" >> "$TEAM/logs/launchd.log" 2>&1
 
 # staleness + CI reconciliation + issue filing (deterministic)
 python3 "$TEAM/cli.py" alarm "$PROJECT" >> "$TEAM/logs/launchd.log" 2>&1

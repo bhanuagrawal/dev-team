@@ -373,20 +373,21 @@ def _validate(result: dict, research: dict | None = None) -> str | None:
 
 
 def _llm(prompt: str, log: RunLog, timeout: int = 900) -> str:
-    from .core import runtimes
-    role = runtimes()["roles"]["product_synthesis"]
-    model = role.get("model", "")
-    primary = run(["opencode", "run", "--auto", "--model", model, prompt],
-                  None, timeout=timeout)
-    if primary.returncode == 0:
-        return primary.stdout
-    fold = ((primary.stdout or "") + (primary.stderr or ""))[-400:]
-    fallback = run(["claude", "-p", prompt, "--output-format", "text"],
-                   None, timeout=timeout)
-    if fallback.returncode != 0:
-        raise SystemExit("synthesis LLM failed: " + fold +
-                         " / " + (fallback.stdout + fallback.stderr)[-400:])
-    return fallback.stdout
+    from .core import agent_argv, role_cfg
+    cfg = role_cfg("product_synthesis")
+    argv = agent_argv(cfg, prompt)
+    if not argv:
+        raise SystemExit(
+            "synthesis needs an agentic-tool command — set "
+            "roles.product_synthesis.command in config/runtimes.json or export "
+            "DEVTEAM_AGENT_CMD (e.g. '<your-tool> run --model {model} {prompt}'). "
+            "No vendor is baked into the team.")
+    log(f"~ synthesis via {argv[0]} (model {cfg.get('model', 'default')})")
+    r = run(argv, None, timeout=timeout)
+    if r.returncode != 0:
+        raise SystemExit("synthesis LLM failed: " +
+                         ((r.stdout or "") + (r.stderr or ""))[-400:])
+    return r.stdout
 
 
 def research_apply(project: Path, result: dict, log: RunLog) -> None:
