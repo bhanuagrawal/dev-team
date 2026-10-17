@@ -83,8 +83,22 @@ jobs:
       # ── Publish to the Play "internal" track with curated release notes ───────
       # STAGED: deferred if Play credentials aren't wired yet — CI stays GREEN,
       # the upload activates itself the moment PLAY_SERVICE_ACCOUNT_JSON exists.
+      # NOTE: `secrets` is NOT a valid context in a step `if:` (GitHub rejects the
+      # whole workflow file — "workflow file issue" failing run in 0s). Presence
+      # must be detected through the `steps` context, as below.
+      - name: Detect Play credentials
+        id: play
+        env:
+          PLAY_JSON: ${{ secrets.PLAY_SERVICE_ACCOUNT_JSON }}
+        run: |
+          if [ -n "$PLAY_JSON" ]; then
+            echo "available=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "available=false" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Upload to Play Console (internal testing)
-        if: ${{ secrets.PLAY_SERVICE_ACCOUNT_JSON != '' }}
+        if: steps.play.outputs.available == 'true'
         uses: r0adkll/upload-google-play@v1
         with:
           serviceAccountJsonPlainText: ${{ secrets.PLAY_SERVICE_ACCOUNT_JSON }}
@@ -95,5 +109,5 @@ jobs:
           whatsNewDirectory: distribution/whatsnew
 
       - name: Play upload deferred (gate pending)
-        if: ${{ secrets.PLAY_SERVICE_ACCOUNT_JSON == '' }}
+        if: steps.play.outputs.available == 'false'
         run: echo "Play internal-testing upload DEFERRED — PLAY_SERVICE_ACCOUNT_JSON not set yet. Build is green; artifact available above."

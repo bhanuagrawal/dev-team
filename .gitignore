@@ -8,3 +8,7 @@ logs/
 
 # Nightly single-instance lock
 .nightly.lock/
+
+# Local editor / OS junk
+.DS_Store
+.idea/

@@ -43,6 +43,28 @@ def bump_version_file(worktree: Path, new: tuple[int, int, int], log: RunLog) ->
         r'(versionName[\s\S]{0,70}?["\'])(\d+(?:\.\d+){0,2})(["\'])',
         rf"\g<1>{name}\g<3>", text, count=1)
 
+    if profile.get("version_code_bump") == "increment":
+        # Some projects encode info in the versionCode beyond the semver value —
+        # a per-flavor minSdk prefix (so Play routes each device to the right
+        # bundle) is one example. Overwriting those with the single semver `code`
+        # would collapse two flavors onto one code, so bump EVERY versionCode
+        # literal by +1 instead (profile-driven; default stays the semver
+        # overwrite below).
+        new_text, n_code = re.subn(
+            r'(versionCode[\s\S]{0,30}?[?:=\s])(\d{4,})(\s*\)?)',
+            lambda m: f"{m.group(1)}{int(m.group(2)) + 1}{m.group(3)}",
+            new_text)
+        if n_name != 1:
+            log(f"FATAL: could not bump versionName in {profile['version_file']} — refusing to ship")
+            raise SystemExit("version bump failed — inspect the version file")
+        if n_code:
+            log(f"{bump_version_file.__name__}: bumped {n_code} versionCode(s) by +1")
+        else:
+            log(f"{bump_version_file.__name__}: WARNING no versionCode literal bumped "
+                "(version_code_bump=increment)")
+        gf.write_text(new_text)
+        return name
+
     new_text, n_code = re.subn(
         r'(versionCode[\s\S]{0,70}?[?:=\s])(\d{4,})(\s*\)?)',
         rf"\g<1>{code}\g<3>", new_text, count=1)
