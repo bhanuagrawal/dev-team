@@ -84,8 +84,8 @@ cli.py  team/  prompts/developer.md  scripts/nightly.sh
 config/runtimes.json            # role → model (no vendor pinned)
 skills/                          # the real team brain (above)
 ```
-The team repo can live anywhere — it currently sits in `~/Documents/AI/dev-team`
-alongside the other agent systems. Projects resolve by name from
+The team repo can live anywhere — it currently sits in `~/dev-team`
+(outside `~/Documents`, which macOS TCC blocks for launchd-spawned jobs). Projects resolve by name from
 `DEVTEAM_PROJECTS_HOME` (optional env override), the team's parent folder,
 `~/AndroidStudioProjects`, and `~/KMPProjects` (in that order); absolute paths
 always work.
