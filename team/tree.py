@@ -20,7 +20,7 @@ reparented; only the human changes the root):
 """
 from __future__ import annotations
 
-from .core import now_iso, profile_of, state_of
+from .core import now_iso, pipeline_dir, profile_of, state_of
 from . import adapt, goals
 
 ACTIVE, DONE, PROPOSED, PARKED, OFF_GOAL = "active", "done", "proposed", "parked", "off-goal"
@@ -542,11 +542,19 @@ def render_html(model: dict, title: str) -> str:
                         lede=batched, foot=foot, body=_body(model))
 
 
+def url(project) -> str:
+    """The goal page as a `file://` URL (clickable in a terminal, pasteable into
+    a browser). Printed after EVERY change and on EVERY run, so the owner is one
+    paste away from the current picture — see cli.print_page()."""
+    return (pipeline_dir(project) / "goals.html").as_uri()
+
+
 def write(project, open_after: bool = False) -> str:
     """Render both views into the project's .pipeline dir; returns the html path."""
     profile = profile_of(project)
     model = build(project)
-    (project / ".pipeline" / "goals.txt").write_text(render_text(model) + "\n")
+    (project / ".pipeline" / "goals.txt").write_text(
+        render_text(model) + "\n\nwhere we are going: " + url(project) + "\n")
     dest = project / ".pipeline" / "goals.html"
     dest.write_text(render_html(model, profile.get("name", "project")))
     if open_after:

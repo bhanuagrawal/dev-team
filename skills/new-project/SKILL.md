@@ -113,7 +113,10 @@ python3 <team>/cli.py setup --project <path> --schedule auto --at HH:MM
 # registered schedules (`devteam schedules` lists them all).
 ```
 Then close with the consolidated report: what's live, what's pending gates,
-the next-build trigger (manual phrase / schedule time).
+the next-build trigger (manual phrase / schedule time). The report ends with the
+goal page URL — run `python3 <team>/cli.py tree <project> --html` (it prints
+`file:///…/.pipeline/goals.html`) and paste it, so the owner can open the page
+and see the goal the whole app is now aimed at.
 Status summary to owner: what's live, what's pending gates, next build time.
 
 ## STAGE MODEL (an app reaches steady-state in stages — never block on a future one)

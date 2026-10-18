@@ -150,6 +150,15 @@ collapse; `--open` opens it). Deterministic renderer, no LLM/network; refreshed
 by every `record`/`research`. A goal-less project renders the standing ask
 instead of an empty page.
 
+**The page URL is printed — after EVERY change and on EVERY run.** Anything that
+regenerates the page ends with `goal page: file:///…/goals.html` (clickable in a
+terminal, pasteable in a browser): `adapt`, `status`, `record`, `doctor`, `tree`,
+`goal add|park|set-status|retire|reparent|revert|review`, `align --apply`,
+`vision`, and `queue add|--done`. `pick` and `research` print it on **stderr**
+(their stdout is a machine payload). The owner is therefore never told a change
+happened without being handed the URL that shows it, and the run banner ends with
+that URL (run-outcome contract).
+
 **The team CHANGES the tree; the owner reviews afterwards (never waits).**
 `devteam goal <project> add|park|set-status|retire|reparent` mutates the plan
 directly — no approval gate. Every change is recorded with the reason and a
@@ -183,7 +192,8 @@ never silently blocking.
    the workflow does not start on an un-adapted project.
 1. `python3 <team>/cli.py status <project>` — see queue, shipped, last run.
    `status` is read-only and prints `ADAPT NEEDED` when the project lags the
-   team (step 0 is the fix — never migrate by hand).
+   team (step 0 is the fix — never migrate by hand). It ends with the
+   `goal page: file://…` URL: keep it, the run banner ends with it (10c).
 2. If nothing executable remains → REFILL the queue:
    run `python3 <team>/cli.py research <project>` (code agent: pulls GA4 +
    codebase + repo signals; ONE synthesis call; updates state.json queue —
@@ -260,6 +270,12 @@ never silently blocking.
     / `❓ OWNER ASK: <the decision>` / `🛠 TEAM SHIP: <what landed>` — plus what
     ran, and next step. An analysis-only report with no ask and no ship fails
     the run-outcome contract.
+10c. **Hand the owner the page, every run.** The banner ENDS with the goal page
+    URL that `status`/`record` printed (`goal page: file:///…/goals.html`) — a
+    run that changed the plan, the queue, or shipped anything without pasting it
+    is incomplete. It is the owner's one-click "where we are now"; the URL is
+    printed even when a run changes nothing, so never invent or guess one — paste
+    the one from the command output.
 10b. **Relay, don't remember**: `devteam record` prints an `AGENT FLAGS` block
     (the research agents' upgrade/capability asks) on EVERY outcome. The run
     banner MUST quote that block verbatim in its final report — dropping it is

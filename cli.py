@@ -286,6 +286,22 @@ def print_agent_flags(project: Path) -> None:
         print(f"    how: {u.get('how', '?')}")
 
 
+def print_page(project: Path, note: str = "", file=None) -> None:
+    """Print the goal page URL — after EVERY change to the plan/queue and on
+    EVERY run (status opens a run, record closes it). The owner is then one
+    paste away from the current picture: `goal page: file:///…/goals.html`.
+    Goes to stderr where stdout is a machine payload (research/pick JSON)."""
+    from team import tree as tree_mod
+    dest = pipeline_dir(project) / "goals.html"
+    if dest.exists():
+        line = f"goal page:  {tree_mod.url(project)}"
+        if note:
+            line += f"   ({note})"
+    else:
+        line = f"goal page:  not built yet — python3 cli.py tree {project.name}"
+    print(line, file=file or sys.stdout)
+
+
 # --------------------------------------------------------------------------- #
 # orchestrator-facing deterministic commands
 # --------------------------------------------------------------------------- #
@@ -403,6 +419,9 @@ def cmd_queue(args: argparse.Namespace) -> None:
         save_state(project, state)
         print(block)
         print(json.dumps(state.get("queue", []), indent=2))
+        from team import tree as tree_mod
+        tree_mod.write(project)
+        print_page(project, "shows the new queue item", file=sys.stderr)
         return
     if action == "review":
         from team import queue as qmod
@@ -417,6 +436,10 @@ def cmd_queue(args: argparse.Namespace) -> None:
             save_state(project, state)
         print(f"queue: {len(queue)} left (popped '{args.done}')" if len(queue) != before
               else f"'{args.done}' not found in queue — nothing popped")
+        if len(queue) != before:
+            from team import tree as tree_mod
+            tree_mod.write(project)
+            print_page(project, "the queue changed")
     else:
         print(json.dumps(queue, indent=2))
 
@@ -528,6 +551,8 @@ def cmd_record(args: argparse.Namespace) -> None:
     block = goals.review_block(state_of(project))
     if block:
         print("\n" + block)
+    # Every run ends by handing the owner the page: "where we are now", one paste.
+    print_page(project, "refreshed by this record")
 
 
 def cmd_pick(args: argparse.Namespace) -> int:
@@ -561,6 +586,9 @@ def cmd_pick(args: argparse.Namespace) -> int:
                       "worktree_cmd": f"python3 cli.py worktree-start {project.name} --task-id {task['id']}",
                       "prompt_cmd": f"python3 cli.py developer-prompt {project.name} {spec_path.name}"},
                      indent=2))
+    # stdout above is a machine payload (the orchestrator parses it) — but the
+    # run should also hand the owner the page. stderr, so the JSON stays clean.
+    print_page(project, "the queue this pick came from", file=sys.stderr)
     return 0
 
 
@@ -569,12 +597,13 @@ def cmd_tree(args: argparse.Namespace) -> None:
     from team import tree as tree_mod
     project = resolve_project(args.project)
     if args.html:
-        print(tree_mod.write(project, open_after=args.open))
+        tree_mod.write(project, open_after=args.open)
+        print(tree_mod.url(project))
         return
     model = tree_mod.build(project)
     print(tree_mod.render_text(model))
-    path = tree_mod.write(project, open_after=args.open)
-    print(f"\nhtml: {path}")
+    tree_mod.write(project, open_after=args.open)
+    print_page(project, "add --open to open it in the browser")
 
 
 def cmd_goal(args: argparse.Namespace) -> int:
@@ -606,6 +635,9 @@ def cmd_goal(args: argparse.Namespace) -> int:
                 e["reviewed"], n = True, n + 1
         save_state(project, state)
         print(f"marked {n} plan change(s) as seen")
+        from team import tree as tree_mod
+        tree_mod.write(project)   # the page's banner clears with the review
+        print_page(project, "change notice cleared")
         return 0
     if action == "revert":
         entries = [e for e in (state.get("tree_changes") or [])
@@ -627,6 +659,7 @@ def cmd_goal(args: argparse.Namespace) -> int:
         print(f"reverted: {last.get('action')} '{last.get('node')}' — the plan is "
               f"back to how it was before that change")
         print(f"  (it was made because: {last.get('why')})")
+        print_page(project, "the page shows the restored plan")
         return 0
 
     # ---- mutating actions below: snapshot first, then mutate, then record ----
@@ -721,6 +754,7 @@ def cmd_goal(args: argparse.Namespace) -> int:
     print(f"plan changed: {human} '{node_id}' (why: {e['why']})")
     print("the owner will see this on the next status/page — no approval needed; "
           f"`devteam goal {project} revert` undoes it")
+    print_page(project, "shows this change under the plan/goal it belongs to")
     return 0
 
 
@@ -739,6 +773,7 @@ def cmd_align(args: argparse.Namespace) -> int:
                      "the team changed the tree and is telling you here."))
         from team import tree as tree_mod
         tree_mod.write(project)
+        print_page(project, "refreshed by this alignment record")
         return 1 if entry["verdict"] == "against" else 0
     request = args.request or ""
     if not request:
@@ -811,6 +846,9 @@ def cmd_status(args: argparse.Namespace) -> None:
     for block in (goals.review_block(state), goals.alignment_block(state)):
         if block:
             print("\n" + block)
+    # Every run starts here — so the page URL is printed on every run, even the
+    # ones that change nothing (the tree is regenerated by adapt/record).
+    print_page(project)
 
 
 def cmd_scan(args: argparse.Namespace) -> None:
@@ -857,6 +895,8 @@ def cmd_research(args: argparse.Namespace) -> int:
     s = state_of(project)
     print(json.dumps({"queue": s.get("queue", []),
                       "insights": s.get("insights", {})}, indent=2))
+    # stdout above is a machine payload (agents parse it) — the URL goes to stderr.
+    print_page(project, "refilled by this research", file=sys.stderr)
     return 0
 
 
@@ -870,6 +910,8 @@ def cmd_adapt(args: argparse.Namespace) -> int:
     res = adapt_mod.run(project, apply=not args.dry_run)
     print(adapt_mod.report(project, res, profile_of(project).get("name"),
                            dry=args.dry_run))
+    print_page(project, "dry run — nothing written" if args.dry_run else
+               "regenerated now")
     return 0
 
 
@@ -901,6 +943,7 @@ def cmd_vision(args: argparse.Namespace) -> int:
     if not goals_block["milestones"]:
         print("  next: the team's job is to propose the milestones under it "
               "(`devteam research`), not to ask you for them")
+    print_page(project, "the goal is at the top")
     return 0
 
 
@@ -922,7 +965,9 @@ def cmd_doctor(args: argparse.Namespace) -> int:
         for agent, r in blocked.items():
             for b in r["blocked"]:
                 print(f"ASK OWNER ({agent}): {b['requirement']} → {b['fix']}")
+        print_page(project)
         return 1
+    print_page(project)
     return 0
 
 
