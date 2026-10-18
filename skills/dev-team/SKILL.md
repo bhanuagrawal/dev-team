@@ -37,7 +37,7 @@ explicit "here's what connecting this would buy you" line.
 | orchestrator | skill (this file) | the agentic tool you are |
 | create-agent | skill (`skills/new-project/SKILL.md`) | delegated on MODE B |
 | developer | skill (prompts/developer.md + this runbook) | YOUR native subagent |
-| research (product) | CODE + one synthesis call (`cli.py research`) | standalone or when queue drained |
+| research (product) | CODE collectors + ONE synthesis (`cli.py plan`, raw: `cli.py research`) | EVERY run, step 2 |
 | alarm | CODE (`cli.py alarm`) | nightly end + on demand |
 | verifier/gates | CODE (`cli.py verify`) | before every release |
 | release-agent | CODE (`cli.py release`) | after green gates |
@@ -120,8 +120,8 @@ A run ends in EXACTLY ONE of these — never in silence:
 - 🛠 **TOOLING/TEAM SHIP** — if genuinely nothing in the APP is buildable but a
   team skill/code lesson conversion or research-export hardening lands, ship
   that (team repo commit) and say so; analysis-only runs are failures.
-If the queue is empty: refill via research (which must now default to
-executable work — see its prompt rules). If research still yields nothing
+If the queue is empty: the planner (step 2 — `devteam plan`, which runs every
+run) must refill it with executable work. If it still yields nothing
 executable, the run's deliverable is the OWNER ASK (alarm + question) — that
 is "stopping honestly", not idling. Never ask what to do; never ask about
 things an agent can decide. Question budget: zero unless a gate truly blocks.
@@ -142,6 +142,33 @@ banner therefore always states the direction: `goal: [m1-…] <milestone> ← <t
 When the active milestone is met, the next entry is the NEXT milestone (research
 proposes it; an owner call becomes an issues_to_file ask) — never invented polish.
 A project with no `goals` runs exactly as before (goal-less mode).
+
+**THE PLANNER — one agent owns the plan, and it runs on EVERY run (step 2).**
+`devteam plan <project>` is the single place where direction is decided: it reads
+fresh data (deterministic collectors — GA4/repo/codebase/CI), makes ONE synthesis
+call, and — through code-validated gates — **maintains the goal tree and the
+queue**. Nothing else writes the queue, and only the owner writes the vision.
+Its contract:
+- **It CHANGES the plan when the plan no longer matches reality** (`goal_changes`:
+  add a branch, park/retire a dead one, re-point, set-status). No approval gate:
+  each change is recorded with a plain-words reason, shown to the owner
+  afterwards ("THE TEAM CHANGED THE PLAN" + page banner + `goal log`), and undone
+  exactly with `goal revert`. It never asks permission to plan.
+- **Maintenance, not regeneration.** Every queued entry gets a verdict each cycle
+  (kept / superseded / dropped-with-reason — the `QUEUE IMPACT` block). A plan
+  cannot make a queued task vanish silently.
+- **The handover:** `queue[0]` is the ONE task the next run builds. `pick`
+  executes that head (deterministically, with the delivery-first and
+  un-animated-surface fallbacks); it does not re-decide direction.
+- **The stamp:** every review writes `state['plan_review']` (when, what it left
+  waiting, which task it handed over). `status` prints it and `pick` warns on
+  stderr when the plan was not reviewed today — a skipped step 2 is visible
+  instead of silent (a nudge, never a hard gate: a run with no LLM must still be
+  able to ship).
+Deterministic core, agent at the edges: collectors, schema, tree changes, queue
+impact, and the goal gate are all code — the LLM cannot smuggle in an unknown
+branch, a missing reason, work against a done or parked goal, or off-goal work
+that is not declared.
 
 **Seeing the tree:** `devteam tree <project>` prints vision → milestones/sub-goals
 → leaves (the work each run picks) and writes two machine-local mirrors into the
@@ -174,12 +201,15 @@ them (run-outcome contract).
 
 **The team CHANGES the tree; the owner reviews afterwards (never waits).**
 `devteam goal <project> add|park|set-status|retire|reparent` mutates the plan
-directly — no approval gate. Every change is recorded with the reason and a
-before/after snapshot, printed by `status`/`record` as "THE TEAM CHANGED THE
-PLAN", and shown as a banner on the goal page; `goal log` lists them and `goal
-revert` puts the last one back exactly. The synthesizer may do the same in one
-plan via `goal_changes` (applied BEFORE the queue is validated, so a plan can add
-a branch and queue work for it). Only the long-term goal stays human-only.
+directly — no approval gate, and the planner does the same thing inside its own
+run via `goal_changes` (applied BEFORE the queue is validated, so a plan can add
+a branch and queue work for it in the same cycle; a branch added this way may be
+named in a queue entry by its title, and code resolves it). Every change is
+recorded with the reason and a before/after snapshot, printed by `status`/`record`
+as "THE TEAM CHANGED THE PLAN", and shown as a banner on the goal page; `goal log`
+lists them and `goal revert` puts the last one back exactly. Only the long-term
+goal stays human-only. The `goal` command is for the owner's own requests and for
+repair — the planner is the standing owner of the plan.
 
 **Alignment:** `devteam align <project> "<task or owner request>"` exports the
 question with the plan attached; the agent answers JSON (`aligned|neutral|
@@ -207,33 +237,43 @@ never silently blocking.
    `status` is read-only and prints `ADAPT NEEDED` when the project lags the
    team (step 0 is the fix — never migrate by hand). It ends with the
    `goal page: file://…` URL: keep it, the run banner ends with it (10c).
-2. If nothing executable remains → REFILL the queue:
-   run `python3 <team>/cli.py research <project>` (code agent: pulls GA4 +
-   codebase + repo signals; ONE synthesis call; updates state.json queue —
-   no-LLM fallback writes research.json for you to read). Research defaults to
-   EXECUTABLE work (motion/bugfix/feature); investigations are capped at 2 and
-   must each name the owner decision or code task they feed. Every refill runs
-   an IMPACT REVIEW (below): the synthesis must judge each already-queued task
-   and the CLI prints a `QUEUE IMPACT` block. If research adds nothing executable
-   → `devteam alarm` + OWNER ASK, then stop (see the run-outcome contract). No
-   inventing work to fill silence; no analysis-only endings.
-   HOST TOOL HAS NO SUBPROCESS? `research <project> --no-llm` writes
-   `.pipeline/research-prompt.txt` (the exact prompt, goal tree included) —
-   hand it to your OWN native agent, then apply its JSON with
-   `research <project> --apply-result <file>`; the same schema, impact-review
-   and goal gates run in code (nothing is trusted just because an agent said it).
+2. **RUN THE PLANNER — every run, not just when the queue is empty.**
+   `python3 <team>/cli.py plan <project>`
+   ONE agent reviews where the work is heading against fresh data: it refreshes
+   the research signals (GA4 + codebase + repo + CI), makes one synthesis call,
+   MAINTAINS the tree and the queue (code-validated: schema, tree-change schema,
+   goal gate, impact review), prints the owner-facing `PLAN REVIEW` block
+   (heading → what is left → the queue → THIS RUN BUILDS … → what the plan moved
+   and why), then publishes the plan and prints both URLs. Its output is the
+   handover: the queue head is what step 3 will build.
+   - Research/planner defaults to EXECUTABLE work (motion/bugfix/feature);
+     investigations are capped at 2 and must each name the owner decision or code
+     task they feed.
+   - Every cycle runs an IMPACT REVIEW: the synthesis must judge each
+     already-queued task; the CLI prints a `QUEUE IMPACT` block (added / kept /
+     replaced / obsolete / dropped). A queued task can never vanish silently.
+   - If it leaves nothing executable → `devteam alarm` + OWNER ASK, then stop
+     (see the run-outcome contract). No invented work to fill silence.
+   - `devteam research <project>` is the same engine with a machine-readable
+     JSON result (used when a caller wants the queue dict); `plan` adds the
+     review block + the page publish.
+   - HOST TOOL HAS NO SUBPROCESS? `plan <project> --no-llm` writes
+     `.pipeline/research-prompt.txt` (the exact prompt, goal tree included) —
+     hand it to your OWN native agent, then apply its JSON with
+     `plan <project> --apply-result <file>`; the same schema, impact-review
+     and goal gates run in code (nothing is trusted just because an agent said it).
 3. DETERMINISTIC PICK (runbook step 3 is code now):
    `python3 <team>/cli.py pick <project>` [--supervised]
    → returns the next task spec file + worktree/prompt command bundle:
      priority order: (a) delivery-restoring code task after a failed run;
-     (b) GOAL MODE — when the project declares `profile['goals']`, the queue
-     entry whose `advances` names a live milestone (goal-linked work outranks
-     polish, so cosmetic motion can never starve product work);
-     (c) first safe un-animated surface; (d) remaining queue head
-     (bugfix/feature only; investigation stays yours to perform per step 3).
-   rc=2 nothing actionable (→ research/step-2 refill + idle rules)
+     (b) THE PLANNER'S HEAD — the queue entry the planner marked, in its order
+     (the queue is the plan; the head is the handover, goal tree or not);
+     (c) first safe un-animated surface (fallback: nothing queued is buildable).
+   rc=2 nothing actionable (→ step 2 re-review + idle rules)
    rc=3 only supervised remain (ask human). The pick is code-verifiable; you
-   review and proceed — you do not re-derive selection logic. Type handling:
+   review and proceed — you do not re-derive selection logic. If `pick` prints
+   `NOTE: plan review … NOT reviewed today` on stderr, step 2 was skipped — run
+   it before building. Type handling:
    - motion → targets from surfaces; use the MOTION developer prompt template.
    - bugfix/feature → targets from the queue entry; use the GENERIC developer
      prompt template (`devteam developer-prompt <project> <spec> --template generic`).
@@ -311,16 +351,17 @@ say so in your report, then run the task with the human watching.
 When a run's release could not deliver (red delivery workflow — a store
 upload/policy rejection, e.g. Play target-API level increases), the pipeline
 fixes itself instead of idling:
-1. `research` always collects `signals.ci` (last delivery-workflow conclusion
-   + failure log tail) and MUST queue the delivery-restoring bugfix/feature as
-   the first queue entry (validator-enforced whenever `last_conclusion=failure`).
+1. The planner (`devteam plan`, step 2 of every run) always collects `signals.ci`
+   (last delivery-workflow conclusion + failure log tail) and MUST queue the
+   delivery-restoring bugfix/feature as the first queue entry
+   (validator-enforced whenever `last_conclusion=failure`).
 2. `pick` escalates that queue head ABOVE motion surfaces whenever the last
    recorded run result is `failed`.
 3. Engine/hostile-file frustration is resolved through
    `profile['constraint_lifts']` — {"paths", "decided_by", "note"} recorded by
    the OWNER in the profile; `verify.scope_check` honors them and the freeze
    stays absolute for everything else. Orchestrator never invents a lift.
-4. Orchestration reruns research → pick → developer → verify → release
+4. Orchestration reruns plan → pick → developer → verify → release
    **automatically, max 2 loops**, without a new owner ask; after loop 2 stop
    honestly with the alarm + a run report (never a silent red main).
 5. **CI retry on release** (owner decision 2026-10-17): `push_and_deliver` monitors
@@ -330,13 +371,13 @@ fixes itself instead of idling:
    and the alarm files a GitHub Issue.
 
 ## Queue admissions & impact review (owner requirement 2026-10-16)
-A new task never enters the queue in isolation. **Every admission — a research
-refill or an explicit orchestrator add — must judge the impact on the tasks
+A new task never enters the queue in isolation. **Every admission — the planner's
+cycle or an explicit orchestrator add — must judge the impact on the tasks
 already queued**, because new work can make older entries irrelevant (already
 covered, same target + type, or a better replacement). Rule: *propose in the
 agent, judge and apply in code; never drop silently.*
 
-- Research refill: the synthesis reviews `signals.repo.current_queue` and, for
+- Planner cycle: the synthesis reviews `signals.repo.current_queue` and, for
   each entry, either carries it forward, lists its exact label in a new entry's
   `"supersedes"`, or lists it in top-level `"dropped"` with a reason.
   Validation rejects unknown labels. Any queued task that simply vanishes is
@@ -345,9 +386,9 @@ agent, judge and apply in code; never drop silently.*
   (or `--type/--label/--target/--reason`, plus repeatable `--supersedes LABEL`
   and `--position head|tail`). Code folds same-type/same-target work into the
   new entry and reports the impact.
-- Both paths print `QUEUE IMPACT (…)`: `+ added`, `x superseded/replaced`,
-  `x obsolete` (target already shipped), `! dropped`, `= kept`. Quote it in the
-  run banner.
+- Both paths print `QUEUE IMPACT (…)`: `+ added`, `= kept`,
+  `x superseded/replaced`, `x obsolete` (target already shipped), `! dropped`.
+  Quote it in the run banner.
 - Every verdict is preserved in `state['queue_events']` (append-only) — nothing
   is ever deleted silently, so a dropped task can always be restored.
 - Standalone check anytime: `python3 <team>/cli.py queue <project> review`

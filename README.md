@@ -48,7 +48,7 @@ OWNER ASK**, not as a vision the team drafted.
 requirements exist: `gh` authenticated, `origin` reachable, a developer model
 configured, `java_home` present, and the analytics connection (a property id plus
 a token that actually mints). A BLOCKED agent produces one precise owner ask —
-never a silent guess. `research` runs doctor itself.
+never a silent guess. `plan` (and its engine `research`) runs doctor itself.
 
 ### Step 1 — where do we stand? (code, read-only)
 
@@ -59,35 +59,59 @@ goal each entry serves, the surfaces (shipped / animated / un-animated, with
 risk labels), the last run, and — if the project lags the team — `ADAPT NEEDED`
 (step 0 is the fix; nobody migrates by hand). It ends with the URLs below.
 
-### Step 2 — if nothing is executable, refill the queue (code + one LLM call)
+### Step 2 — the planner reviews the plan, and hands over the task (code + one LLM call)
 
-Only when the queue is dry: `cli.py research <project>`.
+`cli.py plan <project>` — **every run, not only when the queue is dry.** This is
+the one place direction is decided, and the one writer of the plan and the queue.
 
 Deterministic collectors (no LLM) gather: analytics (GA4 via a service account,
 if the project declares one), a codebase scan **at `origin/main`**, repo/tag/
 ledger facts, and the state of the project's own CI workflow — including the
 failure log tail when delivery is red.
 
-Then **exactly one** synthesis call (the only LLM step in the pipeline) returns
-strict JSON, and *code validates and applies it*. The synthesis proposes:
+Then **exactly one** synthesis call returns strict JSON, and *code validates and
+applies it*. The synthesis proposes:
 
 - `insights` — the one-line headline plus a grounded analysis;
 - a `queue` (≤ 6 entries), executable work first; every entry names
   `advances` (the goal it serves) and a `reason` citing a measure; investigations
   are capped and must each name the decision or code task they feed;
+- `goal_changes` — **changes to the goal tree itself** (add a branch, park a dead
+  one, set-status, retire, re-point) when the plan no longer matches reality,
+  each with a plain-words `why`;
 - `off_goal` — anything kept that serves no goal, with a reason (never silent);
 - a `milestone_verdict` for the active goal;
 - `dropped` — queue entries removed on purpose, with a reason;
 - `issues_to_file` — decisions only a human can make.
 
-Validation is code: unknown goal ids, a missing `advances`, work aimed at an
-already-done goal, a motion task with no listed surface, or a label that is not
-actually queued are all rejected. When CI is red, the first entry **must** be the
-delivery-restoring fix. Nothing is trusted because an agent said it.
+Validation is code: output schema, tree-change schema (unknown branch, missing
+`why`), then the tree changes applied on a **copy** so the whole plan is judged
+against the tree it would produce (a plan may add a branch and queue work for it
+in the same cycle), then the goal gate — unknown goal ids, a missing `advances`,
+work aimed at a done **or parked** goal, a motion task with no listed surface, a
+label that is not actually queued, work against a branch the same plan retired.
+When CI is red, the first entry **must** be the delivery-restoring fix. Nothing is
+trusted because an agent said it.
 
-No subprocess available in the host tool? `research --no-llm` writes the exact
+**Maintenance, not regeneration:** every entry already queued gets a verdict each
+cycle — kept, superseded, or dropped with a reason — in the `QUEUE IMPACT` block.
+A queued task can never vanish silently. And the handover is explicit: `queue[0]`
+is the task the run builds (step 3 consumes it).
+
+The review is then stamped in state (`plan_review`: when, how many waiting, which
+task was handed over). `status` prints that line, and `pick` warns on **stderr**
+when the plan was not reviewed today — a skipped step 2 is visible, never silent,
+and never a hard block (a run with no LLM available must still be able to ship).
+
+It prints the owner-facing `PLAN REVIEW` block (where this is going → what is left
+→ the queue with `← NEXT` → this run builds … → what the plan moved and why),
+regenerates the page, publishes the plan and prints both URLs.
+
+No subprocess available in the host tool? `plan --no-llm` writes the exact
 prompt (`.pipeline/research-prompt.txt`) for your own native agent, and
-`research --apply-result <file>` applies its JSON through the same validation.
+`plan --apply-result <file>` applies its JSON through the same validation.
+`cli.py research <project>` is the same engine with a machine-readable JSON
+result (no review block, no publish) for callers that want the queue dict.
 
 ### Step 3 — pick exactly one task (code)
 
@@ -95,15 +119,16 @@ prompt (`.pipeline/research-prompt.txt`) for your own native agent, and
 
 1. **delivery first** — if the last run failed, the queue's executable head
    (a red store upload outranks everything);
-2. **goal mode** — the first queue entry that advances a live goal, so polish can
-   never starve product work;
-3. the first un-animated surface (polish), skipping `supervised` ones unless a
-   human is present;
-4. the remaining queue head (bugfix / feature).
+2. **the planner's head** — the queue entry the planner marked, in its own order:
+   the queue is the plan and its head is the handover (this holds whether or not
+   the project declares a goal tree, so a maintained queue is never dead weight);
+3. the first un-animated surface (fallback for when nothing queued is buildable),
+   skipping `supervised` ones unless a human is present.
 
 It writes the task spec (`.pipeline/tasks/<id>.json`: id, type, surface label +
 targets, risk, and for queue work the `advances` goal and the queue `reason`).
 Exit code 2 = nothing actionable (→ step 2), 3 = only supervised tasks remain.
+If the plan was not reviewed today it says so on stderr — run step 2 first.
 
 ### Step 4 — a sandbox, never your working tree (code)
 
@@ -164,8 +189,8 @@ of this — it stays a human action.
 ledger, writes the per-target delivered rows on a ship (attributing each to the
 goal named in the task spec), refreshes the remaining-work list, regenerates the
 plan views, and prints, for the run banner: the goal line
-(`goal: [<goal>] <title> ← <task>`), the **AGENT FLAGS** block (what the research
-agents say the owner could connect next), the **THE TEAM CHANGED THE PLAN** block
+(`goal: [<goal>] <title> ← <task>`), the **AGENT FLAGS** block (what the planner
+says the owner could connect next), the **THE TEAM CHANGED THE PLAN** block
 if the plan moved, and the URLs. It also publishes the plan (below).
 
 ### Step 10 — silence must be loud (code)
@@ -188,19 +213,30 @@ Companies run on long-, mid- and short-term goals; so does this pipeline. They a
 |---|---|---|
 | long term | `profile['goals']['vision']` — the app's thesis, one sentence | **the owner only** |
 | mid term | `profile['goals']['milestones']` — an outcome + measures, in order | owner and team (see below) |
-| short term | the research queue; every entry names the goal it serves | research + code |
+| short term | the queue; every entry names the goal it serves, and its **head is the next run's task** | the planner + code |
 
 The **active** goal is simply the first one not done — deterministic, not a
 judgement call. A milestone whose measure is a number (e.g. "uninstall events
 ≤ 2 per 30 days") is evaluated by code from the collected signals; code's verdict
 always beats an agent's. Text-only measures are the agent's honest judgement.
 
+**One agent owns the plan, and it runs on every run** (step 2, `devteam plan`).
+It reads fresh data, then maintains both halves of the plan: the **tree**
+(`goal_changes` — add a branch, park a dead one, re-point work) and the **queue**
+(every entry judged, kept, superseded or dropped with a reason). Its head is the
+task the run builds. It is the only writer of either, and it never asks for
+permission — the owner reviews afterwards.
+
 **The team may change the plan; the owner reviews afterwards and never waits.**
 `devteam goal <project> add|park|set-status|retire|reparent` mutates the tree
-directly, with the reason and a before/after snapshot. Research can do the same
-inside one plan via `goal_changes`. Every change is recorded, shown as a banner on
-the plan page and in `status`, and `goal revert` restores the previous plan
-exactly. Only the long-term goal is human-only.
+directly, with the reason and a before/after snapshot — the owner's own request
+path, and the repair path. The planner does the same inside one cycle via
+`goal_changes` (a branch added there can be queued against in the same plan). Every
+change is recorded, shown as a banner on the plan page and in `status`, and
+`goal revert` restores the previous plan exactly. Only the long-term goal is
+human-only. Every review also leaves a stamp (`plan_review`) that `status` prints
+and `pick` warns about on stderr when it is missing for today — a skipped plan
+review is visible, never silent, and never a hard block.
 
 **Alignment is a judgement, so it is done by an agent, and never silently.**
 `devteam align <project> "<task or request>"` exports the question with the plan
@@ -242,8 +278,8 @@ because their stdout is a machine payload.
 A run ends in exactly one of these. Never in silence, never in analysis alone:
 
 - **✅ BUILD SHIPPED** — version bump pushed → project CI → internal testing.
-  This is the default terminal state whenever buildable work exists (or research
-  can legitimately refill with it).
+  This is the default terminal state whenever buildable work exists (or the
+  planner can legitimately refill with it).
 - **❓ OWNER ASK** — only for questions no agent can answer (a freeze lift, a
   sign-off, a user-WIP keep-or-discard). Production promotion is **not** one of
   them: never asked, never filed. Even then the run squeezes every non-blocking
@@ -280,15 +316,15 @@ task is never silent.
 
 ## Self-healing delivery & queue admissions
 
-- When a release cannot deliver (a store upload or policy rejection), research
+- When a release cannot deliver (a store upload or policy rejection), the planner
   collects the CI failure and validation forces the delivery-restoring fix to be
   the first queue entry; `pick` escalates it above polish; the orchestrator loops
-  research → pick → develop → verify → release automatically, max 2 loops, then
+  plan → pick → develop → verify → release automatically, max 2 loops, then
   stops honestly with an alarm.
-- A task never enters the queue alone. Every admission — a research refill or an
+- A task never enters the queue alone. Every admission — the planner's cycle or an
   orchestrator `queue add` — re-judges the entries already queued: new work can
   make older work irrelevant. Code records every verdict and prints
-  `QUEUE IMPACT (+ added, x superseded/replaced, x obsolete, ! dropped, = kept)`.
+  `QUEUE IMPACT (+ added, = kept, x superseded/replaced, x obsolete, ! dropped)`.
   Nothing is ever dropped silently, and `queue <project> review` flags duplicates
   and entries whose target already shipped.
 
@@ -308,7 +344,12 @@ task is never silent.
 python3 cli.py status|pick|verify|release|record <project>
 python3 cli.py adapt <project> [--dry-run]      # step 0: match the current team
 python3 cli.py doctor <project>                 # agents' declared requirements
+python3 cli.py plan <project> [--no-llm] [--apply-result <file>]
+                                                # step 2: THE PLANNER — review +
+                                                # maintain the tree/queue + hand
+                                                # over the task (the queue head)
 python3 cli.py research <project> [--no-llm] [--apply-result <file>]
+                                                # same engine, raw JSON result
 python3 cli.py queue <project> [add|review]     # admission + impact review
 python3 cli.py worktree-start <project> --task-id ID
 python3 cli.py developer-prompt <project> .pipeline/tasks/ID.json
@@ -329,9 +370,9 @@ alarms. Zero LLM, zero project names.
 
 | Layer | Who | What |
 |---|---|---|
-| Orchestrator | any agentic tool with the `dev-team` skill | decide + drive: adapt, pick, sandbox, spawn the developer, gate, release, record, report |
+| Orchestrator | any agentic tool with the `dev-team` skill | decide + drive: adapt, **plan**, pick, sandbox, spawn the developer, gate, release, record, report |
 | Developer | the orchestrator's **native subagent** (model from `config/runtimes.json`) | edit code inside the task worktree, per `prompts/developer.md` |
-| Research | code collectors + **one** synthesis call | propose the next work, judged and applied by code |
+| Research / **planner** | code collectors + **one** synthesis call (`cli.py plan`) | review the plan against fresh data: maintain the tree and the queue, then hand over the task (the queue head) — judged and applied by code |
 | Python (`cli.py`, `team/`) | deterministic only | gates, worktree plumbing, version bump, bookkeeping, plan rendering/publishing, alarms |
 | Scheduler | macOS `launchd` (`com.devteam.nightly`) | boot the orchestrator each night at the configured slot |
 
@@ -355,9 +396,9 @@ alarms. Zero LLM, zero project names.
 
 ```
 cli.py                  deterministic CLI (above)
-team/                   core, adapt, scan, goals, tree, publish, research, queue,
-                        verify, developer, shipper, scribe, doctor, alarm,
-                        emulator, scheduler, align
+team/                   core, adapt, scan, goals, tree, publish, research (the
+                        planner engine), queue, verify, developer, shipper,
+                        scribe, doctor, alarm, emulator, scheduler, align
 prompts/developer.md    the developer contract (motion + generic templates)
 scripts/nightly.sh      launchd entry point
 config/runtimes.json    role → model (the only thing pinned)

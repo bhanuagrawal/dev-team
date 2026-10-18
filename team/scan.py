@@ -11,7 +11,6 @@ import re
 from pathlib import Path
 
 from .core import now_iso, profile_of, state_of
-from . import goals
 
 CORE_MOTION_TOKENS = [
     "AnimatedVisibility", "AnimatedContent", "Animatable", "crossfade",
@@ -155,48 +154,53 @@ def next_task(project: Path, seq: int, supervised: bool = False) -> dict | None:
     # work — never serve it again (label-level; a feature may legitimately
     # re-touch a shipped path, so path matching stays out of this check).
     shipped_labels = _shipped_labels(state)
+    queue = state.get("queue") or []
 
-    def _code_task(q: dict) -> bool:
-        return (q.get("type") in ("bugfix", "feature") and q.get("target")
-                and _norm_label(q.get("label")) not in shipped_labels)
-
-    def _goal_task(q: dict) -> bool:
-        """Any queued entry that is eligible work AND named a milestone — the
-        goal-linked head of the queue. Deterministic: the tag is data."""
+    def _eligible(q: dict) -> bool:
         return (q.get("type") in ("bugfix", "feature", "motion")
                 and q.get("target")
-                and str(q.get("advances") or "").strip() not in ("", "none")
                 and _norm_label(q.get("label")) not in shipped_labels)
+
+    def _buildable(q: dict, surfaces: list[dict]) -> bool:
+        """Eligible AND not already obsolete: a motion entry whose surface has
+        since animated (or is missing) has nothing left to do, so it is skipped —
+        the planner's own impact review would have dropped it, this is the belt."""
+        if not _eligible(q):
+            return False
+        if q.get("risk") == "supervised" and not supervised:
+            return False
+        if q.get("type") != "motion":
+            return True
+        lab = _norm_label(q.get("label"))
+        for s in surfaces:
+            if _norm_label(s.get("label")) == lab:
+                return (s.get("status") == "unanimated"
+                        and not (s.get("risk") == "supervised" and not supervised))
+        return False
 
     # Delivery-first escalation (owner decision 2026-10-16: the pipeline is
     # self-healing — when the last run FAILED, restoring delivery (the research
-    # queue's executable head) outranks motion polish; the orchestrator reruns
+    # queue's executable head) outranks everything; the orchestrator reruns
     # without re-asking, max 2 redelivery loops).
     if (state.get("last_run", {}) or {}).get("result") == "failed":
-        for q in state.get("queue", []):
-            if _code_task(q):
+        for q in queue:
+            if _eligible(q) and q.get("type") in ("bugfix", "feature"):
                 return _queue_task(q, seq)
-    # GOAL MODE (owner decision 2026-10-18: "run a workflow that leads towards
-    # goals"). When the project declares a goal tree, work that ADVANCES the
-    # active milestone outranks the un-animated-surface list — otherwise polish
-    # (which is always available and always green) structurally starves the
-    # product work, and releases accumulate without a direction. Deterministic:
-    # ordering follows the queue, which research wrote in goal order.
-    if goals.has_goals(profile):
-        for q in state.get("queue", []):
-            if _goal_task(q):
-                return _queue_task(q, seq)
-    for t in scan_surfaces(project):
+    # THE PLANNER'S HANDOVER (owner decision 2026-10-18): the head of the queue is
+    # what this run builds. The planner re-reads reality and maintains the queue
+    # every cycle, so its order IS the decision — the un-animated-surface list
+    # below is only the fallback for when nothing queued is buildable. This holds
+    # whether or not the project declares a goal tree: a maintained queue that the
+    # runner ignored was dead weight (goal-less projects never built a queued
+    # task while any polish surface was left).
+    surfaces = scan_surfaces(project)
+    for q in queue:
+        if _buildable(q, surfaces):
+            return _queue_task(q, seq)
+    for t in surfaces:
         if t.get("status") != "unanimated":
             continue
         if t.get("risk") == "supervised" and not supervised:
             continue
         return task_for(profile, t, seq)
-    # surfaces exhausted → the research queue refills (first eligible entry
-    # only; the nightly rhythm is ONE task per run). Entries already shipped
-    # are skipped, otherwise a stale head would block the queue forever;
-    # investigation-type stays orchestrator-run, not a code task.
-    for q in state.get("queue", []):
-        if _code_task(q):
-            return _queue_task(q, seq)
     return None

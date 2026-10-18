@@ -126,28 +126,55 @@ def _record(state: dict, source: str, action: str, label: str,
 
 
 def impact_block(source: str, added: list[dict], verdicts: list[dict],
-                 unexplained: list[dict] | None = None) -> str:
+                 unexplained: list[dict] | None = None,
+                 existing_labels: set[str] | None = None) -> str:
     """Human/agent-readable impact summary. Printed on every admission and
-    quotable verbatim in the run banner."""
+    quotable verbatim in the run banner.
+
+    The planner re-reads the plan EVERY cycle, so an entry that is simply kept
+    must not read as new work: with `existing_labels` (the queue as it was), an
+    incoming entry whose label was already queued prints as kept, not added."""
     lines = [f"QUEUE IMPACT ({source}):"]
+    existing_labels = existing_labels or set()
+    new_labels = {_norm(label_of(a)) for a in added}
+    printed_added: set[str] = set()
     for a in added:
+        n = _norm(label_of(a))
+        if existing_labels and n in existing_labels:
+            continue                     # already queued: reported once, as kept
+        printed_added.add(n)
         lines.append(f"  + added      {label_of(a)}")
     unexplained = unexplained or []
     gone = {_norm(label_of(u)) for u in unexplained}
+    kept: list[str] = []
+    seen: set[str] = set()
     for v in verdicts:
-        if v["verdict"] == "superseded":
-            if _norm(v["superseded_by"]) == _norm(v["label"]):
+        n = _norm(v["label"])
+        if n in seen:
+            continue
+        seen.add(n)
+        same_label = _norm(v["superseded_by"]) == n
+        if v["verdict"] == "superseded" and same_label and n in new_labels:
+            # The plan kept this work and re-queued it as-is. The old copy being
+            # "replaced" is bookkeeping — and the planner re-reads the plan every
+            # cycle, so this MUST read as kept, not as churn. Unless this very
+            # entry was just reported as "+ added" (an explicit admission), which
+            # already says what happened.
+            if n not in printed_added:
+                kept.append(v["label"])
+        elif v["verdict"] == "superseded":
+            if same_label:
                 lines.append(f"  x replaced   {v['label']}  ({v['reason']})")
             else:
                 lines.append(f"  x superseded {v['label']}  ← by {v['superseded_by']}"
                              f"  ({v['reason']})")
         elif v["verdict"] == "redundant":
             lines.append(f"  x obsolete   {v['label']}  ({v['reason']})")
-        elif _norm(v["label"]) in gone:
+        elif n in gone:
             lines.append(f"  ! dropped    {v['label']}  "
                          "(vanished from the plan with no verdict — review)")
-    kept = [v["label"] for v in verdicts
-            if v["verdict"] == "keep" and _norm(v["label"]) not in gone]
+        else:
+            kept.append(v["label"])            # unaffected: it stays queued
     if kept:
         lines.append(f"  = kept       {', '.join(kept)}")
     if len(lines) == 1:
@@ -202,7 +229,8 @@ def apply_plan(state: dict, incoming: list[dict], source: str = "research",
     for u in unexplained:
         _record(state, source, "dropped", label_of(u),
                 "not carried forward by the new plan")
-    return impact_block(source, new_queue, verdicts, unexplained)
+    return impact_block(source, new_queue, verdicts, unexplained,
+                        existing_labels={_norm(label_of(q)) for q in existing})
 
 
 def review(state: dict) -> str:

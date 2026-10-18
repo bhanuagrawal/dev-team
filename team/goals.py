@@ -176,6 +176,10 @@ def validate_advances(result: dict, profile: dict, state: dict,
     derived = status_of(profile, state)
     done = {n["id"] for n in flat
             if (derived.get(n["id"]) or n["status"]) == "done"}
+    # A parked/retired branch is "not now": queueing work for it would contradict
+    # the plan the same cycle set it aside. Set its status instead.
+    shelved = {n["id"] for n in flat
+               if n["status"].lower() in ("parked", "retired", "dropped")}
     off = {str(x.get("label") or "").strip()
            for x in (result.get("off_goal") or []) if isinstance(x, dict)}
     for q in result.get("queue", []):
@@ -196,6 +200,10 @@ def validate_advances(result: dict, profile: dict, state: dict,
         if mid in done:
             return (f"queue entry '{q.get('label')}' advances milestone '{mid}', "
                     "which is already done")
+        if mid in shelved:
+            return (f"queue entry '{q.get('label')}' advances '{mid}', which is "
+                    "parked/retired — either set it active or queue work that "
+                    "serves the active step")
     return None
 
 
@@ -278,6 +286,12 @@ def report_line(profile: dict, state: dict, task: dict | None = None) -> str:
 # changing the tree (shared engine: `devteam goal` AND research's goal_changes)
 # --------------------------------------------------------------------------- #
 
+def _norm_title(title: str) -> str:
+    """Titles compared for sameness: case/punctuation-insensitive."""
+    import re as _re
+    return _re.sub(r"[^a-z0-9]+", " ", (title or "").lower()).strip()
+
+
 def _slug(title: str, profile: dict) -> str:
     import re as _re
     slug = _re.sub(r"[^a-z0-9]+", "-", (title or "branch").lower()).strip("-")
@@ -314,6 +328,14 @@ def apply_one(profile: dict, change: dict, by: str = "agent") -> tuple[str, str,
         if kids is None:
             return bad(f"no branch '{parent}' to add under "
                        f"(known: {[n['id'] for n in nodes(profile)]})")
+        # MAINTENANCE, NOT REGENERATION: the planner re-reads the plan every run,
+        # so an `add` for a branch that is ALREADY there (same title, same parent)
+        # is a no-op, not a twin. Re-queueing under it still works because the
+        # existing id comes back.
+        for k in kids:
+            if _norm_title(k.get("title")) == _norm_title(title):
+                return good(str(k.get("id")),
+                            f"already existed under {parent} (nothing added)", why)
         node_id = str(change.get("id") or _slug(title, profile))
         new = {"id": node_id, "kind": str(change.get("kind") or "subgoal"),
                "title": title, "decided_by": by,

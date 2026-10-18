@@ -604,6 +604,12 @@ def cmd_pick(args: argparse.Namespace) -> int:
                       "worktree_cmd": f"python3 cli.py worktree-start {project.name} --task-id {task['id']}",
                       "prompt_cmd": f"python3 cli.py developer-prompt {project.name} {spec_path.name}"},
                      indent=2))
+    # The pick executes the head the planner marked. If the plan has not been
+    # reviewed today, say so on stderr (the JSON above stays clean for agents) —
+    # step 2 of the run is the fix, and this is a nudge, never a block.
+    from team import research as research_mod
+    if not research_mod.reviewed_today(state):
+        print(f"note: {research_mod.plan_review_line(project)}", file=sys.stderr)
     # stdout above is a machine payload (the orchestrator parses it) — but the
     # run should also hand the owner the page. stderr, so the JSON stays clean.
     print_page(project, "the queue this pick came from", file=sys.stderr)
@@ -810,6 +816,62 @@ def cmd_align(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_plan(args: argparse.Namespace) -> int:
+    """THE PLANNER — one agent, one job, run by step 2 of EVERY run.
+
+    It looks at where the work is heading against fresh data, changes the plan
+    when the plan no longer matches reality, maintains the queue (nothing vanishes
+    without a verdict), and hands this run its task: the head of the queue. Its
+    verdicts are advisory and always shown; the owner reviews it afterwards, never
+    before. Deterministic collectors plus ONE synthesis call — and code validates
+    every word of the result before anything is applied.
+    """
+    from team import research, doctor
+    from team.core import agent_argv, role_cfg
+    project = resolve_project(args.project)
+    log = RunLog(project, "plan-" + today())
+    doctor.run_doctor(project, log)
+    # ONE agent owns the plan, and it must always be able to run. If this host has
+    # no synthesis command configured, the hand-off IS the normal path: write the
+    # prompt for the host's own native agent (never an error, never a failed run).
+    can_spawn = bool(agent_argv(role_cfg("product_synthesis"), "x"))
+    if not args.no_llm and not args.apply_result and not can_spawn:
+        print("no synthesis command configured — handing the review to your own "
+              "native agent (prompt written below)")
+    applied = True
+    try:
+        if args.apply_result:
+            research.research_apply_file(project, Path(args.apply_result), log)
+        else:
+            applied = research.research_run(project, log,
+                                            use_llm=not args.no_llm and can_spawn)
+    except SystemExit as e:
+        code = e.code
+        if code in (0, None):
+            return 0
+        # The plan still stands — show the owner where things are, say plainly
+        # that this cycle changed nothing, and let the run continue to its ask.
+        print(f"plan review could not finish ({e})")
+        print()
+        print(research.plan_report(project))
+        print_page(project, "unchanged — the planner could not finish")
+        return 2 if code == 2 else 1
+    if not applied:
+        print("nothing applied yet — the planner's prompt is ready for an agent:")
+        print(f"  {pipeline_dir(project) / 'research-prompt.txt'}")
+        print(f"then: devteam plan {project.name} --apply-result <the json it wrote>")
+        print()
+    print(research.plan_report(project))
+    if not applied:
+        print_page(project, "nothing applied yet — this is the plan as it stands")
+        return 0
+    from team import publish as publish_mod, tree as tree_mod
+    tree_mod.write(project)          # the page the owner opens, this cycle's plan
+    published = publish_mod.publish(project)
+    print_page(project, "rewritten by this plan review", published=published)
+    return 0 if (state_of(project).get("queue") or []) else 2
+
+
 def cmd_status(args: argparse.Namespace) -> None:
     project = resolve_project(args.project)
     profile = profile_of(project)
@@ -820,17 +882,22 @@ def cmd_status(args: argparse.Namespace) -> None:
     # Where the work is going (deterministic, LLM-free): vision → milestone →
     # queue. A project with no goal tree prints a one-line goal-less notice.
     print(goals.goal_block(profile, state))
+    # The plan is reviewed by one agent on every run (step 2). Show when that
+    # last happened, so a skipped review is visible instead of silent.
+    from team import research as research_mod
+    print(research_mod.plan_review_line(project))
     if state.get("queue"):
         # Plain: group the queue by the goal it serves, by TITLE not id — the
-        # owner should not have to hold the codes in their head.
-        titled = {m["id"]: m["title"] for m in (goals.plan(profile) or {}).get("milestones", [])}
+        # owner should not have to hold the codes in their head. Any branch counts
+        # (work may serve a sub-goal deeper in the tree), not just milestones.
         groups: dict[str, int] = {}
         for q in state["queue"]:
             key = str(q.get("advances") or "").strip()
             groups[key] = groups.get(key, 0) + 1
         parts = []
         for mid, n in groups.items():
-            what = titled.get(mid, "no goal declared" if not mid else mid)
+            node = goals.find_node(profile, mid) if mid else None
+            what = node["title"] if node else ("no goal declared" if not mid else mid)
             parts.append(f"{n} serving \"{what}\"")
         print(f"queue:      {len(state['queue'])} waiting — " + "; ".join(parts))
     print(f"targets:    {len(profile['targets'])} shipped-do: "
@@ -896,6 +963,11 @@ def cmd_schedules(args: argparse.Namespace) -> None:
 
 
 def cmd_research(args: argparse.Namespace) -> int:
+    """The planner's ENGINE, raw: collectors + one synthesis, or --apply-result.
+
+    `devteam plan` is the same work with the owner-facing review block and the
+    handover (the queue head). Use this one when you want the JSON back.
+    """
     project = resolve_project(args.project)
     log = RunLog(project, "research-" + today())
     from team import research, doctor
@@ -1098,6 +1170,15 @@ def main() -> None:
     rs = sub.add_parser("research");   rs.add_argument("project"); rs.add_argument("--no-llm", action="store_true")
     rs.add_argument("--apply-result", help="synthesis JSON produced by the host tool's native agent; applies through the same validation + goal gate")
     rs.set_defaults(fn=cmd_research)
+    pl = sub.add_parser("plan", help="THE PLANNER — step 2 of every run: review the plan "
+                                     "against fresh data, maintain the tree and the queue, "
+                                     "and hand this run its task (the queue head)")
+    pl.add_argument("project")
+    pl.add_argument("--no-llm", action="store_true",
+                    help="stop after collection and write the prompt for the host "
+                         "tool's own agent (then: --apply-result <json>)")
+    pl.add_argument("--apply-result", help="planner JSON produced by the host tool's native agent")
+    pl.set_defaults(fn=cmd_plan)
     do = sub.add_parser("doctor");     do.add_argument("project"); do.set_defaults(fn=cmd_doctor)
     ad = sub.add_parser("adapt");      ad.add_argument("project")
     ad.add_argument("--dry-run", action="store_true",

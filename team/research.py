@@ -18,7 +18,8 @@ import subprocess  # noqa: F401
 from pathlib import Path
 
 from . import scan
-from .core import RunLog, now_iso, profile_of, run, save_state, state_of
+from .core import (RunLog, now_iso, pipeline_dir, profile_of, run, save_json,
+                   save_state, state_of)
 from . import goals
 from . import queue as queue_mod
 
@@ -255,6 +256,17 @@ Decide what to BUILD NEXT. Output STRICT JSON only (no prose, no code fence):
   "off_goal": [
     {{"label": "<exact queue label you are keeping even though it advances nothing>", "reason": "one line: why it is still worth a run"}}
   ],
+  "goal_changes": [
+    {{"action": "add|park|set-status|retire|reparent",
+      "id": "<add: optional id you want, so you can point queue entries at it;
+              every action but add: the existing branch id>",
+      "title": "<add: what this branch is for, in plain words>",
+      "parent": "vision|<branch id>", "kind": "milestone|subgoal",
+      "status": "active|pending|parked|done",
+      "outcome": "<add: what will be true when this is done>",
+      "measures": [{{"text": "..."}}],
+      "why": "why the plan had to move — the owner reads exactly this"}}
+  ],
   "milestone_verdict": {{"id": "<milestone id>", "met": true|false, "evidence": "grounded in the numbers/measures"}},
   "dropped": [
     {{"label": "<exact label of an already-queued task you are removing>", "reason": "one line why it is no longer queued"}}
@@ -264,6 +276,25 @@ Decide what to BUILD NEXT. Output STRICT JSON only (no prose, no code fence):
   ]
 }}
 Rules:
+- YOU OWN THE PLAN — you are the ONLY agent that changes the goal tree or the
+  queue. If the work that should happen next has no place in the tree, CHANGE
+  THE TREE (`goal_changes`: add a branch, park a dead one, set-status, retire,
+  reparent). Never squeeze work under a goal it does not serve, and NEVER ask
+  the owner for permission to change the plan: the owner reviews it AFTERWARDS
+  (each change is shown to them with your `why`, and is one command to undo).
+  The long-term VISION is the owner's and cannot be changed here.
+  A branch you add may be queued against in the SAME plan: put the branch's id
+  (or its exact title) in the queue entry's "advances" — code resolves a title to
+  the id. Do not add a branch that already exists: change it instead.
+- MAINTENANCE, NOT REGENERATION: every entry already in
+  signals.repo.current_queue must be judged this cycle — carried forward,
+  superseded by a new entry, or dropped with a reason. Do not rebuild the queue
+  from scratch: keep what still serves the plan, and reorder only where the
+  active milestone says so. (Carried-forward work must still be valid: an entry
+  whose goal no longer exists must be re-pointed at a live one or dropped.)
+- HANDOVER: queue[0] is the task THE NEXT RUN BUILDS. Put the single most
+  valuable next step for the ACTIVE milestone first — the runner-up second, and
+  so on. The order you write IS the execution order.
 - GOAL DISCIPLINE (above all else): when a goal tree is given, the work you
   queue must MOVE THE ACTIVE MILESTONE — order the queue so the entries that
   most directly advance it come first. Every queue entry carries "advances"
@@ -474,10 +505,10 @@ def research_apply(project: Path, result: dict, log: RunLog) -> None:
             "already done; the next one must come from the owner")
     for q in state.get("queue", []):
         mid = goals.queue_entry_milestone(q, profile, state)
-        ms = goals.milestone(profile, mid) if mid else None
+        node = goals.find_node(profile, mid) if mid else None
         q["advances"] = mid or q.get("advances") or ""
-        if ms:
-            log(f"  goal: '{q['label'][:40]}' → [{ms['id']}] {ms['title'][:60]}")
+        if node:
+            log(f"  goal: '{q['label'][:40]}' → [{node['id']}] {node['title'][:60]}")
     for og in (result.get("off_goal") or []):
         log(f"  goal: OFF-GOAL '{str(og.get('label',''))[:40]}' — "
             f"{str(og.get('reason',''))[:80]}")
@@ -586,6 +617,204 @@ def render_prompt(project: Path, research: dict, log: RunLog | None = None) -> s
                               max_queue=MAX_QUEUE)
 
 
+def _preview_goal_changes(profile: dict, result: dict) -> tuple[dict, list, str]:
+    """Apply the plan's tree changes to a COPY, so the whole plan is validated
+    against the tree it would actually have — a plan may add a branch and queue
+    work against it in the same cycle (validate-before-apply used to reject
+    exactly that). Returns (trial_profile, branches_added, error)."""
+    import copy
+    trial = copy.deepcopy(profile)
+    added: list = []
+    for c in result.get("goal_changes") or []:
+        nid, _what, _why, err = goals.apply_one(trial, c, by="agent")
+        if err:
+            return trial, added, f"goal_changes rejected: {err}"
+        if str(c.get("action") or "") == "add":
+            added.append({"id": nid, "title": str(c.get("title") or "")})
+    return trial, added, ""
+
+
+def _alias_advances(result: dict, added: list) -> None:
+    """A plan may add a branch and queue work for it in one cycle. An agent cannot
+    always know the id code generates from a title, so a queue entry that names an
+    added branch by its TITLE (or the title slugged) is resolved here — the same
+    deterministic repair the rest of the pipeline does for references. Anything
+    still unknown is left alone for validation to reject."""
+    def slug(t: str) -> str:
+        return re.sub(r"[^a-z0-9]+", "-", (t or "").lower()).strip("-")
+    alias: dict[str, str] = {}
+    for a in added:
+        alias[str(a["title"]).strip().lower()] = a["id"]
+        alias[slug(str(a["title"]))] = a["id"]
+    for q in result.get("queue") or []:
+        v = str(q.get("advances") or "").strip()
+        if v and v.lower() in alias:
+            q["advances"] = alias[v.lower()]
+
+
+def validate_plan(project: Path, result: dict, research: dict | None) -> str | None:
+    """The whole deterministic gate on a planner result: output schema, tree-change
+    schema, the tree changes themselves (on a copy), reference repair, then the
+    goal gate on the queue — with the would-be branches visible, so adding a
+    branch and queueing for it in one plan is legal. Nothing is trusted because an
+    agent said it."""
+    profile, state = profile_of(project), state_of(project)
+    err = _validate(result, research)
+    if not err:
+        err = goals.validate_changes(result)
+    trial = profile
+    if not err:
+        trial, added, err = _preview_goal_changes(profile, result)
+        if not err:
+            _alias_advances(result, added)
+    if not err:
+        err = goals.validate_advances(
+            result, trial, state,
+            extra_ids=tuple(goals.change_ids(result, profile)))
+    return err
+
+
+def apply_goal_changes(profile: dict, state: dict, result: dict) -> list[dict]:
+    """Apply the plan's tree changes for real — the SAME engine as `devteam goal`
+    (goals.apply_one) and recorded the same way: the whole goals block before and
+    after each change, a mandatory plain-words reason, and the owner reviews
+    afterwards (never a permission gate, and exactly revertible)."""
+    import copy
+    applied: list[dict] = []
+    for c in result.get("goal_changes") or []:
+        before = copy.deepcopy(profile.get("goals") or {})
+        node_id, what, why, err = goals.apply_one(profile, c, by="agent")
+        if err:
+            raise SystemExit(f"goal change rejected: {err}")
+        if what.startswith("already existed"):
+            # Re-reading the same plan: nothing moved, so nothing is recorded —
+            # no misleading entry in the owner's change log, no fake "plan moved".
+            continue
+        after = copy.deepcopy(profile.get("goals") or {})
+        e = goals.change(state, what, node_id, why or str(c.get("why") or ""),
+                         by="agent")
+        e["goals_before"], e["goals_after"] = before, after
+        applied.append({"node": node_id, "what": what, "why": e["why"]})
+    return applied
+
+
+def apply_result(project: Path, result: dict, research: dict | None,
+                 log: RunLog) -> dict:
+    """Validate, then apply a planner result: the TREE first (so the queue can
+    point at branches this same plan adds), then the queue — and stamp the
+    review so `status`/`pick` can see the plan was reviewed for this run."""
+    err = validate_plan(project, result, research)
+    if err:
+        log(f"planner: result REJECTED — {err}")
+        raise SystemExit("planner result rejected: " + err)
+
+    profile, state = profile_of(project), state_of(project)
+    changes = apply_goal_changes(profile, state, result)
+    if changes:
+        save_json(pipeline_dir(project) / "profile.json", profile)
+        # The audit entry MUST hit the disk with the change it describes: the
+        # owner's review banner and `goal revert` read it, and a later state
+        # reload (research_apply does one) would otherwise drop it.
+        save_state(project, state)
+        log(f"planner: the plan moved ({len(changes)} change"
+            f"{'s' if len(changes) != 1 else ''}): "
+            + "; ".join(f"{c['what']} '{c['node']}'" for c in changes))
+    research_apply(project, result, log)
+    st = state_of(project)
+    head = (st.get("queue") or [{}])[0].get("label", "") if st.get("queue") else ""
+    st["plan_review"] = {"at": now_iso(), "head": head,
+                         "queue": len(st.get("queue") or []),
+                         "tree_changes": len(changes),
+                         "changes_count": len(changes),
+                         "changes": changes,
+                         "by": "planner"}
+    save_state(project, st)
+    log(f"planner: reviewed — {len(st.get('queue') or [])} waiting, next run "
+        f"builds '{head or '—'}'")
+    return {"head": head, "changes": changes, "queue": st.get("queue") or []}
+
+
+def reviewed_today(state: dict) -> bool:
+    """Was the plan reviewed by the planner today? The workflow's step 2 does it
+    on every run; this is how code can SEE that it happened (never a hard gate —
+    a run with no LLM available must still be able to ship)."""
+    at = str(((state.get("plan_review") or {}).get("at")) or "")
+    return bool(at) and at[:10] == now_iso()[:10]
+
+
+def plan_review_line(project: Path) -> str:
+    """One plain line for the run banner/status: when the plan was last reviewed,
+    what it left waiting, and which task that review handed this run. A review
+    that has not happened today says so out loud (step 2 is the fix)."""
+    state = state_of(project)
+    lv = state.get("plan_review") or {}
+    if not lv:
+        return ("plan review: none yet — the run's step 2 reviews the plan "
+                f"(`devteam plan {project.name}`)")
+    when = str(lv.get("at") or "")[:16].replace("T", " ")
+    stale = "" if reviewed_today(state) else \
+        "  ⚠ NOT reviewed today — step 2 of this run does it"
+    head = str(lv.get("head") or "") or "nothing — this run is an owner ask"
+    return (f"plan review: {when} — {lv.get('queue', 0)} waiting, builds "
+            f'"{head}"{stale}')
+
+
+def plan_report(project: Path) -> str:
+    """The owner-facing review block: where we are heading in plain words, what
+    is left, what the planner changed and why, and — the handover — the ONE task
+    this run builds. No ids, no paths, no commands."""
+    from . import tree as tree_mod
+    profile, state = profile_of(project), state_of(project)
+    goals_block = goals.plan(profile) or {}
+    vision = str(goals_block.get("vision") or "").strip()
+    act = goals.active_milestone(profile, state) if goals_block else None
+    queue = state.get("queue") or []
+    lv = state.get("plan_review") or {}
+    head = str(lv.get("head") or (queue[0].get("label") if queue else ""))
+    L = ["PLAN REVIEW — where this is going, and what the run does next"]
+    if vision:
+        L.append(f"  heading for:      {vision}")
+    else:
+        L.append("  heading for:      no long-term goal yet — the team has asked "
+                 "you for one sentence (OWNER ASK below)")
+    if act:
+        L.append(f"  working toward:   {act.get('title', '')}")
+    elif goals_block:
+        L.append("  working toward:   every step is done — the next one is yours "
+                 "to name")
+    if not queue:
+        L.append("  left to do:       nothing executable — this run is an ask to "
+                 "you, not a build")
+    else:
+        L.append(f"  left to do:       {len(queue)} waiting")
+    L.append(f"  THIS RUN BUILDS:  {head or '— (nothing queued)'}")
+    if queue:
+        L.append("  the queue, in order:")
+        for i, q in enumerate(queue, 1):
+            label = tree_mod._humanize(str(q.get("label") or "?"))
+            mid = goals.queue_entry_milestone(q, profile, state)
+            # any branch counts, not just a milestone: work may serve a sub-goal
+            node = goals.find_node(profile, mid) if mid else None
+            serv = f"   serves \"{node['title']}\"" if node \
+                else "   (no goal declared)"
+            mark = "  ← NEXT" if i == 1 else ""
+            L.append(f"    {i}. {label}{mark}{serv}")
+    # Only what THIS review changed counts as "the plan moved" — a change made by
+    # an earlier cycle today must not be re-reported every run.
+    n_made = int(lv.get("changes_count") or 0)
+    recent = [e for e in (state.get("tree_changes") or [])
+              if not e.get("reverted")][-n_made:] if n_made else []
+    if recent:
+        L.append("  the plan moved (you can undo any of it — `devteam goal "
+                 f"{project.name} log` shows all, `revert` undoes the last):")
+        for e in recent[-4:]:
+            L.append(f"    · {e.get('action')} '{e.get('node')}' — {e.get('why')}")
+    else:
+        L.append("  the plan:         unchanged this cycle — the queue still "
+                 "serves the same step")
+    return "\n".join(L)
+
+
 def research_apply_file(project: Path, result_path: Path, log: RunLog) -> None:
     """Apply a synthesis result produced elsewhere (the host tool's native
     agent). Identical gates to the in-process LLM path: schema, impact review,
@@ -598,17 +827,15 @@ def research_apply_file(project: Path, result_path: Path, log: RunLog) -> None:
         research = json.loads((project / ".pipeline" / "research.json").read_text())
     except Exception:
         research = None
-    err = _validate(result, research)
-    if not err:
-        err = goals.validate_advances(result, profile_of(project), state_of(project))
-    if err:
-        log(f"research: apply-result REJECTED — {err}")
-        raise SystemExit("synthesis result rejected: " + err)
-    log(f"research: apply-result accepted ({len(result.get('queue', []))} entries)")
-    research_apply(project, result, log)
+    log(f"planner: apply-result received ({len(result.get('queue', []))} entries, "
+        f"{len(result.get('goal_changes') or [])} plan changes) — validating")
+    apply_result(project, result, research, log)
 
 
-def research_run(project: Path, log: RunLog, use_llm: bool = True) -> None:
+def research_run(project: Path, log: RunLog, use_llm: bool = True) -> bool:
+    """Collect (always), then synthesize + apply (unless --no-llm). Returns True
+    when a plan was actually applied, False when the prompt was only written out
+    for the host tool's own agent."""
     research = research_collect(project, log)
     if not use_llm:
         # Hand the prompt to the calling agent: the team's contract is "the LLM
@@ -618,16 +845,14 @@ def research_run(project: Path, log: RunLog, use_llm: bool = True) -> None:
         p.write_text(render_prompt(project, research, log))
         log(f"research: --no-llm stop; prompt → {p.name} "
             "(apply the agent's JSON with `research <project> --apply-result <file>`)")
-        return
+        return False
     prompt = render_prompt(project, research, log)
     result, err = None, ""
     for attempt in (1, 2):
         raw = _llm(prompt, log)
         try:
             result = _extract_json(raw)
-            err = _validate(result, research)
-            if not err:
-                err = goals.validate_advances(result, profile, state) or ""
+            err = validate_plan(project, result, research) or ""
             if not err:
                 break
         except json.JSONDecodeError as e:
@@ -639,4 +864,5 @@ def research_run(project: Path, log: RunLog, use_llm: bool = True) -> None:
         log("research: synthesis failed twice — raw research kept; "
             "orchestrator may decide manually from .pipeline/research.json")
         raise SystemExit(2)
-    research_apply(project, result, log)
+    apply_result(project, result, research, log)
+    return True
