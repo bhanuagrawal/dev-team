@@ -144,20 +144,33 @@ proposes it; an owner call becomes an issues_to_file ask) — never invented pol
 A project with no `goals` runs exactly as before (goal-less mode).
 
 **Seeing the tree:** `devteam tree <project>` prints vision → milestones/sub-goals
-→ leaves (the work each run picks) and writes two mirrors into the project:
-`.pipeline/goals.txt` and `.pipeline/goals.html` (self-contained, click to
-collapse; `--open` opens it). Deterministic renderer, no LLM/network; refreshed
-by every `record`/`research`. A goal-less project renders the standing ask
-instead of an empty page.
+→ leaves (the work each run picks) and writes two machine-local mirrors into the
+project: `.pipeline/goals.txt` and `.pipeline/goals.html` (self-contained, click
+to collapse; `--open` opens it). Deterministic renderer, no LLM/network;
+refreshed by every `record`/`research`. A goal-less project renders the standing
+ask instead of an empty page.
+
+**The plan is also PUBLISHED, so it travels with the repo.** `.pipeline/` is
+excluded repo-locally, so a machine-local tree would die with the laptop. The
+same render is written to `docs/plan.md` (GitHub-rendered, business English
+first, technical detail in `<details>`) and `docs/plan.html`, and the run's
+bookkeeping (`record`, `research`, `adapt`) commits those two files to main and
+pushes them — `devteam publish <project>` does the same on demand. Best-effort by
+design: a checkout on another branch, no network or a moved remote reports why
+and retries next run; it never fails a run. Nothing else in the working tree is
+staged, and a local release push that lands mid-run is handled by fetch/rebase.
 
 **The page URL is printed — after EVERY change and on EVERY run.** Anything that
-regenerates the page ends with `goal page: file:///…/goals.html` (clickable in a
-terminal, pasteable in a browser): `adapt`, `status`, `record`, `doctor`, `tree`,
+regenerates the page ends with two lines: `goal page: file:///…/goals.html`
+(clickable in a terminal) and, once the mirror is on the repo,
+`shared plan: https://github.com/…/docs/plan.md` — printed ONLY when it is true
+(mirror committed, unchanged, on origin), never a guessed URL. Printed by
+`adapt`, `status`, `record`, `doctor`, `tree`, `publish`,
 `goal add|park|set-status|retire|reparent|revert|review`, `align --apply`,
-`vision`, and `queue add|--done`. `pick` and `research` print it on **stderr**
+`vision`, and `queue add|--done`. `pick` and `research` print them on **stderr**
 (their stdout is a machine payload). The owner is therefore never told a change
-happened without being handed the URL that shows it, and the run banner ends with
-that URL (run-outcome contract).
+happened without being handed the URLs that show it, and the run banner ends with
+them (run-outcome contract).
 
 **The team CHANGES the tree; the owner reviews afterwards (never waits).**
 `devteam goal <project> add|park|set-status|retire|reparent` mutates the plan
@@ -270,12 +283,13 @@ never silently blocking.
     / `❓ OWNER ASK: <the decision>` / `🛠 TEAM SHIP: <what landed>` — plus what
     ran, and next step. An analysis-only report with no ask and no ship fails
     the run-outcome contract.
-10c. **Hand the owner the page, every run.** The banner ENDS with the goal page
-    URL that `status`/`record` printed (`goal page: file:///…/goals.html`) — a
-    run that changed the plan, the queue, or shipped anything without pasting it
-    is incomplete. It is the owner's one-click "where we are now"; the URL is
-    printed even when a run changes nothing, so never invent or guess one — paste
-    the one from the command output.
+10c. **Hand the owner the page, every run.** The banner ENDS with the two URLs
+    `status`/`record` printed (`goal page: file:///…/goals.html`, and
+    `shared plan: https://github.com/…/docs/plan.md` once published) — a run that
+    changed the plan, the queue, or shipped anything without pasting them is
+    incomplete. They are the owner's one-click "where we are now", and they are
+    printed even when a run changes nothing: paste them from the command output,
+    never invent or guess a URL.
 10b. **Relay, don't remember**: `devteam record` prints an `AGENT FLAGS` block
     (the research agents' upgrade/capability asks) on EVERY outcome. The run
     banner MUST quote that block verbatim in its final report — dropping it is

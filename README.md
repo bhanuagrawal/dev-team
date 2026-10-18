@@ -1,162 +1,376 @@
-# dev-team — a project-independent agent team for app development
+# dev-team — an autonomous app-delivery team that runs on any agentic tool
 
-A small standalone team (this repo) that operates on app projects on this
-machine. **Two modes, both agent-driven:**
+A small, standalone team that operates on Android / Kotlin-Multiplatform app
+projects. **The team is project-independent:** every project fact lives in that
+project's `.pipeline/profile.json`, and this repo holds only generic craft plus a
+thin deterministic core (gates, worktrees, version truth, ledger, alarms). The
+"team brain" is a set of skills; the muscle is Python. Zero LLM in the code, zero
+project names in the code (enforced — see *Principles*).
 
-- **MODE A — operate an existing project** (a real project today): nightly
-  pipeline — status → task → worktree → developer subagent → gates → release
-  → version-bump push → CI → Play internal testing.
-- **MODE B — create a new app from an idea** (`skills/new-project/SKILL.md`):
-  the create-agent sets EVERYTHING up — official-skill refresh, JetBrains KMP
-  template (Android-first, iOS deferred), MVI core adoption, signing key,
-  repo + secrets, proven CI workflow, gates — ending in the first build on
-  Play internal testing + the nightly loop installed.
+Two modes, both driven by an agent:
 
-Project facts live **in the project** (`<project>/.pipeline/`); generic craft
-lives here. Team code is deliberately thin: only the irreducible deterministic
-core (gates, worktree plumbing, version-truth release, ledger, alarms). The
-agents define the rest in skills, and development leans on **official
-Google/JetBrains skills refreshed before every coding session**.
+- **MODE A — operate an existing project.** One run ships exactly one task to
+  Play Console **internal testing**, or stops with a real question. Run it
+  nightly, or by saying *"run workflow for &lt;Project&gt;"* to any agent with the
+  `dev-team` skill loaded.
+- **MODE B — create a new app from an idea.** `skills/new-project/SKILL.md`
+  scaffolds, signs, wires CI and lands the first build on internal testing.
+
+---
+
+## What happens in every run
+
+The orchestrator is an agent; everything below marked **code** is a command whose
+output is not negotiable. The agent decides *what* to do, never *whether* a gate
+passed.
+
+### Step 0 — does the project exist, and does it match the team? (code)
+
+Mode selection first: a project with `.pipeline/profile.json` is MODE A; anything
+else is MODE B.
+
+Then **adapt** — `cli.py adapt <project>`. The team changes over time (new data
+shape, new goal model, new gates); a project was onboarded under an older team.
+Adapt is deterministic and idempotent: it reports `up to date` in one line, or
+lists what it repaired —
+
+- missing profile/state keys, renamed fields, a moved path alias;
+- convention files that no longer exist on disk (repaired when a single obvious
+  new location can be traced; ambiguity is left alone, never guessed);
+- queued tasks pointing at a goal that no longer exists (re-pointed at the active
+  goal, or explicitly declared off-goal);
+- the goal page and its mirrors regenerated.
+
+It never invents direction. A missing long-term goal comes back as a **standing
+OWNER ASK**, not as a vision the team drafted.
+
+**doctor** — `cli.py doctor <project>` — checks that every agent's declared
+requirements exist: `gh` authenticated, `origin` reachable, a developer model
+configured, `java_home` present, and the analytics connection (a property id plus
+a token that actually mints). A BLOCKED agent produces one precise owner ask —
+never a silent guess. `research` runs doctor itself.
+
+### Step 1 — where do we stand? (code, read-only)
+
+`cli.py status <project>` prints the **plan** (the long-term goal, milestones in
+order with `✓` done / `>` active / `·` later marks, the one being worked on, and
+any plan changes the team made since you last looked), the queue grouped by the
+goal each entry serves, the surfaces (shipped / animated / un-animated, with
+risk labels), the last run, and — if the project lags the team — `ADAPT NEEDED`
+(step 0 is the fix; nobody migrates by hand). It ends with the URLs below.
+
+### Step 2 — if nothing is executable, refill the queue (code + one LLM call)
+
+Only when the queue is dry: `cli.py research <project>`.
+
+Deterministic collectors (no LLM) gather: analytics (GA4 via a service account,
+if the project declares one), a codebase scan **at `origin/main`**, repo/tag/
+ledger facts, and the state of the project's own CI workflow — including the
+failure log tail when delivery is red.
+
+Then **exactly one** synthesis call (the only LLM step in the pipeline) returns
+strict JSON, and *code validates and applies it*. The synthesis proposes:
+
+- `insights` — the one-line headline plus a grounded analysis;
+- a `queue` (≤ 6 entries), executable work first; every entry names
+  `advances` (the goal it serves) and a `reason` citing a measure; investigations
+  are capped and must each name the decision or code task they feed;
+- `off_goal` — anything kept that serves no goal, with a reason (never silent);
+- a `milestone_verdict` for the active goal;
+- `dropped` — queue entries removed on purpose, with a reason;
+- `issues_to_file` — decisions only a human can make.
+
+Validation is code: unknown goal ids, a missing `advances`, work aimed at an
+already-done goal, a motion task with no listed surface, or a label that is not
+actually queued are all rejected. When CI is red, the first entry **must** be the
+delivery-restoring fix. Nothing is trusted because an agent said it.
+
+No subprocess available in the host tool? `research --no-llm` writes the exact
+prompt (`.pipeline/research-prompt.txt`) for your own native agent, and
+`research --apply-result <file>` applies its JSON through the same validation.
+
+### Step 3 — pick exactly one task (code)
+
+`cli.py pick <project>`. The order is data, not judgement:
+
+1. **delivery first** — if the last run failed, the queue's executable head
+   (a red store upload outranks everything);
+2. **goal mode** — the first queue entry that advances a live goal, so polish can
+   never starve product work;
+3. the first un-animated surface (polish), skipping `supervised` ones unless a
+   human is present;
+4. the remaining queue head (bugfix / feature).
+
+It writes the task spec (`.pipeline/tasks/<id>.json`: id, type, surface label +
+targets, risk, and for queue work the `advances` goal and the queue `reason`).
+Exit code 2 = nothing actionable (→ step 2), 3 = only supervised tasks remain.
+
+### Step 4 — a sandbox, never your working tree (code)
+
+`cli.py worktree-start <project> --task-id <id>` creates a fresh git worktree at
+`origin/main` (`dt/<task>`), and records the base. All reading, scanning and
+development happen in worktrees at `origin/main`; the local checkout — including
+uncommitted WIP — is never touched.
+
+### Step 5 — the exact developer prompt (code)
+
+`cli.py developer-prompt <project> <spec>` renders the prompt verbatim: project
+facts, targets, the risk addendum for gesture/drag-adjacent surfaces, the
+analytics context, the reason the item was queued, and — for goal-linked work —
+
+> `GOAL THIS SERVES: <the goal> — done here means: <its outcome>`
+> `LONG-TERM (owner): <the vision>`
+> *Do not widen scope to "help" this goal: a smaller change that serves it is
+> better than a bigger one that does not.*
+
+Convention files that no longer exist are annotated `SKIP` rather than sent as a
+broken path.
+
+### Step 6 — develop (agent)
+
+The orchestrator spawns **its own native subagent** with that prompt, working
+inside the worktree, using the developer model from `config/runtimes.json`. If the
+host tool cannot spawn subagents, the documented headless fallback
+(`cli.py run-headless`) runs the same task through the same gates.
+
+### Step 7 — trust nothing: gates (code)
+
+`cli.py verify <project> --worktree <path>` checks the *actual diff*, not the
+agent's report:
+
+- **scope** — nothing under the project's `frozen_paths`; an empty diff is a
+  failure. Owner-recorded `constraint_lifts` are honoured; the orchestrator
+  cannot invent one;
+- **localization** — every newly referenced string resource exists in every
+  locale the project ships;
+- **compile**, then **tests** (a single retry, for the one known flaky suite);
+- **emulator hygiene** (warn-only) — see *Safety rails*.
+
+FAIL → a fresh subagent is spawned with the failure output appended (max 2
+attempts), then the run records `failed` and alarms.
+
+### Step 8 — release (code)
+
+`cli.py release` bumps the version from the latest remote tag, writes the
+release notes, commits, pushes to `origin/main` (fetch + rebase if the remote
+moved meanwhile), and then **watches CI**, retrying up to 3 times with a fresh
+bump if CI fails or times out. On tag-triggered projects it pushes the tag too.
+CI delivers to Play Console internal testing. Production promotion is never part
+of this — it stays a human action.
+
+### Step 9 — bookkeeping (code, every outcome)
+
+`cli.py record <project> --result shipped|failed|blocked`. It appends to the run
+ledger, writes the per-target delivered rows on a ship (attributing each to the
+goal named in the task spec), refreshes the remaining-work list, regenerates the
+plan views, and prints, for the run banner: the goal line
+(`goal: [<goal>] <title> ← <task>`), the **AGENT FLAGS** block (what the research
+agents say the owner could connect next), the **THE TEAM CHANGED THE PLAN** block
+if the plan moved, and the URLs. It also publishes the plan (below).
+
+### Step 10 — silence must be loud (code)
+
+`cli.py alarm <project>` is deterministic: no success for two days while work
+remains, three consecutive failed runs, or a red CI on the last pushed release
+commit each produce (or de-duplicate) a GitHub Issue on the project.
+
+Then the orchestrator posts the outcome banner — see the contract below — and the
+run is over.
+
+---
+
+## The plan: why every release has a direction ("goal mode")
+
+Companies run on long-, mid- and short-term goals; so does this pipeline. They are
+**data, not another agent**:
+
+| Horizon | Where it lives | Who writes it |
+|---|---|---|
+| long term | `profile['goals']['vision']` — the app's thesis, one sentence | **the owner only** |
+| mid term | `profile['goals']['milestones']` — an outcome + measures, in order | owner and team (see below) |
+| short term | the research queue; every entry names the goal it serves | research + code |
+
+The **active** goal is simply the first one not done — deterministic, not a
+judgement call. A milestone whose measure is a number (e.g. "uninstall events
+≤ 2 per 30 days") is evaluated by code from the collected signals; code's verdict
+always beats an agent's. Text-only measures are the agent's honest judgement.
+
+**The team may change the plan; the owner reviews afterwards and never waits.**
+`devteam goal <project> add|park|set-status|retire|reparent` mutates the tree
+directly, with the reason and a before/after snapshot. Research can do the same
+inside one plan via `goal_changes`. Every change is recorded, shown as a banner on
+the plan page and in `status`, and `goal revert` restores the previous plan
+exactly. Only the long-term goal is human-only.
+
+**Alignment is a judgement, so it is done by an agent, and never silently.**
+`devteam align <project> "<task or request>"` exports the question with the plan
+attached; the agent answers `aligned | neutral | against | gap` with why, cost and
+options; `--apply` records it. `against` warns the owner in plain words; `gap`
+means the plan has no place for the work — so the team changes the tree rather
+than squeezing the work under an unrelated goal. Both are advisory: recorded,
+always shown, never blocking.
+
+## What the owner sees
+
+`devteam tree <project>` prints the plan (goal → goals → the work each run picks)
+and writes two machine-local mirrors: `.pipeline/goals.txt` and
+`.pipeline/goals.html` — one self-contained page, no CDN, business English first
+with every technical detail collapsed behind a click (`--open` opens it).
+
+`.pipeline/` is excluded from git **repo-locally**, so that page would die with
+the laptop. So the same render is also **published with the project**: the run's
+bookkeeping commits `docs/plan.md` (markdown, rendered by GitHub, business view
+first, technical detail in `<details>`) and `docs/plan.html` to `main`, and
+pushes. `devteam publish <project>` does the same on demand. Publishing is
+best-effort by design — another branch checked out, no network, a moved remote
+each report *why* and retry next run; it never fails a run, and it stages nothing
+but those two files.
+
+Every command that regenerates the plan, and every run, prints where the plan is:
+
+```
+goal page:   file:///…/.pipeline/goals.html                       (this machine)
+shared plan: https://github.com/…/blob/main/docs/plan.md          (the repo)
+```
+
+The second line is printed **only when it is true** — mirror committed, unchanged,
+on `origin` — never a guessed URL. `pick` and `research` print both to stderr,
+because their stdout is a machine payload.
 
 ## Run-outcome contract
 
-Every run ends in **a build shipped to internal testing, an owner ask, or a team/tooling ship — never in silent analysis-only**. The orchestrator asks questions only when a genuinely owner-gated decision blocks the path (a freeze lift, a kill-switch flip, a scope-subtraction sign-off), then continues to a build. Production promotion is never one of those asks — it stays human-only. See `skills/dev-team/SKILL.md` → Run-outcome contract.
+A run ends in exactly one of these. Never in silence, never in analysis alone:
 
-## Self-improvement loop (standing)
+- **✅ BUILD SHIPPED** — version bump pushed → project CI → internal testing.
+  This is the default terminal state whenever buildable work exists (or research
+  can legitimately refill with it).
+- **❓ OWNER ASK** — only for questions no agent can answer (a freeze lift, a
+  sign-off, a user-WIP keep-or-discard). Production promotion is **not** one of
+  them: never asked, never filed. Even then the run squeezes every non-blocking
+  stage first, and converts the analysis into a decision issue plus a made-ready
+  task spec.
+- **🛠 TEAM/TOOLING SHIP** — if nothing in the app is buildable but a durable team
+  lesson or a hardening change lands, ship that and say so.
 
-The team gets better every run, and stays **extremely generic**: every run logs
-surprises in `skills/lessons.md`, and lessons that yield durable fixes get
-implemented into team code/skills **in the same run** — fixes must be
-project-agnostic (project quirks live in `<project>/.pipeline/profile.json`),
-run-derived, and proven with `devteam doctor`. See
-`skills/dev-team/SKILL.md` → Hard rules + Upkeep for the contract.
+Each run banner also ends with the plan URLs, and quotes the `AGENT FLAGS` and
+`QUEUE IMPACT` blocks verbatim when they are printed — a superseded or dropped
+task is never silent.
 
-## The skills (the actual "team brain")
-- `skills/dev-team/` — orchestrator contract: mode selection, nightly runbook,
-  fallback spawning, alarms.
-- `skills/new-project/` — create-agent playbook + reference assets (proven
-  CI ymls, MVI event-core files).
-- `skills/android-code/` — coding-style law for dev subagents.
-- `skills/checks/` — executable expertise (localization completeness…).
-- `skills/lessons.md` — appended after every surprise; the orchestrator's
-  standing duty (see `skills/dev-team/SKILL.md` → Upkeep / Hard rules) is to
-  promote lessons into durable, generic fixes in team code/skills the same run
-  — never project-specific, always proven by `devteam doctor`.
+## Safety rails
 
-## Deterministic core (cli.py + team/)
-```
-python3 cli.py status|onboard|scan <project>
+- **Frozen paths are absolute.** If a task seems to need one, it is blocked, not
+  bent. The only exceptions are `constraint_lifts` the *owner* recorded in the
+  profile.
+- **Worktrees, always.** All reading happens at `origin/main`; all development in
+  a per-task worktree. Your working tree and your uncommitted work are untouched.
+- **Never push on red gates.** `verify` must pass before `release`.
+- **Emulators are torn down, never abandoned.** A run records a start-of-run
+  baseline and stops only the emulators that appeared during it — never one you
+  had open deliberately. A leak is reported; it never reds a gate.
+- **The team improves itself, but stays generic.** Every surprise goes to
+  `skills/lessons.md`, and a lesson that yields a durable fix is implemented in
+  the same run — generic, traced to a real surprise, proven by `doctor`. `doctor`
+  greps the team's own code, skills, prompts and README for every registered
+  project's name and blocks on any hit; a project's quirks belong in that
+  project's profile, never here.
+- **Minimal tools.** Every agent runs with whatever connections the project
+  actually has, never blocks on an absent data source, and ends its report with
+  an **Upgrades** section: what connecting that source would buy, exactly how. Once
+  connected, the upgrade disappears by itself.
+
+## Self-healing delivery & queue admissions
+
+- When a release cannot deliver (a store upload or policy rejection), research
+  collects the CI failure and validation forces the delivery-restoring fix to be
+  the first queue entry; `pick` escalates it above polish; the orchestrator loops
+  research → pick → develop → verify → release automatically, max 2 loops, then
+  stops honestly with an alarm.
+- A task never enters the queue alone. Every admission — a research refill or an
+  orchestrator `queue add` — re-judges the entries already queued: new work can
+  make older work irrelevant. Code records every verdict and prints
+  `QUEUE IMPACT (+ added, x superseded/replaced, x obsolete, ! dropped, = kept)`.
+  Nothing is ever dropped silently, and `queue <project> review` flags duplicates
+  and entries whose target already shipped.
+
+## What lives where
+
+| | Where |
+|---|---|
+| project facts, goals, frozen paths, gates, connections | `<project>/.pipeline/profile.json` |
+| source of truth for state (queue, ledger, shipped, plan log) | `<project>/.pipeline/state.json` |
+| run logs, task specs, research, plan mirrors | `<project>/.pipeline/…` (git-excluded, machine-local) |
+| **the published plan** | `<project>/docs/plan.md` + `docs/plan.html` (committed, pushed) |
+| generic craft: skills, prompts, gates, CLI | **this repo** |
+
+## The deterministic core (`cli.py` + `team/`)
+
+```bash
+python3 cli.py status|pick|verify|release|record <project>
+python3 cli.py adapt <project> [--dry-run]      # step 0: match the current team
+python3 cli.py doctor <project>                 # agents' declared requirements
+python3 cli.py research <project> [--no-llm] [--apply-result <file>]
+python3 cli.py queue <project> [add|review]     # admission + impact review
 python3 cli.py worktree-start <project> --task-id ID
-python3 cli.py developer-prompt <project> <spec.json>
-python3 cli.py queue <project> [add|review]   # admission + impact review
-python3 cli.py verify <project> --worktree <path>
-python3 cli.py emulators <project> [--record [--reset]]   # emulator teardown
-python3 cli.py release <project> --worktree <path> --task-spec <spec.json>
-python3 cli.py record <project> --result shipped|failed|blocked …
-python3 cli.py poll / alarm / setup
+python3 cli.py developer-prompt <project> .pipeline/tasks/ID.json
+python3 cli.py tree <project> [--html] [--open] # the plan, locally
+python3 cli.py publish <project>                # put the plan on the repo now
+python3 cli.py goal <project> add|park|set-status|retire|reparent|revert|review|log
+python3 cli.py vision <project> "one sentence"  # the owner's goal
+python3 cli.py align <project> "<request>" [--apply]
+python3 cli.py emulators <project> [--record [--reset]]
+python3 cli.py alarm <project> ; python3 cli.py poll <project> ; python3 cli.py schedules
+python3 cli.py onboard <path> ; python3 cli.py setup --project <path> [--at HH:MM]
 ```
-Only here, only these: gates (frozen-paths scope, 15-locale check, build+test),
-worktrees, tag-truth version bump + push, state ledger, alarms. Zero LLM, zero
-project names.
 
-### Queue impact review
-Any task entering the queue — a research refill or an orchestrator
-`queue add` — is judged against the tasks already queued: new work can make an
-older entry irrelevant (same target + type, already covered, or superseded).
-Code records every verdict in `state['queue_events']` and prints a
-`QUEUE IMPACT` block (`+ added`, `x superseded/replaced`, `x obsolete`,
-`! dropped`, `= kept`) for the run banner; nothing is ever dropped silently.
+Only here, only these: gates, worktrees, version truth, the ledger, the plan,
+alarms. Zero LLM, zero project names.
 
-## Delivery goal (both modes)
-Version-bump push → project's own GitHub Actions → **Play Console internal
-testing**. Production promotion stays human-only; the team has no production
-path and never raises it as an ask or an issue.
-
-## The local-checkout lesson
-Machine-local checkouts can be stale/diverged. ALL code reads/scans/dev happen
-in worktrees at `origin/main` (`.pipeline/scan`, `.pipeline/worktrees/`).
-The user's local working tree — including its uncommitted WIP — is never
-touched.
-
-## Layout
-```
-cli.py  team/  prompts/developer.md  scripts/nightly.sh
-config/runtimes.json            # role → model (no vendor pinned)
-skills/                          # the real team brain (above)
-```
-The team repo can live anywhere — it currently sits in `~/dev-team`
-(outside `~/Documents`, which macOS TCC blocks for launchd-spawned jobs). Projects resolve by name from
-`DEVTEAM_PROJECTS_HOME` (optional env override), the team's parent folder,
-`~/AndroidStudioProjects`, and `~/KMPProjects` (in that order); absolute paths
-always work.
-
-## Adding a project (existing repo)
-`python3 cli.py onboard <path>` → review `.pipeline/profile.json` →
-run manually anytime (just ask an agent session), or opt into a
-clash-checked nightly: `python3 cli.py setup --project <path> --schedule auto [--at HH:MM]`.
-
-## Creating an app from scratch
-Say it in plain language to any agent with this skill loaded →
-`skills/new-project/SKILL.md` runs the whole turnkey.
-
-## Division of labor
+## Division of labour
 
 | Layer | Who | What |
 |---|---|---|
-| Orchestrator | any agentic tool running **with the dev-team skill** | decide + drive: pick task, prepare sandbox, spawn developer, gate, release, record |
-| Developer | the orchestrator's **native subagent** (model from `config/runtimes.json`) | edit code in the task worktree, per `prompts/developer.md` |
-| Python | `cli.py` + `team/*` — deterministic only | gates (scope/localization/build/test), worktree plumbing, version bump, state bookkeeping, alarms. Zero LLM, zero project names. |
-| Scheduler | macOS launchd (`com.devteam.nightly`) | boots the orchestrator daily at the configured time |
+| Orchestrator | any agentic tool with the `dev-team` skill | decide + drive: adapt, pick, sandbox, spawn the developer, gate, release, record, report |
+| Developer | the orchestrator's **native subagent** (model from `config/runtimes.json`) | edit code inside the task worktree, per `prompts/developer.md` |
+| Research | code collectors + **one** synthesis call | propose the next work, judged and applied by code |
+| Python (`cli.py`, `team/`) | deterministic only | gates, worktree plumbing, version bump, bookkeeping, plan rendering/publishing, alarms |
+| Scheduler | macOS `launchd` (`com.devteam.nightly`) | boot the orchestrator each night at the configured slot |
 
-## Delivery goal
+## Adding a project, creating one, and scheduling
 
-Version-bump push → project's own GitHub Actions → **Play Console internal
-testing**. Production promotion stays human-only; this team has no production
-path by construction and never raises it as an ask or an issue.
-
-## Key routes
-
-```
-python3 cli.py status <project>          # queue / shipped / last run
-python3 cli.py onboard <project>         # detect + write profile draft (idempotent)
-python3 cli.py worktree-start <project> --task-id ID
-python3 cli.py developer-prompt <project> <spec.json>
-python3 cli.py verify <project> --worktree <path>
-python3 cli.py emulators <project>        # stop emulators this run leaked (warn-only)
-python3 cli.py release <project> --worktree <path> --task-spec <spec.json>
-python3 cli.py record <project> --result shipped|failed|blocked …
-python3 cli.py alarm <project>           # staleness + CI reconciliation → GitHub Issue
-python3 cli.py setup --project <path> --at 23:10   # launchd + global skill links
-```
-
-## The local-checkout lesson
-
-This app's machine-local git checkout can be stale/diverged (it currently is:
-v3.13.17+ work exists only on origin). Therefore **all reading of project code
-(scans, discovery, references) happens in a worktree at `origin/main`**
-(`.pipeline/scan`), and all development happens in per-task worktrees.
-The user's local working tree — including its uncommitted WIP — is never
-touched by the team.
+- **Existing repo:** `python3 cli.py onboard <path>` → review
+  `.pipeline/profile.json` (prune dark/invisible targets, adjust `frozen_paths`,
+  set the gates and connections) → optionally
+  `python3 cli.py setup --project <path> --schedule auto`.
+- **New app:** say it in plain language to any agent with the skill loaded →
+  `skills/new-project/SKILL.md` runs the whole turnkey flow, including the
+  owner-only questions (identity, positioning, the long-term goal) and the first
+  internal-testing build.
+- **Scheduling:** `setup` installs a launchd job that runs
+  `scripts/nightly.sh <Project>`, which boots the orchestrator with
+  *"Run workflow for &lt;Project&gt;"*, caps it with a 90-minute watchdog, keeps a
+  single-instance lock, and records/takes down emulators around the run. Slots are
+  clash-checked inside the owner's night window; `devteam schedules` lists them.
 
 ## Layout
 
 ```
 cli.py                  deterministic CLI (above)
-team/                   core, scan, verify, developer (headless fallback),
-                        shipper, alarm, scribe, scheduler (launchd)
-prompts/developer.md    the developer contract (prompt template)
-scripts/nightly.sh      launchd entry: boots the orchestrator agentic tool
-config/runtimes.json    role → model (only the model is pinned; headless
-                        launch comes from the environment, never a vendor)
-skills/dev-team/        THE skill: what any agentic orchestrator must do
-skills/checks/          executable expertise (localization completeness …)
+team/                   core, adapt, scan, goals, tree, publish, research, queue,
+                        verify, developer, shipper, scribe, doctor, alarm,
+                        emulator, scheduler, align
+prompts/developer.md    the developer contract (motion + generic templates)
+scripts/nightly.sh      launchd entry point
+config/runtimes.json    role → model (the only thing pinned)
+skills/dev-team/        THE contract any orchestrator agent must follow
+skills/new-project/     mode-B create-a-new-app playbook + reference assets
+skills/android-code/    coding-style law for developer subagents
+skills/checks/          executable expertise (localization completeness, …)
+skills/lessons.md       append-only surprises log (the team's memory)
 ```
 
-## Adding a project
-
-1. `python3 cli.py onboard <path>` — detects stack/src roots/components/
-   reference screens, discovers unanimated surfaces, writes
-   `<project>/.pipeline/profile.json` + starter state.
-2. Review the profile: prune dark/invisible features from `targets`, adjust
-   `frozen_paths` + risk labels. The profile is the human-reviewed contract.
-3. `python3 cli.py setup --project <path> --at <HH:MM>` if it should run nightly.
+The team repo can live anywhere; it is resolved by path, and projects are
+resolved by name from `DEVTEAM_PROJECTS_HOME` (optional), the team's parent
+folder, `~/AndroidStudioProjects`, then `~/KMPProjects` — absolute paths always
+work. Two notes for a scheduled (launchd) setup: keep the team and its logs
+outside macOS TCC-protected folders such as `~/Documents`, and never hard-code a
+default project — the team is project-independent by construction.

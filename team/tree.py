@@ -451,7 +451,7 @@ def _body(model: dict) -> str:
         for b in col["branches"]:
             status = b.get("status", "")
             if status == "active":
-                pill, dot = "current", "now"
+                pill, dot = "now", "now"
             elif b.get("status") == "done" or b.get("progress", "").endswith("all of them"):
                 pill, dot = "done", "done"
             else:
@@ -549,14 +549,148 @@ def url(project) -> str:
     return (pipeline_dir(project) / "goals.html").as_uri()
 
 
+def _md_details(summary: str, items: list[str], indent: int = 0) -> list[str]:
+    """A collapsed block that survives GitHub's markdown renderer."""
+    if not items:
+        return []
+    pad = " " * indent
+    lines = [f"{pad}<details><summary>{summary}</summary>", ""]
+    lines += [f"{pad}- {i}" for i in items]
+    lines += ["", f"{pad}</details>", ""]
+    return lines
+
+
+def _bar_text(pct: int, width: int = 10) -> str:
+    filled = max(0, min(width, round(int(pct) / 100 * width)))
+    return "█" * filled + "░" * (width - filled)
+
+
+def render_md(model: dict, title: str) -> str:
+    """The SHARED mirror (docs/plan.md): the same plan as the page, in markdown so
+    GitHub renders it where the repo lives. Same rule as the HTML — business
+    English in front, technical detail inside <details> (GitHub honours it)."""
+    root = model["root"]
+    col = _collect(model)
+    md: list[str] = [
+        f"# {title} — where we are going",
+        "",
+        "The goal you set, the team's plan under it, and the queue a nightly run "
+        "works through from the top. Technical detail is collapsed.",
+        "",
+    ]
+
+    changes = model.get("changes") or []
+    if changes:
+        items = [f'{e.get("action")} — {e.get("why")} '
+                 f'({str(e.get("at"))[:10]}, by {e.get("by")})' for e in changes]
+        md += [f"**The team changed the plan {len(changes)}x since you last looked.** "
+               "Nothing is waiting on you — this is so you can disagree.", ""]
+        md += _md_details("show the changes", items)
+
+    md += ["## The goal — yours, nobody else changes it", "",
+           f"> {root['title']}", ""]
+    if model.get("goal_less") and root.get("note"):
+        md += [f"_{root['note']}_", ""]
+
+    asks = model.get("asks") or []
+    if asks:
+        md += ["## Waiting on you", ""]
+        for a in asks:
+            what, how = adapt.ask_text(a)
+            md.append(f"- {what}")
+            md += _md_details("how to fix it", [how], indent=2) if how else []
+        md.append("")
+
+    if col["branches"]:
+        working = [b for b in col["branches"] if b.get("status") == "active"]
+        plural = "s" if len(col["branches"]) != 1 else ""
+        md += [f"## The plan — {len(col['branches'])} goal{plural}, "
+               f"{len(working)} in progress", ""]
+        for b in col["branches"]:
+            lvl = min(3 + int(b.get("depth") or 0), 6)
+            words = goals.STATUS_WORDS.get(b.get("status"), b.get("status"))
+            mark = "●" if b.get("status") == "active" else "○"
+            md += [f"{'#' * lvl} {mark} {b['title']} — _{words}_", ""]
+            if b.get("outcome"):
+                md += [b["outcome"], ""]
+            if b.get("bar") is not None:
+                md += [f"`{_bar_text(b['bar'])}` {b.get('progress', '')}", ""]
+            md += _md_details("how we will know it is done", b.get("measures") or [])
+            md += _md_details("technical detail",
+                              [f'id: {b["id"]}', f'status: {b.get("status")}',
+                               "set by: " + ("you" if b.get("decided_by") == "owner"
+                                             else "the team" if b.get("decided_by") == "agent"
+                                             else "—")])
+
+    waiting = ("one item is built per night, top first" if col["queue"]
+               else "empty — the team refills it before the next run")
+    md += [f"## The queue — {len(col['queue'])} waiting, {waiting}", ""]
+    if not col["queue"]:
+        md += ["_Nothing waiting right now._", ""]
+    # One collapsed block at the end of the section rather than a <details> inside
+    # every list item: in-list HTML is where markdown renderers disagree, and the
+    # visible list stays pure business English.
+    tech: list[str] = []
+    for i, leaf in enumerate(col["queue"], 1):
+        bits = [f"{i}. **{leaf['title']}**"]
+        if leaf.get("is_next"):
+            bits.append("_NEXT_")
+        bits.append(f"for: {_short(leaf['for'])}"
+                    if leaf.get("for") and not leaf.get("in_history")
+                    else "not tied to a goal yet (none is set)")
+        md.append(" · ".join(bits))
+        fields = []
+        if leaf.get("detail"):
+            fields.append(f"why: {leaf['detail']}")
+        fields += [f"type: {leaf.get('task_kind') or '—'}",
+                   f"serves: {leaf.get('for') or '—'}",
+                   f"goal id: {leaf.get('advances') or '—'}",
+                   f"target: {leaf.get('target')}"]
+        tech.append(f"{i} · {leaf['title']} — " + " · ".join(fields))
+    md.append("")
+    md += _md_details("technical detail for the queue", tech)
+
+    if col["done"] or col["earlier"]:
+        md += [f"## Already done — {len(col['done']) + len(col['earlier'])} shipped", ""]
+        for leaf in col["done"] + col["earlier"]:
+            ver = f" · v{leaf['version']}" if leaf.get("version") else ""
+            note = (" · _done before this plan existed_"
+                    if leaf.get("in_history") else "")
+            md.append(f"- ✓ **{leaf['title']}**{ver} · {leaf.get('date') or ''}{note}")
+        md.append("")
+
+    md += ["---", "",
+           "Generated by the dev-team pipeline from this project's own records "
+           "(`.pipeline/`, machine-local) — every run rewrites this file, so do "
+           "not edit it by hand. The same plan as a clickable page: "
+           "`docs/plan.html`. Disagree with the plan? Tell the team: it changes "
+           "the tree and tells you what it changed.", ""]
+    return "\n".join(md).rstrip() + "\n"
+
+
 def write(project, open_after: bool = False) -> str:
-    """Render both views into the project's .pipeline dir; returns the html path."""
+    """Render every view of the plan; returns the local html path.
+
+    Two audiences, four files:
+      .pipeline/goals.txt|.html  — machine-local working copies (git-excluded)
+      docs/plan.md|.html         — the SHARED mirror, committed and pushed by
+                                   team/publish.py, so the plan travels with the
+                                   repo instead of dying with this laptop.
+    Same model, same renderers: the shared copy can never drift from the local one.
+    """
     profile = profile_of(project)
     model = build(project)
-    (project / ".pipeline" / "goals.txt").write_text(
+    title = profile.get("name", "project")
+    pdir = project / ".pipeline"
+    pdir.mkdir(parents=True, exist_ok=True)
+    (pdir / "goals.txt").write_text(
         render_text(model) + "\n\nwhere we are going: " + url(project) + "\n")
-    dest = project / ".pipeline" / "goals.html"
-    dest.write_text(render_html(model, profile.get("name", "project")))
+    dest = pdir / "goals.html"
+    dest.write_text(render_html(model, title))
+    docs = project / "docs"
+    docs.mkdir(exist_ok=True)
+    (docs / "plan.html").write_text(render_html(model, title))
+    (docs / "plan.md").write_text(render_md(model, title) + "\n")
     if open_after:
         import subprocess
         subprocess.run(["open", str(dest)], check=False)

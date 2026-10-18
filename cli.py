@@ -286,12 +286,18 @@ def print_agent_flags(project: Path) -> None:
         print(f"    how: {u.get('how', '?')}")
 
 
-def print_page(project: Path, note: str = "", file=None) -> None:
-    """Print the goal page URL — after EVERY change to the plan/queue and on
-    EVERY run (status opens a run, record closes it). The owner is then one
-    paste away from the current picture: `goal page: file:///…/goals.html`.
-    Goes to stderr where stdout is a machine payload (research/pick JSON)."""
-    from team import tree as tree_mod
+def print_page(project: Path, note: str = "", file=None,
+               published: dict | None = None) -> None:
+    """Print where the plan lives — after EVERY change and on EVERY run.
+
+    Two lines, because there are two copies of the same plan:
+      goal page:   file://…/.pipeline/goals.html      (this machine, click to open)
+      shared plan: https://github.com/…/docs/plan.md  (the pushed copy)
+    The GitHub line is only printed when it is TRUE (mirror committed, unchanged,
+    on origin) — never a guessed URL. `published` is the result of a publish()
+    that just ran; without it we check the local refs (no network).
+    """
+    from team import publish as publish_mod, tree as tree_mod
     dest = pipeline_dir(project) / "goals.html"
     if dest.exists():
         line = f"goal page:  {tree_mod.url(project)}"
@@ -299,7 +305,15 @@ def print_page(project: Path, note: str = "", file=None) -> None:
             line += f"   ({note})"
     else:
         line = f"goal page:  not built yet — python3 cli.py tree {project.name}"
-    print(line, file=file or sys.stdout)
+    lines = [line]
+    res = published or {}
+    if res and not res.get("url"):
+        lines.append(f"shared plan: NOT pushed — {res.get('why')}")
+    else:
+        shared, why = publish_mod.published_url(project)
+        lines.append(f"shared plan: {shared}" if shared
+                     else f"shared plan: not published yet — {why}")
+    print("\n".join(lines), file=file or sys.stdout)
 
 
 # --------------------------------------------------------------------------- #
@@ -552,7 +566,11 @@ def cmd_record(args: argparse.Namespace) -> None:
     if block:
         print("\n" + block)
     # Every run ends by handing the owner the page: "where we are now", one paste.
-    print_page(project, "refreshed by this record")
+    # The plan itself is published too, so what the owner opens is what the repo
+    # says — see team/publish.py (best-effort: never fails a run).
+    from team import publish as publish_mod
+    published = publish_mod.publish(project)
+    print_page(project, "refreshed by this record", published=published)
 
 
 def cmd_pick(args: argparse.Namespace) -> int:
@@ -895,8 +913,12 @@ def cmd_research(args: argparse.Namespace) -> int:
     s = state_of(project)
     print(json.dumps({"queue": s.get("queue", []),
                       "insights": s.get("insights", {})}, indent=2))
-    # stdout above is a machine payload (agents parse it) — the URL goes to stderr.
-    print_page(project, "refilled by this research", file=sys.stderr)
+    # stdout above is a machine payload (agents parse it) — the plan lines go to
+    # stderr. Research refilled the queue, so the shared plan changed too.
+    from team import publish as publish_mod
+    published = publish_mod.publish(project)
+    print_page(project, "refilled by this research", file=sys.stderr,
+               published=published)
     return 0
 
 
@@ -910,9 +932,30 @@ def cmd_adapt(args: argparse.Namespace) -> int:
     res = adapt_mod.run(project, apply=not args.dry_run)
     print(adapt_mod.report(project, res, profile_of(project).get("name"),
                            dry=args.dry_run))
-    print_page(project, "dry run — nothing written" if args.dry_run else
-               "regenerated now")
+    if args.dry_run:
+        print_page(project, "dry run — nothing written")
+    else:
+        # adapt is step 0 of every run, so even a run that does nothing else
+        # leaves the published plan current.
+        from team import publish as publish_mod
+        published = publish_mod.publish(project)
+        print_page(project, "regenerated now", published=published)
     return 0
+
+
+def cmd_publish(args: argparse.Namespace) -> int:
+    """Commit the plan mirror (docs/plan.md + docs/plan.html) and push it.
+
+    Every run's bookkeeping (`record`, `research`, `adapt`) does this by itself;
+    the command exists so the owner can put the current plan on the repo without
+    waiting for a run. Best-effort by design — see team/publish.py."""
+    from team import publish as publish_mod, tree as tree_mod
+    project = resolve_project(args.project)
+    tree_mod.write(project)            # the mirror must match the tree we publish
+    res = publish_mod.publish(project)
+    print(publish_mod.line(project, res))
+    print_page(project, "the plan this publish committed", published=res)
+    return 0 if res.get("pushed") else 1
 
 
 def cmd_vision(args: argparse.Namespace) -> int:
@@ -1060,6 +1103,11 @@ def main() -> None:
     ad.add_argument("--dry-run", action="store_true",
                     help="report what would change without touching anything")
     ad.set_defaults(fn=cmd_adapt)
+    pb = sub.add_parser("publish", add_help=True,
+                        help="commit docs/plan.md + docs/plan.html and push them "
+                             "(every run's bookkeeping does this automatically)")
+    pb.add_argument("project")
+    pb.set_defaults(fn=cmd_publish)
     vi = sub.add_parser("vision");     vi.add_argument("project")
     vi.add_argument("text", nargs="?", help="the owner's long-term goal, one sentence")
     vi.add_argument("--why", help="why the goal changed (optional)")
