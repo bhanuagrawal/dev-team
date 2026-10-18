@@ -83,7 +83,44 @@ def needed(project: Path) -> list[str]:
     if stale:
         out.append(f"{len(stale)} queued task(s) point at a goal that no longer "
                    f"exists: {', '.join(str(s) for s in stale[:3])}")
+    deadc = [c for c in profile.get("conventions", []) if c and not Path(c).exists()]
+    if deadc:
+        fixable = sum(1 for c in deadc if _relocated(c))
+        out.append(f"{len(deadc)} convention path(s) missing"
+                   + (f" ({fixable} repairable automatically)" if fixable else ""))
     return out
+
+
+def _relocated(path: str) -> str | None:
+    """A path the TEAM moved, repaired structurally — never by guessing.
+
+    Two cases, in order, and nothing else:
+      1. The path was inside the team repo (`.../dev-team/...`) and the team repo
+         has moved: the SAME file at the same relative place is the answer.
+      2. The path was a skills path: `skills/<name>/...` found under a known
+         skills root. Exactly one hit, or we refuse — a name collision (two
+         different skills called android-code) is an ambiguity only the owner may
+         resolve, and re-pointing to the wrong one silently swaps the style law
+         the developer is told to read."""
+    p = Path(path)
+    # 1. team repo relocation (structural: same tail, new root)
+    for marker in ("/dev-team/", "/Documents/AI/dev-team/"):
+        if marker in path:
+            tail = path.split(marker, 1)[1]
+            from .core import TEAM_ROOT
+            cand = TEAM_ROOT / tail
+            if cand.exists():
+                return str(cand)
+    # 2. skills root search (unique hit only)
+    if "/skills/" in path:
+        tail = path.split("/skills/", 1)[1]
+        from .core import TEAM_ROOT
+        roots = [TEAM_ROOT / "skills", Path.home() / ".agents" / "skills",
+                 Path.home() / ".Codex" / "skills"]
+        hits = [str(r / tail) for r in roots if (r / tail).exists()]
+        if len(hits) == 1:
+            return hits[0]
+    return None
 
 
 def run(project: Path, log: RunLog | None = None, apply: bool = True) -> dict:
@@ -162,7 +199,21 @@ def run(project: Path, log: RunLog | None = None, apply: bool = True) -> dict:
                         "analytics source, or the measure can only be guessed at")
 
     # 7. conventions that point at files that no longer exist ---------------
-    dead = [c for c in profile.get("conventions", []) if c and not Path(c).exists()]
+    conventions = list(profile.get("conventions", []))
+    repaired, dead = [], []
+    for c in conventions:
+        if not c or Path(c).exists():
+            continue
+        fixed = _relocated(c)
+        if fixed:
+            repaired.append((c, fixed))
+            conventions[conventions.index(c)] = fixed
+        else:
+            dead.append(c)
+    if repaired:
+        profile["conventions"] = conventions
+        for old, new in repaired:
+            note(f"convention path moved → {new} (was {old})")
     if dead:
         asks.append(f"{len(dead)} convention path(s) no longer exist on disk "
                     f"(the developer prompt marks them SKIP): {', '.join(dead[:3])}")
