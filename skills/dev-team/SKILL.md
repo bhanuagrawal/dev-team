@@ -121,10 +121,16 @@ A run ends in EXACTLY ONE of these — never in silence:
   questions at the start and `record` prints an `OWNER ASKS` block on EVERY
   outcome; the banner MUST quote that block (and put the question to the owner
   in the same message) even when the run SHIPPED. "Nobody has said what this app
-  is for long term — one sentence" is the standing one: a goal-less project keeps
-  shipping, and the run keeps asking until the owner answers with
-  `devteam vision <project> "<sentence>"`. Shipping silently while the app has no
-  direction is a run-report failure, not a success.
+  is for long term — one sentence" is the standing one and it is **BLOCKING**: a
+  project nobody has aimed has no long-term goal, so no work is picked for it —
+  `pick` returns rc=4 with the ask, the run's terminal state is the OWNER ASK,
+  and the orchestrator puts the question to the owner in plain words. It stays
+  that way until the owner answers with
+  `devteam vision <project> "<sentence>"`. Owner directive 2026-10-18: *"I should
+  have been prompted to provide long term goals. There should not be no goal-less
+  mode."* Shipping work aimed at nothing is a run-report failure AND a
+  run-design failure. The vision is the owner's forever; the planner proposes the
+  milestones UNDER it, never the owner.
 - 🛠 **TOOLING/TEAM SHIP** — if genuinely nothing in the APP is buildable but a
   team skill/code lesson conversion or research-export hardening lands, ship
   that (team repo commit) and say so; analysis-only runs are failures.
@@ -149,7 +155,12 @@ LLM "met"), goal-linked ordering in `pick`, and the GOALS/report lines. A run
 banner therefore always states the direction: `goal: [m1-…] <milestone> ← <task>`.
 When the active milestone is met, the next entry is the NEXT milestone (research
 proposes it; an owner call becomes an issues_to_file ask) — never invented polish.
-A project with no `goals` runs exactly as before (goal-less mode).
+A project with no `goals` gets NO WORK PICKED — there is no goal-less mode
+(owner directive 2026-10-18). `pick` returns rc=4 with the owner ask, the run's
+terminal state is the OWNER ASK, and the orchestrator asks the owner for one
+sentence (`devteam vision`) in the same message. Once the vision exists, the
+planner proposes the first milestone under it — that is the team's job, not an
+owner ask.
 
 **THE PLANNER — one agent owns the plan, and it runs on EVERY run (step 2).**
 `devteam plan <project>` is the single place where direction is decided: it reads
@@ -182,8 +193,8 @@ that is not declared.
 → leaves (the work each run picks) and writes two machine-local mirrors into the
 project: `.pipeline/goals.txt` and `.pipeline/goals.html` (self-contained, click
 to collapse; `--open` opens it). Deterministic renderer, no LLM/network;
-refreshed by every `record`/`research`. A goal-less project renders the standing
-ask instead of an empty page.
+refreshed by every `record`/`research`. A project with no goal tree renders the
+BLOCKING ask instead of an empty page (and gets no work picked).
 
 **The plan is also PUBLISHED, so it travels with the repo.** `.pipeline/` is
 excluded repo-locally, so a machine-local tree would die with the laptop. The
@@ -238,7 +249,10 @@ never silently blocking.
    queued tasks whose goal no longer exists (re-pointed at the active goal, or
    declared off-goal), the goal page + mirrors regenerated — plus any STANDING
    OWNER ASKs (a missing long-term goal, dead convention paths, a missing gate
-   field). It never invents direction: a missing goal comes back as an ask to
+   field). **A missing long-term goal is BLOCKING, not a footnote:** put the ask
+   to the owner in the SAME message that reports the run, here at step 0, and do
+   not proceed to step 2/3 — `pick` will refuse (rc=4) anyway. You never invent
+   direction: a missing goal comes back as an ask to
    pass to the owner, never as a vision the team drafted. Run `status` after it;
    the workflow does not start on an un-adapted project.
 1. `python3 <team>/cli.py status <project>` — see queue, shipped, last run.
@@ -278,6 +292,9 @@ never silently blocking.
      (the queue is the plan; the head is the handover, goal tree or not);
      (c) first safe un-animated surface (fallback: nothing queued is buildable).
    rc=2 nothing actionable (→ step 2 re-review + idle rules)
+   rc=4 NO GOAL — the project has no long-term goal: nothing is picked. Put the
+     ask to the owner in plain words, in the same message (the run's terminal
+     state is the OWNER ASK; `devteam vision <project> "<sentence>"` sets it).
    rc=3 only supervised remain (ask human). The pick is code-verifiable; you
    review and proceed — you do not re-derive selection logic. If `pick` prints
    `NOTE: plan review … NOT reviewed today` on stderr, step 2 was skipped — run

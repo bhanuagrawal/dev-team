@@ -12,6 +12,8 @@ from pathlib import Path
 
 from .core import now_iso, profile_of, state_of
 
+from . import goals
+
 CORE_MOTION_TOKENS = [
     "AnimatedVisibility", "AnimatedContent", "Animatable", "crossfade",
     "animateContentSize", "animateFloatAsState", "animateColorAsState",
@@ -181,6 +183,11 @@ def _delivered_slugs_from_runs(state: dict) -> set[str]:
 def next_task(project: Path, seq: int, supervised: bool = False) -> dict | None:
     state = state_of(project)
     profile = profile_of(project)
+    # GOAL GATE (owner directive 2026-10-18): a project nobody has aimed does not
+    # get a task. `pick` refuses with its own rc and owner-ask payload; this is the
+    # belt for every other caller.
+    if goals.vision_required(profile):
+        return None
     # A queue entry whose label is already delivered is delivered work — never
     # serve it again (label-level; a feature may legitimately re-touch a shipped
     # path, so path matching stays out of this check). Both ledgers are consulted:

@@ -31,19 +31,40 @@ _OPS = {"<": lambda a, b: a < b, "<=": lambda a, b: a <= b,
         "==": lambda a, b: a == b}
 
 
+def vision(profile: dict) -> str:
+    """The owner's own one-sentence thesis — the top of the tree ('' if unset)."""
+    return str((profile.get("goals") or {}).get("vision") or "").strip()
+
+
+def vision_required(profile: dict) -> bool:
+    """True when the owner has never said what this app is for.
+
+    This is the ONE thing no agent may supply, so a project in this state does
+    not get work picked for it: `pick` refuses (rc=4) and the run's honest
+    terminal state is the OWNER ASK. Owner directive 2026-10-18: "I should have
+    been prompted to provide long term goals. There should not be no goal-less
+    mode." Eighteen runs shipped against uncounted assumptions before this gate
+    existed — the failure was design, not diligence."""
+    return not vision(profile)
+
+
 def direction_ask(profile: dict, state: dict, project_name: str = "<project>") -> dict | None:
     """The ONE question only the owner can answer: what is this app for, long term?
 
     Returned (not printed) so every surface says the SAME thing — adapt's report,
-    `doctor`, the goal page, the planner's review block, and `record`'s OWNER ASKS
-    block. None once a goal tree exists. It is an ASK, never a blocker: until the
-    owner answers, the team works from what it already knows."""
-    if (profile.get("goals") or {}).get("milestones"):
+    `doctor`, the goal page, `pick`, the planner's review block and `record`'s
+    OWNER ASKS block. None once the vision exists (a vision without milestones is
+    NOT an owner ask: proposing the first milestone is the planner's job).
+
+    It is a BLOCKING ask by owner directive 2026-10-18 — the run ends here rather
+    than shipping work aimed at nothing."""
+    if not vision_required(profile):
         return None
     return {
-        "what": "Nobody has said what this app is for long term — one sentence "
-                "from you sets the goal every release is then aimed at (until "
-                "then the team works from what it already knows)",
+        "what": "BLOCKING: nobody has said what this app is for long term — one "
+                "sentence from you becomes the goal every release is aimed at. "
+                "Until you answer, no work is picked or built (the team will not "
+                "invent a direction)",
         "how": f'python3 cli.py vision {project_name} "what this app is for, in '
                f'one sentence"',
     }
@@ -239,9 +260,9 @@ def goal_block(profile: dict, state: dict) -> str:
     words: no ids, no bracket codes — those live in the JSON and `goal log`."""
     p = plan(profile)
     if not p:
-        return ("PLAN: none yet — nobody has said what this app is for long term. "
-                "One sentence from you becomes the top of the tree; until then the "
-                "team picks from what it already knows (goal-less mode).")
+        return ("PLAN: none yet — BLOCKING: nobody has said what this app is for "
+                "long term, so no work is picked until the owner answers "
+                "(`devteam vision <project> \"<one sentence>\"`).")
     st = status_of(profile, state)
     lines = [f'PLAN  the goal: {p["vision"] or "(none)"}']
     for m in p["milestones"]:

@@ -608,6 +608,20 @@ def cmd_pick(args: argparse.Namespace) -> int:
     profile = profile_of(project)
     state = state_of(project)
     seq = len(state.get("runs", [])) + 1
+    # GOAL GATE — owner directive 2026-10-18 ("I should have been prompted to
+    # provide long term goals. There should not be no goal-less mode"). A project
+    # with no vision gets NO work picked: the run's terminal state is the OWNER
+    # ASK, handed back as a distinct rc so the orchestrator must put the question
+    # to the owner instead of building on an assumption nobody made.
+    if goals.vision_required(profile):
+        ask = goals.direction_ask(profile, state, project.name) or {}
+        print(json.dumps({"pick": None, "goal_required": True, "owner_ask": ask,
+                          "note": "no long-term goal — ask the owner for one sentence; "
+                                  "nothing is picked or built until it is set"},
+                         indent=2))
+        print_owner_asks(project)
+        print_page(project, "this project's plan (no goal yet)")
+        return 4
     from team.scan import next_task, scan_surfaces
     surfaces = scan_surfaces(project)
     unsup_only = (not any(s["status"] == "unanimated" and s.get("risk") != "supervised"
