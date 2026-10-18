@@ -775,8 +775,12 @@ def plan_report(project: Path) -> str:
     if vision:
         L.append(f"  heading for:      {vision}")
     else:
-        L.append("  heading for:      no long-term goal yet — the team has asked "
-                 "you for one sentence (OWNER ASK below)")
+        a = goals.direction_ask(profile, state, project.name)
+        L.append("  heading for:      nothing set yet — the team works from what "
+                 "it already knows")
+        if a:
+            L.append("  YOUR ONE-LINE ASK: " + a["what"])
+            L.append("      how:          " + a["how"])
     if act:
         L.append(f"  working toward:   {act.get('title', '')}")
     elif goals_block:

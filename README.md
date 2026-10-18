@@ -190,8 +190,15 @@ ledger, writes the per-target delivered rows on a ship (attributing each to the
 goal named in the task spec), refreshes the remaining-work list, regenerates the
 plan views, and prints, for the run banner: the goal line
 (`goal: [<goal>] <title> ← <task>`), the **AGENT FLAGS** block (what the planner
-says the owner could connect next), the **THE TEAM CHANGED THE PLAN** block
+says the owner could connect next), the **OWNER ASKS** block (the questions only
+the owner can answer — including "nobody has said what this app is for long term"
+when no goal is set), the **THE TEAM CHANGED THE PLAN** block
 if the plan moved, and the URLs. It also publishes the plan (below).
+
+Every one of those blocks is printed by code on every outcome, so the banner
+cannot drop one by forgetting: a run that ships while the app has no long-term
+goal still ends with the ask for that one sentence (and the run keeps asking until
+it is answered with `devteam vision`).
 
 ### Step 10 — silence must be loud (code)
 

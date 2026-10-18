@@ -286,6 +286,25 @@ def print_agent_flags(project: Path) -> None:
         print(f"    how: {u.get('how', '?')}")
 
 
+def print_owner_asks(project: Path) -> None:
+    """Questions ONLY the owner can answer, printed by code on EVERY record.
+
+    A run that ships is still a run that must ask: if the app has no long-term
+    goal, the banner carries the ask for that one sentence instead of quietly
+    shipping a goal-less build. `adapt`/`doctor` print the same ask at the start —
+    this is the copy the run REPORT must contain, so the question cannot be
+    buried in step-0 output."""
+    asks = goals.owner_asks(profile_of(project), state_of(project), project.name)
+    if not asks:
+        return
+    print("--- OWNER ASKS (only the owner can answer these — "
+          "quote this block in the run banner) ---")
+    for a in asks:
+        print(f"  ? {a['what']}")
+        if a.get("how"):
+            print(f"    how: {a['how']}")
+
+
 def print_page(project: Path, note: str = "", file=None,
                published: dict | None = None) -> None:
     """Print where the plan lives — after EVERY change and on EVERY run.
@@ -562,6 +581,9 @@ def cmd_record(args: argparse.Namespace) -> None:
     # The orchestrator relays the research agents' flags mechanically —
     # code prints them here on EVERY record; the run banner quotes this block.
     print_agent_flags(project)
+    # …and the owner's own open questions (no long-term goal yet) are printed on
+    # EVERY record too: a shipped build must not swallow the ask.
+    print_owner_asks(project)
     block = goals.review_block(state_of(project))
     if block:
         print("\n" + block)

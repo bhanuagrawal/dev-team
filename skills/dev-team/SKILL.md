@@ -117,6 +117,14 @@ A run ends in EXACTLY ONE of these — never in silence:
   never ask it, never file it. Even then: ask AFTER squeezing every
   non-blocking stage, and if all you have is analysis, convert it — a decision
   issue + a made-ready task spec that becomes buildable on "yes".
+  **A STANDING ASK IS NOT OPTIONAL TO RELAY.** `adapt`/`doctor` print the open
+  questions at the start and `record` prints an `OWNER ASKS` block on EVERY
+  outcome; the banner MUST quote that block (and put the question to the owner
+  in the same message) even when the run SHIPPED. "Nobody has said what this app
+  is for long term — one sentence" is the standing one: a goal-less project keeps
+  shipping, and the run keeps asking until the owner answers with
+  `devteam vision <project> "<sentence>"`. Shipping silently while the app has no
+  direction is a run-report failure, not a success.
 - 🛠 **TOOLING/TEAM SHIP** — if genuinely nothing in the APP is buildable but a
   team skill/code lesson conversion or research-export hardening lands, ship
   that (team repo commit) and say so; analysis-only runs are failures.
@@ -334,9 +342,14 @@ never silently blocking.
     (the research agents' upgrade/capability asks) on EVERY outcome. The run
     banner MUST quote that block verbatim in its final report — dropping it is
     a run-report failure even when the build shipped. The same rule applies to
-    any `QUEUE IMPACT` block printed by research or `queue add`: quote it, so a
+    any `QUEUE IMPACT` block printed by the planner or `queue add`: quote it, so a
     superseded or dropped task is never silent. If record printed no block, the
-    banner says "no agent flags pending".
+    banner says "no agent flags pending". The `OWNER ASKS` block printed by the
+    same command follows the same rule: it is the questions only the owner can
+    answer (no long-term goal yet, a blocked gate), it is printed on every
+    outcome, and the banner MUST carry it verbatim — plus put the question to the
+    owner in plain words. A shipped run with an unanswered standing ask still ends
+    with that ask.
 
 ## Interactive (human-present) sessions
 Same procedure; `supervised` tasks become available when a human is with you —

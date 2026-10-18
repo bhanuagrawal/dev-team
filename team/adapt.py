@@ -175,13 +175,9 @@ def run(project: Path, log: RunLog | None = None, apply: bool = True) -> dict:
     changes += _state_defaults(state)
 
     # 4. direction: ask, never invent ----------------------------------------
-    if not (profile.get("goals") or {}).get("milestones"):
-        asks.append(ask(
-            "Nobody has said what this app is for long term — one sentence from "
-            "you sets the goal every release is then aimed at (until then the "
-            "team works from what it already knows)",
-            f'python3 cli.py vision {project} "what this app is for, in one '
-            f'sentence"'))
+    a = goals.direction_ask(profile, state, project)
+    if a:
+        asks.append(ask(a["what"], a["how"]))
 
     # 5. stale goal links in the queue ---------------------------------------
     # A queue entry pointing at a branch that no longer exists would be invisible

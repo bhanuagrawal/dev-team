@@ -31,6 +31,33 @@ _OPS = {"<": lambda a, b: a < b, "<=": lambda a, b: a <= b,
         "==": lambda a, b: a == b}
 
 
+def direction_ask(profile: dict, state: dict, project_name: str = "<project>") -> dict | None:
+    """The ONE question only the owner can answer: what is this app for, long term?
+
+    Returned (not printed) so every surface says the SAME thing — adapt's report,
+    `doctor`, the goal page, the planner's review block, and `record`'s OWNER ASKS
+    block. None once a goal tree exists. It is an ASK, never a blocker: until the
+    owner answers, the team works from what it already knows."""
+    if (profile.get("goals") or {}).get("milestones"):
+        return None
+    return {
+        "what": "Nobody has said what this app is for long term — one sentence "
+                "from you sets the goal every release is then aimed at (until "
+                "then the team works from what it already knows)",
+        "how": f'python3 cli.py vision {project_name} "what this app is for, in '
+               f'one sentence"',
+    }
+
+
+def owner_asks(profile: dict, state: dict, project_name: str = "<project>") -> list[dict]:
+    """Every open question that only the owner can answer, in plain words."""
+    out: list[dict] = []
+    a = direction_ask(profile, state, project_name)
+    if a:
+        out.append(a)
+    return out
+
+
 def plan(profile: dict) -> dict | None:
     """The owner-authored goal tree, normalised; None when the project has none."""
     g = profile.get("goals") or {}
