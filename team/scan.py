@@ -147,19 +147,54 @@ def _queue_task(q: dict, seq: int) -> dict:
     }
 
 
+def _label_task_slug(label: str) -> str:
+    """The task-id slug a label gets at pick time (see `_queue_task`) — kept
+    identical on purpose: it is the only thing that ties a queue label to the
+    task id in the run ledger."""
+    return re.sub(r"[^a-z0-9]+", "-", str(label or "").lower())[:30].strip("-")
+
+
+def _delivered_slugs_from_runs(state: dict) -> set[str]:
+    """Task-id slugs of delivered work, read from the RUN ledger instead of the
+    shipped ledger.
+
+    Belt for a real gap (lesson 2026-10-18): `record --result shipped` writes the
+    shipped-ledger rows from the task-spec's targets, so a shipped run recorded
+    WITHOUT its spec leaves no ledger rows — and then the label filter above is
+    blind, so `pick` re-serves already-delivered work as the run's head (a queue
+    entry outlived the release that delivered it this way, and the plan's "next
+    task" was work that had already shipped). The runs ledger always carries the
+    task id, and that id is derived from the label, so the id is the identity."""
+    out: set[str] = set()
+    for r in state.get("runs") or []:
+        if r.get("result") != "shipped":
+            continue
+        tid = str(r.get("task_id") or "")
+        if not tid.startswith("dt-"):
+            continue
+        slug = re.sub(r"-\d+$", "", tid[3:]).strip("-")
+        if slug:
+            out.add(slug)
+    return out
+
+
 def next_task(project: Path, seq: int, supervised: bool = False) -> dict | None:
     state = state_of(project)
     profile = profile_of(project)
-    # A queue entry whose label is already in the shipped ledger is delivered
-    # work — never serve it again (label-level; a feature may legitimately
-    # re-touch a shipped path, so path matching stays out of this check).
+    # A queue entry whose label is already delivered is delivered work — never
+    # serve it again (label-level; a feature may legitimately re-touch a shipped
+    # path, so path matching stays out of this check). Both ledgers are consulted:
+    # the shipped ledger is authoritative, the run ledger catches the runs that
+    # were recorded without a task-spec.
     shipped_labels = _shipped_labels(state)
+    delivered_slugs = _delivered_slugs_from_runs(state)
     queue = state.get("queue") or []
 
     def _eligible(q: dict) -> bool:
         return (q.get("type") in ("bugfix", "feature", "motion")
                 and q.get("target")
-                and _norm_label(q.get("label")) not in shipped_labels)
+                and _norm_label(q.get("label")) not in shipped_labels
+                and _label_task_slug(q.get("label")) not in delivered_slugs)
 
     def _buildable(q: dict, surfaces: list[dict]) -> bool:
         """Eligible AND not already obsolete: a motion entry whose surface has

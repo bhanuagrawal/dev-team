@@ -19,7 +19,7 @@ from pathlib import Path
 
 from . import scan
 from .core import (RunLog, now_iso, pipeline_dir, profile_of, run, save_json,
-                   save_state, state_of)
+                   save_state, state_of, target_looks_like_paths)
 from . import goals
 from . import queue as queue_mod
 
@@ -248,7 +248,7 @@ Decide what to BUILD NEXT. Output STRICT JSON only (no prose, no code fence):
   "insights": {{"headline": "one line", "analysis": "2-5 sentences grounded in the numbers"}},
   "queue": [
     {{"type": "motion|bugfix|feature|investigation", "label": "...",
-      "target": "<exact surface path for motion; short topic otherwise>",
+      "target": "<motion: the exact surface path; feature/bugfix: the repo-relative path(s) you will edit, comma-separated — this BECOMES the developer's edit allow-list, so no prose here; investigation: a short topic>",
       "priority": 1, "reason": "one line grounded in research",
       "advances": "<milestone id this task serves, or 'none'>",
       "supersedes": ["<exact label of an already-queued task this makes irrelevant>"]}}
@@ -310,6 +310,11 @@ Rules:
   entry is to propose the NEXT milestone (as a feature/bugfix that starts it,
   or an issues_to_file for an owner decision) rather than inventing off-goal
   polish.
+- 'target' is the developer's file allow-list, not a description: for
+  feature/bugfix it must be repo-relative PATH(S) (files, dirs or globs, e.g.
+  'app/src/main/java/**/ui/Foo.kt'); put the explanation in 'reason'. A prose
+  target is rejected in code — it would silently replace the allow-list and
+  fail the build step.
 - Buildability bias: the pipeline must be able to END EVERY RUN IN A BUILD.
   Queue executable work (motion/bugfix/feature) first; investigations are
   capped at 2 entries and each MUST, in its "reason", name the owner decision
@@ -386,6 +391,15 @@ def _validate(result: dict, research: dict | None = None) -> str | None:
                     and q.get("type") not in ("bugfix", "feature"):
                 return ("signals.ci is red — the first queue entry must be the "
                         "bugfix/feature that restores delivery")
+        if q.get("type") in ("feature", "bugfix") and not target_looks_like_paths(q.get("target")):
+            return (
+                f"{q.get('type')} queue entry '{q.get('label')}' names no "
+                "repo-relative path in 'target' — that field becomes the "
+                "developer's 'Edit ONLY files under:' allow-list, so a sentence "
+                "there hard-fails the build step (see developer-prompt). Put the "
+                "description in 'reason' and list real paths in 'target', e.g. "
+                "'app/src/main/java/**/ui/Foo.kt, app/src/main/res/values*/strings.xml'."
+            )
         if q.get("type") == "motion":
             labels = {r.get("label"): set(r.get("paths") or []) for r in remaining}
             if q["label"] not in labels:

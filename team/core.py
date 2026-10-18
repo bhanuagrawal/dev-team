@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shlex
 import subprocess
 import sys
@@ -29,6 +30,42 @@ PROJECTS_BASES = [
 PROJECTS_BASES = [b for b in PROJECTS_BASES if b is not None]
 
 RUNTIMES_PATH = TEAM_ROOT / "config" / "runtimes.json"
+
+# one token: no whitespace (so a sentence never matches) and path-ish
+# characters only. Glob-ish targets ("app/src/main/res/values*/strings.xml")
+# count; a bare file name does not.
+_PATH_TOKEN_RE = re.compile(r"[A-Za-z0-9_.*\-]+(?:/[A-Za-z0-9_.*\-]+)+")
+
+
+def path_tokens(text: Any) -> list[str]:
+    """The repo-relative path-ish tokens inside free text (diagnostics only)."""
+    return _PATH_TOKEN_RE.findall(str(text or ""))
+
+
+def target_items(target: Any) -> list[str]:
+    """A queue entry's `target` as candidate path items: a list stays a list, a
+    string splits on commas/newlines (so 'a.kt, b.kt' is two items)."""
+    if isinstance(target, (list, tuple)):
+        raw = [str(t) for t in target]
+    else:
+        raw = re.split(r"[,\n]", str(target or ""))
+    return [p.strip() for p in raw if p.strip()]
+
+
+def target_looks_like_paths(target: Any) -> bool:
+    """Is this `target` usable as the developer's file allow-list?
+
+    ONE definition, shared by the planner gate (`research._validate`) and the
+    developer prompt (`developer._check_targets_are_paths`): every item must be
+    a single whitespace-free, repo-relative path (or glob). A sentence is prose
+    even when it names files. Lesson 2026-10-18: a feature entry whose target
+    was a whole sentence passed the plan gate and only blew up at
+    developer-prompt time, wasting the run."""
+    items = target_items(target)
+    if not items:
+        return False
+    return all("/" in t and not any(c.isspace() for c in t) for t in items)
+
 
 
 def now_iso() -> str:

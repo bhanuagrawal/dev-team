@@ -574,6 +574,14 @@ def cmd_record(args: argparse.Namespace) -> None:
     save_state(project, state)
     scribe.update(project)
     print(f"recorded: {entry['result']} {entry['task_id']}")
+    # A shipped run recorded WITHOUT its task-spec writes no shipped-ledger rows,
+    # so the queue entry it delivered cannot later be recognised as delivered
+    # (lesson 2026-10-18: exactly this let a delivered entry stay at the head of
+    # the plan). Never silent — the orchestrator sees it where it happens.
+    if args.result == "shipped" and not (task.get("surface", {}) or {}).get("targets"):
+        print("WARNING: shipped recorded with no task-spec targets — no shipped-ledger "
+              "rows written; pass --task-spec .pipeline/tasks/<id>.json so the queue "
+              "entry is marked delivered")
     # Where this release sits in the goal tree — computed from data, no LLM.
     line = goals.report_line(profile_of(project), state, task)
     if line:

@@ -26,7 +26,7 @@ from pathlib import Path
 from . import goals, verify
 from .core import (
     RunLog, agent_argv, git, now_iso, profile_of, role_cfg as _role_cfg,
-    run, state_of,
+    run, state_of, target_looks_like_paths,
 )
 
 RUN_BASE = ".pipeline/worktrees"
@@ -164,8 +164,7 @@ def _check_targets_are_paths(task_paths: list[str]) -> None:
     "RESEARCH CONTEXT TO SOLVE") or in a plan doc under docs/progress/.
     """
     prose = [str(t) for t in (task_paths or [])
-             if any(c.isspace() for c in str(t))
-             or (len(str(t)) > 80 and "/" not in str(t))]
+             if not target_looks_like_paths(str(t))]
     if prose:
         raise ValueError(
             "surface.targets must be repo-relative PATHS (files, dirs or globs), not "
