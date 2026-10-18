@@ -24,7 +24,9 @@ explicit "here's what connecting this would buy you" line.
 
 ## MODE SELECTION (do this first, every invocation)
 - Project exists and has .pipeline/profile.json → MODE A (nightly run
-  procedure below).
+  procedure below). STEP 0 of MODE A is `adapt` — a project onboarded under an
+  older team is brought up to date by code before any work is picked; never edit
+  `.pipeline/profile.json` by hand to catch up.
 - Owner starts a NEW app ("build me an app that…") → MODE B:
   `skills/new-project/SKILL.md` — authoritative.
 - Owner asks for ONE agent only → "DIRECT AGENT INVOCATION" section.
@@ -167,7 +169,21 @@ never silently blocking.
 
 ## Nightly run procedure (also works interactively)
 
+0. **ADAPT FIRST — make the project match the team you are running.** The team
+   changes (new fields, new goal model, new gates); a project was onboarded under
+   an older one. Before anything else:
+   `python3 <team>/cli.py adapt <project>` (add `--dry-run` to only report).
+   Deterministic and idempotent: it reports `up to date` with one line, or lists
+   what it repaired — missing profile/state keys, the `components_dir` alias,
+   queued tasks whose goal no longer exists (re-pointed at the active goal, or
+   declared off-goal), the goal page + mirrors regenerated — plus any STANDING
+   OWNER ASKs (a missing long-term goal, dead convention paths, a missing gate
+   field). It never invents direction: a missing goal comes back as an ask to
+   pass to the owner, never as a vision the team drafted. Run `status` after it;
+   the workflow does not start on an un-adapted project.
 1. `python3 <team>/cli.py status <project>` — see queue, shipped, last run.
+   `status` is read-only and prints `ADAPT NEEDED` when the project lags the
+   team (step 0 is the fix — never migrate by hand).
 2. If nothing executable remains → REFILL the queue:
    run `python3 <team>/cli.py research <project>` (code agent: pulls GA4 +
    codebase + repo signals; ONE synthesis call; updates state.json queue —

@@ -189,6 +189,10 @@ def cmd_onboard(args: argparse.Namespace) -> None:
     # --- draft queue from discovery --------------------------------------------
     profile = {
         "name": project.name,
+        # Data shape this profile conforms to. `devteam adapt` (step 0 of every
+        # workflow run) stamps/upgrades it, so a project tracks the team's own
+        # changes without anyone hand-editing profile.json.
+        "profile_schema": 2,
         "repo_slug": repo_slug,
         "main_branch": "main",
         "src_root": src_root,
@@ -232,8 +236,12 @@ def cmd_onboard(args: argparse.Namespace) -> None:
     save_json(pdir / "profile.json", profile)
 
     state = {"runs": [], "shipped": [], "remaining": [], "last_run": {},
-             "created": now_iso()}
+             "created": now_iso(),
+             # the current team's full state shape, so a fresh project never
+             # starts out "needing adapt"
+             "queue": [], "goal_log": [], "tree_changes": [], "alignment_log": []}
     save_json(pdir / "state.json", state)
+    (pdir / "tasks").mkdir(parents=True, exist_ok=True)
 
     # keep local working tree clean: exclude pipeline dir repo-locally
     excl = project / ".git" / "info" / "exclude"
@@ -735,7 +743,7 @@ def cmd_align(args: argparse.Namespace) -> int:
     request = args.request or ""
     if not request:
         raise SystemExit("align needs the request to judge as text, e.g.\n"
-                         "  devteam align PdfKitKMP \"add a dark mode toggle\"")
+                         "  devteam align <project> \"add a dark mode toggle\"")
     task = None
     if args.task_spec:
         task = json.loads(task_spec_path(project, args.task_spec).read_text())
@@ -787,6 +795,17 @@ def cmd_status(args: argparse.Namespace) -> None:
     r = subprocess.run(["git", "log", "--oneline", "-1"], cwd=project,
                        capture_output=True, text=True)
     print(f"local HEAD: {r.stdout.strip()}")
+    # Read-only: status never migrates, but the owner must know the project is
+    # behind the team (the workflow's own step 0 fixes it).
+    try:
+        from team import adapt as adapt_mod
+        todo = adapt_mod.needed(project)
+        if todo:
+            print(f"\nADAPT NEEDED ({len(todo)}): " + "; ".join(todo[:3])
+                  + f"\n  the workflow's first step fixes this: devteam adapt "
+                    f"{project.name}")
+    except Exception:
+        pass
     # What the team changed about the plan since the owner last looked, and the
     # honest alignment verdicts (both advisory: nothing is silently blocked).
     for block in (goals.review_block(state), goals.alignment_block(state)):
@@ -841,9 +860,61 @@ def cmd_research(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_adapt(args: argparse.Namespace) -> int:
+    """STEP 0 of any workflow: make the project match the CURRENT team.
+
+    Deterministic, idempotent, never invents direction — a missing long-term goal
+    comes back as an OWNER ASK, not as a drafted vision."""
+    from team import adapt as adapt_mod
+    project = resolve_project(args.project)
+    res = adapt_mod.run(project, apply=not args.dry_run)
+    print(adapt_mod.report(project, res, profile_of(project).get("name"),
+                           dry=args.dry_run))
+    return 0
+
+
+def cmd_vision(args: argparse.Namespace) -> int:
+    """The ONE thing only the owner writes: the long-term goal (tree root)."""
+    from team.core import save_json
+    project = resolve_project(args.project)
+    profile, state = profile_of(project), state_of(project)
+    text = (args.text or "").strip()
+    if not text:
+        raise SystemExit("vision needs the owner's sentence, e.g.\n"
+                         "  devteam vision <project> \"what this app is for, "
+                         "in one sentence\"")
+    goals_block = profile.setdefault("goals", {})
+    old = str(goals_block.get("vision") or "")
+    if old == text:
+        print("the goal is already exactly that — nothing changed")
+        return 0
+    goals_block["vision"] = text
+    goals_block.setdefault("milestones", [])
+    goals.change(state, "set the long-term goal", "vision", args.why or
+                 "the owner wrote the goal the team works toward",
+                 before=old or "(none)", after=text, by="owner")
+    save_json(pipeline_dir(project) / "profile.json", profile)
+    save_state(project, state)
+    from team import tree as tree_mod
+    tree_mod.write(project)
+    print(f"the goal is now: {text}")
+    if not goals_block["milestones"]:
+        print("  next: the team's job is to propose the milestones under it "
+              "(`devteam research`), not to ask you for them")
+    return 0
+
+
 def cmd_doctor(args: argparse.Namespace) -> int:
     project = resolve_project(args.project)
     log = RunLog(project, "doctor-" + today())
+    # Adapt FIRST: the readiness check must measure the project against the team
+    # it is actually being run by, not the one it was onboarded under.
+    from team import adapt as adapt_mod
+    try:
+        res = adapt_mod.run(project, log)
+        print(adapt_mod.report(project, res, profile_of(project).get("name")))
+    except SystemExit:
+        pass   # not onboarded at all — the doctor report below says so
     from team import doctor
     report = doctor.run_doctor(project, log)
     blocked = {a: r for a, r in report.items() if r["status"] == "blocked"}
@@ -940,6 +1011,14 @@ def main() -> None:
     rs.add_argument("--apply-result", help="synthesis JSON produced by the host tool's native agent; applies through the same validation + goal gate")
     rs.set_defaults(fn=cmd_research)
     do = sub.add_parser("doctor");     do.add_argument("project"); do.set_defaults(fn=cmd_doctor)
+    ad = sub.add_parser("adapt");      ad.add_argument("project")
+    ad.add_argument("--dry-run", action="store_true",
+                    help="report what would change without touching anything")
+    ad.set_defaults(fn=cmd_adapt)
+    vi = sub.add_parser("vision");     vi.add_argument("project")
+    vi.add_argument("text", nargs="?", help="the owner's long-term goal, one sentence")
+    vi.add_argument("--why", help="why the goal changed (optional)")
+    vi.set_defaults(fn=cmd_vision)
     st = sub.add_parser("setup");  st.add_argument("--project", required=True)
     st.add_argument("--schedule", choices=["manual", "auto"], default="manual")
     st.add_argument("--at", default=None); st.add_argument("--strict", action="store_true"); st.set_defaults(fn=cmd_setup)

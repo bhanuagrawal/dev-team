@@ -75,6 +75,11 @@ off-machine (you generate; they never generate).
    see what users do" (instrumentation), the third a retention/traction number.
    The pipeline then orders every release against these — see the dev-team
    skill's GOAL MODE section.
+   **Also stamp `"profile_schema": 2`** (the team's current data shape) so the
+   project is born current. From then on `devteam adapt <project>` — step 0 of
+   every workflow run — keeps it that way as the team itself changes; a project
+   created by hand (no stamp) is adapted automatically on its first run instead
+   of silently missing whatever the team learned since.
 
 ## STEP 3 — signing + secrets + repo (agent does; user only backs up + passes tokens)
 ```bash
