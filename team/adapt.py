@@ -26,6 +26,20 @@ from . import goals
 
 SCHEMA = 2   # bump when a project needs new data/knowledge to work with the team
 
+
+def ask(what: str, how: str = "") -> dict:
+    """An owner ask: WHAT is missing, in plain words, and separately HOW to fix
+    it. The two are split because the owner reads the page and the command is
+    mechanical noise there — the page collapses it behind a click. Plain strings
+    are still accepted (older state wrote them)."""
+    return {"what": what.strip(), "how": (how or "").strip()}
+
+
+def ask_text(a) -> tuple[str, str]:
+    if isinstance(a, dict):
+        return str(a.get("what") or ""), str(a.get("how") or "")
+    return str(a or ""), ""
+
 # Keys the current team reads. Missing non-critical ones get the default below;
 # missing CRITICAL ones become an owner ask instead of an invented value.
 DEFAULTS = {
@@ -151,17 +165,23 @@ def run(project: Path, log: RunLog | None = None, apply: bool = True) -> dict:
         note("components_dir ← shared_components_dir (alias the prompts read)")
     missing_critical = [k for k in CRITICAL if not profile.get(k)]
     for k in missing_critical:
-        asks.append(f"profile has no '{k}' — the team cannot gate or ship without "
-                    f"it; re-run `devteam onboard {project}` or add it by hand")
+        asks.append(ask(
+            f"the team cannot gate or ship this project: its setup is missing "
+            f"'{k}'",
+            f"python3 cli.py onboard {project}   (or add '{k}' to "
+            f".pipeline/profile.json by hand)"))
 
     # 3. state keys ----------------------------------------------------------
     changes += _state_defaults(state)
 
     # 4. direction: ask, never invent ----------------------------------------
     if not (profile.get("goals") or {}).get("milestones"):
-        asks.append("THE LONG-TERM GOAL IS MISSING: one sentence from the owner, "
-                    f"what is this app for? Set it with: devteam vision "
-                    f"{project} \"...\"  (until then the team works goal-less)")
+        asks.append(ask(
+            "Nobody has said what this app is for long term — one sentence from "
+            "you sets the goal every release is then aimed at (until then the "
+            "team works from what it already knows)",
+            f'python3 cli.py vision {project} "what this app is for, in one '
+            f'sentence"'))
 
     # 5. stale goal links in the queue ---------------------------------------
     # A queue entry pointing at a branch that no longer exists would be invisible
@@ -180,9 +200,10 @@ def run(project: Path, log: RunLog | None = None, apply: bool = True) -> dict:
         else:
             q["advances"] = "none"
             fixed += 1
-            asks.append(f"queued task '{q.get('label')}' served a goal that no "
-                        "longer exists and there is no active goal to re-point it "
-                        "at — it is now declared off-goal (visible, not silent)")
+            asks.append(ask(
+                f"'{q.get('label')}' served a goal that no longer exists and there "
+                f"is no goal to re-point it at — it is now visible as off-goal",
+                f"python3 cli.py queue {project}   (review the queue)"))
     if fixed:
         note(f"re-pointed {fixed} queued task(s) whose goal no longer exists"
              + (f" → '{act['title']}'" if act else " → declared off-goal"))
@@ -194,9 +215,12 @@ def run(project: Path, log: RunLog | None = None, apply: bool = True) -> dict:
             isinstance(m, dict) and m.get("metric")
             for ms in p["milestones"] for m in (ms.get("measures") or []))
         if needs_metrics and not (pipeline_dir(project) / "research.json").exists():
-            asks.append("a goal measure is a number (e.g. weekly active users) but "
-                        "no research signals are collected yet — connect the "
-                        "analytics source, or the measure can only be guessed at")
+            asks.append(ask(
+                "one of the goals is measured by a number (weekly active users) "
+                "but nothing collects that number yet — until then it can only be "
+                "guessed at",
+                "declare the analytics connection in "
+                ".pipeline/profile.json['connections']"))
 
     # 7. conventions that point at files that no longer exist ---------------
     conventions = list(profile.get("conventions", []))
@@ -215,8 +239,11 @@ def run(project: Path, log: RunLog | None = None, apply: bool = True) -> dict:
         for old, new in repaired:
             note(f"convention path moved → {new} (was {old})")
     if dead:
-        asks.append(f"{len(dead)} convention path(s) no longer exist on disk "
-                    f"(the developer prompt marks them SKIP): {', '.join(dead[:3])}")
+        asks.append(ask(
+            f"the coding-convention file the team tells its developer to read is "
+            f"gone ({Path(dead[0]).name}), so runs proceed without the style law",
+            "fix .pipeline/profile.json['conventions'] — the team auto-repairs "
+            "paths it can trace, and leaves the ambiguous ones to you"))
 
     # 8. write (only if something changed) + snapshots + mirrors -------------
     # A standing owner ask is NOT "not current": the shape is fine, the question
@@ -256,14 +283,19 @@ def report(project: Path, res: dict, project_name: str | None = None,
         lines = [f"ADAPT {name}: up to date with the team (schema v{res['schema']}) "
                  "— nothing to change"]
         for a in res["asks"]:
-            lines.append(f"  ? OWNER ASK (standing): {a}")
+            what, how = ask_text(a)
+            lines.append(f"  ? OWNER ASK (standing): {what}"
+                         + (f"\n      how: {how}" if how else ""))
         return "\n".join(lines)
     head = (f"ADAPT {name} — WOULD do this (dry run, nothing written):"
             if dry else f"ADAPT {name} — brought it up to date with the team:")
     lines = [head]
     lines += [f"  + {c}" for c in res["changes"]]
     for a in res["asks"]:
-        lines.append(f"  ? OWNER ASK: {a}")
+        what, how = ask_text(a)
+        lines.append(f"  ? OWNER ASK: {what}")
+        if how:
+            lines.append(f"      how: {how}")
     if res["changes"]:
         lines.append(f"  (previous profile kept at .pipeline/profile.bak; page "
                      f"regenerated)")
