@@ -184,6 +184,14 @@ Its contract:
   stderr when the plan was not reviewed today — a skipped step 2 is visible
   instead of silent (a nudge, never a hard gate: a run with no LLM must still be
   able to ship).
+- **A verdict about code is checkable, so check it.** A `milestone_verdict` that
+  marks a TEXT-measured milestone met RETIRES it and re-aims every future
+  release, so before the plan is applied the orchestrator re-runs the cheap
+  check the synthesis names (grep the artifact for the measure's evidence). If
+  the check disagrees, do not apply the pivot: the plan's direction is the one
+  thing worth five minutes of verification, and an LLM verdict flips it.
+  Metric-measured milestones need no such check — code already evaluates those
+  and a code FAIL beats an LLM "met".
 Deterministic core, agent at the edges: collectors, schema, tree changes, queue
 impact, and the goal gate are all code — the LLM cannot smuggle in an unknown
 branch, a missing reason, work against a done or parked goal, or off-goal work

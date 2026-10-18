@@ -897,7 +897,7 @@ def cmd_plan(args: argparse.Namespace) -> int:
         # that this cycle changed nothing, and let the run continue to its ask.
         print(f"plan review could not finish ({e})")
         print()
-        print(research.plan_report(project))
+        print(research.plan_report(project, applied=False))
         print_page(project, "unchanged — the planner could not finish")
         return 2 if code == 2 else 1
     if not applied:
@@ -905,7 +905,7 @@ def cmd_plan(args: argparse.Namespace) -> int:
         print(f"  {pipeline_dir(project) / 'research-prompt.txt'}")
         print(f"then: devteam plan {project.name} --apply-result <the json it wrote>")
         print()
-    print(research.plan_report(project))
+    print(research.plan_report(project, applied=bool(applied)))
     if not applied:
         print_page(project, "nothing applied yet — this is the plan as it stands")
         return 0

@@ -293,7 +293,7 @@ Decide what to BUILD NEXT. Output STRICT JSON only (no prose, no code fence):
       "measures": [{{"text": "..."}}],
       "why": "why the plan had to move — the owner reads exactly this"}}
   ],
-  "milestone_verdict": {{"id": "<milestone id>", "met": true|false, "evidence": "grounded in the numbers/measures"}},
+  "milestone_verdict": {{"id": "<milestone id>", "met": true|false, "evidence": "grounded in the numbers/measures, and for a TEXT measure name the artifact you actually inspected (file/pattern) — this verdict decides the direction of every future release, so the owner (and the orchestrator) must be able to re-run your check"}},
   "dropped": [
     {{"label": "<exact label of an already-queued task you are removing>", "reason": "one line why it is no longer queued"}}
   ],
@@ -552,6 +552,10 @@ def research_apply(project: Path, result: dict, log: RunLog) -> None:
                                  explicit_drops=result.get("dropped", []))
     state["insights"] = result.get("insights", {})
     state["last_research_at"] = now_iso()
+    # The review block reports what this cycle did to the QUEUE from this string:
+    # tree changes and queue churn are different facts, and the review may not
+    # claim the queue held still while the plan replaced it.
+    state["last_plan_impact"] = block
     # Milestone verdicts: code evaluates metric measures (deterministic); the
     # synthesis's verdict is only recorded for measures code cannot check, and
     # code's FAIL always wins over an LLM "met". Retiring a milestone advances
@@ -839,10 +843,15 @@ def plan_review_line(project: Path) -> str:
             f'"{head}"{stale}')
 
 
-def plan_report(project: Path) -> str:
+def plan_report(project: Path, applied: bool = True) -> str:
     """The owner-facing review block: where we are heading in plain words, what
     is left, what the planner changed and why, and — the handover — the ONE task
-    this run builds. No ids, no paths, no commands."""
+    this run builds. No ids, no paths, no commands.
+
+    `applied` is False when this cycle changed nothing (the planner could not
+    finish): the block then says so instead of reporting the previous cycle's
+    churn as if it had just happened.
+    """
     from . import tree as tree_mod
     profile, state = profile_of(project), state_of(project)
     goals_block = goals.plan(profile) or {}
@@ -908,10 +917,34 @@ def plan_report(project: Path) -> str:
                  f"{project.name} log` shows all, `revert` undoes the last):")
         for e in recent[-4:]:
             L.append(f"    · {e.get('action')} '{e.get('node')}' — {e.get('why')}")
-    else:
-        L.append("  the plan:         unchanged this cycle — the queue still "
-                 "serves the same step")
+    # The TREE and the QUEUE are two different facts, and a cycle that leaves the
+    # tree alone can still replace every queued task (a milestone met, a pivot).
+    # Reporting "unchanged" on the strength of `tree_changes` alone told the owner
+    # the queue held still in the very cycle that rebuilt it, so the queue line is
+    # derived from the impact of the plan THIS cycle applied — never asserted.
+    L.append(_queue_move_line(state, lv, applied))
     return "\n".join(L)
+
+
+def _queue_move_line(state: dict, lv: dict, applied: bool) -> str:
+    """What this cycle did to the QUEUE, from the impact block of the plan it
+    applied (`state['last_plan_impact']`)."""
+    if not applied:
+        return ("  the queue:        unchanged by this cycle — the plan above is "
+                "the one that stands")
+    impact = str(state.get("last_plan_impact") or "")
+    if not impact:
+        # A state written before the impact was recorded: say that instead of
+        # asserting "unchanged", which we cannot know.
+        return ("  the queue:        no queue impact recorded for this cycle — the "
+                "planner records it every time it applies a plan")
+    moved = [ln.strip() for ln in impact.splitlines()
+             if ln.strip()[:1] in ("+", "x", "!")]
+    if moved:
+        return ("  the queue:        moved this cycle (see QUEUE IMPACT above — "
+                "every change has a reason and nothing was dropped silently)")
+    return (f"  the queue:        unchanged this cycle — {lv.get('queue', 0)} "
+            f"waiting, same step, and it is the step this run builds")
 
 
 def research_apply_file(project: Path, result_path: Path, log: RunLog) -> None:
