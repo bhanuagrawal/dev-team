@@ -66,6 +66,15 @@ off-machine (you generate; they never generate).
    output; src_root = composeApp/src/commonMain/kotlin;
    version_file = composeApp/build.gradle.kts; ci_workflow =
    ship-on-version-bump.yml; frozen_paths = core/event/**).
+   **Also write `profile.json['goals']`** — from the owner's own words in
+   intake: `vision` (the long-term thesis, one sentence) and `milestones`
+   (mid-term, in order: `{id, title, outcome, measures[]}` where a measure is
+   `{"text": "..."}` or, when GA4 can decide it, `{"metric": "...", "op": ">=",
+   "target": N}`). A brand-new app is worthless without a direction: the first
+   milestone is normally "the core loop works end-to-end", the second "we can
+   see what users do" (instrumentation), the third a retention/traction number.
+   The pipeline then orders every release against these — see the dev-team
+   skill's GOAL MODE section.
 
 ## STEP 3 — signing + secrets + repo (agent does; user only backs up + passes tokens)
 ```bash

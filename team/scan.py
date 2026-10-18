@@ -11,6 +11,7 @@ import re
 from pathlib import Path
 
 from .core import now_iso, profile_of, state_of
+from . import goals
 
 CORE_MOTION_TOKENS = [
     "AnimatedVisibility", "AnimatedContent", "Animatable", "crossfade",
@@ -144,6 +145,7 @@ def _queue_task(q: dict, seq: int) -> dict:
 
 def next_task(project: Path, seq: int, supervised: bool = False) -> dict | None:
     state = state_of(project)
+    profile = profile_of(project)
     # A queue entry whose label is already in the shipped ledger is delivered
     # work — never serve it again (label-level; a feature may legitimately
     # re-touch a shipped path, so path matching stays out of this check).
@@ -151,6 +153,14 @@ def next_task(project: Path, seq: int, supervised: bool = False) -> dict | None:
 
     def _code_task(q: dict) -> bool:
         return (q.get("type") in ("bugfix", "feature") and q.get("target")
+                and _norm_label(q.get("label")) not in shipped_labels)
+
+    def _goal_task(q: dict) -> bool:
+        """Any queued entry that is eligible work AND named a milestone — the
+        goal-linked head of the queue. Deterministic: the tag is data."""
+        return (q.get("type") in ("bugfix", "feature", "motion")
+                and q.get("target")
+                and str(q.get("advances") or "").strip() not in ("", "none")
                 and _norm_label(q.get("label")) not in shipped_labels)
 
     # Delivery-first escalation (owner decision 2026-10-16: the pipeline is
@@ -161,12 +171,22 @@ def next_task(project: Path, seq: int, supervised: bool = False) -> dict | None:
         for q in state.get("queue", []):
             if _code_task(q):
                 return _queue_task(q, seq)
+    # GOAL MODE (owner decision 2026-10-18: "run a workflow that leads towards
+    # goals"). When the project declares a goal tree, work that ADVANCES the
+    # active milestone outranks the un-animated-surface list — otherwise polish
+    # (which is always available and always green) structurally starves the
+    # product work, and releases accumulate without a direction. Deterministic:
+    # ordering follows the queue, which research wrote in goal order.
+    if goals.has_goals(profile):
+        for q in state.get("queue", []):
+            if _goal_task(q):
+                return _queue_task(q, seq)
     for t in scan_surfaces(project):
         if t.get("status") != "unanimated":
             continue
         if t.get("risk") == "supervised" and not supervised:
             continue
-        return task_for(profile_of(project), t, seq)
+        return task_for(profile, t, seq)
     # surfaces exhausted → the research queue refills (first eligible entry
     # only; the nightly rhythm is ONE task per run). Entries already shipped
     # are skipped, otherwise a stale head would block the queue forever;

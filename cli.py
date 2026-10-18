@@ -18,7 +18,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from team import alarm, emulator, scribe, scan, scheduler, shipper  # noqa: E402
+from team import alarm, emulator, goals, scribe, scan, scheduler, shipper  # noqa: E402
 from team.core import (  # noqa: E402
     RunLog, TEAM_ROOT, agent_argv, load_json, now_iso, pipeline_dir, profile_of,
     resolve_model, resolve_project, role_cfg, run as sys_run, runtimes,
@@ -380,6 +380,8 @@ def cmd_queue(args: argparse.Namespace) -> None:
                      "reason": args.reason or "added by the orchestrator"}
             if args.risk:
                 entry["risk"] = args.risk
+            if getattr(args, "advances", None):
+                entry["advances"] = args.advances
         if args.supersedes:
             known = {qmod._norm(qmod.label_of(q)) for q in state.get("queue", [])}
             known |= {qmod._norm(q.get("id", "")) for q in state.get("queue", [])}
@@ -496,6 +498,10 @@ def cmd_record(args: argparse.Namespace) -> None:
     save_state(project, state)
     scribe.update(project)
     print(f"recorded: {entry['result']} {entry['task_id']}")
+    # Where this release sits in the goal tree — computed from data, no LLM.
+    line = goals.report_line(profile_of(project), state, task)
+    if line:
+        print(line)
     # The orchestrator relays the research agents' flags mechanically —
     # code prints them here on EVERY record; the run banner quotes this block.
     print_agent_flags(project)
@@ -542,6 +548,15 @@ def cmd_status(args: argparse.Namespace) -> None:
     surfaces = scan.scan_surfaces(project)
     print(f"== {profile['name']} ==")
     print(f"repo:       {profile['repo_slug']} (branch {profile['main_branch']})")
+    # Where the work is going (deterministic, LLM-free): vision → milestone →
+    # queue. A project with no goal tree prints a one-line goal-less notice.
+    print(goals.goal_block(profile, state))
+    if state.get("queue"):
+        acts = []
+        for q in state["queue"]:
+            mid = str(q.get("advances") or "").strip()
+            acts.append(f"{q.get('label')} → {mid or '(unattributed)'}")
+        print("queue:      " + "; ".join(acts[:6]))
     print(f"targets:    {len(profile['targets'])} shipped-do: "
           f"{sum(1 for s in surfaces if s['status'] == 'shipped')} "
           f"animated: {sum(1 for s in surfaces if s['status'] == 'animated')} "
@@ -591,7 +606,10 @@ def cmd_research(args: argparse.Namespace) -> int:
     from team import research, doctor
     doctor.run_doctor(project, log)
     try:
-        research.research_run(project, log, use_llm=not args.no_llm)
+        if args.apply_result:
+            research.research_apply_file(project, Path(args.apply_result), log)
+        else:
+            research.research_run(project, log, use_llm=not args.no_llm)
     except SystemExit as e:
         if e.code in (0, None):
             return 0
@@ -682,6 +700,8 @@ def main() -> None:
     q.add_argument("--label"); q.add_argument("--target"); q.add_argument("--reason")
     q.add_argument("--risk"); q.add_argument("--position", choices=["head", "tail"],
                                              default="head")
+    q.add_argument("--advances", help="milestone id this task serves "
+                                      "(profile.goals.milestones[].id)")
     q.add_argument("--supersedes", action="append", default=[])
     q.set_defaults(fn=cmd_queue)
     rh = sub.add_parser("run-headless"); rh.add_argument("project"); rh.add_argument("--task-spec", required=True); rh.add_argument("--supervised", action="store_true"); rh.set_defaults(fn=cmd_run_headless)
@@ -696,7 +716,9 @@ def main() -> None:
     rec.set_defaults(fn=cmd_record)
     po = sub.add_parser("poll");       po.add_argument("project"); po.add_argument("--tail", type=int, default=60); po.set_defaults(fn=cmd_poll)
     a = sub.add_parser("alarm");       a.add_argument("project"); a.set_defaults(fn=cmd_alarm)
-    rs = sub.add_parser("research");   rs.add_argument("project"); rs.add_argument("--no-llm", action="store_true"); rs.set_defaults(fn=cmd_research)
+    rs = sub.add_parser("research");   rs.add_argument("project"); rs.add_argument("--no-llm", action="store_true")
+    rs.add_argument("--apply-result", help="synthesis JSON produced by the host tool's native agent; applies through the same validation + goal gate")
+    rs.set_defaults(fn=cmd_research)
     do = sub.add_parser("doctor");     do.add_argument("project"); do.set_defaults(fn=cmd_doctor)
     st = sub.add_parser("setup");  st.add_argument("--project", required=True)
     st.add_argument("--schedule", choices=["manual", "auto"], default="manual")

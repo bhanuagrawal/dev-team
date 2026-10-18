@@ -19,6 +19,7 @@ from pathlib import Path
 
 from . import scan
 from .core import RunLog, now_iso, profile_of, run, save_state, state_of
+from . import goals
 from . import queue as queue_mod
 
 MAX_QUEUE = 6
@@ -236,6 +237,8 @@ def research_collect(project: Path, log: RunLog) -> dict:
 
 PROMPT_TMPL = """You are the research/product agent for app "{project}".
 
+{goals}
+
 You are given research collected by deterministic code:
 {research}
 
@@ -246,8 +249,13 @@ Decide what to BUILD NEXT. Output STRICT JSON only (no prose, no code fence):
     {{"type": "motion|bugfix|feature|investigation", "label": "...",
       "target": "<exact surface path for motion; short topic otherwise>",
       "priority": 1, "reason": "one line grounded in research",
+      "advances": "<milestone id this task serves, or 'none'>",
       "supersedes": ["<exact label of an already-queued task this makes irrelevant>"]}}
   ],
+  "off_goal": [
+    {{"label": "<exact queue label you are keeping even though it advances nothing>", "reason": "one line: why it is still worth a run"}}
+  ],
+  "milestone_verdict": {{"id": "<milestone id>", "met": true|false, "evidence": "grounded in the numbers/measures"}},
   "dropped": [
     {{"label": "<exact label of an already-queued task you are removing>", "reason": "one line why it is no longer queued"}}
   ],
@@ -256,6 +264,21 @@ Decide what to BUILD NEXT. Output STRICT JSON only (no prose, no code fence):
   ]
 }}
 Rules:
+- GOAL DISCIPLINE (above all else): when a goal tree is given, the work you
+  queue must MOVE THE ACTIVE MILESTONE — order the queue so the entries that
+  most directly advance it come first. Every queue entry carries "advances"
+  with a milestone id from the tree. If a task advances nothing, set
+  "advances": "none" AND list its label in "off_goal" with a reason — off-goal
+  work is allowed but never silent. Validation rejects unknown ids, missing
+  "advances", and entries pointing at a milestone that is already done. The
+  entry's "reason" must name the milestone MEASURE it serves, so the mapping is
+  auditable in the run log (a task that cannot cite a measure is off-goal).
+- MILESTONE VERDICT: judge the active milestone honestly against its measures.
+  Metric measures are checked by code too — do not contradict them. Only claim
+  met:true when the evidence supports it; if the milestone is met, the next
+  entry is to propose the NEXT milestone (as a feature/bugfix that starts it,
+  or an issues_to_file for an owner decision) rather than inventing off-goal
+  polish.
 - Buildability bias: the pipeline must be able to END EVERY RUN IN A BUILD.
   Queue executable work (motion/bugfix/feature) first; investigations are
   capped at 2 entries and each MUST, in its "reason", name the owner decision
@@ -289,7 +312,8 @@ Rules:
   reappear unless the underlying cause clearly changed.
 - no new domain features unless the research/constraints say the freeze lifted.
 - issues_to_file ONLY for decisions needing the owner (e.g. re-enabling
-  disabled features, analytics instrumentation sign-off, a freeze lift).
+  disabled features, analytics instrumentation sign-off, a freeze lift,
+  an owner call on the next milestone when the active one is met).
   PRODUCTION PROMOTION IS NEVER SUCH A DECISION: promoting a built release
   beyond internal testing is human-only and the owner's own manual step in Play
   Console. Never ask about it, never file an issue about it, never queue work
@@ -375,7 +399,19 @@ def _validate(result: dict, research: dict | None = None) -> str | None:
         if not executable and not result.get("issues_to_file"):
             return ("queue has no executable work and no owner-ask issue — "
                     "a run must end in a build, an owner ask, or both")
+    if not isinstance(result.get("off_goal", []), list):
+        return "'off_goal' must be a list"
     return None
+
+
+def _research_signals(project: Path) -> dict:
+    """The signals collected for THIS cycle (written by research_collect just
+    before synthesis) — used for deterministic metric-measure evaluation."""
+    f = project / ".pipeline" / "research.json"
+    try:
+        return json.loads(f.read_text()).get("signals", {}) or {}
+    except Exception:
+        return {}
 
 
 def _llm(prompt: str, log: RunLog, timeout: int = 900) -> str:
@@ -405,6 +441,46 @@ def research_apply(project: Path, result: dict, log: RunLog) -> None:
                                  explicit_drops=result.get("dropped", []))
     state["insights"] = result.get("insights", {})
     state["last_research_at"] = now_iso()
+    # Milestone verdicts: code evaluates metric measures (deterministic); the
+    # synthesis's verdict is only recorded for measures code cannot check, and
+    # code's FAIL always wins over an LLM "met". Retiring a milestone advances
+    # the active pointer deterministically (goals.status_of).
+    profile = profile_of(project)
+    act = goals.active_milestone(profile, state)
+    verdict = result.get("milestone_verdict") or {}
+    if act:
+        code_ok, evidence = goals.check_measures(act, _research_signals(project))
+        if code_ok is False:
+            goals.record_verdict(state, act["id"], "active",
+                                 f"metric measure failed: {evidence}", "code")
+            log(f"goal: [{act['id']}] not met — {evidence}")
+        elif code_ok is True and verdict.get("id", act["id"]) == act["id"]:
+            goals.record_verdict(state, act["id"], "done",
+                                 f"all metric measures pass: {evidence}", "code")
+            log(f"goal: [{act['id']}] MET by code — {evidence}; advancing to the "
+                "next milestone")
+        elif verdict.get("id") == act["id"]:
+            goals.record_verdict(state, act["id"],
+                                 "done" if verdict.get("met") else "active",
+                                 str(verdict.get("evidence", "")), "research")
+            log(f"goal: [{act['id']}] verdict "
+                f"{'MET' if verdict.get('met') else 'not met'} (research) — "
+                f"{str(verdict.get('evidence',''))[:120]}")
+        if verdict.get("id") and verdict.get("id") != act["id"]:
+            log(f"goal: ignored verdict for '{verdict['id']}' — the active "
+                f"milestone is '{act['id']}'")
+    elif verdict.get("id") and goals.milestone(profile, str(verdict["id"])):
+        log(f"goal: verdict for '{verdict['id']}' ignored — every milestone is "
+            "already done; the next one must come from the owner")
+    for q in state.get("queue", []):
+        mid = goals.queue_entry_milestone(q, profile, state)
+        ms = goals.milestone(profile, mid) if mid else None
+        q["advances"] = mid or q.get("advances") or ""
+        if ms:
+            log(f"  goal: '{q['label'][:40]}' → [{ms['id']}] {ms['title'][:60]}")
+    for og in (result.get("off_goal") or []):
+        log(f"  goal: OFF-GOAL '{str(og.get('label',''))[:40]}' — "
+            f"{str(og.get('reason',''))[:80]}")
     from pathlib import Path as _P
     research_file = _P(project) / ".pipeline" / "research.json"
     try:
@@ -494,21 +570,64 @@ def capability_upgrades(signals: dict, profile: dict, project: Path | None = Non
     return up
 
 
+def render_prompt(project: Path, research: dict, log: RunLog | None = None) -> str:
+    """The exact synthesis prompt (goals + research + rules). Exported by
+    --no-llm so a host tool that has no subprocess command can hand it to its
+    OWN native agent verbatim, then apply the returned JSON with
+    `research --apply-result <file>` — same validation, same goal gate."""
+    profile, state = profile_of(project), state_of(project)
+    if log and goals.has_goals(profile):
+        act = goals.active_milestone(profile, state)
+        log(f"goal: active milestone = {act['id'] if act else 'none'} "
+            f"({(profile.get('goals') or {}).get('vision','')[:80]})")
+    return PROMPT_TMPL.format(project=research["project"],
+                              goals=goals.prompt_block(profile, state),
+                              research=json.dumps(research, indent=2),
+                              max_queue=MAX_QUEUE)
+
+
+def research_apply_file(project: Path, result_path: Path, log: RunLog) -> None:
+    """Apply a synthesis result produced elsewhere (the host tool's native
+    agent). Identical gates to the in-process LLM path: schema, impact review,
+    and the goal gate. Nothing is trusted just because it came from an agent."""
+    try:
+        result = _extract_json(result_path.read_text())
+    except Exception as e:
+        raise SystemExit(f"cannot read synthesis result {result_path}: {e}")
+    try:
+        research = json.loads((project / ".pipeline" / "research.json").read_text())
+    except Exception:
+        research = None
+    err = _validate(result, research)
+    if not err:
+        err = goals.validate_advances(result, profile_of(project), state_of(project))
+    if err:
+        log(f"research: apply-result REJECTED — {err}")
+        raise SystemExit("synthesis result rejected: " + err)
+    log(f"research: apply-result accepted ({len(result.get('queue', []))} entries)")
+    research_apply(project, result, log)
+
+
 def research_run(project: Path, log: RunLog, use_llm: bool = True) -> None:
     research = research_collect(project, log)
     if not use_llm:
-        log("research: --no-llm stop; agent reads .pipeline/research.json directly")
+        # Hand the prompt to the calling agent: the team's contract is "the LLM
+        # proposes, code validates and applies", and the host tool may be the
+        # only thing that can spawn an agent (no roles.*.command configured).
+        p = project / ".pipeline" / "research-prompt.txt"
+        p.write_text(render_prompt(project, research, log))
+        log(f"research: --no-llm stop; prompt → {p.name} "
+            "(apply the agent's JSON with `research <project> --apply-result <file>`)")
         return
-    prompt = PROMPT_TMPL.format(project=research["project"],
-                                research=json.dumps(research, indent=2),
-                                max_queue=MAX_QUEUE)
-    log("~ synthesis: one LLM call (strict JSON, code-validated)")
+    prompt = render_prompt(project, research, log)
     result, err = None, ""
     for attempt in (1, 2):
         raw = _llm(prompt, log)
         try:
             result = _extract_json(raw)
             err = _validate(result, research)
+            if not err:
+                err = goals.validate_advances(result, profile, state) or ""
             if not err:
                 break
         except json.JSONDecodeError as e:

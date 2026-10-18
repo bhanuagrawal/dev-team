@@ -124,7 +124,25 @@ executable, the run's deliverable is the OWNER ASK (alarm + question) — that
 is "stopping honestly", not idling. Never ask what to do; never ask about
 things an agent can decide. Question budget: zero unless a gate truly blocks.
 
+## GOAL MODE — direction of every release (owner decision 2026-10-18)
+Companies run on long/mid/short-term goals; so does this pipeline, and the
+goals are DATA, not a new agent:
+- **long term** — `profile['goals']['vision']`: the app's thesis (owner-authored).
+- **mid term** — `profile['goals']['milestones']`: an outcome + measures, in
+  order. The ACTIVE milestone is the first not-done one (deterministic).
+- **short term** — the existing research queue; every entry must name the
+  milestone it advances in `advances` (`off_goal` declares the exceptions).
+Division of labour: the synthesis only PROPOSES (tags tasks, judges a milestone
+whose measures are text); CODE DECIDES everything derivable — active milestone,
+metric-measure evaluation (`goals.check_measures`; a code FAIL always beats an
+LLM "met"), goal-linked ordering in `pick`, and the GOALS/report lines. A run
+banner therefore always states the direction: `goal: [m1-…] <milestone> ← <task>`.
+When the active milestone is met, the next entry is the NEXT milestone (research
+proposes it; an owner call becomes an issues_to_file ask) — never invented polish.
+A project with no `goals` runs exactly as before (goal-less mode).
+
 ## Nightly run procedure (also works interactively)
+
 1. `python3 <team>/cli.py status <project>` — see queue, shipped, last run.
 2. If nothing executable remains → REFILL the queue:
    run `python3 <team>/cli.py research <project>` (code agent: pulls GA4 +
@@ -136,10 +154,19 @@ things an agent can decide. Question budget: zero unless a gate truly blocks.
    and the CLI prints a `QUEUE IMPACT` block. If research adds nothing executable
    → `devteam alarm` + OWNER ASK, then stop (see the run-outcome contract). No
    inventing work to fill silence; no analysis-only endings.
+   HOST TOOL HAS NO SUBPROCESS? `research <project> --no-llm` writes
+   `.pipeline/research-prompt.txt` (the exact prompt, goal tree included) —
+   hand it to your OWN native agent, then apply its JSON with
+   `research <project> --apply-result <file>`; the same schema, impact-review
+   and goal gates run in code (nothing is trusted just because an agent said it).
 3. DETERMINISTIC PICK (runbook step 3 is code now):
    `python3 <team>/cli.py pick <project>` [--supervised]
    → returns the next task spec file + worktree/prompt command bundle:
-     priority order: first safe un-animated surface → research queue head
+     priority order: (a) delivery-restoring code task after a failed run;
+     (b) GOAL MODE — when the project declares `profile['goals']`, the queue
+     entry whose `advances` names a live milestone (goal-linked work outranks
+     polish, so cosmetic motion can never starve product work);
+     (c) first safe un-animated surface; (d) remaining queue head
      (bugfix/feature only; investigation stays yours to perform per step 3).
    rc=2 nothing actionable (→ research/step-2 refill + idle rules)
    rc=3 only supervised remain (ask human). The pick is code-verifiable; you
