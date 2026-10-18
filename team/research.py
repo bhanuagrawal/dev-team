@@ -798,8 +798,15 @@ def plan_report(project: Path) -> str:
     if act:
         L.append(f"  working toward:   {act.get('title', '')}")
     elif goals_block:
-        L.append("  working toward:   every step is done — the next one is yours "
-                 "to name")
+        # A vision with no milestones is not "done" — proposing the first one is
+        # the planner's job (owner directive 2026-10-18: the owner owns only the
+        # vision).
+        if (goals.plan(profile) or {}).get("milestones"):
+            L.append("  working toward:   every step is done — the next one is yours "
+                     "to name")
+        else:
+            L.append("  working toward:   no milestone proposed yet — the planner "
+                     "proposes the first one under the vision")
     if not queue:
         L.append("  left to do:       nothing executable — this run is an ask to "
                  "you, not a build")
@@ -814,7 +821,8 @@ def plan_report(project: Path) -> str:
             # any branch counts, not just a milestone: work may serve a sub-goal
             node = goals.find_node(profile, mid) if mid else None
             serv = f"   serves \"{node['title']}\"" if node \
-                else "   (no goal declared)"
+                else ("   (off-goal — declared)" if mid == "none"
+                      else "   (no goal declared)")
             mark = "  ← NEXT" if i == 1 else ""
             L.append(f"    {i}. {label}{mark}{serv}")
     # Only what THIS review changed counts as "the plan moved" — a change made by

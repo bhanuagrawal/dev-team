@@ -199,9 +199,15 @@ def record_verdict(state: dict, mid: str, verdict: str, evidence: str,
 
 def queue_entry_milestone(entry: dict, profile: dict, state: dict) -> str:
     """The milestone a queue entry advances: an explicit 'advances' tag, else —
-    for legacy/goal-less entries — the active milestone's id (so every shipped
-    release still reports a direction). Empty when there is nothing to say."""
+    for legacy entries that never carried one — the active milestone's id (so
+    every shipped release still reports a direction).
+
+    An EXPLICIT "none" is returned as-is: the synthesis declared that work
+    off-goal (and had to list it in `off_goal`), so silently re-pointing it at
+    the active milestone would make the auditable mapping a lie."""
     mid = str(entry.get("advances") or "").strip()
+    if mid == "none":
+        return "none"
     if mid and find_node(profile, mid):
         return mid   # any branch counts, including a sub-goal deeper in the tree
     act = active_milestone(profile, state)
@@ -273,9 +279,12 @@ def goal_block(profile: dict, state: dict) -> str:
     act = active_milestone(profile, state)
     if act:
         lines.append(f"  working on: {act['title']}")
-    else:
+    elif p["milestones"]:
         lines.append("  working on: nothing — every goal is done; the team should "
                      "propose the next one")
+    else:
+        lines.append("  working on: no milestone yet — the planner proposes the "
+                     "first one under your goal (you own only the goal itself)")
     pend = [e for e in (state.get("tree_changes") or []) if not e.get("reviewed")]
     if pend:
         lines.append(f"  the team changed the plan {len(pend)}x since you last "
@@ -305,7 +314,17 @@ def prompt_block(profile: dict, state: dict) -> str:
                                 f'{x.get("op","<=")} {x.get("target")}')
                 elif x.get("text"):
                     body.append(f'      measure: {x["text"]}')
-    body.append(f'ACTIVE MILESTONE: {act["id"] if act else "none (all done)"}')
+    if act:
+        body.append(f'ACTIVE MILESTONE: {act["id"]}')
+    elif p["milestones"]:
+        body.append("ACTIVE MILESTONE: none (every milestone is done — retiring one "
+                    "advances the pointer; proposing the next is an owner call)")
+    else:
+        body.append("ACTIVE MILESTONE: none yet — the vision has no milestones. "
+                    "YOUR JOB THIS CYCLE: propose the first one (goal_changes: "
+                    "action=add, kind=milestone, parent=vision, with an outcome and "
+                    "measures) and aim the queue at it. Never ask the owner for "
+                    "milestones — you own the tree below the vision.")
     return "\n".join(body)
 
 
@@ -327,7 +346,14 @@ def report_line(profile: dict, state: dict, task: dict | None = None) -> str:
     ms = milestone(profile, mid) if mid else None
     if ms:
         return f"goal: [{ms['id']}] {ms['title']}" + (f" ← {label}" if label else "")
-    return f"goal: {act['title'] if act else 'all milestones done'}"
+    if act:
+        return f"goal: {act['title']}"
+    # A vision with no milestones under it yet is NOT "all done" — the planner
+    # still has to propose the first one (owner directive: the team proposes
+    # milestones, the owner owns only the vision).
+    if plan(profile)["milestones"]:
+        return "goal: all milestones done — the next one needs the owner or the planner"
+    return "goal: vision set, no milestone yet — the planner proposes the first one"
 
 
 # --------------------------------------------------------------------------- #

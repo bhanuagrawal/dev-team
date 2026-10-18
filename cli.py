@@ -941,7 +941,9 @@ def cmd_status(args: argparse.Namespace) -> None:
         parts = []
         for mid, n in groups.items():
             node = goals.find_node(profile, mid) if mid else None
-            what = node["title"] if node else ("no goal declared" if not mid else mid)
+            what = node["title"] if node else (
+                "off-goal (declared)" if mid == "none" else
+                ("no goal declared" if not mid else mid))
             parts.append(f"{n} serving \"{what}\"")
         print(f"queue:      {len(state['queue'])} waiting — " + "; ".join(parts))
     print(f"targets:    {len(profile['targets'])} shipped-do: "
