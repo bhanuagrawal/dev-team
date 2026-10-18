@@ -16,6 +16,7 @@ import json
 import re
 import subprocess  # noqa: F401
 from pathlib import Path
+from typing import Any
 
 from . import scan
 from .core import (RunLog, now_iso, pipeline_dir, profile_of, run, save_json,
@@ -24,6 +25,30 @@ from . import goals
 from . import queue as queue_mod
 
 MAX_QUEUE = 6
+# TASK SIZING (owner decision 2026-10-18: "plan lead task not too small, [the
+# developer] agent might take 20-25 min to complete it"). Every queued entry is
+# ONE developer session — not a micro-edit that burns a release. The band is a
+# gate (code-validated `effort_min`), the target is guidance to the synthesis.
+TARGET_EFFORT_MIN = 25
+MIN_EFFORT_MIN = 15
+# The ceiling is deliberately tight: the owner asked for ~20-25 minutes, and a
+# generous ceiling would let the queue drift back to half-done mega-tasks. Above
+# this, work must be SPLIT (each half still reusable/verifiable on its own).
+MAX_EFFORT_MIN = 35
+# motion is sized by its surface (one surface per entry, enforced elsewhere), so
+# only these types carry the sizing gate.
+SIZED_TYPES = ("feature", "bugfix", "investigation")
+
+
+def _as_int(value: Any) -> int | None:
+    """A minute count from the plan, tolerant of '25' but not of prose."""
+    if isinstance(value, bool) or value is None:
+        return None
+    try:
+        return int(str(value).strip())
+    except (TypeError, ValueError):
+        return None
+
 
 
 # --------------------------------------------------------------------------- #
@@ -249,6 +274,7 @@ Decide what to BUILD NEXT. Output STRICT JSON only (no prose, no code fence):
   "queue": [
     {{"type": "motion|bugfix|feature|investigation", "label": "...",
       "target": "<motion: the exact surface path; feature/bugfix: the repo-relative path(s) you will edit, comma-separated — this BECOMES the developer's edit allow-list, so no prose here; investigation: a short topic>",
+      "effort_min": 25,
       "priority": 1, "reason": "one line grounded in research",
       "advances": "<milestone id this task serves, or 'none'>",
       "supersedes": ["<exact label of an already-queued task this makes irrelevant>"]}}
@@ -310,6 +336,21 @@ Rules:
   entry is to propose the NEXT milestone (as a feature/bugfix that starts it,
   or an issues_to_file for an owner decision) rather than inventing off-goal
   polish.
+- SIZE EVERY ENTRY — a queue entry is ONE developer session, and the owner's
+  target is ~20-25 minutes of real work (hard band 15-35). Set `effort_min` to
+  your honest estimate in minutes; code rejects entries outside the band and
+  prints a SIZING line for the owner.
+  - TOO SMALL (below 15): do NOT queue micro-work (a one-line fix, a single
+    string, one test file, a tweak). FOLD it into the related entry — list that
+    entry's exact label in your new entry's "supersedes" — or bundle sibling
+    micro-changes into one coherent entry. A release costs a version bump, a CI
+    run and an internal-testing build; spending it on five minutes of edits
+    wastes the pipeline.
+  - TOO BIG (above 35): SPLIT it into sequential entries that each stand alone
+    and each still deliver something a user could see. One entry must be
+    finishable, verifiable and releasable in a single session.
+  - Exception: the delivery-restoring entry (signals.ci red, queue[0]) may be
+    any size — restoring delivery outranks sizing.
 - 'target' is the developer's file allow-list, not a description: for
   feature/bugfix it must be repo-relative PATH(S) (files, dirs or globs, e.g.
   'app/src/main/java/**/ui/Foo.kt'); put the explanation in 'reason'. A prose
@@ -391,6 +432,31 @@ def _validate(result: dict, research: dict | None = None) -> str | None:
                     and q.get("type") not in ("bugfix", "feature"):
                 return ("signals.ci is red — the first queue entry must be the "
                         "bugfix/feature that restores delivery")
+        if q.get("type") in SIZED_TYPES:
+            eff = _as_int(q.get("effort_min"))
+            # The delivery-restoring head is the fire: size does not gate it.
+            delivery_fix = bool(
+                research is not None and q is result["queue"][0]
+                and (research.get("signals", {}).get("ci", {}) or {}).get("last_conclusion")
+                == "failure")
+            if eff is None:
+                return (f"queue entry '{q.get('label')}' has no integer "
+                        f"'effort_min' — size every entry in MINUTES of developer "
+                        f"work (target ~{TARGET_EFFORT_MIN}, band "
+                        f"{MIN_EFFORT_MIN}-{MAX_EFFORT_MIN}); a run is one developer "
+                        "session, not a micro-edit")
+            if eff < MIN_EFFORT_MIN and not delivery_fix:
+                return (f"queue entry '{q.get('label')}' is sized {eff} min — below "
+                        f"the {MIN_EFFORT_MIN}-minute floor. A run is one developer "
+                        "(+ verification + release) session, so fold this micro-work "
+                        "into the related entry (name that entry's exact label in "
+                        "'supersedes') or bundle sibling micro-changes into ONE "
+                        "coherent entry of ~20-25 minutes")
+            if eff > MAX_EFFORT_MIN and not delivery_fix:
+                return (f"queue entry '{q.get('label')}' is sized {eff} min — above "
+                        f"the {MAX_EFFORT_MIN}-minute ceiling: SPLIT it into "
+                        "sequential entries that each stand alone and each still "
+                        "deliver something verifiable in one session")
         if q.get("type") in ("feature", "bugfix") and not target_looks_like_paths(q.get("target")):
             return (
                 f"{q.get('type')} queue entry '{q.get('label')}' names no "
@@ -824,7 +890,14 @@ def plan_report(project: Path) -> str:
                 else ("   (off-goal — declared)" if mid == "none"
                       else "   (no goal declared)")
             mark = "  ← NEXT" if i == 1 else ""
-            L.append(f"    {i}. {label}{mark}{serv}")
+            eff = _as_int(q.get("effort_min"))
+            size = f"   ~{eff} min" if eff else ""
+            L.append(f"    {i}. {label}{mark}{serv}{size}")
+        sizes = [e for e in (_as_int(q.get("effort_min")) for q in queue) if e]
+        if sizes:
+            L.append(f"  SIZING:           {len(sizes)} estimated · "
+                     f"{min(sizes)}–{max(sizes)} min per task (target "
+                     f"~{TARGET_EFFORT_MIN}) · ~{sum(sizes)} min of work queued")
     # Only what THIS review changed counts as "the plan moved" — a change made by
     # an earlier cycle today must not be re-reported every run.
     n_made = int(lv.get("changes_count") or 0)

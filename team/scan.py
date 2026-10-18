@@ -140,6 +140,10 @@ def _queue_task(q: dict, seq: int) -> dict:
                     "targets": (q["target"] if isinstance(q["target"], list)
                                 else [q["target"]])},
         "risk": q.get("risk", "safe"),
+        # The expected size of THIS session travels with the task: the developer
+        # prompt shows it (the whole spec is dumped for the agent), so a task is
+        # worked at its intended depth instead of being gold-plated or rushed.
+        "effort_min": q.get("effort_min"),
         # The leaf carries its branch with it: the developer prompt shows which
         # goal this run serves, and `record` attributes the shipped leaf from the
         # spec instead of re-matching the label (which the next refill rewrites).

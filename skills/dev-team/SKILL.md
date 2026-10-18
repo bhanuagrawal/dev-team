@@ -271,6 +271,14 @@ never silently blocking.
    - Research/planner defaults to EXECUTABLE work (motion/bugfix/feature);
      investigations are capped at 2 and must each name the owner decision or code
      task they feed.
+   - SIZE IS PART OF THE PLAN (owner decision 2026-10-18: *"plan lead task not too
+     small, [the developer] agent might take 20-25 min to complete it"*): every
+     feature/bugfix/investigation entry carries `effort_min` — minutes of real
+     developer work, target ~20-25, hard band 15-35, enforced in code (a
+     too-small entry must be folded into the related one via `supersedes` or
+     bundled with its siblings; a too-big one must be split). The review block
+     prints a `SIZING` line, and the estimate travels into the developer prompt.
+     The delivery-restoring head (red CI) is exempt — the fire outranks sizing.
    - Every cycle runs an IMPACT REVIEW: the synthesis must judge each
      already-queued task; the CLI prints a `QUEUE IMPACT` block (added / kept /
      replaced / obsolete / dropped). A queued task can never vanish silently.
@@ -309,14 +317,21 @@ never silently blocking.
 4. Compose the task spec JSON:
    {"id": "dt-<label-slug>-<seq>", "type": "motion|bugfix|feature|investigation",
     "surface": {"label": "<label>", "targets": ["<repo-relative path(s)>"]},
-    "risk": "safe", "created": "<iso>"}
-   Write it to `.pipeline/tasks/<id>.json`.
+    "risk": "safe", "effort_min": 25, "created": "<iso>"}
+   Write it to `.pipeline/tasks/<id>.json`. `effort_min` (from the picked queue
+   entry) is the expected size of ONE developer session — the developer prompt
+   shows it, so the task is worked at its intended depth rather than gold-plated
+   or rushed.
 5. Prepare the sandbox (deterministic git plumbing is code, not you):
    `python3 <team>/cli.py worktree-start <project> --task-id <id>`
    → WORKTREE_PATH / WORKTREE_BRANCH / WORKTREE_BASE.
 6. Get the exact developer prompt (keep it verbatim):
    `python3 <team>/cli.py developer-prompt <project> .pipeline/tasks/<id>.json`
 7. SPAWN THE DEVELOPER AS A SUBAGENT — your tool's own native mechanism:
+   - budget the session at the task's `effort_min` (~20-25 min is the norm for a
+     healthy entry): one coherent change, verified, no gold-plating beyond the
+     spec. If the agent is clearly done in a few minutes, the entry was too small
+     — say so in the run report and fold such work into the next plan cycle.
    - agent prompt = the exact prompt from step 6
    - run with cwd = WORKTREE_PATH (pass this in the subagent's initial
      instruction: "work ONLY inside directory <WORKTREE_PATH>")
