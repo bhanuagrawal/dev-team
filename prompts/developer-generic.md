@@ -19,7 +19,12 @@ HARD RULES:
    default values/strings.xml AND every locale file the profile declares.
    A localization gate will hard-fail otherwise.
 3. Never touch files outside this task's scope, never fix unrelated pre-existing
-   issues you notice — note them at the end instead.
+   issues you notice — note them at the end instead. In particular, NEVER change a
+   version or pin (dependency, Gradle wrapper, SDK/API level, plugin) to work
+   around a problem that only exists in your LOCAL environment (missing/corrupt
+   build caches, a download timeout, a machine-local toolchain gap). Report the
+   environment problem in your final note instead: the pipeline repairs the
+   environment, and an unrelated pin change in the verified diff fails the run.
 4. Do NOT commit. Do NOT push. Do NOT bump versions. Leave all changes UNCOMMITTED
    in the working tree; the pipeline commits after its own gates pass.
 5. Self-check before finishing: run {compile_cmd} and {test_cmd} and make sure

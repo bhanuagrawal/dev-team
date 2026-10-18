@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import json
 import subprocess
+import sys
 from pathlib import Path
 
 from . import verify
@@ -29,6 +30,23 @@ from .core import (
 )
 
 RUN_BASE = ".pipeline/worktrees"
+
+# A profile `conventions` entry is a path the developer is told to read before
+# writing code ("MANDATORY READS"). Paths go stale (a team/skill dir moves), and
+# a dead path either wastes the developer's context hunting for it or makes it
+# skip the style law entirely. We can't fix the path from team code (it is
+# project data), but we can say so in the prompt and warn the orchestrator.
+_MISSING_MARK = "  (SKIP: not found on disk — do not search for it)"
+
+
+def _annotate_path(p: str) -> str:
+    """Convention path + an explicit skip note when it no longer exists."""
+    if not p:
+        return p
+    try:
+        return p if Path(p).exists() else p + _MISSING_MARK
+    except OSError:
+        return p + _MISSING_MARK
 
 
 def _spawn(prompt: str, worktree: Path, log: RunLog, cfg: dict,
@@ -209,7 +227,18 @@ def build_prompt(project: Path, profile: dict, task: dict, task_paths: list[str]
             "\n  OWNER-APPROVED LIFT for THIS task — the paths below are NOT blocked "
             "here; move/edit them as the task requires (verify already exempts "
             "them):\n  - " + "\n  - ".join(lifted)
-            + ("\n  (decided_by: " + "; ".join(decisions) + ")" if decisions else ""))
+            + ("\n  (decided_by: " + "; ".join(decisions) + ")" if decisions else "")
+            + "\n  The lift is PERMISSION, not instruction: touch a lifted path ONLY "
+              "if this task genuinely needs it. A lifted file in the diff that this "
+              "task did not require (a pin/wrapper/dependency bump for an unrelated "
+              "reason) fails the run."
+        )
+    conventions = [_annotate_path(str(p)) for p in profile.get("conventions", [])]
+    missing = [c for c in conventions if _MISSING_MARK in c]
+    if missing:
+        print("WARNING: profile conventions point at files that do not exist on "
+              "disk — the developer prompt marks them '(SKIP: not found)'. Fix the "
+              "profile:\n  - " + "\n  - ".join(missing), file=sys.stderr)
     return tpl.format(
         task_json=json.dumps(task_spec, indent=2),
         reference_screen=profile["reference_screen"],
@@ -221,7 +250,7 @@ def build_prompt(project: Path, profile: dict, task: dict, task_paths: list[str]
         frozen_paths=frozen_txt,
         compile_cmd=v["compile"],
         test_cmd=v.get("test", "(skip; profile defines no test gate)"),
-        conventions="\n  - ".join(profile.get("conventions", [])),
+        conventions="\n  - ".join(conventions),
         locales=n_locales,
         research_context=research_ctx or "see research.json constraints",
         project_name=profile["name"],

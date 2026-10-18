@@ -212,6 +212,11 @@ def review(state: dict) -> str:
     without admitting anything new."""
     queue = list(state.get("queue", []))
     shipped, shipped_labels = shipped_from_state(state)
+    # verdict_for() compares target SETS; shipped_from_state() hands back the
+    # ledger as lists. Normalise both here — judge() already does (lesson
+    # 2026-10-18: the read-only review path was never exercised after the
+    # shipped-label feature landed, so it crashed on the first real queue).
+    shipped = {str(x) for x in shipped}
     shipped_labels = {_norm(x) for x in shipped_labels if x}
     verdicts = []
     for i, q in enumerate(queue):
