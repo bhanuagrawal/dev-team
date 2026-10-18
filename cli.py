@@ -481,13 +481,23 @@ def cmd_record(args: argparse.Namespace) -> None:
     if args.result == "shipped":
         label = task.get("surface", {}).get("label", args.task or "?")
         targets = task.get("surface", {}).get("targets", [])
+        # Attribute the delivery to the milestone the queue entry named, so the
+        # goal tree can show WHICH goal each shipped version advanced (the
+        # queue row is replaced on the next refill; the ledger keeps the tag).
+        adv = ""
+        for q in state.get("queue", []):
+            if (q.get("label") or "") == label:
+                adv = str(q.get("advances") or "")
+                break
         already = {s["target"] for s in state.get("shipped", [])}
         for t in targets:
             if t in already:
                 continue  # concurrent runs may both ship; keep one ledger row per target
             state.setdefault("shipped", []).append({
                 "target": t, "label": label, "version": args.version or "?",
-                "commit": args.commit or "", "date": today()})
+                "commit": args.commit or "", "date": today(),
+                "task_id": args.task or task.get("id", ""),
+                "advances": adv})
         state["last_success_date"] = today()
         state["last_run"] = {**entry, "pushed_sha": args.commit or ""}
     elif args.result in ("failed", "blocked") :
@@ -539,6 +549,19 @@ def cmd_pick(args: argparse.Namespace) -> int:
                       "prompt_cmd": f"python3 cli.py developer-prompt {project.name} {spec_path.name}"},
                      indent=2))
     return 0
+
+
+def cmd_tree(args: argparse.Namespace) -> None:
+    """Deterministic view of the goal tree: vision → milestones → leaves."""
+    from team import tree as tree_mod
+    project = resolve_project(args.project)
+    if args.html:
+        print(tree_mod.write(project, open_after=args.open))
+        return
+    model = tree_mod.build(project)
+    print(tree_mod.render_text(model))
+    path = tree_mod.write(project, open_after=args.open)
+    print(f"\nhtml: {path}")
 
 
 def cmd_status(args: argparse.Namespace) -> None:
@@ -724,6 +747,10 @@ def main() -> None:
     st.add_argument("--schedule", choices=["manual", "auto"], default="manual")
     st.add_argument("--at", default=None); st.add_argument("--strict", action="store_true"); st.set_defaults(fn=cmd_setup)
     sch = sub.add_parser("schedules"); sch.set_defaults(fn=cmd_schedules)
+    tt = sub.add_parser("tree"); tt.add_argument("project")
+    tt.add_argument("--html", action="store_true", help="write the html view and print its path")
+    tt.add_argument("--open", action="store_true", help="open the html view in the browser")
+    tt.set_defaults(fn=cmd_tree)
 
     args = ap.parse_args()
     sys.exit(args.fn(args) or 0)

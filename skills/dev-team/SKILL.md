@@ -141,6 +141,13 @@ When the active milestone is met, the next entry is the NEXT milestone (research
 proposes it; an owner call becomes an issues_to_file ask) — never invented polish.
 A project with no `goals` runs exactly as before (goal-less mode).
 
+**Seeing the tree:** `devteam tree <project>` prints vision → milestones/sub-goals
+→ leaves (the work each run picks) and writes two mirrors into the project:
+`.pipeline/goals.txt` and `.pipeline/goals.html` (self-contained, click to
+collapse; `--open` opens it). Deterministic renderer, no LLM/network; refreshed
+by every `record`/`research`. A goal-less project renders the standing ask
+instead of an empty page.
+
 ## Nightly run procedure (also works interactively)
 
 1. `python3 <team>/cli.py status <project>` — see queue, shipped, last run.

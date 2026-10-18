@@ -49,3 +49,10 @@ def update(project: Path) -> None:
                   f"- {header.get('finished')} · result: {header.get('result')} · "
                   f"CI: {header.get('ci')}"]
     (pdir / "progress.md").write_text("\n".join(lines) + "\n")
+    # The goal tree view travels with the mirror (goals.txt + goals.html). A
+    # render failure must never break bookkeeping — mirrors may go stale.
+    try:
+        from . import tree as tree_mod
+        tree_mod.write(project)
+    except Exception:
+        pass
