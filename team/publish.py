@@ -6,19 +6,31 @@ the plan to be *pushed*, shared and viewable where the repo lives. The two files
 under `docs/` are deterministic renders of that same tree (team/tree.py, no LLM),
 so the shared copy can never drift from the local one.
 
-Best-effort BY DESIGN: publishing is bookkeeping, not delivery. A checkout on
-another branch, no network, a moved remote, a tree that cannot rebase — each
-reports WHY and leaves the run alone; the next run retries. Nothing here is ever
-allowed to fail a run.
+Best-effort BY DESIGN: publishing is bookkeeping, not delivery. No network, a
+moved remote, an origin that does not know the branch — each reports WHY and
+leaves the run alone; the next run retries. Nothing here is ever allowed to fail
+a run.
+
+The commit is built in a DETACHED WORKTREE sitting on origin/<main> (the same
+idiom the shipper and the codebase scanner use), never in the owner's checkout.
+That distinction is the whole fix for a project whose local branch has diverged
+from origin or whose working tree carries the owner's uncommitted work: an
+in-place publish could only ever succeed if the branch was a clean fast-forward
+and the tree clean enough to rebase, so it failed forever and silently while the
+owner never got a `shared plan:` link.
 """
 from __future__ import annotations
 
+import shutil
 from pathlib import Path
 
 from .core import git, profile_of, state_of
 
 # The committed mirror. Order matters only for the commit message.
 FILES = ("docs/plan.md", "docs/plan.html")
+
+# A throwaway worktree pinned to origin/<main>, where the plan commit is built.
+PUBLISH_TREE = ".pipeline/worktrees/.publish"
 
 
 def github_url(project: Path, profile: dict | None = None) -> str | None:
@@ -40,23 +52,61 @@ def published_url(project: Path) -> tuple[str | None, str]:
     """(url, why-not) for the plan as it stands — LOCAL refs only, no network, so
     it is safe to call from a read-only command like `status`.
 
-    The URL is only returned when it is true: the mirror exists, is tracked, has
-    no unpublished changes, and the commit holding it is on origin/main.
+    The question is "is what I render NOW the same plan origin/<main> serves?"
+    — CONTENT, not local branch topology. The local checkout may legitimately sit
+    on other commits (or another branch, or carry WIP) while the shared copy is
+    perfectly current; asking HEAD whether it is an ancestor of origin/main
+    answered a different question and reported "not published" forever after any
+    local commit.
     """
     profile = profile_of(project)
     branch = str(profile.get("main_branch") or "main")
     if not (project / FILES[0]).exists():
         return None, "the plan mirror has not been written yet"
-    if _g(["ls-files", "--error-unmatch", "--", *FILES], project).returncode != 0:
-        return None, "docs/plan.* exists but is not committed yet"
-    if _g(["diff", "--quiet", "--", *FILES], project).returncode != 0:
-        return None, "the local plan has unpushed changes"
-    if _g(["diff", "--cached", "--quiet", "--", *FILES], project).returncode != 0:
-        return None, "the plan is committed but not pushed yet"
-    anc = _g(["merge-base", "--is-ancestor", "HEAD", f"origin/{branch}"], project)
-    if anc.returncode != 0:
-        return None, f"the plan is not on origin/{branch} yet"
+    ref = f"origin/{branch}"
+    if _g(["rev-parse", "--verify", "--quiet", ref], project, timeout=30).returncode != 0:
+        return None, f"{ref} is not known locally yet (try `git fetch`)"
+    for f in FILES:
+        there = _g(["rev-parse", "--verify", "--quiet", f"{ref}:{f}"], project, timeout=30)
+        if there.returncode != 0:
+            return None, f"the plan is not on {ref} yet ({f} is missing there)"
+        local = _g(["hash-object", "--", f], project, timeout=30)
+        if (local.stdout or "").strip() != (there.stdout or "").strip():
+            return None, "the local plan has changes that are not on origin yet"
     return github_url(project, profile), ""
+
+
+def _origin_tree(project: Path, branch: str) -> tuple[Path | None, str]:
+    """A detached worktree sitting exactly on origin/<branch> — where the plan
+    commit is BUILT. Returns (path, why-not); best-effort like everything here.
+    """
+    wt = project / PUBLISH_TREE
+    _g(["fetch", "origin"], project, timeout=120)
+    base = f"origin/{branch}"
+    if _g(["rev-parse", "--verify", "--quiet", base], project, timeout=30).returncode != 0:
+        return None, f"{base} is not known locally (no network?)"
+    r = None
+    if (wt / ".git").exists():
+        r = _g(["checkout", "--detach", "--force", base], wt, timeout=120)
+        if r.returncode == 0:
+            _g(["clean", "-fd"], wt, timeout=60)
+        else:
+            # A stale registration (pruned metadata, moved directory) would
+            # otherwise fail every publish from now on: throw it away and re-add.
+            _g(["worktree", "remove", "--force", str(wt)], project, timeout=120)
+            _g(["worktree", "prune"], project, timeout=60)
+            shutil.rmtree(wt, ignore_errors=True)
+            r = None
+    if r is None:
+        if wt.exists():  # a leftover directory with no live registration
+            shutil.rmtree(wt, ignore_errors=True)
+            _g(["worktree", "prune"], project, timeout=60)
+        r = git(["worktree", "add", "--detach", str(wt), base], cwd=project, timeout=300)
+        _g(["clean", "-fd"], wt, timeout=60)
+    if r.returncode != 0:
+        tail = (r.stdout + r.stderr).strip().splitlines()
+        return None, "cannot prepare the publish worktree: " + (tail[-1] if tail else "unknown")
+    return wt, ""
 
 
 def _subject(project: Path) -> str:
@@ -87,19 +137,17 @@ def publish(project: Path, log=None) -> dict:
 
     Returns {pushed, url, why, sha}. `pushed` False always carries a `why` the
     owner can act on, and never means the run failed.
+
+    The commit is built in a detached worktree on origin/<main> and pushed from
+    there, so it is a child of origin by construction: a diverged local branch or
+    the owner's uncommitted work cannot block bookkeeping, and nothing in their
+    checkout is ever read, rebased, stashed or reset.
     """
     profile = profile_of(project)
     branch = str(profile.get("main_branch") or "main")
     if not (project / FILES[0]).exists():
         return {"pushed": False, "url": None, "sha": "",
                 "why": "no plan mirror to publish yet"}
-
-    cur = _g(["rev-parse", "--abbrev-ref", "HEAD"], project, timeout=30)
-    head = (cur.stdout or "").strip()
-    if head != branch:
-        return {"pushed": False, "url": None, "sha": "",
-                "why": f"the local checkout is on '{head or '?'}', and the plan is "
-                       f"only published from {branch}"}
 
     # Already published and unchanged: no commit, no push, and we can say where
     # it lives instead of silently doing nothing.
@@ -108,47 +156,42 @@ def publish(project: Path, log=None) -> dict:
         return {"pushed": True, "url": url, "sha": "",
                 "why": "unchanged since the last publish"}
 
-    # Sync first so the push is usually a fast-forward instead of a rebase. Both
-    # steps are best-effort: offline, we find out at push time anyway.
     if log:
-        log("publishing the plan (docs/plan.md → origin/" + branch + ")")
-    _g(["fetch", "origin"], project, timeout=120)
-    _g(["merge", "--ff-only", f"origin/{branch}"], project, timeout=120)
-
-    _g(["add", "--", *FILES], project)
-    staged = _g(["diff", "--cached", "--quiet", "--", *FILES], project).returncode != 0
-    if staged:
-        c = _g(["commit", "-m", _message(project), "--", *FILES], project, timeout=120)
+        log(f"publishing the plan ({FILES[0]} → origin/{branch})")
+    note = _message(project)
+    for _attempt in range(1, 4):
+        wt, why = _origin_tree(project, branch)
+        if wt is None:
+            return {"pushed": False, "url": None, "sha": "", "why": why}
+        for f in FILES:
+            (wt / f).parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(project / f, wt / f)
+        _g(["add", "--", *FILES], wt, timeout=60)
+        if _g(["diff", "--cached", "--quiet", "--", *FILES], wt, timeout=60).returncode == 0:
+            # origin already carries exactly this plan (a run published it first).
+            url, why = published_url(project)
+            return {"pushed": True, "url": url or github_url(project, profile),
+                    "sha": "", "why": why or "already on origin"}
+        c = _g(["commit", "-m", note, "--", *FILES], wt, timeout=120)
         if c.returncode != 0:
             tail = (c.stderr or c.stdout or "").strip().splitlines()
             return {"pushed": False, "url": None, "sha": "",
                     "why": f"the plan commit failed: {tail[-1] if tail else 'unknown'}"}
-
-    sha = (_g(["rev-parse", "--short", "HEAD"], project, timeout=30).stdout or "").strip()
-    r = _g(["push", "origin", f"HEAD:{branch}"], project, timeout=180)
-    if r.returncode != 0:
-        # Remote moved (a release landed while we were writing): rebase and retry,
-        # exactly like the shipper does — or give up loudly and retry next run.
-        _g(["fetch", "origin"], project, timeout=120)
-        rb = _g(["rebase", f"origin/{branch}"], project, timeout=180)
-        if rb.returncode != 0:
-            _g(["rebase", "--abort"], project, timeout=60)
-            return {"pushed": False, "url": None, "sha": sha,
-                    "why": "the push was rejected and rebasing failed — the plan "
-                           "commit stays local, the next run retries"}
-        r = _g(["push", "origin", f"HEAD:{branch}"], project, timeout=180)
-        if r.returncode != 0:
-            return {"pushed": False, "url": None, "sha": sha,
-                    "why": "the push failed twice — the plan commit stays local, "
-                           "the next run retries"}
-
-    url, why = published_url(project)
-    if not url:
-        # Pushed, but the local check disagrees (e.g. an unrelated later commit is
-        # still local). Still honest: the mirror is on origin, its URL is real.
-        return {"pushed": True, "url": github_url(project, profile), "sha": sha,
-                "why": f"pushed ({why})"}
-    return {"pushed": True, "url": url, "sha": sha, "why": "published"}
+        sha = (_g(["rev-parse", "--short", "HEAD"], wt, timeout=30).stdout or "").strip()
+        r = _g(["push", "origin", f"HEAD:{branch}"], wt, timeout=180)
+        if r.returncode == 0:
+            url, why = published_url(project)
+            if url:
+                return {"pushed": True, "url": url, "sha": sha, "why": "published"}
+            # Pushed, but the local check disagrees (a later render landed after
+            # ours). Still honest: the mirror is on origin, its URL is real.
+            return {"pushed": True, "url": github_url(project, profile), "sha": sha,
+                    "why": f"pushed ({why})"}
+        if log:
+            log("push rejected — origin moved; rebuilding the plan commit on the new tip")
+    return {"pushed": False, "url": None, "sha": "",
+            "why": "the push was rejected 3 times — the plan commit was not needed "
+                   "on origin; the next run retries"}
 
 
 def line(project: Path, res: dict) -> str:
