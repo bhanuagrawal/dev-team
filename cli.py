@@ -482,13 +482,15 @@ def cmd_record(args: argparse.Namespace) -> None:
         label = task.get("surface", {}).get("label", args.task or "?")
         targets = task.get("surface", {}).get("targets", [])
         # Attribute the delivery to the milestone the queue entry named, so the
-        # goal tree can show WHICH goal each shipped version advanced (the
-        # queue row is replaced on the next refill; the ledger keeps the tag).
-        adv = ""
-        for q in state.get("queue", []):
-            if (q.get("label") or "") == label:
-                adv = str(q.get("advances") or "")
-                break
+        # goal tree can show WHICH goal each shipped version advanced. The spec
+        # carries the branch (written at pick time); the label lookup is only the
+        # fallback for specs picked before the tag existed.
+        adv = str(task.get("advances") or "")
+        if not adv:
+            for q in state.get("queue", []):
+                if (q.get("label") or "") == label:
+                    adv = str(q.get("advances") or "")
+                    break
         already = {s["target"] for s in state.get("shipped", [])}
         for t in targets:
             if t in already:
@@ -515,6 +517,9 @@ def cmd_record(args: argparse.Namespace) -> None:
     # The orchestrator relays the research agents' flags mechanically —
     # code prints them here on EVERY record; the run banner quotes this block.
     print_agent_flags(project)
+    block = goals.review_block(state_of(project))
+    if block:
+        print("\n" + block)
 
 
 def cmd_pick(args: argparse.Namespace) -> int:
@@ -564,6 +569,186 @@ def cmd_tree(args: argparse.Namespace) -> None:
     print(f"\nhtml: {path}")
 
 
+def cmd_goal(args: argparse.Namespace) -> int:
+    """The team CHANGES the tree; the owner reviews afterwards (never waits).
+
+    Every change stores the whole goals block before/after, so `revert` is exact
+    and the audit line is readable by a non-engineer."""
+    from team.core import save_json
+    project = resolve_project(args.project)
+    profile, state = profile_of(project), state_of(project)
+    action = args.action
+    pfile = pipeline_dir(project) / "profile.json"
+
+    if action == "log":
+        entries = state.get("tree_changes") or []
+        if not entries:
+            print("the plan has never been changed since it was written")
+            return 0
+        for e in entries[-int(args.limit or 20):]:
+            flag = "reverted" if e.get("reverted") else (
+                "seen" if e.get("reviewed") else "TO REVIEW")
+            print(f"  [{flag}] {str(e.get('at'))[:16]} {e.get('action')} "
+                  f"'{e.get('node')}' — {e.get('why')}")
+        return 0
+    if action == "review":
+        n = 0
+        for e in state.get("tree_changes") or []:
+            if not e.get("reviewed"):
+                e["reviewed"], n = True, n + 1
+        save_state(project, state)
+        print(f"marked {n} plan change(s) as seen")
+        return 0
+    if action == "revert":
+        entries = [e for e in (state.get("tree_changes") or [])
+                   if not e.get("reverted") and e.get("goals_before") is not None]
+        if not entries:
+            raise SystemExit("nothing to revert — no plan change is outstanding")
+        last = entries[-1]
+        profile["goals"] = last.get("goals_before") or {}
+        last["reverted"] = True
+        goals.change(state, "reverted by owner", str(last.get("node")),
+                     f"undo of: {last.get('action')} — {last.get('why')}",
+                     before=last.get("after") or "", after=last.get("before") or "",
+                     by="owner")
+        state["tree_changes"][-1]["reviewed"] = True
+        save_json(pfile, profile)
+        save_state(project, state)
+        from team import tree as tree_mod
+        tree_mod.write(project)
+        print(f"reverted: {last.get('action')} '{last.get('node')}' — the plan is "
+              f"back to how it was before that change")
+        print(f"  (it was made because: {last.get('why')})")
+        return 0
+
+    # ---- mutating actions below: snapshot first, then mutate, then record ----
+    before = json.loads(json.dumps(profile.get("goals") or {}))
+    if not before.get("milestones") and action != "add":
+        raise SystemExit("this project has no plan yet — the owner must state the "
+                         "long-term goal first (devteam onboard / profile['goals'])")
+    node_id = args.id or ""
+
+    def _new_id(title: str) -> str:
+        import re as _re
+        slug = _re.sub(r"[^a-z0-9]+", "-", (title or "branch").lower()).strip("-")
+        taken = {n["id"] for n in goals.nodes(profile)}
+        base, i = (slug or "branch")[:40], 2
+        while slug in taken:
+            slug = f"{base}-{i}"
+            i += 1
+        return slug
+
+    if action == "add":
+        parent = args.parent or "vision"
+        title = args.title or ""
+        if not title:
+            raise SystemExit("goal add needs --title (what this branch is for)")
+        new = {"id": args.id or _new_id(title), "kind": args.kind or "subgoal",
+               "title": title, "decided_by": "agent" if args.by == "agent" else "owner",
+               "why": (args.why or "")[:300], "status": args.status or "active"}
+        if args.outcome:
+            new["outcome"] = args.outcome
+        if args.measure:
+            new["measures"] = [{"text": m} for m in args.measure]
+        kids = goals.holder_list(profile, parent)
+        if kids is None:
+            raise SystemExit(f"no branch '{parent}' to add under "
+                             f"(known: {[n['id'] for n in goals.nodes(profile)]})")
+        kids.append(new)
+        node_id = new["id"]
+
+    elif action in ("park", "set-status"):
+        st = args.status or ("parked" if action == "park" else "")
+        raw, _parent = goals.raw_node(profile, args.id or "")
+        if raw is None:
+            raise SystemExit(f"no goal or sub-goal with id '{args.id}' "
+                             f"(known: {[n['id'] for n in goals.nodes(profile)]})")
+        if st not in ("active", "pending", "done", "parked", "proposed"):
+            raise SystemExit("status must be one of: active, pending, done, "
+                             "parked, proposed")
+        if st == "proposed" and str(raw.get("decided_by") or "") != "agent":
+            # 'proposed' only means something for agent-authored branches; keep
+            # the distinction honest instead of silently accepting anything.
+            raise SystemExit("'proposed' is for agent-authored branches; "
+                             "owner-set goals use active/pending/done/parked")
+        raw["status"] = st
+        node_id = args.id
+
+    elif action == "retire":
+        raw, parent = goals.raw_node(profile, args.id or "")
+        if raw is None:
+            raise SystemExit(f"no goal or sub-goal with id '{args.id}'")
+        kids = goals.holder_list(profile, parent or "vision") or []
+        if raw in kids:
+            kids.remove(raw)
+        node_id = args.id
+
+    elif action == "reparent":
+        raw, parent = goals.raw_node(profile, args.id or "")
+        if raw is None:
+            raise SystemExit(f"no goal or sub-goal with id '{args.id}'")
+        if goals.raw_node(profile, args.parent or "")[0] is None:
+            raise SystemExit(f"no branch '{args.parent}' to move it under")
+        kids = goals.holder_list(profile, parent or "vision") or []
+        if raw in kids:
+            kids.remove(raw)
+        (goals.holder_list(profile, args.parent or "vision") or []).append(raw)
+        node_id = args.id
+    else:
+        raise SystemExit("goal needs an action: add | park | set-status | retire | "
+                         "reparent | revert | review | log")
+
+    after = profile.get("goals") or {}
+    human = {"add": f"added under {args.parent or 'vision'}",
+             "park": "set aside", "set-status": f"status → {args.status}",
+             "retire": "removed from the plan",
+             "reparent": f"moved under {args.parent}"}.get(action, action)
+    e = goals.change(state, human, node_id, args.why or "(no reason given)",
+                     before="", after="", by=args.by)
+    e["goals_before"], e["goals_after"] = before, after
+    save_json(pfile, profile)
+    save_state(project, state)
+    from team import tree as tree_mod
+    tree_mod.write(project)
+    print(f"plan changed: {human} '{node_id}' (why: {e['why']})")
+    print("the owner will see this on the next status/page — no approval needed; "
+          f"`devteam goal {project} revert` undoes it")
+    return 0
+
+
+def cmd_align(args: argparse.Namespace) -> int:
+    """Does this serve a goal? The verdict comes from an agent; code records it."""
+    from team import align as align_mod
+    project = resolve_project(args.project)
+    if args.apply:
+        entry = align_mod.apply_file(project, Path(args.apply))
+        print(align_mod.line(entry))
+        if entry["verdict"] in ("against", "gap"):
+            print("\nOWNER, THIS ONE NEEDS YOUR EYES — the team is not hiding it: "
+                  + ("this spends time against a goal you set."
+                     if entry["verdict"] == "against" else
+                     "the work may be right but the plan has no place for it; "
+                     "the team changed the tree and is telling you here."))
+        from team import tree as tree_mod
+        tree_mod.write(project)
+        return 1 if entry["verdict"] == "against" else 0
+    request = args.request or ""
+    if not request:
+        raise SystemExit("align needs the request to judge as text, e.g.\n"
+                         "  devteam align PdfKitKMP \"add a dark mode toggle\"")
+    task = None
+    if args.task_spec:
+        task = json.loads(task_spec_path(project, args.task_spec).read_text())
+    prompt = align_mod.alignment_prompt(project, request, task)
+    side = pipeline_dir(project) / "alignment-prompt.txt"
+    side.write_text(prompt + "\n")
+    (pipeline_dir(project) / "alignment-request.txt").write_text(request.strip() + "\n")
+    print(prompt)
+    print(f"\n[written to {side} — hand it to your agent, then:\n"
+          f" python3 cli.py align {project} --apply <the json it wrote>]")
+    return 0
+
+
 def cmd_status(args: argparse.Namespace) -> None:
     project = resolve_project(args.project)
     profile = profile_of(project)
@@ -575,11 +760,18 @@ def cmd_status(args: argparse.Namespace) -> None:
     # queue. A project with no goal tree prints a one-line goal-less notice.
     print(goals.goal_block(profile, state))
     if state.get("queue"):
-        acts = []
+        # Plain: group the queue by the goal it serves, by TITLE not id — the
+        # owner should not have to hold the codes in their head.
+        titled = {m["id"]: m["title"] for m in (goals.plan(profile) or {}).get("milestones", [])}
+        groups: dict[str, int] = {}
         for q in state["queue"]:
-            mid = str(q.get("advances") or "").strip()
-            acts.append(f"{q.get('label')} → {mid or '(unattributed)'}")
-        print("queue:      " + "; ".join(acts[:6]))
+            key = str(q.get("advances") or "").strip()
+            groups[key] = groups.get(key, 0) + 1
+        parts = []
+        for mid, n in groups.items():
+            what = titled.get(mid, "no goal declared" if not mid else mid)
+            parts.append(f"{n} serving \"{what}\"")
+        print(f"queue:      {len(state['queue'])} waiting — " + "; ".join(parts))
     print(f"targets:    {len(profile['targets'])} shipped-do: "
           f"{sum(1 for s in surfaces if s['status'] == 'shipped')} "
           f"animated: {sum(1 for s in surfaces if s['status'] == 'animated')} "
@@ -595,6 +787,11 @@ def cmd_status(args: argparse.Namespace) -> None:
     r = subprocess.run(["git", "log", "--oneline", "-1"], cwd=project,
                        capture_output=True, text=True)
     print(f"local HEAD: {r.stdout.strip()}")
+    # What the team changed about the plan since the owner last looked, and the
+    # honest alignment verdicts (both advisory: nothing is silently blocked).
+    for block in (goals.review_block(state), goals.alignment_block(state)):
+        if block:
+            print("\n" + block)
 
 
 def cmd_scan(args: argparse.Namespace) -> None:
@@ -751,6 +948,30 @@ def main() -> None:
     tt.add_argument("--html", action="store_true", help="write the html view and print its path")
     tt.add_argument("--open", action="store_true", help="open the html view in the browser")
     tt.set_defaults(fn=cmd_tree)
+    g = sub.add_parser("goal")
+    g.add_argument("project")
+    g.add_argument("action", choices=["add", "park", "set-status", "retire",
+                                      "reparent", "revert", "review", "log"])
+    g.add_argument("--id", help="the branch to change (see `goal log` / the tree page)")
+    g.add_argument("--title", help="add: what this branch is for, in plain words")
+    g.add_argument("--parent", help="add/reparent: vision or another branch id")
+    g.add_argument("--kind", default="subgoal", choices=["subgoal", "milestone"])
+    g.add_argument("--status", help="set-status: active|pending|done|parked|proposed")
+    g.add_argument("--outcome", help="add: what will be true when this is done")
+    g.add_argument("--measure", action="append",
+                   help="add: how we will know (repeatable, plain words)")
+    g.add_argument("--why", help="the reason the team is changing the plan")
+    g.add_argument("--by", default="agent", choices=["agent", "owner"])
+    g.add_argument("--limit", type=int, default=20)
+    g.add_argument("--last", action="store_true",
+                   help="revert: undo the most recent change (the only mode)")
+    g.set_defaults(fn=cmd_goal)
+    al = sub.add_parser("align")
+    al.add_argument("project")
+    al.add_argument("request", nargs="?", help="the task or owner request to judge")
+    al.add_argument("--task-spec", help="judge a picked task spec instead of free text")
+    al.add_argument("--apply", help="apply a verdict JSON the agent wrote")
+    al.set_defaults(fn=cmd_align)
 
     args = ap.parse_args()
     sys.exit(args.fn(args) or 0)

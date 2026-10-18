@@ -23,7 +23,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-from . import verify
+from . import goals, verify
 from .core import (
     RunLog, agent_argv, git, now_iso, profile_of, role_cfg as _role_cfg,
     run, state_of,
@@ -209,6 +209,28 @@ def build_prompt(project: Path, profile: dict, task: dict, task_paths: list[str]
         if q.get("label") == task["surface"].get("label") and q.get("reason"):
             research_ctx = (research_ctx + " · queue reason: " + q["reason"])[:900]
             break
+    # WHICH GOAL THIS RUN SERVES. The developer never sees the tree itself, so
+    # code states the branch in plain words: without it the implementer optimizes
+    # a diff it cannot connect to anything (the reason polish accumulated).
+    # (No new template placeholder: projects override prompts/*.md, and a fresh
+    # {placeholder} would KeyError inside an owner's own template.)
+    mid = str(task.get("advances") or "").strip()
+    if not mid:
+        for q in st.get("queue", []):
+            if q.get("label") == task["surface"].get("label"):
+                mid = str(q.get("advances") or "")
+                break
+    node = goals.find_node(profile, mid) if mid else None
+    if node:
+        goal_txt = f"GOAL THIS SERVES: {node['title']}"
+        if node["raw"].get("outcome"):
+            goal_txt += f" — done here means: {node['raw']['outcome']}"
+        vision = (goals.plan(profile) or {}).get("vision")
+        if vision:
+            goal_txt += f'\nLONG-TERM (owner): {vision}'
+        goal_txt += ("\nDo not widen scope to 'help' this goal: a smaller change "
+                     "that serves it is better than a bigger one that does not.")
+        research_ctx = goal_txt + ("\n" + research_ctx if research_ctx else "")
     n_locales = profile.get("locales") or \
         "the skill set of locale strings.xml files shipped by this project"
     # Owner-recorded scope widening (profile['constraint_lifts']). The ENGINE

@@ -148,6 +148,23 @@ collapse; `--open` opens it). Deterministic renderer, no LLM/network; refreshed
 by every `record`/`research`. A goal-less project renders the standing ask
 instead of an empty page.
 
+**The team CHANGES the tree; the owner reviews afterwards (never waits).**
+`devteam goal <project> add|park|set-status|retire|reparent` mutates the plan
+directly — no approval gate. Every change is recorded with the reason and a
+before/after snapshot, printed by `status`/`record` as "THE TEAM CHANGED THE
+PLAN", and shown as a banner on the goal page; `goal log` lists them and `goal
+revert` puts the last one back exactly. The synthesizer may do the same in one
+plan via `goal_changes` (applied BEFORE the queue is validated, so a plan can add
+a branch and queue work for it). Only the long-term goal stays human-only.
+
+**Alignment:** `devteam align <project> "<task or owner request>"` exports the
+question with the plan attached; the agent answers JSON (`aligned|neutral|
+against|gap` + why/cost/options) and `--apply` records it. `against` exits
+non-zero and prints an owner-facing warning; `gap` means the plan has no place
+for the work — the agent changes the tree rather than squeezing the work under an
+unrelated goal. Verdicts are advisory: recorded and always shown, never silent,
+never silently blocking.
+
 ## Nightly run procedure (also works interactively)
 
 1. `python3 <team>/cli.py status <project>` — see queue, shipped, last run.
