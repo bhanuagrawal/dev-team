@@ -3,8 +3,9 @@
 The owner's flow for competitor recon: *search the app in the emulator's Play
 Store, install it, use it.* This module does the parts that are deterministic —
 find the emulator, launch Play, read the screen, recognise the states a human
-must resolve, tap Install, wait for the install to land, then hand the APK to
-the static pass.
+must resolve, tap Install, wait for the install to land, and report what landed.
+It writes nothing: using the app, and deciding what it means, is the agent's (or
+the human's) part.
 
 The parts that are NOT deterministic come back as an **OWNER ASK** (exit code 4,
 the same rc the rest of the team uses for "only a human can answer this"):
@@ -18,7 +19,7 @@ the same rc the rest of the team uses for "only a human can answer this"):
     ask for a Play-enabled AVD.
 
 Why not just an agent with vision? Because everything up to the tap is knowable
-from the accessibility tree and adb, and a report must not depend on a model
+from the accessibility tree and adb, and the result must not depend on a model
 looking at pixels. So the tree does the work; the agent is only needed for what
 the tree cannot say.
 
@@ -31,7 +32,6 @@ from __future__ import annotations
 import re
 import time
 import xml.etree.ElementTree as ET
-from pathlib import Path
 from urllib.parse import quote
 
 from .core import run
@@ -307,15 +307,17 @@ def screen_rows(serial: str, limit: int = 12) -> list[str]:
 
 
 # --------------------------------------------------------------------------- #
-# install → pull → static pass
+# install → verify
 # --------------------------------------------------------------------------- #
 
-def play_install(project: Path, package: str, device: str | None = None,
-                 force: bool = False, timeout: int = 900, log=None) -> dict:
-    """Install `package` from the Play Store on the emulator, then run the
-    static pass on what landed. Raises Ask when a human must act first."""
-    from . import recon
+def play_install(package: str, device: str | None = None,
+                 timeout: int = 900, log=None) -> dict:
+    """Install `package` from the Play Store on the emulator.
 
+    Nothing is written anywhere: this installs the app and reports what landed,
+    so an agent (or a human) can then use it. Raises Ask when a human must act
+    first (sign-in, CAPTCHA, an unreadable screen).
+    """
     say = log or (lambda *_a, **_k: None)
     serial = pick_device(device)
 
@@ -359,7 +361,7 @@ def play_install(project: Path, package: str, device: str | None = None,
         if st == "incompatible":
             raise SystemExit(
                 f"Play says {package} is not compatible with {serial}'s image "
-                f"— pick another device/ABI, or use `recon static <apk>`.")
+                f"— pick another device/ABI, or install it by hand.")
         if st == "not-found":
             raise SystemExit(f"Play has no app for {package} on {serial}.")
         if st in ("install", "update") and btn:
@@ -387,10 +389,4 @@ def play_install(project: Path, package: str, device: str | None = None,
     ver = package_version(serial, package)
     say(f"play: installed {package} "
         f"v{ver.get('version_name') or '?'} ({ver.get('version_code') or '?'})")
-
-    apk = recon.pull_from_device(package, device=serial)
-    report = recon.static_pass(project, apk, source="play", force=force, log=say)
-    report["installed_from"] = {"via": "play", "device": serial, **ver}
-    from .core import save_json
-    save_json(recon.report_path(project, report["package"]), report)
-    return report
+    return {"package": package, "device": serial, **ver}

@@ -48,13 +48,13 @@ project profile (`connections` section) and validated by `cli.py doctor` —
 run doctor at the start of any session touching research/release. A BLOCKED
 agent = one precise ask for the owner, never a silent path guess in team code.
 
-**The intel plane is a SEPARATE, MANUAL workflow — not a stage here.** Competitor
-research lives in the `recon` skill (`skills/recon/SKILL.md`): the owner runs
-`devteam recon …` by hand, when they want it, with a human present. Its only
-contact with this run is read-only — the planner's collectors read
-`<project>/.pipeline/competitors/*.json` as a signal and NEVER wait on it. Do not
-chain recon into a nightly run (it is long, needs an emulator, and asks questions
-only a human can answer).
+**Recon is a SEPARATE, MANUAL workflow — not a stage here.** The `recon` skill
+(`skills/recon/SKILL.md`) installs a competitor's app from the Play Store on an
+emulator so a human or agent can use it. The owner runs `devteam recon …` by
+hand, with a human present. It shares NOTHING with a run: it writes no reports,
+touches no project state, and the planner does not read it. Do not chain recon
+into a nightly run (it needs an emulator, and it asks questions only a human can
+answer).
 - Project exists and has .pipeline/profile.json → MODE A, follow "Nightly run
   procedure" below.
 - Owner asks to start a NEW app (anything like "build me an app that…") →
@@ -464,7 +464,7 @@ The owner may ask for ONE agent only, and that must work:
   via the matching commands/skill section, then report.
 - "run competitor recon" / "check a competitor app" → load
   `skills/recon/SKILL.md` and follow it (manual, human present). Do NOT chain it
-  into the pipeline — it is the separate intel plane.
+  into the pipeline — it is a separate, manual workflow.
 Rule: honor the narrower scope exactly — no pipeline chaining — except the
 non-negotiables (never commit on red gates; never touch frozen paths; never
 hand-edit state.json; MODE-B gates still asked). State a one-line report of

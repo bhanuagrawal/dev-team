@@ -327,45 +327,31 @@ Each run banner also ends with the plan URLs, and quotes the `AGENT FLAGS` and
 `QUEUE IMPACT` blocks verbatim when they are printed — a superseded or dropped
 task is never silent.
 
-## The intel plane — competitor recon (manual, separate)
+## recon — install a rival app on the emulator (manual, separate)
 
 A **second workflow**, deliberately not part of the nightly run. Where the
-delivery plane ships one task to internal testing, the intel plane answers *"what
-do our competitors actually do?"* — by hand, when you want it.
+delivery plane ships one task to internal testing, this one gets a competitor's
+app installed on an emulator so you or an agent can use it.
 
 ```bash
 devteam recon <project> play --term "rival app"          # search the Play Store on the emulator
-devteam recon <project> install com.rival.app            # Play install → pull → static pass
-devteam recon <project> static /path/to/rival.apk        # or: analyze an APK you already have
-devteam recon <project> static com.rival.app --device <adb-serial>   # pull from a device
-devteam recon <project> prompt com.rival.app             # hand the agent its prompt (agentic pass)
-devteam recon <project> findings com.rival.app --file .pipeline/competitors/com.rival.app.findings.json
-devteam recon <project> list | show <package>
+devteam recon <project> install com.rival.app            # Play details → tap Install → wait
 ```
 
 - **Install the way a user would** — `play` searches the emulator's Play Store and
   lists the rows; `install` opens the app's Play page, taps Install (or Update),
-  clears Play's own dialogs, waits for the package, then pulls the APK and runs
-  the static pass on it. Needs a Play-enabled AVD. The one thing it will **not**
-  do is sign in: with no Google account on the emulator it stops with an
-  OWNER ASK (rc=4) telling you to sign in on the emulator window. That is
-  deliberate — automated sign-in trips Google's device verification.
-- **Static pass** — no LLM, no emulator: manifest facts via `aapt2` /
-  `apkanalyzer` when installed, and **SDK signatures** byte-scanned from the
-  APK's dex against a generic catalogue (`team/recon.py`) grouped into
-  *capabilities*. Cached by `versionCode` (or an APK fingerprint when no Android
-  tool is present). It already answers "what features/integrations does it have?"
-  for most questions.
-- **Dynamic pass** — agentic, needs an emulator and you: follow
-  `skills/recon/SKILL.md` — read the UI tree first (`android layout`), pixel-click
-  only where the tree is empty, and ask the human for anything needing a
-  login/secret. Findings merge back through `recon findings`, so every write goes
-  through code.
-- **The boundary is files.** Reports live in
-  `<project>/.pipeline/competitors/<package>.json`. The planner's collectors read
-  that directory as a research signal (`signals.competitors`) and **never wait on
-  it** — `none` is a normal state, and its absence surfaces as an *Upgrades* line,
-  never a failure.
+  clears Play's own dialogs and waits for the package to land. It needs a
+  Play-enabled AVD and writes nothing.
+- **It installs; it does not judge.** Nothing reads the app's store metadata or
+  scans its APK. Using the app and deciding what it means is the agent's work —
+  follow `skills/recon/SKILL.md` (read the UI tree first, screenshot before
+  clicking blind, ask the human for logins).
+- **The one thing it will not do is sign in.** A Play install needs the emulator
+  signed into a Google account, and automated sign-in trips Google's device
+  verification. With no account (or on a CAPTCHA, or an image with no Play
+  Store at all) it stops with an OWNER ASK (rc=4) telling you to sign in on the
+  emulator window. That is deliberate — an agent holding an account password is a
+  worse failure than a failed install.
 
 Not scheduled, no server, no protocol: a human is present, so stopping mid-way,
 answering questions and unblocking are just you. Graduate to a schedule and an
@@ -438,9 +424,9 @@ python3 cli.py publish <project>                # put the plan on the repo now
 python3 cli.py goal <project> add|park|set-status|retire|reparent|revert|review|log
 python3 cli.py vision <project> "one sentence"  # the owner's goal
 python3 cli.py align <project> "<request>" [--apply]
-python3 cli.py recon <project> play|install|static|findings|prompt|list|show
-                                                # the MANUAL intel plane: search
-                                                # the Play Store, install, inspect
+python3 cli.py recon <project> play|install
+                                                # MANUAL: search the Play Store
+                                                # and install a rival app
 python3 cli.py emulators <project> [--record [--reset]]
 python3 cli.py alarm <project> ; python3 cli.py poll <project> ; python3 cli.py schedules
 python3 cli.py onboard <path> ; python3 cli.py setup --project <path> [--at HH:MM]
@@ -487,7 +473,7 @@ scripts/nightly.sh      launchd entry point
 config/runtimes.json    role → model (the only thing pinned)
 skills/dev-team/        THE contract any orchestrator agent must follow
 skills/new-project/     mode-B create-a-new-app playbook + reference assets
-skills/recon/           the MANUAL intel plane: competitor recon runbook
+skills/recon/           the MANUAL recon runbook: install a rival app on an emulator
 skills/android-code/    coding-style law for developer subagents
 skills/checks/          executable expertise (localization completeness, …)
 skills/lessons.md       append-only surprises log (the team's memory)

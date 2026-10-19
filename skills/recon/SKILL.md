@@ -1,168 +1,76 @@
-# recon — the manual intel plane (competitor research, by hand)
+# recon — install a competitor app on the emulator (manual, by hand)
 
 name: recon
 description: >
-  Inspect a competitor's Android app and write a report the delivery team's
-  planner reads. MANUAL and SEPARATE from the nightly run: you invoke it when
-  you want it. Two passes — a deterministic static pass (no emulator) and an
-  agentic dynamic pass (drive the app on an emulator). Use when the owner asks
-  "what do our competitors do?", "check this app's features/paywalls", or wants
-  grounded gaps instead of guesses.
+  Get a competitor's Android app onto an emulator through the Play Store, the way
+  a user would — search the store, install it, then use it. MANUAL and separate
+  from the nightly run. Use when the owner says "check this app", "look at what a
+  rival does", or hands over a package id to install.
 
 ## What this is (and is not)
 
-- **A second workflow.** The delivery plane (`dev-team` skill, nightly run) does
-  one task → internal testing. THIS plane produces competitor intel. They do not
-  call each other: the only link is a directory of report files.
-- **Manual, for now.** No schedule, no daemon, a human is present. Any question
-  that needs a login, a secret or a judgement call comes to the human in the
-  room — there is no unattended unblock path yet (see *Graduating*, below).
-- **The boundary is files.** `devteam recon` writes
-  `<project>/.pipeline/competitors/<package>.json`. The planner's collectors read
-  that dir (`research._competitors_pull`) and **never wait** on it. `none` is a
-  normal state, never an error.
+- **A second workflow.** The delivery plane (`dev-team` skill, nightly run) ships
+  one task to internal testing. This plane gets a rival app installed so a human
+  or an agent can actually use it. They share nothing: this writes no reports and
+  never touches project code.
+- **Manual.** No schedule, no daemon — a human is present.
+- **It installs; it does not judge.** Nothing here reads the app's store metadata,
+  scans its APK, or records findings. Using the app and deciding what it means is
+  the agent's (or the owner's) job.
 
-## Where it sits
-
-```
-INTEL PLANE (this skill, manual)
-  you → devteam recon play --term "…"           search the Store on the emulator
-      → devteam recon install <pkg>             Play install → pull → static pass
-      → (optional) drive the app on an emulator → devteam recon findings …  ↺
-                     ↘ .pipeline/competitors/<pkg>.json
-                               │
-                               │  files only, one-way, async
-                               ▼
-DELIVERY PLANE (dev-team, nightly)
-  step 2 `plan`  →  research collectors read competitors/*.json as a SIGNAL
-```
-
-## The passes
-
-### 1. Static pass — deterministic, no emulator, cheap
+## Flow
 
 ```bash
-devteam recon <project> static /path/to/app.apk
-# or pull an installed package off a device/emulator:
-devteam recon <project> static com.competitor.app --device <adb-serial>
+android emulator start <avd>                         # start once, keep it for the session
+devteam recon <project> play --term "forest focus"   # search the Store; lists the visible rows
+devteam recon <project> install com.rival.app        # Play details → tap Install → wait
+# then USE it: launch the app, read the UI tree, ask the human for logins
+android emulator stop <avd>                          # you started it; you stop it
 ```
 
-What it extracts, with no LLM:
+`install` is deterministic: it finds the emulator, opens the app's Play page,
+reads the accessibility tree, taps Install (or Update), clears Play's own dialogs
+and waits for the package to land. It prints the version it installed and writes
+nothing.
 
-- manifest facts via `aapt2` / `apkanalyzer` when installed (package, version,
-  min/target SDK, permissions, features, launcher activity);
-- **SDK signatures** by byte-scanning the APK's dex for a generic catalogue
-  (`team/recon.py` `SDK_MARKERS`): analytics, crash, ads, billing, push, auth,
-  maps, health, … → grouped into **capabilities**.
+Prefer `install <package>`. When you only know the app's *name*, `play --term`
+lists the visible rows so you can pick the exact package id — installing the
+wrong id installs the wrong app.
 
-Cached by `versionCode`: re-running on an unchanged version says *up to date*.
-Use `--force` to refresh.
+## The one thing it will never do: sign in
 
-**Start here.** Static already answers "what features/integrations does it
-have?" for most questions — no emulator, no tokens.
+A Play install needs the emulator signed into a Google account, and automated
+sign-in trips 2FA / device verification. So when the emulator is not signed in —
+or Play throws a CAPTCHA, or the image has no Play Store at all — the command
+stops with an **OWNER ASK** (rc=4) saying exactly what to do. You sign in **on the
+emulator window**, once, and it sticks in the AVD.
 
-### 2. Install it the way a user would — the Play Store on the emulator
+**Never type a Google password into a prompt.** The ask is the feature, not a
+limitation: an agent holding an account password is a worse failure than a failed
+install.
 
-You must be on a **Play-enabled AVD** (a `google_apis_playstore` image). The AVD
-you already have, `medium_phone`, is one. The flow is the user's flow: search the
-store, install, use it.
+## Driving the app afterwards (an agent's job, not a command)
 
-```bash
-android emulator start <avd>                       # start once, keep it for the session
-devteam recon <project> play --term "forest focus" # search the Store; lists the rows
-devteam recon <project> install com.rival.app      # Play details → Install → wait → pull → static pass
-```
-
-`install` is deterministic: it reads the accessibility tree, taps Install (or
-Update) — clearing Play's own agree/permission dialogs — waits for the package to
-appear, then pulls the APK and runs the static pass on it. One command goes from
-"not installed" to a filled report.
-
-**The one thing it deliberately will not do is sign in.** If the emulator has no
-Google account, it stops with an `OWNER ASK` (rc=4) telling the human to sign in
-on the emulator window — email, password, 2FA. Same for a CAPTCHA, and same for
-an AOSP image with no Play Store at all. Automated sign-in trips Google's device
-verification, and an agent should not hold a password: sign in once, and the AVD
-remembers.
-
-- Prefer `install <package>`. When you only know the app's *name*, `play --term`
-  lists the visible rows so you can pick the exact package id — installing the
-  wrong id installs the wrong app.
-- Emulator lifetime: for recon, start it once and keep it across the session,
-  then `android emulator stop <avd>` when you are done. For a one-shot,
-  `with-emulator <avd> -- <command>` tears down via an EXIT trap. **Never stop an
-  emulator you did not start** — the owner may have one open on purpose.
-
-### 3. Dynamic pass — agentic: use the app, answer the questions
-
-Only for what static cannot answer (real flows, paywall gating, onboarding).
-
-```bash
-# hand the agent an exact prompt (mirrors developer-prompt):
-devteam recon <project> prompt <package> --question "How is the paywall triggered?"
-```
-
-Follow the printed prompt. In short:
-
-1. **Launch and drive the app** on the emulator you installed it on.
-2. **Read the UI tree first** (`android layout` / `uiautomator dump`) — it is
-   structured and reliable. Use pixel-clicks (`computer-use` / `desktop` tools)
-   **only** where the tree is empty (canvas, WebView) — and for those, a
-   screenshot (`android screen capture`) *before* clicking.
-3. **Ask the human** for anything needing a login/secret/payment. Never guess.
-4. **Never touch any project's source code.** This plane reads behavior only.
-
-Then return observations and merge them through code:
-
-```bash
-devteam recon <project> findings <package> --file .pipeline/competitors/<pkg>.findings.json
-```
-
-Findings file shape:
-
-```json
-{"findings": [{"question": "...", "answer": "...", "evidence": "screen/file",
-               "confidence": "high|medium|low", "capability": "optional bucket"}],
- "dynamic": {"done": true, "screens": ["Home", "Paywall"], "notes": "..."},
- "questions": ["anything the human must answer"],
- "confidence": "high|medium|low"}
-```
-
-## Read side
-
-```bash
-devteam recon <project> list          # every report, one line each
-devteam recon <project> show <package> # the full report JSON
-```
-
-The planner cites them next cycle via `signals.competitors`
-(`capability_coverage` shows which apps have which capability — the grounded
-"gap" evidence).
+1. Launch the app. **Read the UI tree first** (`android layout`) — structured and
+   reliable. Use pixel-clicks (`computer-use` / `desktop` tools) **only** where
+   the tree is empty (canvas, WebView), and take a screenshot (`android screen
+   capture`) before clicking blind.
+2. **Ask the human** for anything needing a login, a secret or a payment.
+3. **Never touch any project's source code.** Read behavior only.
 
 ## Hard rules
 
-- **Never edit project code** — this plane inspects competitors and writes only
-  under `.pipeline/competitors/`.
-- **Never write `plan`/`queue`/state** — that is the planner's job in the other
-  plane. You produce evidence; the planner decides.
-- **Never block the delivery run.** Reports are consumed *if present*; the run
-  never waits for a recon.
-- **Emulator hygiene** — the baseline rule from the dev-team skill applies here
-  too: start through `with-emulator` (or start once and stop it yourself), and
-  stop only what you started.
-- **Never type a Google password.** The Play sign-in is the human's, on the
-  emulator window. `recon install` detects the wall and asks (rc=4); it must stay
-  that way — an agent holding an account password is a worse failure than a
-  failed install.
-- **Observable behavior + static metadata only.** Do not patch, crack, or
-  redistribute APKs; respect store terms.
+- **Never edit project code**, and never write planner state (`plan`/`queue`).
+- **Emulator hygiene** — start it, and stop only what you started.
+  `with-emulator <avd> -- <cmd>` does both for a single command; if you keep one
+  up across the session, `android emulator stop <avd>` before you finish.
+- **Never type a Google password.**
+- **Observable behavior only.** Do not patch, crack or redistribute APKs; respect
+  store terms.
 
 ## Graduating (only when an event fires)
 
-- Manual runs feel like a chore (> ~once a week) → give the producer its own
-  schedule.
-- A mid-inspection question appears with no human around → that is the point to
-  add a resident, addressable agent (A2A `input-required`) plus a client bridge.
-- Another agent wants to call it directly → expose a typed façade (MCP tool).
-- Until then, **do not** add a server or a protocol: the manual flow with a
-  human in the room already covers stop-midway, answer-questions and unblock.
+- You want a durable record of what a rival does, rather than a working install →
+  that is a different design, and nothing here does it today.
+- Unattended installs (nobody in the room to clear a sign-in) → that is the
+  moment to think about a resident agent, and not before.
