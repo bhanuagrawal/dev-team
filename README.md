@@ -24,6 +24,34 @@ The orchestrator is an agent; everything below marked **code** is a command whos
 output is not negotiable. The agent decides *what* to do, never *whether* a gate
 passed.
 
+### The order, end to end (one screen)
+
+The orchestrator has just two tools: **run a shell command**, and **spawn a
+subagent**. The skill is the checklist that names the commands; the run is a fixed
+sequence of them. Nothing below is invented at runtime — code decides *what is
+allowed*, the agent decides *what to do*.
+
+| # | What the orchestrator runs | Kind |
+|---|---|---|
+| — | *trigger* `scripts/nightly.sh <Project>` → `opencode run --auto "Run workflow for <Project>."` | shell |
+| 0 | `cli.py adapt` | code |
+| 1 | `cli.py status` | code (read-only) |
+| 2 | `cli.py plan` | code + **one LLM call** |
+| 3 | `cli.py pick` — then write `.pipeline/tasks/<id>.json` | code, then agent |
+| 4 | `cli.py worktree-start` | code |
+| 5 | `cli.py developer-prompt` | code |
+| 6 | spawn the developer subagent | agent (the host's own mechanism) |
+| 7 | `cli.py verify` | code (**gate**) |
+| 8 | `cli.py release` | code (**gate**, only on green) |
+| 9 | `cli.py record` | code |
+| 10 | `cli.py alarm` — then post the outcome banner | code + agent |
+| — | *tail* emulator teardown, then `alarm` again | shell |
+
+The agent's judgement is steps 3 (compose the spec) and 6 (spawn the developer) and
+its choice of words in 10; **`plan`, `verify`, `release` and `record` are gates
+whose output it relays, never overrides.** It never edits project code — it runs
+commands, writes task specs, and spawns the developer. Each step is expanded below.
+
 ### Step 0 — does the project exist, and does it match the team? (code)
 
 Mode selection first: a project with `.pipeline/profile.json` is MODE A; anything
