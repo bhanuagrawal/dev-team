@@ -327,36 +327,20 @@ Each run banner also ends with the plan URLs, and quotes the `AGENT FLAGS` and
 `QUEUE IMPACT` blocks verbatim when they are printed — a superseded or dropped
 task is never silent.
 
-## recon — install a rival app on the emulator (manual, separate)
+## recon — a separate agent, not a stage here
 
-A **second workflow**, deliberately not part of the nightly run. Where the
-delivery plane ships one task to internal testing, this one gets a competitor's
-app installed on an emulator so you or an agent can use it.
+Competitor recon lives in its own repo: **`~/recon-agent`** (A2A, localhost).
+It installs a rival app from the Play Store on an emulator, and later phases
+crawl it and write a run artifact. It shares nothing with a run: no reports, no
+project state, and the planner never reads it.
 
 ```bash
-devteam recon <project> play --term "rival app"          # search the Play Store on the emulator
-devteam recon <project> install com.rival.app            # Play details → tap Install → wait
+recon play --term "rival app"      # search the store on the emulator
+recon install com.rival.app        # Play details → tap Install → wait
 ```
 
-- **Install the way a user would** — `play` searches the emulator's Play Store and
-  lists the rows; `install` opens the app's Play page, taps Install (or Update),
-  clears Play's own dialogs and waits for the package to land. It needs a
-  Play-enabled AVD and writes nothing.
-- **It installs; it does not judge.** Nothing reads the app's store metadata or
-  scans its APK. Using the app and deciding what it means is the agent's work —
-  follow `skills/recon/SKILL.md` (read the UI tree first, screenshot before
-  clicking blind, ask the human for logins).
-- **The one thing it will not do is sign in.** A Play install needs the emulator
-  signed into a Google account, and automated sign-in trips Google's device
-  verification. With no account (or on a CAPTCHA, or an image with no Play
-  Store at all) it stops with an OWNER ASK (rc=4) telling you to sign in on the
-  emulator window. That is deliberate — an agent holding an account password is a
-  worse failure than a failed install.
-
-Not scheduled, no server, no protocol: a human is present, so stopping mid-way,
-answering questions and unblocking are just you. Graduate to a schedule and an
-addressable agent (A2A) only when those events actually fire — see
-`skills/recon/SKILL.md` → *Graduating*.
+Do not chain it into the nightly: it needs an emulator and it asks questions only
+a human can answer. It is documented in its own repo.
 
 ## Safety rails
 
@@ -424,9 +408,6 @@ python3 cli.py publish <project>                # put the plan on the repo now
 python3 cli.py goal <project> add|park|set-status|retire|reparent|revert|review|log
 python3 cli.py vision <project> "one sentence"  # the owner's goal
 python3 cli.py align <project> "<request>" [--apply]
-python3 cli.py recon <project> play|install
-                                                # MANUAL: search the Play Store
-                                                # and install a rival app
 python3 cli.py emulators <project> [--record [--reset]]
 python3 cli.py alarm <project> ; python3 cli.py poll <project> ; python3 cli.py schedules
 python3 cli.py onboard <path> ; python3 cli.py setup --project <path> [--at HH:MM]
@@ -473,7 +454,6 @@ scripts/nightly.sh      launchd entry point
 config/runtimes.json    role → model (the only thing pinned)
 skills/dev-team/        THE contract any orchestrator agent must follow
 skills/new-project/     mode-B create-a-new-app playbook + reference assets
-skills/recon/           the MANUAL recon runbook: install a rival app on an emulator
 skills/android-code/    coding-style law for developer subagents
 skills/checks/          executable expertise (localization completeness, …)
 skills/lessons.md       append-only surprises log (the team's memory)

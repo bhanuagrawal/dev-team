@@ -18,7 +18,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from team import alarm, emulator, goals, recon_play, scribe, scan, scheduler, shipper  # noqa: E402
+from team import alarm, emulator, goals, scribe, scan, scheduler, shipper  # noqa: E402
 from team.core import (  # noqa: E402
     RunLog, TEAM_ROOT, agent_argv, load_json, now_iso, pipeline_dir, profile_of,
     resolve_model, resolve_project, role_cfg, run as sys_run, runtimes,
@@ -1181,63 +1181,6 @@ def cmd_setup(args: argparse.Namespace) -> None:
     print(f"  manual-mode alternative remains possible anytime".strip())
 
 
-def cmd_recon(args: argparse.Namespace) -> int:
-    """The MANUAL intel plane — get a competitor app onto the emulator, by hand.
-
-    `play` searches the store; `install` drives the Play page and taps Install.
-    Nothing here writes a report or touches project code: using the app and
-    judging it is an agent's/human's job (`skills/recon/SKILL.md`). This is a
-    MANUAL workflow, separate from a run — never part of the nightly.
-
-    A wall only a human can clear (not signed in, a CAPTCHA) ends in an OWNER ASK
-    (rc=4) — never a guessed password.
-    """
-    from team import recon_play
-    try:
-        return _recon(args)
-    except recon_play.Ask as e:
-        print("OWNER ASK (recon) — only you can answer this:")
-        print(e.message.strip())
-        return recon_play.ASK_EXIT
-
-
-def _recon(args: argparse.Namespace) -> int:
-    from team import recon_play
-    # Nothing is written for the project, but resolving it keeps this in the same
-    # family as every other command: it must run against a real registered project.
-    resolve_project(args.project)
-    action = args.action
-
-    if action == "play":
-        serial = recon_play.pick_device(args.device)
-        state = recon_play.play_state(serial)
-        print(f"play: device {serial} → {state}")
-        if state == "no-play":
-            raise recon_play.Ask(recon_play.NO_PLAY_ASK.format(serial=serial))
-        if state == "signed-out":
-            raise recon_play.Ask(recon_play.SIGNED_OUT_ASK.format(serial=serial))
-        if args.term:
-            recon_play.open_search(serial, args.term)
-            print(f"play: searched Play for {args.term!r} — visible rows:")
-        else:
-            recon_play.launch(serial, "market://")
-            print("play: opened the store — visible rows:")
-        for row in recon_play.screen_rows(serial):
-            print(f"  {row}")
-        return 0
-
-    if action == "install":
-        if not args.target:
-            raise SystemExit("install needs a package id, e.g. "
-                             "`recon <project> install com.rival.app`")
-        recon_play.play_install(args.target, device=args.device,
-                                timeout=args.timeout,
-                                log=lambda m, **_k: print(m, flush=True))
-        return 0
-
-    raise SystemExit(f"unknown recon action: {action}")
-
-
 def main() -> None:
     ap = argparse.ArgumentParser(prog="devteam")
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -1328,18 +1271,6 @@ def main() -> None:
     al.add_argument("--task-spec", help="judge a picked task spec instead of free text")
     al.add_argument("--apply", help="apply a verdict JSON the agent wrote")
     al.set_defaults(fn=cmd_align)
-
-    rn = sub.add_parser("recon", help="the MANUAL intel plane — search the Play "
-                                      "Store on an emulator and install a "
-                                      "competitor app, by hand")
-    rn.add_argument("project")
-    rn.add_argument("action", choices=["install", "play"])
-    rn.add_argument("target", nargs="?", help="the package id to install")
-    rn.add_argument("--device", help="adb serial (required if >1 emulator runs)")
-    rn.add_argument("--term", help="play: what to search the store for")
-    rn.add_argument("--timeout", type=int, default=900,
-                    help="install: seconds to wait for Play to finish")
-    rn.set_defaults(fn=cmd_recon)
 
     args = ap.parse_args()
     sys.exit(args.fn(args) or 0)
