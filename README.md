@@ -327,6 +327,42 @@ Each run banner also ends with the plan URLs, and quotes the `AGENT FLAGS` and
 `QUEUE IMPACT` blocks verbatim when they are printed — a superseded or dropped
 task is never silent.
 
+## The intel plane — competitor recon (manual, separate)
+
+A **second workflow**, deliberately not part of the nightly run. Where the
+delivery plane ships one task to internal testing, the intel plane answers *"what
+do our competitors actually do?"* — by hand, when you want it.
+
+```bash
+devteam recon <project> static /path/to/rival.apk        # deterministic, no emulator
+devteam recon <project> static com.rival.app --device <adb-serial>   # pull from a device
+devteam recon <project> prompt com.rival.app             # hand the agent its prompt (agentic pass)
+devteam recon <project> findings com.rival.app --file .pipeline/competitors/com.rival.app.findings.json
+devteam recon <project> list | show <package>
+```
+
+- **Static pass** — no LLM, no emulator: manifest facts via `aapt2` /
+  `apkanalyzer` when installed, and **SDK signatures** byte-scanned from the
+  APK's dex against a generic catalogue (`team/recon.py`) grouped into
+  *capabilities*. Cached by `versionCode` (or an APK fingerprint when no Android
+  tool is present). It already answers "what features/integrations does it have?"
+  for most questions.
+- **Dynamic pass** — agentic, needs an emulator and you: follow
+  `skills/recon/SKILL.md` — read the UI tree first (`android layout`), pixel-click
+  only where the tree is empty, and ask the human for anything needing a
+  login/secret. Findings merge back through `recon findings`, so every write goes
+  through code.
+- **The boundary is files.** Reports live in
+  `<project>/.pipeline/competitors/<package>.json`. The planner's collectors read
+  that directory as a research signal (`signals.competitors`) and **never wait on
+  it** — `none` is a normal state, and its absence surfaces as an *Upgrades* line,
+  never a failure.
+
+Not scheduled, no server, no protocol: a human is present, so stopping mid-way,
+answering questions and unblocking are just you. Graduate to a schedule and an
+addressable agent (A2A) only when those events actually fire — see
+`skills/recon/SKILL.md` → *Graduating*.
+
 ## Safety rails
 
 - **Frozen paths are absolute.** If a task seems to need one, it is blocked, not
@@ -393,6 +429,9 @@ python3 cli.py publish <project>                # put the plan on the repo now
 python3 cli.py goal <project> add|park|set-status|retire|reparent|revert|review|log
 python3 cli.py vision <project> "one sentence"  # the owner's goal
 python3 cli.py align <project> "<request>" [--apply]
+python3 cli.py recon <project> static|findings|prompt|list|show
+                                                # the MANUAL intel plane: inspect
+                                                # a competitor (static pass first)
 python3 cli.py emulators <project> [--record [--reset]]
 python3 cli.py alarm <project> ; python3 cli.py poll <project> ; python3 cli.py schedules
 python3 cli.py onboard <path> ; python3 cli.py setup --project <path> [--at HH:MM]
@@ -439,6 +478,7 @@ scripts/nightly.sh      launchd entry point
 config/runtimes.json    role → model (the only thing pinned)
 skills/dev-team/        THE contract any orchestrator agent must follow
 skills/new-project/     mode-B create-a-new-app playbook + reference assets
+skills/recon/           the MANUAL intel plane: competitor recon runbook
 skills/android-code/    coding-style law for developer subagents
 skills/checks/          executable expertise (localization completeness, …)
 skills/lessons.md       append-only surprises log (the team's memory)

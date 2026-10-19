@@ -18,7 +18,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from team import alarm, emulator, goals, scribe, scan, scheduler, shipper  # noqa: E402
+from team import alarm, emulator, goals, recon, scribe, scan, scheduler, shipper  # noqa: E402
 from team.core import (  # noqa: E402
     RunLog, TEAM_ROOT, agent_argv, load_json, now_iso, pipeline_dir, profile_of,
     resolve_model, resolve_project, role_cfg, run as sys_run, runtimes,
@@ -1181,6 +1181,80 @@ def cmd_setup(args: argparse.Namespace) -> None:
     print(f"  manual-mode alternative remains possible anytime".strip())
 
 
+def cmd_recon(args: argparse.Namespace) -> int:
+    """The MANUAL intel plane — competitor recon, by hand, separate from a run.
+
+    Deterministic: acquire an APK and write ONE versioned report to
+    `.pipeline/competitors/<package>.json`. The planner reads that dir as a
+    research signal; it never waits on it and never writes it. Driving the app on
+    an emulator is an agent's job (`skills/recon/SKILL.md`) that merges back here
+    through `recon findings`, so every write stays in code.
+    """
+    project = resolve_project(args.project)
+    action = args.action
+
+    if action == "list":
+        reports = recon.load_reports(project)
+        if not reports:
+            print("no competitor reports yet — run:\n"
+                  "  devteam recon <project> static <apk|package>")
+            return 0
+        for r in reports:
+            st = r.get("static") or {}
+            caps = ",".join(st.get("capabilities") or []) or "-"
+            print(f"  {(r.get('package') or '?'):42s} "
+                  f"v{(r.get('version_name') or '?'):10s} caps={caps:28s} "
+                  f"findings={len(r.get('findings') or [])} "
+                  f"({r.get('confidence') or '?'})")
+        return 0
+
+    if action == "show":
+        rp = recon.report_path(project, args.target)
+        data = load_json(rp)
+        if not data:
+            raise SystemExit(f"no report at {rp}")
+        print(json.dumps(data, indent=2))
+        return 0
+
+    if action == "findings":
+        if not args.file:
+            raise SystemExit("findings needs --file <json> (what the agent wrote)")
+        payload = load_json(Path(args.file).expanduser())
+        if not isinstance(payload, dict):
+            raise SystemExit(f"not a JSON object: {args.file}")
+        recon.merge_findings(project, args.target, payload, log=print)
+        return 0
+
+    if action == "prompt":
+        rp = recon.report_path(project, args.target)
+        report = load_json(rp)
+        if not report:
+            raise SystemExit(f"no report for {args.target} — run `recon static` first")
+        print(recon.render_dynamic_prompt(project, report, args.question))
+        return 0
+
+    if action == "static":
+        apk = None
+        source = args.source or "apk"
+        if args.apk:
+            apk = Path(args.apk).expanduser()
+        elif args.target and args.target.lower().endswith(".apk"):
+            apk = Path(args.target).expanduser()
+        if apk is not None:
+            if not apk.exists():
+                raise SystemExit(f"APK not found: {apk}")
+        else:
+            if not args.target:
+                raise SystemExit("static needs an .apk path, or a package to "
+                                 "pull from a device (adb)")
+            apk = recon.pull_from_device(args.target, device=args.device)
+            source = "device"
+        recon.static_pass(project, apk, source=source, force=args.force, log=print)
+        return 0
+
+    raise SystemExit(f"unknown recon action: {action}")
+
+
 def main() -> None:
     ap = argparse.ArgumentParser(prog="devteam")
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -1271,6 +1345,22 @@ def main() -> None:
     al.add_argument("--task-spec", help="judge a picked task spec instead of free text")
     al.add_argument("--apply", help="apply a verdict JSON the agent wrote")
     al.set_defaults(fn=cmd_align)
+
+    rn = sub.add_parser("recon", help="the MANUAL intel plane — inspect a "
+                                      "competitor app and write a report the "
+                                      "planner reads next cycle (never waits)")
+    rn.add_argument("project")
+    rn.add_argument("action", choices=["static", "findings", "prompt", "list", "show"])
+    rn.add_argument("target", nargs="?", help="an .apk path, or a package name")
+    rn.add_argument("--apk", help="explicit APK file (overrides target)")
+    rn.add_argument("--device", help="adb serial to pull the package from")
+    rn.add_argument("--source", help="label for where the APK came from")
+    rn.add_argument("--force", action="store_true",
+                    help="re-analyze even if the versionCode is unchanged")
+    rn.add_argument("--file", help="findings: the JSON the recon agent wrote")
+    rn.add_argument("--question", action="append",
+                    help="prompt: a question to steer the recon agent (repeatable)")
+    rn.set_defaults(fn=cmd_recon)
 
     args = ap.parse_args()
     sys.exit(args.fn(args) or 0)

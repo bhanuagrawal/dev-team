@@ -23,6 +23,7 @@ from .core import (RunLog, now_iso, pipeline_dir, profile_of, run, save_json,
                    save_state, state_of, target_looks_like_paths)
 from . import goals
 from . import queue as queue_mod
+from . import recon
 
 MAX_QUEUE = 6
 # TASK SIZING (owner decision 2026-10-18: "plan lead task not too small, [the
@@ -189,6 +190,14 @@ def _ga4_pull(project: Path, profile: dict) -> dict:
         return {"status": "unavailable", "reason": str(e)[:200]}
 
 
+def _competitors_pull(project: Path) -> dict:
+    """Competitor intel is a SEPARATE, manual workflow (the intel plane). This
+    collector only READS whatever reports exist in `.pipeline/competitors/` — it
+    never waits for the recon agent, and 'none' is a normal, non-error state.
+    `devteam recon` writes the reports; `skills/recon/SKILL.md` is the runbook."""
+    return recon.as_signal(project)
+
+
 def research_collect(project: Path, log: RunLog) -> dict:
     """All deterministic collectors → research dict (no LLM)."""
     profile = profile_of(project)
@@ -209,6 +218,7 @@ def research_collect(project: Path, log: RunLog) -> dict:
         "project": profile["name"],
         "signals": {
             "ga4": _ga4_pull(project, profile),
+            "competitors": _competitors_pull(project),
             "codebase": {
                 "targets_total": len(profile["targets"]),
                 "shipped_count": sum(1 for s in surfaces if s["status"] == "shipped"),
@@ -249,8 +259,10 @@ def research_collect(project: Path, log: RunLog) -> dict:
     dest = project / ".pipeline" / "research.json"
     dest.parent.mkdir(parents=True, exist_ok=True)
     dest.write_text(json.dumps(research, indent=2) + "\n")
+    comp = research["signals"].get("competitors") or {}
     log(f"research: collected → {dest.name} "
         f"(ga4={research['signals']['ga4'].get('status')}, "
+        f"competitors={comp.get('count', 0)}, "
         f"remaining={len(remaining)}, upgrades={len(research['upgrades'])})")
     for u in research["upgrades"]:
         log(f"  upgrade available: {u['title']}")
@@ -681,6 +693,21 @@ def capability_upgrades(signals: dict, profile: dict, project: Path | None = Non
             "benefit": "releases with regressions get flagged before users report",
             "how": "Play Developer API service account (same JSON as the "
                    "internal-testing upload) — declared under connections.play_vitals",
+        })
+    comp = (signals.get("competitors") or {})
+    if comp.get("status") != "ok":
+        up.append({
+            "id": "competitor-intel",
+            "title": "Run competitor recon (the manual intel plane)",
+            "benefit": "what rival apps actually do — features, paywalls, the "
+                       "kits they ship — turns 'add polish' guesses into "
+                       "grounded gaps to close",
+            "how": "by hand, when you want it: "
+                   "`devteam recon <project> static <apk|package>` for the "
+                   "static pass, then follow `skills/recon/SKILL.md` to drive "
+                   "the app on an emulator. Reports land in "
+                   ".pipeline/competitors/ and the planner reads them next cycle "
+                   "(it never waits on them)",
         })
     return up
 
