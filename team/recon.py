@@ -149,9 +149,14 @@ def _parse_badging(text: str) -> dict:
     m = re.search(r"versionName='([^']*)'", text)
     if m:
         facts["version_name"] = m.group(1)
-    m = re.search(r"sdkVersion:'([^']*)'", text)
-    if m:
-        facts["min_sdk"] = m.group(1)
+    # aapt2 (build-tools 34+) says `minSdkVersion:'36'`; older aapt said
+    # `sdkVersion:'24'`. Accept both — and note neither pattern matches
+    # `targetSdkVersion` (capital S), which is parsed separately below.
+    for pat in (r"minSdkVersion:'([^']*)'", r"sdkVersion:'([^']*)'"):
+        m = re.search(pat, text)
+        if m:
+            facts["min_sdk"] = m.group(1)
+            break
     m = re.search(r"targetSdkVersion:'([^']*)'", text)
     if m:
         facts["target_sdk"] = m.group(1)
@@ -423,8 +428,14 @@ when a question needs a real account or a judgement call):
    skills. Read the UI tree (`android layout` / `uiautomator dump`) FIRST — it is
    structured and reliable. Use pixel-clicks (computer-use / desktop tools) ONLY
    for surfaces with an empty tree (canvas, WebView).
-2. Start any emulator through `with-emulator <avd> -- <cmd...>` (teardown is
-   guaranteed by an EXIT trap). NEVER stop an emulator you did not start.
+2. The app must be installed on a Play-enabled emulator. Prefer the deterministic
+   path: `devteam recon {project} install {package}` — it drives the Play Store,
+   taps Install, waits, pulls the APK and runs the static pass. If the emulator
+   is not signed into Play it stops with an OWNER ASK: a human signs in once on
+   the emulator window (never a password in a prompt). Start an emulator with
+   `with-emulator <avd> -- <cmd...>` (teardown via an EXIT trap), or keep one up
+   for the session and stop it yourself when done. NEVER stop an emulator you did
+   not start.
 3. Work ONLY on the target app. Never touch any project's source code.
 4. If a question needs a login/secret/payment you cannot supply, do NOT guess:
    add it to `questions` and ask the human in the room.

@@ -26,8 +26,10 @@ description: >
 
 ```
 INTEL PLANE (this skill, manual)
-  you → devteam recon static <apk|package>     → .pipeline/competitors/<pkg>.json
+  you → devteam recon play --term "…"           search the Store on the emulator
+      → devteam recon install <pkg>             Play install → pull → static pass
       → (optional) drive the app on an emulator → devteam recon findings …  ↺
+                     ↘ .pipeline/competitors/<pkg>.json
                                │
                                │  files only, one-way, async
                                ▼
@@ -35,7 +37,7 @@ DELIVERY PLANE (dev-team, nightly)
   step 2 `plan`  →  research collectors read competitors/*.json as a SIGNAL
 ```
 
-## The two passes
+## The passes
 
 ### 1. Static pass — deterministic, no emulator, cheap
 
@@ -59,7 +61,39 @@ Use `--force` to refresh.
 **Start here.** Static already answers "what features/integrations does it
 have?" for most questions — no emulator, no tokens.
 
-### 2. Dynamic pass — agentic, needs an emulator and you
+### 2. Install it the way a user would — the Play Store on the emulator
+
+You must be on a **Play-enabled AVD** (a `google_apis_playstore` image). The AVD
+you already have, `medium_phone`, is one. The flow is the user's flow: search the
+store, install, use it.
+
+```bash
+android emulator start <avd>                       # start once, keep it for the session
+devteam recon <project> play --term "forest focus" # search the Store; lists the rows
+devteam recon <project> install com.rival.app      # Play details → Install → wait → pull → static pass
+```
+
+`install` is deterministic: it reads the accessibility tree, taps Install (or
+Update) — clearing Play's own agree/permission dialogs — waits for the package to
+appear, then pulls the APK and runs the static pass on it. One command goes from
+"not installed" to a filled report.
+
+**The one thing it deliberately will not do is sign in.** If the emulator has no
+Google account, it stops with an `OWNER ASK` (rc=4) telling the human to sign in
+on the emulator window — email, password, 2FA. Same for a CAPTCHA, and same for
+an AOSP image with no Play Store at all. Automated sign-in trips Google's device
+verification, and an agent should not hold a password: sign in once, and the AVD
+remembers.
+
+- Prefer `install <package>`. When you only know the app's *name*, `play --term`
+  lists the visible rows so you can pick the exact package id — installing the
+  wrong id installs the wrong app.
+- Emulator lifetime: for recon, start it once and keep it across the session,
+  then `android emulator stop <avd>` when you are done. For a one-shot,
+  `with-emulator <avd> -- <command>` tears down via an EXIT trap. **Never stop an
+  emulator you did not start** — the owner may have one open on purpose.
+
+### 3. Dynamic pass — agentic: use the app, answer the questions
 
 Only for what static cannot answer (real flows, paywall gating, onboarding).
 
@@ -70,13 +104,11 @@ devteam recon <project> prompt <package> --question "How is the paywall triggere
 
 Follow the printed prompt. In short:
 
-1. **Install & launch** the app on an emulator (Play-enabled image if it needs
-   Play; otherwise side-load the APK). Start any emulator through
-   `with-emulator <avd> -- <cmd...>` — teardown is guaranteed by an EXIT trap —
-   and **never stop an emulator you did not start**.
+1. **Launch and drive the app** on the emulator you installed it on.
 2. **Read the UI tree first** (`android layout` / `uiautomator dump`) — it is
    structured and reliable. Use pixel-clicks (`computer-use` / `desktop` tools)
-   **only** where the tree is empty (canvas, WebView).
+   **only** where the tree is empty (canvas, WebView) — and for those, a
+   screenshot (`android screen capture`) *before* clicking.
 3. **Ask the human** for anything needing a login/secret/payment. Never guess.
 4. **Never touch any project's source code.** This plane reads behavior only.
 
@@ -116,7 +148,12 @@ The planner cites them next cycle via `signals.competitors`
 - **Never block the delivery run.** Reports are consumed *if present*; the run
   never waits for a recon.
 - **Emulator hygiene** — the baseline rule from the dev-team skill applies here
-  too: start through `with-emulator`, stop only what you started.
+  too: start through `with-emulator` (or start once and stop it yourself), and
+  stop only what you started.
+- **Never type a Google password.** The Play sign-in is the human's, on the
+  emulator window. `recon install` detects the wall and asks (rc=4); it must stay
+  that way — an agent holding an account password is a worse failure than a
+  failed install.
 - **Observable behavior + static metadata only.** Do not patch, crack, or
   redistribute APKs; respect store terms.
 

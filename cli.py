@@ -1189,9 +1189,52 @@ def cmd_recon(args: argparse.Namespace) -> int:
     research signal; it never waits on it and never writes it. Driving the app on
     an emulator is an agent's job (`skills/recon/SKILL.md`) that merges back here
     through `recon findings`, so every write stays in code.
+
+    `play` and `install` DO touch the emulator, because installing the app the
+    way a user would is the point: they drive the Play Store, and when a human is
+    required (not signed in, a CAPTCHA) they end in an OWNER ASK (rc=4), never a
+    guessed password.
     """
+    from team import recon_play
+    try:
+        return _recon(args)
+    except recon_play.Ask as e:
+        print("OWNER ASK (recon) — only you can answer this:")
+        print(e.message.strip())
+        return recon_play.ASK_EXIT
+
+
+def _recon(args: argparse.Namespace) -> int:
+    from team import recon_play
     project = resolve_project(args.project)
     action = args.action
+
+    if action == "play":
+        serial = recon_play.pick_device(args.device)
+        state = recon_play.play_state(serial)
+        print(f"play: device {serial} → {state}")
+        if state == "no-play":
+            raise recon_play.Ask(recon_play.NO_PLAY_ASK.format(serial=serial))
+        if state == "signed-out":
+            raise recon_play.Ask(recon_play.SIGNED_OUT_ASK.format(serial=serial))
+        if args.term:
+            recon_play.open_search(serial, args.term)
+            print(f"play: searched Play for {args.term!r} — visible rows:")
+        else:
+            recon_play.launch(serial, "market://")
+            print("play: opened the store — visible rows:")
+        for row in recon_play.screen_rows(serial):
+            print(f"  {row}")
+        return 0
+
+    if action == "install":
+        if not args.target:
+            raise SystemExit("install needs a package id, e.g. "
+                             "`recon <project> install com.rival.app`")
+        recon_play.play_install(project, args.target, device=args.device,
+                                force=args.force, timeout=args.timeout,
+                                log=lambda m, **_k: print(m, flush=True))
+        return 0
 
     if action == "list":
         reports = recon.load_reports(project)
@@ -1350,10 +1393,14 @@ def main() -> None:
                                       "competitor app and write a report the "
                                       "planner reads next cycle (never waits)")
     rn.add_argument("project")
-    rn.add_argument("action", choices=["static", "findings", "prompt", "list", "show"])
+    rn.add_argument("action", choices=["static", "install", "play", "findings",
+                                       "prompt", "list", "show"])
     rn.add_argument("target", nargs="?", help="an .apk path, or a package name")
     rn.add_argument("--apk", help="explicit APK file (overrides target)")
-    rn.add_argument("--device", help="adb serial to pull the package from")
+    rn.add_argument("--device", help="adb serial (required if >1 emulator runs)")
+    rn.add_argument("--term", help="play: what to search the store for")
+    rn.add_argument("--timeout", type=int, default=900,
+                    help="install: seconds to wait for Play to finish")
     rn.add_argument("--source", help="label for where the APK came from")
     rn.add_argument("--force", action="store_true",
                     help="re-analyze even if the versionCode is unchanged")

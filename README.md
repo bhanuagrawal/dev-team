@@ -334,13 +334,22 @@ delivery plane ships one task to internal testing, the intel plane answers *"wha
 do our competitors actually do?"* — by hand, when you want it.
 
 ```bash
-devteam recon <project> static /path/to/rival.apk        # deterministic, no emulator
+devteam recon <project> play --term "rival app"          # search the Play Store on the emulator
+devteam recon <project> install com.rival.app            # Play install → pull → static pass
+devteam recon <project> static /path/to/rival.apk        # or: analyze an APK you already have
 devteam recon <project> static com.rival.app --device <adb-serial>   # pull from a device
 devteam recon <project> prompt com.rival.app             # hand the agent its prompt (agentic pass)
 devteam recon <project> findings com.rival.app --file .pipeline/competitors/com.rival.app.findings.json
 devteam recon <project> list | show <package>
 ```
 
+- **Install the way a user would** — `play` searches the emulator's Play Store and
+  lists the rows; `install` opens the app's Play page, taps Install (or Update),
+  clears Play's own dialogs, waits for the package, then pulls the APK and runs
+  the static pass on it. Needs a Play-enabled AVD. The one thing it will **not**
+  do is sign in: with no Google account on the emulator it stops with an
+  OWNER ASK (rc=4) telling you to sign in on the emulator window. That is
+  deliberate — automated sign-in trips Google's device verification.
 - **Static pass** — no LLM, no emulator: manifest facts via `aapt2` /
   `apkanalyzer` when installed, and **SDK signatures** byte-scanned from the
   APK's dex against a generic catalogue (`team/recon.py`) grouped into
@@ -429,9 +438,9 @@ python3 cli.py publish <project>                # put the plan on the repo now
 python3 cli.py goal <project> add|park|set-status|retire|reparent|revert|review|log
 python3 cli.py vision <project> "one sentence"  # the owner's goal
 python3 cli.py align <project> "<request>" [--apply]
-python3 cli.py recon <project> static|findings|prompt|list|show
-                                                # the MANUAL intel plane: inspect
-                                                # a competitor (static pass first)
+python3 cli.py recon <project> play|install|static|findings|prompt|list|show
+                                                # the MANUAL intel plane: search
+                                                # the Play Store, install, inspect
 python3 cli.py emulators <project> [--record [--reset]]
 python3 cli.py alarm <project> ; python3 cli.py poll <project> ; python3 cli.py schedules
 python3 cli.py onboard <path> ; python3 cli.py setup --project <path> [--at HH:MM]
