@@ -460,12 +460,20 @@ def cmd_queue(args: argparse.Namespace) -> None:
         from team import queue as qmod
         print(qmod.review(state))
         return
+    from team import queue as qmod
     queue = state.get("queue", [])
     if args.done:
         before = len(queue)
         queue = [q for q in queue if q.get("label") != args.done]
         if len(queue) != before:
             state["queue"] = queue
+            # A pop is a queue verdict, so it must leave an audit trail: without
+            # this the next plan review saw an empty queue where plan_review had
+            # recorded "1 waiting", with no event explaining the disappearance —
+            # exactly the silent drop the impact review exists to prevent.
+            qmod._record(state, "orchestrator", "dropped", args.done,
+                         reason="popped by hand (`queue --done`) — removed "
+                                "outside a plan review")
             save_state(project, state)
         print(f"queue: {len(queue)} left (popped '{args.done}')" if len(queue) != before
               else f"'{args.done}' not found in queue — nothing popped")
