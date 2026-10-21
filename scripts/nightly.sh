@@ -11,6 +11,9 @@ TEAM="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 PROJECT="${1:?usage: nightly.sh <ProjectName>}"
 export JAVA_HOME="/Applications/Android Studio.app/Contents/jbr/Contents/Home"
 export PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:$PATH"
+# LLM provider/model + keys (llmctl se generate hota hai)
+[ -f "$HOME/agentconfig/agentconfig.env" ] && . "$HOME/agentconfig/agentconfig.env"
+[ -f "$HOME/agentconfig/secrets.env" ] && . "$HOME/agentconfig/secrets.env"
 mkdir -p "$TEAM/logs"
 # Single-instance guard: launchd re-fires or a manual kickstart must never
 # run two orchestrators against the same project (last night's race lesson).
@@ -38,6 +41,12 @@ import json, pathlib
 cfg = json.loads(pathlib.Path('$TEAM/config/runtimes.json').read_text())
 print(cfg.get('roles', {}).get('orchestrator', {}).get('model', ''))
 " 2>/dev/null)
+
+# Role token -> qualified model id (agentconfig env se)
+case "$MODEL" in
+  llm)     MODEL="${LLM_MODEL:-}" ;;
+  thinker) MODEL="${THINKER_LLM_MODEL:-}" ;;
+esac
 
 if [ -z "$MODEL" ]; then
   echo "ERROR: no orchestrator model in config/runtimes.json" >> "$TEAM/logs/launchd.log"

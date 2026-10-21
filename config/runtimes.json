@@ -1,18 +1,18 @@
 {
-  "_comment": "Role -> model. This is the ONLY thing the team pins per role: the orchestrator is whatever agentic tool loads the dev-team skill and it develops through its own native subagents, so no vendor/binary/CLI appears anywhere in this file. Optional per-role 'command' (argv template with {model}/{prompt}) exists only for tools that cannot spawn subagents, and for A/B bakeoffs; DEVTEAM_AGENT_CMD provides the same template from the environment.",
+  "_comment": "Role -> model. Model ab chhota token hai: 'llm' (worker) ya 'thinker' (orchestrator). Asli id ~/agentconfig/agentconfig.env se aata hai (llmctl switch se badalta hai). Is file mein provider/ID kabhi mat likho. Optional per-role 'command' (argv template with {model}/{prompt}) un tools ke liye hai jo subagent spawn nahi kar sakte; DEVTEAM_AGENT_CMD wahi template env se deta hai.",
   "roles": {
     "developer": {
-      "model": "opencode/deepseek-v4.1-flash-free",
+      "model": "llm",
       "timeout_s": 3600
     },
     "reviewer": {
-      "model": "opencode/deepseek-v4.1-flash-free"
+      "model": "llm"
     },
     "orchestrator": {
-      "model": "opencode/deepseek-v4.1-flash-free"
+      "model": "thinker"
     },
     "product_synthesis": {
-      "model": "opencode/deepseek-v4.1-flash-free"
+      "model": "thinker"
     }
   }
 }

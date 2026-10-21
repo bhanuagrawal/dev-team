@@ -134,6 +134,11 @@ def runtimes() -> dict:
     return load_json(RUNTIMES_PATH, {})
 
 
+# role token -> env var (~/agentconfig/agentconfig.env). Provider badalne pe
+# sirf llmctl switch chalta hai; yahan kuch nahi badalta.
+ROLE_ENV = {"llm": "LLM_MODEL", "thinker": "THINKER_LLM_MODEL"}
+
+
 # --------------------------------------------------------------------------- #
 # roles: model + the tool-agnostic headless launch contract
 #
@@ -157,8 +162,12 @@ def role_cfg(role: str) -> dict:
 
 
 def resolve_model(cfg: dict) -> str:
-    """The single chokepoint every role reads its model from."""
-    return (cfg or {}).get("model", "") or ""
+    """Role token ('llm' | 'thinker') -> ~/agentconfig env se qualified model id.
+    Warna jo diya hai wahi literal id maano."""
+    token = (cfg or {}).get("model", "") or ""
+    if token in ROLE_ENV:
+        return os.environ.get(ROLE_ENV[token], "")
+    return token
 
 
 def agent_argv(cfg: dict, prompt: str) -> list[str] | None:
