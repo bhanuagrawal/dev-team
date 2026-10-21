@@ -4,6 +4,7 @@ code, not by the agent.
 """
 from __future__ import annotations
 
+import os
 import re
 import subprocess
 from pathlib import Path
@@ -12,6 +13,39 @@ from .core import profile_of, run
 
 JAVA_HOME = "/Applications/Android Studio.app/Contents/jbr/Contents/Home"
 GRADLE_ENV = {"JAVA_HOME": JAVA_HOME, "TERM": "dumb", "CI": "true"}
+
+
+def android_sdk_env(start: Path | None = None) -> dict:
+    """{"ANDROID_HOME": <sdk>} when the SDK can be located, else {}.
+
+    Resolved the way Gradle itself resolves it: `$ANDROID_HOME` /
+    `$ANDROID_SDK_ROOT`, else `sdk.dir` in the nearest `local.properties` at or
+    above `start`. This exists because the gates run in a WORKTREE, and a
+    worktree is a fresh checkout: `local.properties` is gitignored, so it is
+    never there, and every gradle gate then dies with "SDK location not found"
+    — a machine-local gap that reads exactly like a code failure and stops a
+    healthy run at step 8. (Lesson 2026-10-22.)"""
+    for var in ("ANDROID_HOME", "ANDROID_SDK_ROOT"):
+        val = os.environ.get(var)
+        if val and Path(val).is_dir():
+            return {"ANDROID_HOME": val}
+    if start:
+        for d in [Path(start).resolve(), *Path(start).resolve().parents]:
+            lp = d / "local.properties"
+            if not lp.is_file():
+                continue
+            for line in lp.read_text(errors="ignore").splitlines():
+                if not line.strip().startswith("sdk.dir"):
+                    continue
+                val = line.split("=", 1)[-1].strip()
+                if val and Path(val).is_dir():
+                    return {"ANDROID_HOME": val}
+    return {}
+
+
+def gradle_env(worktree: Path | None = None) -> dict:
+    """The environment gradle tasks run with (JAVA_HOME + the Android SDK)."""
+    return {**GRADLE_ENV, **android_sdk_env(worktree)}
 
 
 def changed_files(worktree: Path, base: str) -> list[str]:
@@ -63,7 +97,7 @@ def localization_check(project_root: Path, files: list[str]) -> tuple[bool, str]
 
 def gradle_task(worktree: Path, task: str, timeout: int, log) -> tuple[bool, str]:
     log(f"~ gradle {task} (≤{timeout}s)")
-    r = run(["./gradlew", task], worktree, timeout=timeout, env=GRADLE_ENV)
+    r = run(["./gradlew", task], worktree, timeout=timeout, env=gradle_env(worktree))
     if r.returncode == 0:
         log(f"  ok: {task}")
         return True, ""
@@ -78,7 +112,7 @@ def gradle_task(worktree: Path, task: str, timeout: int, log) -> tuple[bool, str
                else (task + "Android" if task.endswith("Kotlin") else None))
         if alt:
             log(f"  {task} not found in this project — retrying as {alt}")
-            r = run(["./gradlew", alt], worktree, timeout=timeout, env=GRADLE_ENV)
+            r = run(["./gradlew", alt], worktree, timeout=timeout, env=gradle_env(worktree))
             if r.returncode == 0:
                 log(f"  ok: {alt}")
                 return True, ""

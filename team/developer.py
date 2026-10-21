@@ -60,7 +60,8 @@ def _spawn(prompt: str, worktree: Path, log: RunLog, cfg: dict,
     log(f"~ spawning developer headless ({argv[0]}, ≤{timeout}s)")
     try:
         r = run(argv, worktree, timeout=timeout,
-                env={"JAVA_HOME": verify.GRADLE_ENV["JAVA_HOME"], "TERM": "dumb"})
+                env={"JAVA_HOME": verify.GRADLE_ENV["JAVA_HOME"], "TERM": "dumb",
+                     **verify.android_sdk_env(worktree)})
     except subprocess.TimeoutExpired:
         log("  developer TIMEOUT")
         return False, f"developer timed out after {timeout}s"
