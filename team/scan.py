@@ -130,6 +130,22 @@ def _shipped_labels(state: dict) -> set[str]:
             if s.get("label")}
 
 
+def already_delivered(q: dict, state: dict) -> bool:
+    """True when this queue entry's work is already in the ledgers.
+
+    The ONE definition of "this queued task has shipped", shared by `pick`
+    (which must not serve it again) and by the planner's review block (which
+    must not announce it as the run's task). A queue entry that outlives its
+    release is the plan's most misleading kind of wrong: the review says "this
+    run builds X" while the picker skips X and builds Y. Both ledgers are read:
+    the shipped ledger is authoritative, the run ledger catches runs recorded
+    without a task-spec."""
+    if not q:
+        return False
+    return (_norm_label(q.get("label")) in _shipped_labels(state)
+            or _label_task_slug(q.get("label")) in _delivered_slugs_from_runs(state))
+
+
 def _queue_task(q: dict, seq: int) -> dict:
     """A code task derived from one queue entry (bugfix|feature)."""
     return {
@@ -196,16 +212,16 @@ def next_task(project: Path, seq: int, supervised: bool = False) -> dict | None:
     # serve it again (label-level; a feature may legitimately re-touch a shipped
     # path, so path matching stays out of this check). Both ledgers are consulted:
     # the shipped ledger is authoritative, the run ledger catches the runs that
-    # were recorded without a task-spec.
-    shipped_labels = _shipped_labels(state)
-    delivered_slugs = _delivered_slugs_from_runs(state)
+    # were recorded without a task-spec. `already_delivered` is the ONE definition
+    # of that fact — the planner's review block asks the same predicate, so the
+    # handover it announces and the task this picking actually serves can no
+    # longer disagree (lesson 2026-10-22).
     queue = state.get("queue") or []
 
     def _eligible(q: dict) -> bool:
         return (q.get("type") in ("bugfix", "feature", "motion")
                 and q.get("target")
-                and _norm_label(q.get("label")) not in shipped_labels
-                and _label_task_slug(q.get("label")) not in delivered_slugs)
+                and not already_delivered(q, state))
 
     def _buildable(q: dict, surfaces: list[dict]) -> bool:
         """Eligible AND not already obsolete: a motion entry whose surface has

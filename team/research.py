@@ -224,7 +224,15 @@ def research_collect(project: Path, log: RunLog) -> dict:
                     {"date": r.get("date"), "task_id": r.get("task_id"),
                      "result": r.get("result"), "note": (r.get("note") or "")[:300]}
                     for r in state.get("runs", [])[-8:]],
-                "current_queue": state.get("queue", []),
+                "current_queue": [
+                    # Mark delivered entries in the payload the synthesis reads:
+                    # a queue entry that outlived its release used to look exactly
+                    # like live work here, so the plan carried it forward (lesson
+                    # 2026-10-22). The verdict itself stays in code — `pick` and the
+                    # review block below ask `scan.already_delivered`.
+                    {**q, "already_delivered": True}
+                    if scan.already_delivered(q, state) else q
+                    for q in state.get("queue", [])],
                 "queue_impact_log": state.get("queue_events", [])[-8:],
                 "insights": state.get("insights", {}),
             },
@@ -888,6 +896,12 @@ def plan_report(project: Path, applied: bool = True) -> str:
     else:
         L.append(f"  left to do:       {len(queue)} waiting")
     L.append(f"  THIS RUN BUILDS:  {head or '— (nothing queued)'}")
+    if queue and scan.already_delivered(queue[0], state):
+        # The handover is a claim about what the picker will serve. When the head
+        # is delivered work the picker skips it — say so here instead of telling
+        # the owner the run builds something it will not (lesson 2026-10-22).
+        L.append("  NOTE:             the head of the queue is already delivered — "
+                 "the picker skips it and builds the next buildable entry below")
     if queue:
         L.append("  the queue, in order:")
         for i, q in enumerate(queue, 1):
@@ -898,6 +912,8 @@ def plan_report(project: Path, applied: bool = True) -> str:
             serv = f"   serves \"{node['title']}\"" if node \
                 else ("   (off-goal — declared)" if mid == "none"
                       else "   (no goal declared)")
+            if scan.already_delivered(q, state):
+                serv += "   (already delivered — skipped by the picker)"
             mark = "  ← NEXT" if i == 1 else ""
             eff = _as_int(q.get("effort_min"))
             size = f"   ~{eff} min" if eff else ""
