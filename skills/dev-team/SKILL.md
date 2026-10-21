@@ -69,6 +69,15 @@ Development leans on official Google/JetBrains skills and they drift:
    (AGP9 migration, gradle-dsl-doctor, tooling).
 Log date + versions in `~/.agents/android-skills-version.txt`. If offline,
 proceed and log it. This is a hard step for both modes.
+Two side effects to expect (they are not failures): `android skills add` DROPS
+the skills into the PROJECT root (`<project>/skills/`, plus `<project>/.claude/
+skills/`) — only `.claude/` is gitignored by default, so `<project>/skills/`
+shows up as untracked in the owner's checkout; add it to that project's
+`.gitignore` (a project fact, so it belongs there, not in team code) or accept
+the untracked dir and say so in the run report. And headless/`--no-llm` runs
+need the role models exported in this shell (`source ~/agentconfig/
+agentconfig.env`) — without it `doctor` correctly reports the agents blocked
+(it now names the missing env var).
 
 ## Hard rules (never violate)
 - You NEVER edit project code directly. You may write `.pipeline/tasks/*.json`

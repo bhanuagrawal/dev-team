@@ -8,17 +8,40 @@ project). BLOCKED reasons are phrased as one precise ask for the owner.
 from __future__ import annotations
 
 import json
+import os
 import shutil
 from pathlib import Path
 
 from .core import (
-    PROJECTS_BASES, TEAM_ROOT, agent_argv, now_iso, profile_of, resolve_model,
-    run, runtimes, save_state, state_of,
+    PROJECTS_BASES, ROLE_ENV, TEAM_ROOT, agent_argv, now_iso, profile_of,
+    resolve_model, run, runtimes, save_state, state_of,
 )
 
 
 def _has(p: str | Path) -> bool:
     return bool(p) and Path(str(p)).expanduser().exists()
+
+
+def _model_fix(role: str, cfg: dict) -> str:
+    """The right fix when a role's model check fails.
+
+    A role model is usually a TOKEN ('llm' | 'thinker') that resolves from an
+    environment variable (~/agentconfig/agentconfig.env). When the token is set
+    but its env var is unset, advising "set roles.<role>.model in runtimes.json"
+    sends the owner to edit the one file that is already correct — and the
+    failure then reads as if the model being CONFIGURED were the problem. Name
+    the real cause instead."""
+    token = (cfg or {}).get("model", "") or ""
+    env = ROLE_ENV.get(token)
+    if env and not os.environ.get(env):
+        return (f"the '{role}' model is the token '{token}', which resolves from "
+                f"${env} — that variable is not set in this shell: source the "
+                f"agent config (e.g. `source ~/agentconfig/agentconfig.env`) or "
+                f"export {env}=<provider>/<model>")
+    if not token:
+        return f"set roles.{role}.model in runtimes.json"
+    return (f"model token '{token}' does not resolve — check that ${env or 'the env'} "
+            f"is exported") if env else f"set roles.{role}.model in runtimes.json"
 
 
 def agent_requirements(profile: dict, project: Path) -> dict[str, list[tuple[str, bool, str]]]:
@@ -52,7 +75,7 @@ def agent_requirements(profile: dict, project: Path) -> dict[str, list[tuple[str
     dev_bin = dev_argv[0] if dev_argv else ""
     dev_checks = [
         ("developer model configured", bool(resolve_model(dev)),
-         "set roles.developer.model in runtimes.json"),
+         _model_fix("developer", dev)),
         (f"headless agent command available ({dev_bin})" if dev_bin
          else "headless agent command not set — native subagents are the primary path",
          bool(shutil.which(dev_bin)) if dev_bin else True,
@@ -72,7 +95,7 @@ def agent_requirements(profile: dict, project: Path) -> dict[str, list[tuple[str
     syn = rt.get("product_synthesis", {})
     synthesis_checks = [
         ("product_synthesis model configured", bool(resolve_model(syn)),
-         "set roles.product_synthesis.model in runtimes.json"),
+         _model_fix("product_synthesis", syn)),
     ]
 
     return {
