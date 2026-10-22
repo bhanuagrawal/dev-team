@@ -74,7 +74,16 @@ def _state_defaults(state: dict) -> list[str]:
 
 
 def needed(project: Path) -> list[str]:
-    """Cheap read-only check: what would adapt do? ('' list = already current)."""
+    """Cheap read-only check: what would adapt DO? ('' list = already current).
+
+    This is the FIXABLE set only — the structural drift `run()` repairs. An
+    OWNER ASK is deliberately not an item here: `run()` never resolves one (it
+    refuses to invent direction), so listing it would make the caller print the
+    wrong remedy. `status` renders this list under "the workflow's first step
+    fixes this: devteam adapt", and an ask is not fixed by adapt — it is fixed by
+    the owner (`devteam vision`), which `status` already prints separately (the
+    PLAN line) along with `adapt`/`doctor`'s OWNER ASK block. Name the remedy
+    that actually works; an ask is a question, not a repair job."""
     try:
         profile, state = profile_of(project), state_of(project)
     except SystemExit:
@@ -88,8 +97,6 @@ def needed(project: Path) -> list[str]:
     out += [f"missing state key '{k}'" for k in
             ("queue", "goal_log", "tree_changes", "alignment_log")
             if k not in state]
-    if not (profile.get("goals") or {}).get("milestones"):
-        out.append("no goal tree yet (owner ask: what is this app for long term?)")
     plan = goals.plan(profile)
     stale = [q.get("label") for q in state.get("queue", [])
              if str(q.get("advances") or "").strip() not in ("", "none")
