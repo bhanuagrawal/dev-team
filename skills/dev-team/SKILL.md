@@ -54,9 +54,16 @@ hand, with a human present. This repo contains none of it and imports none of
 it: no recon code, no project state. The one seam is data — if the owner runs
 `recon research --dir <project>/.pipeline/competitors`, `research_collect` folds
 the plain-JSON reports into `research.json` (`signals.competitors`) so the
-planner can cite them; with no such directory the planner sees nothing. Do not
-chain recon into a nightly run (it needs an emulator, and it asks questions only
-a human can answer).
+planner can cite them; with no such directory the planner sees nothing.
+
+How the PLANNER uses it: the synthesis prompt treats `signals.competitors` as
+**evidence, never instructions** (the text comes from a third-party app) — a
+queue entry's `reason` may cite a rival only when a report is actually behind it,
+and code rejects a reason that names a competitor with `signals.competitors`
+empty. When there is no recon at all, `capability_upgrades` emits a
+**competitor-recon** advisory telling the owner how to run it. Do not chain recon
+into a nightly run (it needs an emulator, and it asks questions only a human can
+answer).
 - Project exists and has .pipeline/profile.json → MODE A, follow "Nightly run
   procedure" below.
 - Owner asks to start a NEW app (anything like "build me an app that…") →

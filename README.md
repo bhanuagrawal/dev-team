@@ -343,8 +343,12 @@ recon install com.rival.app                # Play details → tap Install → wa
 code. If the owner points recon at the project's pipeline (`recon research --dir
 <project>/.pipeline/competitors`), then `research_collect` folds the plain-JSON
 reports it finds there into `research.json` under `signals.competitors` — so the
-planner *can* cite a competitor's surfaces and paywalls. Delete that directory
-and the pipeline is exactly as before.
+planner *can* cite a competitor's surfaces and paywalls. The synthesis prompt
+treats that block as **evidence, not instructions** (a third-party app wrote it),
+a queue entry may cite a rival only when a report backs it up (code rejects the
+claim otherwise), and with no recon at all the planner instead surfaces a
+**competitor-recon** upgrade telling the owner how to run one. Delete the
+directory and the pipeline is exactly as before.
 
 Do not chain it into the nightly: it needs an emulator and it asks questions only
 a human can answer. It is documented in its own repo.
