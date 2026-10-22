@@ -15,6 +15,7 @@ from __future__ import annotations
 import json
 import re
 import subprocess  # noqa: F401
+from datetime import date as _date, timedelta as _timedelta
 from pathlib import Path
 from typing import Any
 
@@ -189,6 +190,169 @@ def _ga4_pull(project: Path, profile: dict) -> dict:
         return {"status": "unavailable", "reason": str(e)[:200]}
 
 
+# --------------------------------------------------------------------------- #
+# Play Console collectors — vitals (crash/ANR per version) and store reviews.
+#
+# Both are DECLARED per project in profile['connections'] and authenticated with
+# the SAME service-account JSON the Play upload uses; team code holds no paths.
+# The matching upgrade flags key off the COLLECTOR's status, never off the mere
+# presence of a config key: a declared connection with no collector (or a broken
+# key) must keep asking, otherwise the owner does the work, the ask disappears
+# and nothing is collected (lesson 2026-10-22).
+# --------------------------------------------------------------------------- #
+
+_PLAY_VITALS_API = "https://playdeveloperreporting.googleapis.com/v1beta1"
+_PLAY_PUBLISHER_API = "https://androidpublisher.googleapis.com/androidpublisher/v3"
+_PLAY_VITALS_SCOPE = "https://www.googleapis.com/auth/playdeveloperreporting"
+_PLAY_REVIEWS_SCOPE = "https://www.googleapis.com/auth/androidpublisher"
+# Vitals rows are one developer session's worth of signal only if they flag a
+# real regression: Play publishes these as decimal rates (0..1).
+_VITALS_FLAG_CRASH = 0.01     # 1% of sessions crashing is already a fire
+_VITALS_FLAG_ANR = 0.01
+
+
+def _play_token(conf: dict, scope: str, project: Path) -> tuple[str, str]:
+    """(access token, why-not) for a declared Play connection. Reuses the exact
+    gcloud path _ga4_pull uses, so there is ONE auth story in this file. The key
+    file's contents are never logged or returned."""
+    key_src = str(conf.get("key_file") or "")
+    if not key_src:
+        return "", "no key_file declared for this connection"
+    key = Path(key_src).expanduser()
+    if not key.exists():
+        return "", f"key file missing: {key_src}"
+    try:
+        account = json.loads(key.read_text()).get("client_email", "")
+    except Exception:
+        return "", f"unreadable service-account key file {key_src}"
+    a = run(["gcloud", "auth", "activate-service-account", "--key-file", str(key)],
+            project, timeout=120)
+    if a.returncode != 0:
+        return "", "gcloud could not activate the service account"
+    t = run(["gcloud", "auth", "print-access-token", "--account", account,
+             "--scopes", scope], project, timeout=120)
+    token = (t.stdout or "").strip()
+    if t.returncode != 0 or not token:
+        return "", "gcloud could not mint a token for the service account"
+    return token, ""
+
+
+def _play_get(url: str, project: Path, token: str, body: dict | None = None) -> dict:
+    """One bounded Play API call. Degrades to {'_error': ...} rather than
+    raising — a nightly must never die on a third-party hiccup."""
+    args = ["curl", "-s", "-H", f"Authorization: Bearer {token}"]
+    if body is not None:
+        args += ["-H", "Content-Type: application/json", "-X", "POST",
+                 "-d", json.dumps(body)]
+    args.append(url)
+    r = run(args, project, timeout=90)
+    if r.returncode != 0:
+        return {"_error": f"curl exit {r.returncode}"}
+    try:
+        out = json.loads(r.stdout or "{}")
+    except Exception:
+        return {"_error": "non-JSON response from Play"}
+    return out if isinstance(out, dict) else {"_error": "unexpected payload"}
+
+
+def _play_vitals_pull(project: Path, profile: dict) -> dict:
+    """Crash/ANR per released version, from the Play Developer Reporting API.
+    status=ok only when the API answered — that is what silences the upgrade
+    flag. Empty rows are reported honestly: Play suppresses small-sample data,
+    and a silent bug (no crash, no ANR) legitimately produces nothing."""
+    conf = (profile.get("connections") or {}).get("play_vitals") or {}
+    pkg = conf.get("package")
+    if not pkg:
+        return {"status": "unconfigured",
+                "reason": "connections.play_vitals.package is not declared"}
+    token, why = _play_token(conf, _PLAY_VITALS_SCOPE, project)
+    if not token:
+        return {"status": "unavailable", "reason": why, "package": pkg}
+    end = _date.today()
+    start = end - _timedelta(days=28)
+    window = {"aggregationPeriod": "DAILY",
+              "startTime": {"year": start.year, "month": start.month, "day": start.day,
+                            "timeZone": {"id": "UTC"}},
+              "endTime": {"year": end.year, "month": end.month, "day": end.day,
+                          "timeZone": {"id": "UTC"}}}
+    out: dict = {"status": "ok", "package": pkg, "window_days": 28, "metrics": {}}
+    for key, ep, flag in (("crash", "crashRateMetricSet", _VITALS_FLAG_CRASH),
+                          ("anr", "anrRateMetricSet", _VITALS_FLAG_ANR)):
+        fresh = _play_get(f"{_PLAY_VITALS_API}/apps/{pkg}/{ep}", project, token)
+        if fresh.get("_error"):
+            out["metrics"][key] = {"api_error": fresh["_error"]}
+        else:
+            latest = ""
+            for f in ((fresh.get("freshnessInfo") or {}).get("freshnesses") or []):
+                t = f.get("latestEndTime") or {}
+                if t.get("year"):
+                    latest = max(latest, "%04d-%02d-%02d" % (t["year"], t["month"], t["day"]))
+            out["metrics"][key] = {"latest_data_date": latest}
+        q = _play_get(
+            f"{_PLAY_VITALS_API}/apps/{pkg}/{ep}:query", project, token,
+            {"timelineSpec": window,
+             "metrics": [f"{key}Rate", "distinctUsers"],
+             "dimensions": ["versionCode"]})
+        if q.get("_error"):
+            out["metrics"][key]["query_error"] = q["_error"]
+            continue
+        flagged: list[dict] = []
+        rows = q.get("rows") or []
+        for row in rows:
+            dims = {d.get("dimension"): d.get("value") for d in row.get("dimensions") or []}
+            mets = row.get("metrics") or []
+            vals = {m.get("metric"): (m.get("decimalValue", {}).get("value")
+                                      if "decimalValue" in m else m.get("int64Value"))
+                    for m in mets}
+            try:
+                rate = float(vals.get(f"{key}Rate") or 0)
+            except (TypeError, ValueError):
+                continue
+            if rate >= flag:
+                flagged.append({"versionCode": dims.get("versionCode"), "rate": round(rate, 4)})
+        out["metrics"][key].update({"rows": len(rows), "flagged": flagged[:10]})
+    out["flagged"] = sorted(
+        {f["versionCode"] for k in out["metrics"]
+         for f in (out["metrics"][k].get("flagged") or [])})
+    return out
+
+
+def _play_reviews_pull(project: Path, profile: dict) -> dict:
+    """Recent store reviews via androidpublisher. status=ok only when the API
+    answered; zero reviews is a normal, honest zero for a small app."""
+    conf = (profile.get("connections") or {}).get("play_reviews") or {}
+    pkg = conf.get("package")
+    if not pkg:
+        return {"status": "unconfigured",
+                "reason": "connections.play_reviews.package is not declared"}
+    token, why = _play_token(conf, _PLAY_REVIEWS_SCOPE, project)
+    if not token:
+        return {"status": "unavailable", "reason": why, "package": pkg}
+    data = _play_get(
+        f"{_PLAY_PUBLISHER_API}/applications/{pkg}/reviews?maxResults=100",
+        project, token)
+    if data.get("_error"):
+        return {"status": "unavailable", "reason": data["_error"], "package": pkg}
+    reviews = data.get("reviews") or []
+    stars: dict[str, int] = {}
+    low: list[dict] = []
+    for rv in reviews:
+        for c in rv.get("comments") or []:
+            uc = c.get("userComment") or {}
+            star = uc.get("starRating")
+            if star is None:
+                continue
+            stars[str(star)] = stars.get(str(star), 0) + 1
+            if int(star) <= 2:
+                low.append({"star": star,
+                            "text": (uc.get("text") or "")[:300].replace("\n", " "),
+                            "language": uc.get("reviewerLanguage")})
+    return {"status": "ok", "package": pkg, "total": len(reviews),
+            "star_histogram": stars, "low_star": low[:5],
+            "developer_has_replied": any(c.get("developerComment")
+                                         for rv in reviews for c in rv.get("comments") or [])}
+
+
 def research_collect(project: Path, log: RunLog) -> dict:
     """All deterministic collectors → research dict (no LLM)."""
     profile = profile_of(project)
@@ -209,6 +373,8 @@ def research_collect(project: Path, log: RunLog) -> dict:
         "project": profile["name"],
         "signals": {
             "ga4": _ga4_pull(project, profile),
+            "vitals": _play_vitals_pull(project, profile),
+            "reviews": _play_reviews_pull(project, profile),
             "codebase": {
                 "targets_total": len(profile["targets"]),
                 "shipped_count": sum(1 for s in surfaces if s["status"] == "shipped"),
@@ -673,22 +839,28 @@ def capability_upgrades(signals: dict, profile: dict, project: Path | None = Non
                        "download google-services.json; dev-team feature task wires "
                        "firebase-analytics into androidMain (owner approves in next intake)",
             })
-    if not profile.get("connections", {}).get("play_reviews"):
+    if signals.get("vitals", {}).get("status") != "ok":
+        up.append({
+            "id": "vitals",
+            "title": "Connect Play vitals (crash/ANR per version)",
+            "benefit": "releases with regressions get flagged before users report",
+            "how": "owner: the SA in connections.play_vitals.key_file needs "
+                   "`playdeveloperreporting.googleapis.com` enabled on its project "
+                   "AND 'View app information' access in Play Console, plus the "
+                   "package id declared; `devteam doctor` verifies the key, and "
+                   "`devteam research` proves the read (empty vitals is normal "
+                   "below Play's small-sample threshold)",
+        })
+    if signals.get("reviews", {}).get("status") != "ok":
         up.append({
             "id": "store-reviews",
             "title": "Connect store reviews",
             "benefit": "public churn reasons from users who never open the app "
                        "again — the only channel that reaches install→uninstall same-day users",
-            "how": "phase while the app is unpublished: this lands only after a "
-                   "Play/App presence exists; recheck `devteam research` after ship",
-        })
-    if not profile.get("connections", {}).get("play_vitals"):
-        up.append({
-            "id": "vitals",
-            "title": "Connect Play vitals (crash/ANR per version)",
-            "benefit": "releases with regressions get flagged before users report",
-            "how": "Play Developer API service account (same JSON as the "
-                   "internal-testing upload) — declared under connections.play_vitals",
+            "how": "same SA as the upload, declared as connections.play_reviews "
+                   "{key_file, package}; needs a PUBLIC listing — internal testing "
+                   "produces no reviews, and production promotion is the owner's "
+                   "own manual step",
         })
     return up
 

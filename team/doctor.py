@@ -70,6 +70,24 @@ def agent_requirements(profile: dict, project: Path) -> dict[str, list[tuple[str
             ]
         ga4_checks.append(("gcloud CLI available", bool(shutil.which("gcloud")), "install gcloud SDK"))
 
+    # Play Console connections (vitals + reviews): declared per project, and the
+    # COLLECTOR is what silences the upgrade ask — so verify the key file and the
+    # package id here, not just that the block exists (lesson 2026-10-22).
+    play_checks: list[tuple[str, bool, str]] = []
+    for key, label in (("play_vitals", "Play vitals"), ("play_reviews", "store reviews")):
+        conf = conns.get(key)
+        if not conf:
+            continue
+        play_checks += [
+            (f"{label}: connections.{key}.key_file exists", _has(conf.get("key_file", "")),
+             f"place the Play service-account JSON at connections.{key}.key_file"),
+            (f"{label}: connections.{key}.package declared", bool(conf.get("package")),
+             f"add the Play package id to connections.{key}.package"),
+        ]
+    if play_checks and not any(n == "gcloud CLI available" for n, _, _ in ga4_checks):
+        play_checks.append(("gcloud CLI available", bool(shutil.which("gcloud")),
+                            "install the gcloud SDK (both Play collectors mint tokens through it)"))
+
     dev = rt.get("developer", {})
     dev_argv = agent_argv(dev, "x") or []
     dev_bin = dev_argv[0] if dev_argv else ""
@@ -101,7 +119,7 @@ def agent_requirements(profile: dict, project: Path) -> dict[str, list[tuple[str
     return {
         "orchestrator": dev_checks + synthesis_checks,
         "developer": dev_checks,
-        "research-agent": ga4_checks + synthesis_checks,
+        "research-agent": ga4_checks + play_checks + synthesis_checks,
         "release-agent": ship_checks + synthesis_checks,
         "alarm-agent": ship_checks[:1],
     }
