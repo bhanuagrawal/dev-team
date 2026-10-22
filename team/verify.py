@@ -6,13 +6,20 @@ from __future__ import annotations
 
 import os
 import re
+import shutil
 import subprocess
 from pathlib import Path
 
+from . import emulator
 from .core import profile_of, run
 
 JAVA_HOME = "/Applications/Android Studio.app/Contents/jbr/Contents/Home"
 GRADLE_ENV = {"JAVA_HOME": JAVA_HOME, "TERM": "dumb", "CI": "true"}
+
+# On-device test source sets: KMP names the Android instrumented set
+# `androidInstrumentedTest` (KGP 2.x), a pure-Android module calls it `androidTest`.
+INSTRUMENTED_DIRS = ("androidInstrumentedTest", "androidTest")
+INSTRUMENTED_TASK_DEFAULT = ":composeApp:connectedDebugAndroidTest"
 
 
 def android_sdk_env(start: Path | None = None) -> dict:
@@ -121,6 +128,94 @@ def gradle_task(worktree: Path, task: str, timeout: int, log) -> tuple[bool, str
 
 
 
+def has_instrumented_tests(worktree: Path) -> bool:
+    """True when the project ships on-device tests. The switch that keeps the
+    device gate from spending a boot on a project (or a change) with nothing to
+    run — the gate's "cheap" half."""
+    for d in INSTRUMENTED_DIRS:
+        if any(worktree.glob(f"*/src/{d}/**/*.kt")):
+            return True
+    return False
+
+
+def available_avds() -> list[str]:
+    """AVD names, via the `android` CLI then the SDK emulator binary. [] means
+    "cannot boot here"; an agent-only machine still runs the pipeline."""
+    out: list[str] = []
+    try:
+        r = run(["android", "emulator", "list"], None, timeout=30)
+        if r.returncode == 0:
+            out = [ln.strip() for ln in r.stdout.splitlines() if ln.strip() and " " not in ln.strip()]
+    except (OSError, subprocess.SubprocessError):
+        out = []
+    if out:
+        return out
+    exe = shutil.which("emulator") or str(Path.home() / "Library/Android/sdk/emulator/emulator")
+    try:
+        r = run([exe, "-list-avds"], None, timeout=30)
+    except (OSError, subprocess.SubprocessError):
+        return []
+    return [ln.strip() for ln in r.stdout.splitlines() if ln.strip()]
+
+
+def instrumented_check(worktree: Path, profile: dict, log) -> tuple[bool, str]:
+    """The device gate: run the project's instrumented tests on an emulator.
+
+    Added 2026-10-22, after v1.5.7 shipped a page-render regression that no gate
+    could see. The chain was `compileDebugKotlin` + `testDebugUnitTest`, and that
+    project has ZERO JVM-test sources — so `testDebugUnitTest` ran as NO-SOURCE
+    ("tests green" meant "nothing ran") and the whole verify was compile-only. A
+    runtime-only framework contract (PdfRenderer rejects every bitmap config but
+    ARGB_8888) therefore survived compile, "tests", review and a Play upload, and
+    every user got a spinner that never stops. A compile gate cannot see a
+    contract that is only checked when the code runs on a device.
+
+    Deliberately CHEAP (owner, 2026-10-22: "use emulator available on mac, do not
+    test aggressive and waste time"):
+      * no instrumented test sources -> skipped before spending anything;
+      * an emulator already booted (e.g. the owner's) -> reused, never re-booted
+        and never stopped;
+      * otherwise exactly ONE bounded boot through `with-emulator`, whose EXIT
+        trap guarantees teardown on success, failure and timeout, so the run-end
+        leak check stays clean.
+    """
+    if not has_instrumented_tests(worktree):
+        log("instrumented: no on-device tests in this project — skipped (no boot)")
+        return True, ""
+    cfg = profile.get("verify") or {}
+    task = cfg.get("instrumented") or INSTRUMENTED_TASK_DEFAULT
+    timeout = int(cfg.get("instrumented_timeout", 1200))
+
+    booted = emulator.running()
+    if booted:
+        where = ", ".join(e.get("avd") or e["serial"] for e in booted)
+        log(f"~ instrumented: reusing the emulator already running ({where}) — no boot")
+        argv = ["./gradlew", task]
+    else:
+        avd = cfg.get("avd") or next(iter(available_avds()), "")
+        if not avd:
+            return False, ("instrumented: on-device tests exist but no AVD is "
+                           "available — cannot claim they pass (install an AVD or "
+                           "set verify.avd in the project profile)")
+        wrapper = shutil.which("with-emulator") or str(Path.home() / ".local/bin/with-emulator")
+        if not Path(wrapper).exists():
+            return False, ("instrumented: on-device tests exist but `with-emulator` "
+                           "is missing — refusing to boot an emulator that might leak")
+        log(f"~ instrumented: booting '{avd}' via with-emulator (teardown guaranteed)")
+        argv = [wrapper, avd, "--", "./gradlew", task]
+
+    log(f"~ gradle {task} on the device (≤{timeout}s)")
+    try:
+        r = run(argv, worktree, timeout=timeout, env=gradle_env(worktree))
+    except subprocess.TimeoutExpired:
+        return False, f"{task} TIMED OUT after {timeout}s on the emulator"
+    if r.returncode == 0:
+        log(f"  ok: {task}")
+        return True, ""
+    return False, f"{task} FAILED on the emulator:\n{(r.stdout + r.stderr)[-4000:]}"
+
+
+
 def verify_all(project: Path, worktree: Path, base: str, log, gradle: bool = True) -> tuple[bool, list[str]]:
     """Full gate chain. Returns (passed, failure_texts). Set gradle=False to
     re-run only the diff-scoped checks (used after a rebase)."""
@@ -159,4 +254,12 @@ def verify_all(project: Path, worktree: Path, base: str, log, gradle: bool = Tru
         if not ok:
             failures.append(msg + "\n\nRETRY ALSO FAILED:\n" + msg2)
             return False, failures
+
+    # Device gate: runtime-only contracts (framework API rules, rendering,
+    # permissions) are invisible to compile + JVM tests. Cheap by design — see
+    # instrumented_check. Skipped entirely when the project ships no such tests.
+    ok, msg = instrumented_check(worktree, profile, log)
+    if not ok:
+        failures.append(msg)
+        return False, failures
     return True, failures
