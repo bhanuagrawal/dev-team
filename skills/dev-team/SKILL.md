@@ -349,6 +349,14 @@ never silently blocking.
 5. Prepare the sandbox (deterministic git plumbing is code, not you):
    `python3 <team>/cli.py worktree-start <project> --task-id <id>`
    → WORKTREE_PATH / WORKTREE_BRANCH / WORKTREE_BASE.
+   Then `python3 <team>/cli.py emulators <project> --record --reset` — record the
+   start-of-run emulator baseline. `run-headless`/`run-orchestrator` do this
+   automatically, but a STEP-BY-STEP run (this numbered procedure) does not, and
+   the run-end leak check trusts whatever baseline file is on disk: with none (or
+   a stale one that predates the owner opening an emulator) `verify` classifies a
+   device the owner started themselves as "leaked" and stops it, breaking the
+   "never stop an emulator you did not start" rule. Recording the baseline here,
+   before any device work, is what makes that check safe.
 6. Get the exact developer prompt (keep it verbatim):
    `python3 <team>/cli.py developer-prompt <project> .pipeline/tasks/<id>.json`
 7. SPAWN THE DEVELOPER AS A SUBAGENT — your tool's own native mechanism:
