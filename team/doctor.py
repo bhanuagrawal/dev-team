@@ -34,9 +34,10 @@ def _model_fix(role: str, cfg: dict) -> str:
     env = ROLE_ENV.get(token)
     if env and not role_env(env):
         return (f"the '{role}' model is the token '{token}', which resolves from "
-                f"${env} — that variable is in neither this shell's environment "
-                f"nor ~/agentconfig/agentconfig.env: add `export {env}="
-                f"<provider>/<model>` to that file (llmctl writes it)")
+                f"${env} — that variable is not in this process's environment: "
+                f"run `llmctl publish` to push the session, or export "
+                f"{env}=<provider>/<model>. If it was switched recently this "
+                f"process predates the change — restart it.")
     if not token:
         return f"set roles.{role}.model in runtimes.json"
     return (f"model token '{token}' does not resolve — check that ${env or 'the env'} "

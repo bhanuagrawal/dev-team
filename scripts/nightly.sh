@@ -11,9 +11,11 @@ TEAM="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 PROJECT="${1:?usage: nightly.sh <ProjectName>}"
 export JAVA_HOME="/Applications/Android Studio.app/Contents/jbr/Contents/Home"
 export PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:$PATH"
-# LLM provider/model + keys (llmctl se generate hota hai)
-[ -f "$HOME/agentconfig/agentconfig.env" ] && . "$HOME/agentconfig/agentconfig.env"
-[ -f "$HOME/agentconfig/secrets.env" ] && . "$HOME/agentconfig/secrets.env"
+# LLM provider/model + keys come from the macOS login session: agentconfig
+# publishes them (llmctl publish -> launchctl setenv, the com.bhanu.agentconfig
+# LaunchAgent, a guarded ~/.zshenv), and launchd hands them to this job. Do NOT
+# source ~/agentconfig/*.env here — a subscription to a file the session already
+# carries would mask a broken publisher (owner decision 2026-10-22).
 mkdir -p "$TEAM/logs"
 # Single-instance guard: launchd re-fires or a manual kickstart must never
 # run two orchestrators against the same project (last night's race lesson).

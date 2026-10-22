@@ -140,72 +140,30 @@ ROLE_ENV = {"llm": "LLM_MODEL", "thinker": "THINKER_LLM_MODEL"}
 
 # --------------------------------------------------------------------------- #
 # agentconfig: role models AND provider keys are OWNER-managed, and code READS
-# them — it never sources, and never hardcodes an id, base_url or key.
+# them from the environment — it never sources, never hardcodes an id, base_url
+# or key, and has no file fallback.
 #
 # The values live in ~/agentconfig/{agentconfig.env,secrets.env}, which the
-# owner keeps current with llmctl. Since 2026-10-22 agentconfig publishes them
-# into the macOS login session (`llmctl publish` -> `launchctl setenv`, plus the
-# `com.bhanu.agentconfig` LaunchAgent and a guarded `~/.zshenv`), so NEW
-# processes get them automatically from os.environ — including non-login ones
+# owner keeps current with llmctl. agentconfig publishes them into the macOS
+# login session (`llmctl publish` -> `launchctl setenv`, the
+# `com.bhanu.agentconfig` LaunchAgent, and a guarded `~/.zshenv`), so NEW
+# processes get them from os.environ automatically — including non-login ones
 # like a launchd job or `zsh -c`. Read `os.environ` / `$VAR`; do NOT add a
-# `source ~/agentconfig/agentconfig.env` line to a script (Lesson 2026-10-22).
+# `source ~/agentconfig/agentconfig.env` line to a script.
 #
-# The file read below is therefore the FALLBACK, not the mechanism: it covers a
-# process launched outside the login session (a root daemon, another account) or
-# one started before the LaunchAgent was loaded. It is deliberately kept — it
-# turns a silent empty {model} into the right one — but it is never a reason to
-# source a file by hand. Why it exists at all: depending on the LAUNCHER to have
-# sourced these once made a correctly-configured machine report "blocked" for
-# every role, and launched a headless agent with `--model ''`. Same rule as the
-# Android SDK in verify: a machine-local toolchain fact must be RESOLVED by the
-# code, never inherited from whoever happened to start it.
+# Deliberately NO file fallback (owner decision 2026-10-22, "remove fallbacks"):
+# a shell that reports a role model as missing is telling the truth about a
+# session that was never published (or a process that predates a switch) — and
+# an empty {model} must surface as that, not be papered over. A silent fallback
+# would MASK a broken publisher: the nightly would keep working while
+# `launchctl getenv LLM_MODEL` was empty. Fix the session (`llmctl publish`),
+# not the code.
 # --------------------------------------------------------------------------- #
-AGENTCONFIG_FILES = ("agentconfig.env", "secrets.env")
-
-
-def _parse_env_file(path: Path) -> dict:
-    """`export NAME="value"` lines -> {NAME: value}. Unreadable file = {}."""
-    out: dict[str, str] = {}
-    try:
-        text = path.read_text(errors="ignore")
-    except OSError:
-        return out
-    for raw in text.splitlines():
-        line = raw.strip()
-        if not line or line.startswith("#"):
-            continue
-        if line.startswith("export "):
-            line = line[len("export "):].strip()
-        key, sep, val = line.partition("=")
-        if not sep:
-            continue
-        key, val = key.strip(), val.strip()
-        if len(val) >= 2 and val[0] == val[-1] and val[0] in "'\"":
-            val = val[1:-1]
-        if key:
-            out[key] = val
-    return out
-
-
-def agentconfig_env() -> dict:
-    """{NAME: value} from ~/agentconfig/agentconfig.env + secrets.env (later file
-    wins). {} when the owner has none — a bare machine still runs the pipeline."""
-    env: dict[str, str] = {}
-    for name in AGENTCONFIG_FILES:
-        env.update(_parse_env_file(Path.home() / "agentconfig" / name))
-    return env
-
 
 def role_env(name: str) -> str:
-    """One agentconfig variable: the real environment wins, else the owner's file."""
-    return os.environ.get(name) or agentconfig_env().get(name, "")
-
-
-def agent_env(extra: dict | None = None) -> dict:
-    """Env for a spawned agent process: the agentconfig files under the real
-    environment, plus `extra`. Lets a headless agent launch with the right model
-    and keys even when this process was started from a bare shell."""
-    return {**agentconfig_env(), **(extra or {})}
+    """One agentconfig variable, read straight from this process's environment.
+    Empty means the session was not published — say so, do not compensate."""
+    return os.environ.get(name, "")
 
 
 # --------------------------------------------------------------------------- #
@@ -231,9 +189,9 @@ def role_cfg(role: str) -> dict:
 
 
 def resolve_model(cfg: dict) -> str:
-    """Role token ('llm' | 'thinker') -> qualified model id, from the environment
-    or the owner's ~/agentconfig file (role_env). Warna jo diya hai wahi literal
-    id maano."""
+    """Role token ('llm' | 'thinker') -> qualified model id from the environment
+    (agentconfig publishes it session-wide). Warna jo diya hai wahi literal id
+    maano."""
     token = (cfg or {}).get("model", "") or ""
     if token in ROLE_ENV:
         return role_env(ROLE_ENV[token])
