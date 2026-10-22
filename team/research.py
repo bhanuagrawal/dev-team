@@ -739,7 +739,9 @@ def _validate(result: dict, research: dict | None = None) -> str | None:
                 "developer's 'Edit ONLY files under:' allow-list, so a sentence "
                 "there hard-fails the build step (see developer-prompt). Put the "
                 "description in 'reason' and list real paths in 'target', e.g. "
-                "'app/src/main/java/**/ui/Foo.kt, app/src/main/res/values*/strings.xml'."
+                "'app/src/main/java/**/ui/Foo.kt, app/src/main/res/values*/strings.xml'. "
+                "A TOP-LEVEL file with no '/' (e.g. settings.gradle.kts) must be "
+                "written './settings.gradle.kts' — every item needs a path separator."
             )
         if q.get("type") == "motion":
             labels = {r.get("label"): set(r.get("paths") or []) for r in remaining}

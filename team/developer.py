@@ -172,7 +172,8 @@ def _check_targets_are_paths(task_paths: list[str]) -> None:
             f"prose — got {prose[0]!r}. This is rendered verbatim as the developer's "
             "'Edit ONLY files under:' allow-list. Move the description to the queue "
             "entry's `reason` (shown as RESEARCH CONTEXT) or to a plan doc, and list "
-            "real paths in `targets`.")
+            "real paths in `targets` (a TOP-LEVEL file with no '/' — e.g. "
+            "settings.gradle.kts — must be written './settings.gradle.kts').")
 
 
 def build_prompt(project: Path, profile: dict, task: dict, task_paths: list[str],
