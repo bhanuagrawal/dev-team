@@ -51,9 +51,12 @@ agent = one precise ask for the owner, never a silent path guess in team code.
 **Recon is a SEPARATE agent in its own repo — not a stage here.** Competitor
 recon lives at `~/recon-agent` (an A2A agent, localhost). The owner runs it by
 hand, with a human present. This repo contains none of it and imports none of
-it: no reports, no project state, and the planner never reads it. Do not chain
-recon into a nightly run (it needs an emulator, and it asks questions only a
-human can answer).
+it: no recon code, no project state. The one seam is data — if the owner runs
+`recon research --dir <project>/.pipeline/competitors`, `research_collect` folds
+the plain-JSON reports into `research.json` (`signals.competitors`) so the
+planner can cite them; with no such directory the planner sees nothing. Do not
+chain recon into a nightly run (it needs an emulator, and it asks questions only
+a human can answer).
 - Project exists and has .pipeline/profile.json → MODE A, follow "Nightly run
   procedure" below.
 - Owner asks to start a NEW app (anything like "build me an app that…") →
@@ -478,10 +481,11 @@ The owner may ask for ONE agent only, and that must work:
   task/spec and STOP — no pipeline bookkeeping beyond that agent's own duty.
 - "run only release / verify / alarm / create / setup" → run just that stage
   via the matching commands/skill section, then report.
-- "run competitor recon" / "check a competitor app" → that is a **separate
-  agent** at `~/recon-agent`, not a stage of this repo. Tell the owner to run it
-  there (`recon play` / `recon install`, human present). Do NOT chain it into the
-  pipeline and do not look for recon code here.
+- "run competitor recon" / "do competition research" / "check a competitor
+  app" → that is a **separate agent** at `~/recon-agent`, not a stage of this
+  repo. Run it there: `recon research` (discover → pick → ask → crawl → report;
+  human present), or `recon play` / `recon install` for one step. Do NOT chain
+  it into the pipeline and do not look for recon code here.
 Rule: honor the narrower scope exactly — no pipeline chaining — except the
 non-negotiables (never commit on red gates; never touch frozen paths; never
 hand-edit state.json; MODE-B gates still asked). State a one-line report of

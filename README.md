@@ -330,14 +330,21 @@ task is never silent.
 ## recon — a separate agent, not a stage here
 
 Competitor recon lives in its own repo: **`~/recon-agent`** (A2A, localhost).
-It installs a rival app from the Play Store on an emulator, and later phases
-crawl it and write a run artifact. It shares nothing with a run: no reports, no
-project state, and the planner never reads it.
+It installs a rival app from the Play Store on an emulator, crawls it and writes
+a run artifact. The whole workflow is one code-based command:
 
 ```bash
-recon play --term "rival app"      # search the store on the emulator
-recon install com.rival.app        # Play details → tap Install → wait
+recon research --term "minimal launcher"   # discover → pick → ask → crawl → report
+recon play --term "rival app"              # search the store on the emulator
+recon install com.rival.app                # Play details → tap Install → wait
 ```
+
+**The seam is a data directory, not an import.** dev-team reads none of recon's
+code. If the owner points recon at the project's pipeline (`recon research --dir
+<project>/.pipeline/competitors`), then `research_collect` folds the plain-JSON
+reports it finds there into `research.json` under `signals.competitors` — so the
+planner *can* cite a competitor's surfaces and paywalls. Delete that directory
+and the pipeline is exactly as before.
 
 Do not chain it into the nightly: it needs an emulator and it asks questions only
 a human can answer. It is documented in its own repo.

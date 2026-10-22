@@ -353,6 +353,61 @@ def _play_reviews_pull(project: Path, profile: dict) -> dict:
                                          for rv in reviews for c in rv.get("comments") or [])}
 
 
+def _competitors_pull(project: Path) -> dict:
+    """Competitor recon reports — DATA ONLY.
+
+    The recon agent is a separate repo and the planner reads none of its code.
+    The seam is a directory of plain JSON: the owner runs
+
+        recon research --dir <project>/.pipeline/competitors
+
+    and this collector folds whatever landed there into research.json. No recon
+    import, no coupling — delete the directory and the pipeline is unchanged.
+    """
+    root = project / ".pipeline" / "competitors"
+    reports_dir = root / "reports"
+    if not root.exists():
+        return {"status": "none",
+                "reason": "no competitors/ directory — run `recon research`"}
+    found: list[dict] = []
+    for path in sorted(reports_dir.glob("*.json")) if reports_dir.exists() else []:
+        try:
+            report = json.loads(path.read_text())
+        except (json.JSONDecodeError, OSError):
+            continue
+        comp = report.get("competitor") or {}
+        crawl = (report.get("crawl") or {}).get("counts") or {}
+        found.append({
+            "package": comp.get("package"),
+            "title": comp.get("title"),
+            "rating": comp.get("rating"),
+            "screens": crawl.get("screens"),
+            "monetization_signals": report.get("monetization_signals", [])[:10],
+            "walls": len(report.get("walls", [])),
+        })
+    latest = None
+    latest_path = root / "report.json"
+    if latest_path.exists():
+        try:
+            latest = json.loads(latest_path.read_text())
+        except (json.JSONDecodeError, OSError):
+            latest = None
+    if not found and latest is None:
+        return {"status": "none", "reason": "competitors/ exists but is empty"}
+    return {
+        "status": "ok",
+        "dir": str(root),
+        "count": len(found),
+        "competitors": found,
+        "latest": {
+            "package": (latest.get("competitor") or {}).get("package"),
+            "surfaces": latest.get("surfaces", [])[:20],
+            "monetization_signals": latest.get("monetization_signals", [])[:10],
+            "walls": latest.get("walls", []),
+        } if latest else None,
+    }
+
+
 def research_collect(project: Path, log: RunLog) -> dict:
     """All deterministic collectors → research dict (no LLM)."""
     profile = profile_of(project)
@@ -375,6 +430,7 @@ def research_collect(project: Path, log: RunLog) -> dict:
             "ga4": _ga4_pull(project, profile),
             "vitals": _play_vitals_pull(project, profile),
             "reviews": _play_reviews_pull(project, profile),
+            "competitors": _competitors_pull(project),
             "codebase": {
                 "targets_total": len(profile["targets"]),
                 "shipped_count": sum(1 for s in surfaces if s["status"] == "shipped"),
