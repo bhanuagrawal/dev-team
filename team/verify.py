@@ -128,14 +128,39 @@ def gradle_task(worktree: Path, task: str, timeout: int, log) -> tuple[bool, str
 
 
 
+def instrumented_modules(worktree: Path) -> list[str]:
+    """Gradle module dirs (first path segment) that ship on-device tests."""
+    mods: set[str] = set()
+    for d in INSTRUMENTED_DIRS:
+        for p in worktree.glob(f"*/src/{d}/**/*.kt"):
+            parts = p.relative_to(worktree).parts
+            if parts:
+                mods.add(parts[0])
+    return sorted(mods)
+
+
 def has_instrumented_tests(worktree: Path) -> bool:
     """True when the project ships on-device tests. The switch that keeps the
     device gate from spending a boot on a project (or a change) with nothing to
     run — the gate's "cheap" half."""
-    for d in INSTRUMENTED_DIRS:
-        if any(worktree.glob(f"*/src/{d}/**/*.kt")):
-            return True
-    return False
+    return bool(instrumented_modules(worktree))
+
+
+def default_instrumented_task(worktree: Path) -> str:
+    """The instrumented gradle task to run when the profile declares none.
+
+    Derived from the project layout instead of assumed: `:composeApp:` is the
+    KMP convention but a pure-Android project's module is `:app`, and a
+    hardcoded `:composeApp:connectedDebugAndroidTest` makes the device gate die
+    with "Cannot locate tasks that match ... project 'composeApp' not found" on
+    every single-module project — a guaranteed FAIL that reads like a code
+    failure. With exactly one module shipping instrumented tests, name it; with
+    none or several, fall back to the KMP-typical default (several test-bearing
+    modules is rare and the profile should declare `verify.instrumented`)."""
+    mods = instrumented_modules(worktree)
+    if len(mods) == 1:
+        return f":{mods[0]}:connectedDebugAndroidTest"
+    return INSTRUMENTED_TASK_DEFAULT
 
 
 def available_avds() -> list[str]:
@@ -183,7 +208,10 @@ def instrumented_check(worktree: Path, profile: dict, log) -> tuple[bool, str]:
         log("instrumented: no on-device tests in this project — skipped (no boot)")
         return True, ""
     cfg = profile.get("verify") or {}
-    task = cfg.get("instrumented") or INSTRUMENTED_TASK_DEFAULT
+    task = cfg.get("instrumented") or "<auto>"
+    if task == "<auto>":
+        task = default_instrumented_task(worktree)
+        log(f"instrumented: task derived from layout → {task}")
     timeout = int(cfg.get("instrumented_timeout", 1200))
 
     booted = emulator.running()
