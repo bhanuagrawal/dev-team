@@ -8,13 +8,12 @@ project). BLOCKED reasons are phrased as one precise ask for the owner.
 from __future__ import annotations
 
 import json
-import os
 import shutil
 from pathlib import Path
 
 from .core import (
     PROJECTS_BASES, ROLE_ENV, TEAM_ROOT, agent_argv, now_iso, profile_of,
-    resolve_model, run, runtimes, save_state, state_of,
+    resolve_model, role_env, run, runtimes, save_state, state_of,
 )
 
 
@@ -33,11 +32,11 @@ def _model_fix(role: str, cfg: dict) -> str:
     the real cause instead."""
     token = (cfg or {}).get("model", "") or ""
     env = ROLE_ENV.get(token)
-    if env and not os.environ.get(env):
+    if env and not role_env(env):
         return (f"the '{role}' model is the token '{token}', which resolves from "
-                f"${env} — that variable is not set in this shell: source the "
-                f"agent config (e.g. `source ~/agentconfig/agentconfig.env`) or "
-                f"export {env}=<provider>/<model>")
+                f"${env} — that variable is in neither this shell's environment "
+                f"nor ~/agentconfig/agentconfig.env: add `export {env}="
+                f"<provider>/<model>` to that file (llmctl writes it)")
     if not token:
         return f"set roles.{role}.model in runtimes.json"
     return (f"model token '{token}' does not resolve — check that ${env or 'the env'} "

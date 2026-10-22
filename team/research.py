@@ -534,7 +534,7 @@ def _research_signals(project: Path) -> dict:
 
 
 def _llm(prompt: str, log: RunLog, timeout: int = 900) -> str:
-    from .core import agent_argv, role_cfg
+    from .core import agent_argv, agent_env, role_cfg
     cfg = role_cfg("product_synthesis")
     argv = agent_argv(cfg, prompt)
     if not argv:
@@ -544,7 +544,7 @@ def _llm(prompt: str, log: RunLog, timeout: int = 900) -> str:
             "DEVTEAM_AGENT_CMD (e.g. '<your-tool> run --model {model} {prompt}'). "
             "No vendor is baked into the team.")
     log(f"~ synthesis via {argv[0]} (model {cfg.get('model', 'default')})")
-    r = run(argv, None, timeout=timeout)
+    r = run(argv, None, timeout=timeout, env=agent_env())
     if r.returncode != 0:
         raise SystemExit("synthesis LLM failed: " +
                          ((r.stdout or "") + (r.stderr or ""))[-400:])

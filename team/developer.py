@@ -25,7 +25,7 @@ from pathlib import Path
 
 from . import goals, verify
 from .core import (
-    RunLog, agent_argv, git, now_iso, profile_of, role_cfg as _role_cfg,
+    RunLog, agent_argv, agent_env, git, now_iso, profile_of, role_cfg as _role_cfg,
     run, state_of, target_looks_like_paths,
 )
 
@@ -60,8 +60,9 @@ def _spawn(prompt: str, worktree: Path, log: RunLog, cfg: dict,
     log(f"~ spawning developer headless ({argv[0]}, ≤{timeout}s)")
     try:
         r = run(argv, worktree, timeout=timeout,
-                env={"JAVA_HOME": verify.GRADLE_ENV["JAVA_HOME"], "TERM": "dumb",
-                     **verify.android_sdk_env(worktree)})
+                env=agent_env({"JAVA_HOME": verify.GRADLE_ENV["JAVA_HOME"],
+                               "TERM": "dumb",
+                               **verify.android_sdk_env(worktree)}))
     except subprocess.TimeoutExpired:
         log("  developer TIMEOUT")
         return False, f"developer timed out after {timeout}s"

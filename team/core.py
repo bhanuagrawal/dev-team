@@ -138,6 +138,67 @@ def runtimes() -> dict:
 # sirf llmctl switch chalta hai; yahan kuch nahi badalta.
 ROLE_ENV = {"llm": "LLM_MODEL", "thinker": "THINKER_LLM_MODEL"}
 
+# --------------------------------------------------------------------------- #
+# agentconfig: role models AND provider keys live in owner-managed files, and
+# the code RESOLVES them instead of inheriting them.
+#
+# A role model is a token ('llm' | 'thinker'); the real id and the API key live
+# in ~/agentconfig/{agentconfig.env,secrets.env}, which the owner keeps current
+# with llmctl. Depending on the LAUNCHER to have sourced those files made a
+# correctly-configured machine look broken: a non-login shell (launchd, an
+# editor's terminal, a harness spawning `zsh -c`) reads neither .zshrc nor
+# .zprofile, so every role read "blocked — developer model configured" and a
+# headless agent launched with an empty {model}. Same rule as the Android SDK in
+# verify: a machine-local toolchain fact must be RESOLVED by the code, never
+# inherited from whoever happened to start it. (Lesson 2026-10-22.)
+# --------------------------------------------------------------------------- #
+AGENTCONFIG_FILES = ("agentconfig.env", "secrets.env")
+
+
+def _parse_env_file(path: Path) -> dict:
+    """`export NAME="value"` lines -> {NAME: value}. Unreadable file = {}."""
+    out: dict[str, str] = {}
+    try:
+        text = path.read_text(errors="ignore")
+    except OSError:
+        return out
+    for raw in text.splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#"):
+            continue
+        if line.startswith("export "):
+            line = line[len("export "):].strip()
+        key, sep, val = line.partition("=")
+        if not sep:
+            continue
+        key, val = key.strip(), val.strip()
+        if len(val) >= 2 and val[0] == val[-1] and val[0] in "'\"":
+            val = val[1:-1]
+        if key:
+            out[key] = val
+    return out
+
+
+def agentconfig_env() -> dict:
+    """{NAME: value} from ~/agentconfig/agentconfig.env + secrets.env (later file
+    wins). {} when the owner has none — a bare machine still runs the pipeline."""
+    env: dict[str, str] = {}
+    for name in AGENTCONFIG_FILES:
+        env.update(_parse_env_file(Path.home() / "agentconfig" / name))
+    return env
+
+
+def role_env(name: str) -> str:
+    """One agentconfig variable: the real environment wins, else the owner's file."""
+    return os.environ.get(name) or agentconfig_env().get(name, "")
+
+
+def agent_env(extra: dict | None = None) -> dict:
+    """Env for a spawned agent process: the agentconfig files under the real
+    environment, plus `extra`. Lets a headless agent launch with the right model
+    and keys even when this process was started from a bare shell."""
+    return {**agentconfig_env(), **(extra or {})}
+
 
 # --------------------------------------------------------------------------- #
 # roles: model + the tool-agnostic headless launch contract
@@ -162,11 +223,12 @@ def role_cfg(role: str) -> dict:
 
 
 def resolve_model(cfg: dict) -> str:
-    """Role token ('llm' | 'thinker') -> ~/agentconfig env se qualified model id.
-    Warna jo diya hai wahi literal id maano."""
+    """Role token ('llm' | 'thinker') -> qualified model id, from the environment
+    or the owner's ~/agentconfig file (role_env). Warna jo diya hai wahi literal
+    id maano."""
     token = (cfg or {}).get("model", "") or ""
     if token in ROLE_ENV:
-        return os.environ.get(ROLE_ENV[token], "")
+        return role_env(ROLE_ENV[token])
     return token
 
 
