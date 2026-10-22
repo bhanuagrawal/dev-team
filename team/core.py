@@ -139,18 +139,26 @@ def runtimes() -> dict:
 ROLE_ENV = {"llm": "LLM_MODEL", "thinker": "THINKER_LLM_MODEL"}
 
 # --------------------------------------------------------------------------- #
-# agentconfig: role models AND provider keys live in owner-managed files, and
-# the code RESOLVES them instead of inheriting them.
+# agentconfig: role models AND provider keys are OWNER-managed, and code READS
+# them — it never sources, and never hardcodes an id, base_url or key.
 #
-# A role model is a token ('llm' | 'thinker'); the real id and the API key live
-# in ~/agentconfig/{agentconfig.env,secrets.env}, which the owner keeps current
-# with llmctl. Depending on the LAUNCHER to have sourced those files made a
-# correctly-configured machine look broken: a non-login shell (launchd, an
-# editor's terminal, a harness spawning `zsh -c`) reads neither .zshrc nor
-# .zprofile, so every role read "blocked — developer model configured" and a
-# headless agent launched with an empty {model}. Same rule as the Android SDK in
-# verify: a machine-local toolchain fact must be RESOLVED by the code, never
-# inherited from whoever happened to start it. (Lesson 2026-10-22.)
+# The values live in ~/agentconfig/{agentconfig.env,secrets.env}, which the
+# owner keeps current with llmctl. Since 2026-10-22 agentconfig publishes them
+# into the macOS login session (`llmctl publish` -> `launchctl setenv`, plus the
+# `com.bhanu.agentconfig` LaunchAgent and a guarded `~/.zshenv`), so NEW
+# processes get them automatically from os.environ — including non-login ones
+# like a launchd job or `zsh -c`. Read `os.environ` / `$VAR`; do NOT add a
+# `source ~/agentconfig/agentconfig.env` line to a script (Lesson 2026-10-22).
+#
+# The file read below is therefore the FALLBACK, not the mechanism: it covers a
+# process launched outside the login session (a root daemon, another account) or
+# one started before the LaunchAgent was loaded. It is deliberately kept — it
+# turns a silent empty {model} into the right one — but it is never a reason to
+# source a file by hand. Why it exists at all: depending on the LAUNCHER to have
+# sourced these once made a correctly-configured machine report "blocked" for
+# every role, and launched a headless agent with `--model ''`. Same rule as the
+# Android SDK in verify: a machine-local toolchain fact must be RESOLVED by the
+# code, never inherited from whoever happened to start it.
 # --------------------------------------------------------------------------- #
 AGENTCONFIG_FILES = ("agentconfig.env", "secrets.env")
 
