@@ -328,6 +328,17 @@ def rc_verdict(state: dict, version: str) -> dict | None:
     return None
 
 
+def _prev_shipped_entry(state: dict, version: str) -> dict | None:
+    """The most recent shipped ledger entry OTHER than `version`, newest first.
+
+    Used only to detect a release note that repeats the previous release
+    verbatim — the case a curated note silently freezes into."""
+    for entry in reversed(state.get("shipped") or []):
+        if str(entry.get("version")) != str(version):
+            return entry
+    return None
+
+
 def print_release_handover(project: Path, task: dict, version: str,
                            commit: str = "") -> None:
     """Hand the owner the shipped build: its release note, what to test by hand,
@@ -362,6 +373,19 @@ def print_release_handover(project: Path, task: dict, version: str,
             print(f"  what's new ({len(note)}/{cap} chars, {source}) — what Play shows the user:")
             for ln in note.splitlines():
                 print(f"    {ln}")
+            # An owner-curated note the pipeline may not rewrite can silently
+            # freeze: if it is byte-for-byte the previous release's note, Play
+            # will show the same "what's new" again and only the owner can fix
+            # it. Say so instead of printing it as if it were this release's.
+            prev = _prev_shipped_entry(state, version)
+            if profile.get("whatsnew_curated") and prev:
+                prev_note = (shipper.whatsnew_read(project, prev.get("commit") or "")
+                             or "").rstrip("\n")
+                if prev_note and prev_note == note:
+                    print(f"    ⚠ STALE: this note is identical to v{prev.get('version')}'s — "
+                          "the store will show the previous release's wording again. "
+                          f"It is owner-curated, so the pipeline cannot change it: edit "
+                          f"{wf_rel} before the next release.")
     areas = shipper.whatsnew_test_areas(task)
     claim = re.split(r"(?<=[.!?])\s", (task.get("reason") or "").strip())[0]
     if len(claim) > 180:
