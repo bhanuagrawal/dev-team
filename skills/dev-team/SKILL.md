@@ -306,13 +306,22 @@ never silently blocking.
      investigations are capped at 2 and must each name the owner decision or code
      task they feed.
    - SIZE IS PART OF THE PLAN (owner decision 2026-10-18: *"plan lead task not too
-     small, [the developer] agent might take 20-25 min to complete it"*): every
-     feature/bugfix/investigation entry carries `effort_min` — minutes of real
-     developer work, target ~20-25, hard band 15-35, enforced in code (a
-     too-small entry must be folded into the related one via `supersedes` or
-     bundled with its siblings; a too-big one must be split). The review block
-     prints a `SIZING` line, and the estimate travels into the developer prompt.
-     The delivery-restoring head (red CI) is exempt — the fire outranks sizing.
+     small, [the developer] agent might take 20-25 min to complete it"* — **revised
+     by the owner 2026-10-23**: *"agents take less time to deliver a task … we are
+     considering more time … fix this in the code where we are doing the estimate"*):
+     every feature/bugfix/investigation entry carries `effort_min` — minutes of
+     developer work, target ~60, hard band 40-90, enforced in code. The numbers are
+     calibrated to what an AGENT session costs, not to human effort: measured here,
+     a whole nightly (plan → developer → verify → release incl. the CI watch) runs
+     ~12 min, and a developer session that shipped a 1305-line deletion took ~5 min.
+     The fixed cost of a RUN (verify + version bump + CI + internal-testing build)
+     dominates the developer's minutes, so the target moved UP — fewer, richer
+     entries per release. A plan of 2-4 entries is the healthy shape; the queue is
+     never padded to a count. A too-small entry must be folded into the related one
+     via `supersedes` or bundled with its siblings (several screens sharing one
+     theme = one entry); a too-big one must be split. The review block prints a
+     `SIZING` line, and the estimate travels into the developer prompt. The
+     delivery-restoring head (red CI) is exempt — the fire outranks sizing.
    - Every cycle runs an IMPACT REVIEW: the synthesis must judge each
      already-queued task; the CLI prints a `QUEUE IMPACT` block (added / kept /
      replaced / obsolete / dropped). A queued task can never vanish silently.
@@ -376,10 +385,12 @@ never silently blocking.
 6. Get the exact developer prompt (keep it verbatim):
    `python3 <team>/cli.py developer-prompt <project> .pipeline/tasks/<id>.json`
 7. SPAWN THE DEVELOPER AS A SUBAGENT — your tool's own native mechanism:
-   - budget the session at the task's `effort_min` (~20-25 min is the norm for a
-     healthy entry): one coherent change, verified, no gold-plating beyond the
-     spec. If the agent is clearly done in a few minutes, the entry was too small
-     — say so in the run report and fold such work into the next plan cycle.
+   - budget the session at the task's `effort_min` (~60 is the norm for a healthy
+     entry, band 40-90 — sized in developer-effort minutes, which an agent spends
+     several times faster than a human would): one coherent change, verified, no
+     gold-plating beyond the spec. If the agent is clearly done in a couple of
+     minutes, the entry was too small — say so in the run report and fold such
+     work into the next plan cycle.
    - agent prompt = the exact prompt from step 6
    - run with cwd = WORKTREE_PATH (pass this in the subagent's initial
      instruction: "work ONLY inside directory <WORKTREE_PATH>")

@@ -26,19 +26,69 @@ from . import goals
 from . import queue as queue_mod
 
 MAX_QUEUE = 6
-# TASK SIZING (owner decision 2026-10-18: "plan lead task not too small, [the
-# developer] agent might take 20-25 min to complete it"). Every queued entry is
-# ONE developer session — not a micro-edit that burns a release. The band is a
-# gate (code-validated `effort_min`), the target is guidance to the synthesis.
-TARGET_EFFORT_MIN = 25
-MIN_EFFORT_MIN = 15
-# The ceiling is deliberately tight: the owner asked for ~20-25 minutes, and a
-# generous ceiling would let the queue drift back to half-done mega-tasks. Above
-# this, work must be SPLIT (each half still reusable/verifiable on its own).
-MAX_EFFORT_MIN = 35
+# TASK SIZING — calibrated to what an AGENT session actually costs, not to what
+# the same change would cost a human. Every queued entry is ONE developer
+# session, and the band is a gate (code-validated `effort_min`).
+#
+# Owner decision 2026-10-18 set the first shape ("plan lead task not too small,
+# [the developer] agent might take 20-25 min to complete it") as target 25 /
+# band 15-35. Owner revision 2026-10-23: "agents take less time to deliver a
+# task … we are considering more time … fix this in the code where we are doing
+# the estimate." The numbers were being written as HUMAN effort while the unit
+# that pays for them is an agent session, and the two are several times apart.
+#
+# Measured in this pipeline: the nightly of 2026-10-23 ran plan → developer →
+# verify → release → alarm in 01:00:05–01:11:51 (~12 min wall clock for one
+# shipped release, of which the CI watch is ~7 min); a developer session that
+# shipped a 1305-line deletion measured ~5 min (lessons 2026-10-22). So the
+# developer's minutes are the CHEAP part of a run and the release is the
+# expensive part — the fixed cost does not shrink with the task. That is why the
+# target moves UP (fewer, richer entries per release), not toward more runs.
+#
+# The band stays a band: a wide one is the same as none (lessons 2026-10-16).
+TARGET_EFFORT_MIN = 60
+MIN_EFFORT_MIN = 40
+# The ceiling is bounded because the one thing the original reasoning got right
+# is that an entry must still finish, verify and release in a SINGLE pass. Sized
+# work of ~90 min is roughly 10-15 min of agent wall clock — comfortably inside
+# the developer role's 3600 s timeout (config/runtimes.json) — while an entry
+# two or three times that is a half-session again.
+MAX_EFFORT_MIN = 90
 # motion is sized by its surface (one surface per entry, enforced elsewhere), so
 # only these types carry the sizing gate.
 SIZED_TYPES = ("feature", "bugfix", "investigation")
+
+
+def file_asks(project: Path, log: RunLog, issues: list[dict]) -> None:
+    """Turn the plan's `issues_to_file` entries into GitHub issues — ONCE each.
+
+    A re-plan re-proposes the same owner asks (the previous cycle's apply is not
+    in the synthesis's context), and unfiltered that filed the SAME issue twice a
+    few minutes apart (2026-10-23: #5 then #6 on an identical title). Dedupe on
+    the normalized, truncation-matched title against the repo's OPEN issues, so
+    proposing an ask is idempotent. A CLOSED issue is deliberately not consulted:
+    the owner answered it, and a genuinely new ask may reuse the words.
+    """
+    from . import alarm
+    slug = profile_of(project)["repo_slug"]
+    open_titles = {_issue_key(t) for t in alarm._issue_list(slug)}
+    for issue in issues:
+        title, body = issue.get("title", ""), issue.get("body", "")
+        if not title:
+            continue
+        key = _issue_key(title[:160])
+        if key in open_titles:
+            log(f"issue already open (not re-filed): {title[:60]}")
+            continue
+        ok, out = alarm.file_issue(slug, title[:160], body[:5000])
+        open_titles.add(key)
+        log(f"issue {'filed' if ok else 'FAILED'}: {title[:60]}  {out[:120]}")
+
+
+def _issue_key(title: str) -> str:
+    """A comparison key for an owner ask: casing, spacing and punctuation
+    collapsed, so the same ask proposed twice compares equal."""
+    return re.sub(r"[^a-z0-9]+", " ", (title or "").lower()).strip()
 
 
 def _as_int(value: Any) -> int | None:
@@ -533,7 +583,7 @@ Decide what to BUILD NEXT. Output STRICT JSON only (no prose, no code fence):
   "queue": [
     {{"type": "motion|bugfix|feature|investigation", "label": "...",
       "target": "<motion: the exact surface path; feature/bugfix: the repo-relative path(s) you will edit, comma-separated — this BECOMES the developer's edit allow-list, so no prose here; investigation: a short topic>",
-      "effort_min": 25,
+      "effort_min": 60,
       "priority": 1, "reason": "one line grounded in research",
       "advances": "<milestone id this task serves, or 'none'>",
       "supersedes": ["<exact label of an already-queued task this makes irrelevant>"]}}
@@ -601,19 +651,26 @@ Rules:
   entry is to propose the NEXT milestone (as a feature/bugfix that starts it,
   or an issues_to_file for an owner decision) rather than inventing off-goal
   polish.
-- SIZE EVERY ENTRY — a queue entry is ONE developer session, and the owner's
-  target is ~20-25 minutes of real work (hard band 15-35). Set `effort_min` to
-  your honest estimate in minutes; code rejects entries outside the band and
-  prints a SIZING line for the owner.
-  - TOO SMALL (below 15): do NOT queue micro-work (a one-line fix, a single
-    string, one test file, a tweak). FOLD it into the related entry — list that
-    entry's exact label in your new entry's "supersedes" — or bundle sibling
-    micro-changes into one coherent entry. A release costs a version bump, a CI
-    run and an internal-testing build; spending it on five minutes of edits
+- SIZE EVERY ENTRY — a queue entry is ONE developer session, sized at ~60
+  minutes of developer work (hard band 40-90). Set `effort_min` to your honest
+  estimate; code rejects entries outside the band and prints a SIZING line for
+  the owner. Calibration matters here: an agent session runs several times
+  faster than a human would, while the fixed cost of a RUN (verify + version
+  bump + CI + internal-testing build) is unchanged — so the developer's minutes
+  are the cheap part and the release is the expensive part. FEWER, RICHER
+  entries are the healthy shape: a plan of 2-4 entries is normal, and you must
+  never pad the queue to reach a count.
+  - TOO SMALL (below 40): do NOT queue micro-work (a one-line fix, a single
+    string, one test file, a tweak, one screen of one polish item). FOLD it into
+    the related entry — list that entry's exact label in your new entry's
+    "supersedes" — or BUNDLE sibling changes into one coherent entry: several
+    screens that share one theme (one shared component, one copy pass, one
+    consistency rule) are ONE entry, not five. A release costs a version bump, a
+    CI run and an internal-testing build; spending it on five minutes of edits
     wastes the pipeline.
-  - TOO BIG (above 35): SPLIT it into sequential entries that each stand alone
+  - TOO BIG (above 90): SPLIT it into sequential entries that each stand alone
     and each still deliver something a user could see. One entry must be
-    finishable, verifiable and releasable in a single session.
+    finishable, verifiable and releasable in a single pass.
   - Exception: the delivery-restoring entry (signals.ci red, queue[0]) may be
     any size — restoring delivery outranks sizing.
 - 'target' is the developer's file allow-list, not a description: for
@@ -739,8 +796,9 @@ def _validate(result: dict, research: dict | None = None) -> str | None:
                         f"the {MIN_EFFORT_MIN}-minute floor. A run is one developer "
                         "(+ verification + release) session, so fold this micro-work "
                         "into the related entry (name that entry's exact label in "
-                        "'supersedes') or bundle sibling micro-changes into ONE "
-                        "coherent entry of ~20-25 minutes")
+                        "'supersedes') or bundle sibling changes into ONE coherent "
+                        f"entry of ~{TARGET_EFFORT_MIN} minutes — several screens "
+                        "that share a theme are one entry, not one each")
             if eff > MAX_EFFORT_MIN and not delivery_fix:
                 return (f"queue entry '{q.get('label')}' is sized {eff} min — above "
                         f"the {MAX_EFFORT_MIN}-minute ceiling: SPLIT it into "
@@ -896,14 +954,7 @@ def research_apply(project: Path, result: dict, log: RunLog) -> None:
     save_state(project, state)
     for line in block.splitlines():
         log(line)
-    for issue in result.get("issues_to_file", []):
-        title, body = issue.get("title", ""), issue.get("body", "")
-        if not title:
-            continue
-        from . import alarm
-        ok, out = alarm.file_issue(project and profile_of(project)["repo_slug"],
-                                   title[:160], body[:5000])
-        log(f"issue {'filed' if ok else 'FAILED'}: {title[:60]}  {out[:120]}")
+    file_asks(project, log, result.get("issues_to_file") or [])
     from . import scribe
     scribe.update(project)
     log(f"research: applied — queue={len(state['queue'])}, "
