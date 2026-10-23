@@ -546,6 +546,15 @@ def research_collect(project: Path, log: RunLog) -> dict:
         },
         "constraints": {
             "frozen_paths_count": len(profile.get("frozen_paths", [])),
+            # The freeze must be DATA the planner can check a target against —
+            # a count tells it how many paths exist but not which, so an entry
+            # whose target sits under an un-lifted frozen path looks buildable
+            # right up to the developer's scope gate, which then blocks the run.
+            "frozen_paths": profile.get("frozen_paths", []),
+            "lifted_paths": sorted({
+                p for lift in (profile.get("constraint_lifts") or [])
+                for p in (lift.get("paths") or [])
+            }),
             "max_queue": MAX_QUEUE,
             "standing_decisions": profile.get("standing_decisions", []),
             "policy": ("respect the freeze: no new domain features without owner "
@@ -678,6 +687,15 @@ Rules:
   'app/src/main/java/**/ui/Foo.kt'); put the explanation in 'reason'. A prose
   target is rejected in code — it would silently replace the allow-list and
   fail the build step.
+- THE FREEZE IS DATA, NOT A COUNT: `constraints.frozen_paths` lists the paths an
+  agent may NOT change and `constraints.lifted_paths` lists the ones the owner has
+  already exempted. Check every entry's `target` against them BEFORE you queue it.
+  An entry whose target sits under an un-lifted frozen path is NOT buildable — the
+  developer's scope gate rejects it and the run ends blocked, not shipped. Do not
+  queue it: file an `issues_to_file` asking the owner for the lift (name the exact
+  path, why the work needs it, and the cost of not acting) and queue the best
+  freeze-clean step toward the SAME milestone instead. Never invent a lift — only
+  the owner records one in the profile.
 - Buildability bias: the pipeline must be able to END EVERY RUN IN A BUILD.
   Queue executable work (motion/bugfix/feature) first; investigations are
   capped at 2 entries and each MUST, in its "reason", name the owner decision
