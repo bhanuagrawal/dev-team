@@ -111,7 +111,17 @@ agentconfig.env`) — without it `doctor` correctly reports the agents blocked
 - The ONLY delivery goal is CI → Play **internal testing** (the version-bump
   push triggers the project's CI). Production promotion is human-only: no path
   in this team, and never an owner ask or a filed issue — the owner promotes
-  manually in Play Console whenever they choose.
+  manually in Play Console whenever they choose. The ONE release question the
+  team does put to the owner is "**is this build a release candidate?**" (see
+  "The release handover" below): it is asked, recorded with `devteam rc`
+  and shown, and NOTHING acts on the answer — asking it is not a promotion
+  request, and it must never be phrased as one.
+- **Release notes are a first-class deliverable, not a by-product.** They are
+  what a user reads in the store, they are length-limited by the store (Play
+  rejects a note over `profile['whatsnew_max_chars']`, default 500), and a
+  project whose profile sets `whatsnew_curated` owns them by hand — the pipeline
+  READS that file and reports it, and must never rewrite it (a curated note was
+  silently replaced by generated boilerplate on 2026-10-23).
 - Never push with red gates. `devteam verify` must PASS before `devteam release`.
 - Frozen paths from the project profile are absolute — if a task seems to
   require them, stop and mark the task blocked instead.
@@ -136,11 +146,17 @@ agentconfig.env`) — without it `doctor` correctly reports the agents blocked
 A run ends in EXACTLY ONE of these — never in silence:
 - ✅ **BUILD SHIPPED** — version bump pushed → project CI → internal testing. This
   is the default terminal state whenever the queue holds (or research can
-  legitimately refill with) buildable work.
+  legitimately refill with) buildable work. **A shipped run hands the owner the
+  build, not just the news:** its banner MUST carry the `RELEASE HANDOVER` block
+  (what's new, what to manually test, the release-candidate question) — see "The
+  release handover" below. A shipped run without it is a run-report failure.
 - ❓ **OWNER ASK** — the ONLY questions you ever ask are ones no agent can
   answer: a freeze lift/sign-off, a kill-switch flip, discard-vs-keep on user
   WIP. Production promotion is NOT one of them (see the delivery rule above) —
-  never ask it, never file it. Even then: ask AFTER squeezing every
+  never ask it, never file it. **The one release question that IS the owner's is
+  "is this build a release candidate?"** — asked on every shipped run as part of
+  the RELEASE HANDOVER and answerable with `devteam rc` (recording an opinion,
+  never a promotion request). Even then: ask AFTER squeezing every
   non-blocking stage, and if all you have is analysis, convert it — a decision
   issue + a made-ready task spec that becomes buildable on "yes".
   **A STANDING ASK IS NOT OPTIONAL TO RELAY.** `adapt`/`doctor` print the open
@@ -292,7 +308,7 @@ never silently blocking.
 1. `python3 <team>/cli.py status <project>` — see queue, shipped, last run.
    `status` is read-only and prints `ADAPT NEEDED` when the project lags the
    team (step 0 is the fix — never migrate by hand). It ends with the
-   `goal page: file://…` URL: keep it, the run banner ends with it (10c).
+   `goal page: file://…` URL: keep it, the run banner ends with it (10b).
 2. **RUN THE PLANNER — every run, not just when the queue is empty.**
    `python3 <team>/cli.py plan <project>`
    ONE agent reviews where the work is heading against fresh data: it refreshes
@@ -410,7 +426,9 @@ never silently blocking.
      max 2 attempts total, then `devteam record --result failed` and alarm).
    - PASS → `python3 <team>/cli.py release <project> --worktree <WORKTREE_PATH>
      --task-spec .pipeline/tasks/<id>.json`
-     This bumps the version, writes release notes, commits, pushes to origin
+     This bumps the version, writes release notes (within
+     `profile['whatsnew_max_chars']`, and NOT AT ALL when the project's notes are
+     owner-curated — see "The release handover"), commits, pushes to origin
      main, and watches CI. CI delivers to Play internal testing.
 9. Bookkeeping (one command, every outcome):
    `python3 <team>/cli.py record <project> --result shipped|failed|blocked
@@ -422,14 +440,14 @@ never silently blocking.
     / `❓ OWNER ASK: <the decision>` / `🛠 TEAM SHIP: <what landed>` — plus what
     ran, and next step. An analysis-only report with no ask and no ship fails
     the run-outcome contract.
-10c. **Hand the owner the page, every run.** The banner ENDS with the two URLs
+10b. **Hand the owner the page, every run.** The banner ENDS with the two URLs
     `status`/`record` printed (`goal page: file:///…/goals.html`, and
     `shared plan: https://github.com/…/docs/plan.md` once published) — a run that
     changed the plan, the queue, or shipped anything without pasting them is
     incomplete. They are the owner's one-click "where we are now", and they are
     printed even when a run changes nothing: paste them from the command output,
     never invent or guess a URL.
-10b. **Relay, don't remember**: `devteam record` prints an `AGENT FLAGS` block
+10c. **Relay, don't remember**: `devteam record` prints an `AGENT FLAGS` block
     (the research agents' upgrade/capability asks) on EVERY outcome. The run
     banner MUST quote that block verbatim in its final report — dropping it is
     a run-report failure even when the build shipped. The same rule applies to
@@ -441,6 +459,43 @@ never silently blocking.
     outcome, and the banner MUST carry it verbatim — plus put the question to the
     owner in plain words. A shipped run with an unanswered standing ask still ends
     with that ask.
+10d. **A shipped run also hands over the BUILD** — `record --result shipped`
+    prints a `RELEASE HANDOVER` block (release note + length, what to test by
+    hand, the release-candidate question). Quote it in the banner, and put the
+    release-candidate question to the owner in the same message. Details below.
+
+## The release handover (owner requirement 2026-10-23)
+A build on internal testing is only useful if the owner knows what it says and
+what to do with it. So every shipped run's report carries three things, printed
+by code (`record`) and quoted verbatim by the orchestrator:
+
+1. **What's new — the note Play will show.** The exact committed text, with its
+   length against the allowed limit: `what's new (231/500 chars, …)`. The store
+   turns away an over-long note, so the length is part of the report, not a
+   detail (the note is trimmed to `profile['whatsnew_max_chars']`, default
+   500; the generated copy names the task's first clause, never the 200-char
+   internal label).
+   - **Where the words come from is a project fact.** Default: the pipeline
+     generates them from the task. `profile['whatsnew_curated'] = true` means the
+     OWNER writes them: the pipeline reads the file, prints it and never rewrites
+     it (and the report says which of the two it was — an owner must never be
+     shown boilerplate as if it were their own words, nor their words replaced
+     silently).
+2. **What to manually test.** The pipeline's gates prove the build compiles,
+   passes its tests and installs — they cannot feel the app. So the handover
+   lists the areas the diff touched (derived from the task's targets, never
+   invented) plus the concrete claim the queue entry made, and asks the owner to
+   walk it. This is not ceremony: on 2026-10-23 a device gate went green while a
+   success screen printed a MediaStore id, and a hand walk found seven defects an
+   agent crawl's "0 blocked taps" had hidden.
+3. **Is this build a release candidate?** The one release question the owner
+   owns. Answer it with `devteam rc <project> --yes|--no [--version <v>]
+   [--note "..."]` — recorded per version in `state['release_candidates']`,
+   shown by `status`, and asked only until answered (an ask with no channel is
+   decoration). **Nothing acts on the answer**: `rc` records an opinion; there is
+   still no promotion path in this team, and the question must never be phrased
+   as "should we promote it" — promoting beyond internal testing stays the
+   owner's manual step in Play Console, and `rc --yes` is not a request for it.
 
 ## Interactive (human-present) sessions
 Same procedure; `supervised` tasks become available when a human is with you —

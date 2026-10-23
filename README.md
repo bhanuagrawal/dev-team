@@ -211,6 +211,12 @@ bump if CI fails or times out. On tag-triggered projects it pushes the tag too.
 CI delivers to Play Console internal testing. Production promotion is never part
 of this — it stays a human action.
 
+Release notes are a store artefact, so they get store rules: the generated copy
+names the task's first clause (not the 200-char internal label) and is clamped to
+`profile['whatsnew_max_chars']` (default 500 — Play rejects longer notes). A
+project whose profile sets `whatsnew_curated: true` owns its notes by hand; the
+pipeline then reads that file and **never rewrites it**, and the report says so.
+
 ### Step 9 — bookkeeping (code, every outcome)
 
 `cli.py record <project> --result shipped|failed|blocked`. It appends to the run
@@ -220,8 +226,27 @@ plan views, and prints, for the run banner: the goal line
 (`goal: [<goal>] <title> ← <task>`), the **AGENT FLAGS** block (what the planner
 says the owner could connect next), the **OWNER ASKS** block (the questions only
 the owner can answer — including "nobody has said what this app is for long term"
-when no goal is set), the **THE TEAM CHANGED THE PLAN** block
-if the plan moved, and the URLs. It also publishes the plan (below).
+when no goal is set), on a ship the **RELEASE HANDOVER** block (below), the
+**THE TEAM CHANGED THE PLAN** block if the plan moved, and the URLs. It also
+publishes the plan (below).
+
+#### The release handover (on every ship)
+
+Handing over a build is not the same as reporting one. On a ship the same command
+prints what the owner needs to USE the build — quoted verbatim by the banner:
+
+- **what's new** — the exact committed note with its length against the limit
+  (`231/500 chars`) and its source (pipeline-generated, or owner-curated);
+- **manually test** — the areas the diff touched (derived from the task's
+  targets) plus the claim the queue entry made. The gates prove it compiles,
+  passes and installs; they cannot feel the app, and on 2026-10-23 a green device
+  gate hid a success screen printing a MediaStore id that a hand walk caught at
+  once;
+- **is this build a release candidate?** — answered with
+  `cli.py rc <project> --yes|--no [--version <v>] [--note "…"]`, recorded per
+  version, shown by `status`, and asked only until answered. `rc` records an
+  opinion: nothing acts on it, there is still no promotion path here, and the
+  question is never phrased as "should we promote it".
 
 Every one of those blocks is printed by code on every outcome, so the banner
 cannot drop one by forgetting: a run that ships while the app has no long-term
@@ -421,6 +446,9 @@ python3 cli.py vision <project> "one sentence"  # the owner's goal
 python3 cli.py align <project> "<request>" [--apply]
 python3 cli.py emulators <project> [--record [--reset]]
 python3 cli.py alarm <project> ; python3 cli.py poll <project> ; python3 cli.py schedules
+python3 cli.py rc <project> --yes|--no [--version V] [--note "…"]
+                                                # answer the release-candidate
+                                                # question for a shipped build
 python3 cli.py onboard <path> ; python3 cli.py setup --project <path> [--at HH:MM]
 ```
 

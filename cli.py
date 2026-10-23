@@ -201,6 +201,10 @@ def cmd_onboard(args: argparse.Namespace) -> None:
         "whatsnew_file": ("distribution/whatsnew/whatsnew-en-US"
                           if (project / "distribution/whatsnew/whatsnew-en-US").exists()
                           else None),
+        # Play rejects a release note longer than this, and the pipeline only
+        # REWRITES the note when the owner does not curate it by hand.
+        "whatsnew_max_chars": 500,
+        "whatsnew_curated": False,
         "ci_workflow": ci_workflow,
         "ci_trigger": ci_trigger,
         "java_home": "/Applications/Android Studio.app/Contents/jbr/Contents/Home",
@@ -303,6 +307,111 @@ def print_owner_asks(project: Path) -> None:
         print(f"  ? {a['what']}")
         if a.get("how"):
             print(f"    how: {a['how']}")
+
+
+def latest_shipped_version(state: dict) -> str:
+    """The version this project last delivered, from the ledger (authoritative —
+    the local checkout may lag origin/main by many commits)."""
+    rows = state.get("shipped") or []
+    if rows:
+        v = str(rows[-1].get("version") or "")
+        if v and v != "?":
+            return v
+    return str((state.get("last_run") or {}).get("version") or "")
+
+
+def rc_verdict(state: dict, version: str) -> dict | None:
+    """The owner's release-candidate answer for `version` (newest wins), or None."""
+    for e in reversed(state.get("release_candidates") or []):
+        if str(e.get("version") or "") == str(version):
+            return e
+    return None
+
+
+def print_release_handover(project: Path, task: dict, version: str,
+                           commit: str = "") -> None:
+    """Hand the owner the shipped build: its release note, what to test by hand,
+    and the release-candidate question. Printed by code on every shipped `record`
+    — the run banner quotes this block verbatim.
+
+    WHY these three and nothing else: the pipeline's gates prove the build
+    compiles, passes its tests and installs; they cannot feel the app. This run's
+    sibling lessons are the proof — a device gate passed while a success screen
+    printed a MediaStore id, and a hand walk found seven defects the crawler's
+    "0 blocked taps" had hidden. So the run reports WHAT a user will read, WHAT
+    to walk by hand, and asks the ONE release question the owner owns (is this a
+    release candidate?). Nothing here acts on the answer: promoting beyond
+    internal testing stays the owner's manual step in Play Console."""
+    profile = profile_of(project)
+    state = state_of(project)
+    wf_rel = profile.get("whatsnew_file")
+    print("--- RELEASE HANDOVER (v" + version + " → internal testing — "
+          "quote this block in the run banner) ---")
+    if wf_rel:
+        cap = shipper.whatsnew_max_chars(profile)
+        note = shipper.whatsnew_read(project, commit).rstrip("\n")
+        if profile.get("whatsnew_curated"):
+            source = (f"owner-curated in {wf_rel} — the pipeline read it, did not "
+                      "rewrite it; update that file for the next release")
+        else:
+            source = f"pipeline-generated from the task into {wf_rel}"
+        if not note:
+            print(f"  what's new: NO note found at {wf_rel} — the store would show "
+                  "nothing for this release")
+        else:
+            print(f"  what's new ({len(note)}/{cap} chars, {source}) — what Play shows the user:")
+            for ln in note.splitlines():
+                print(f"    {ln}")
+    areas = shipper.whatsnew_test_areas(task)
+    claim = re.split(r"(?<=[.!?])\s", (task.get("reason") or "").strip())[0]
+    if len(claim) > 180:
+        claim = claim[:180].rsplit(" ", 1)[0].rstrip(" ,;") + " …"
+    if areas or claim:
+        print("  manually test — the gates cover compile/unit/device, never the "
+              "real-device feel:")
+        for a in areas:
+            print(f"    · {a}")
+        if claim:
+            print(f"    · what this release claims to fix: {claim}")
+        print(f"    how: update the app from the internal-testing track (v{version}) and "
+              "walk it; report what you find back to the agent — a defect here becomes "
+              "the next cycle's queue head")
+    verdict = rc_verdict(state, version)
+    if verdict:
+        mark = "yes ✅" if verdict.get("rc") else "no"
+        print(f"  release candidate?  you answered {mark} on {verdict.get('date')}"
+              + (f" — {verdict.get('note')}" if verdict.get("note") else ""))
+    else:
+        print(f"  release candidate?  v{version} is on internal testing — is this "
+              "build a release candidate?")
+        print(f"    answer: python3 cli.py rc {project.name} --version {version} "
+              '--yes --note "..."   (or --no)')
+        print("    (asked once per version; the answer is recorded and shown and "
+              "nothing acts on it — promotion stays your manual step in Play Console)")
+
+
+def cmd_rc(args: argparse.Namespace) -> None:
+    """Record the owner's release-candidate answer for a shipped version.
+
+    The ask is printed by every shipped run; this is where it is ANSWERED, so the
+    question cannot repeat forever (an ask with no channel is decoration — lesson
+    2026-10-23). Exactly one of --yes/--no: a default would let a stray flag
+    record a verdict the owner never gave."""
+    project = resolve_project(args.project)
+    if bool(args.yes) == bool(args.no):
+        raise SystemExit("pass exactly one of --yes / --no")
+    state = state_of(project)
+    version = str(args.version or latest_shipped_version(state))
+    if not version:
+        raise SystemExit("no shipped version to answer for — pass --version <ver>")
+    entry = {"version": version, "rc": bool(args.yes), "note": args.note or "",
+             "date": today(), "by": "owner"}
+    state.setdefault("release_candidates", []).append(entry)
+    save_state(project, state)
+    verdict = "a RELEASE CANDIDATE (✅)" if entry["rc"] else "NOT a release candidate"
+    print(f"recorded: v{version} is {verdict}"
+          + (f" — {entry['note']}" if entry["note"] else ""))
+    print_page(project, "refreshed by this answer")
 
 
 def print_page(project: Path, note: str = "", file=None,
@@ -535,7 +644,7 @@ def cmd_release(args: argparse.Namespace) -> int:
     new = (latest[0], latest[1], latest[2] + 1)
     task = json.loads(task_spec_path(project, args.task_spec).read_text())
     name = shipper.bump_version_file(worktree, new, log)
-    shipper.write_whatsnew(worktree, task)
+    shipper.write_whatsnew(worktree, task, log)
     res = shipper.push_and_deliver(project, worktree, task, name, log)
     print(json.dumps(res, indent=2))
     return 0 if res.get("delivered") else 1
@@ -551,6 +660,7 @@ def cmd_record(args: argparse.Namespace) -> None:
              "finished": now_iso()}
     state.setdefault("runs", []).append(entry)
     if args.result == "shipped":
+        entry["version"] = args.version or ""
         label = task.get("surface", {}).get("label", args.task or "?")
         targets = task.get("surface", {}).get("targets", [])
         # Attribute the delivery to the milestone the queue entry named, so the
@@ -600,6 +710,13 @@ def cmd_record(args: argparse.Namespace) -> None:
     # …and the owner's own open questions (no long-term goal yet) are printed on
     # EVERY record too: a shipped build must not swallow the ask.
     print_owner_asks(project)
+    # A shipped run also hands the owner the BUILD itself: the note Play will
+    # show, what to walk by hand, and the release-candidate question. Same rule
+    # as the blocks above — code prints it, the banner quotes it.
+    if args.result == "shipped":
+        print_release_handover(project, task,
+                              str(args.version or latest_shipped_version(state)),
+                              str(args.commit or ""))
     block = goals.review_block(state_of(project))
     if block:
         print("\n" + block)
@@ -970,6 +1087,20 @@ def cmd_status(args: argparse.Namespace) -> None:
     last = state.get("last_run", {})
     if last:
         print(f"last run:   {last.get('date')} → {last.get('result')} {last.get('note','')[:80]}")
+    # The shipped build's release-candidate state: the ask is raised by every
+    # shipped run, so it must be visible here too — and visibly answered once the
+    # owner has said so (an ask nobody can see the answer to repeats).
+    rel = latest_shipped_version(state)
+    if rel:
+        verdict = rc_verdict(state, rel)
+        if verdict:
+            print(f"last release: v{rel} — release candidate "
+                  f"{'✅ yes' if verdict.get('rc') else '❌ no'} "
+                  f"({verdict.get('date')})"
+                  + (f" {verdict.get('note')}" if verdict.get("note") else ""))
+        else:
+            print(f"last release: v{rel} — awaiting your release-candidate answer "
+                  f"(`devteam rc {project.name} --yes|--no`)")
     r = subprocess.run(["git", "log", "--oneline", "-1"], cwd=project,
                        capture_output=True, text=True)
     print(f"local HEAD: {r.stdout.strip()}")
@@ -1224,6 +1355,15 @@ def main() -> None:
               choices=["shipped", "failed", "blocked"])
     rec.add_argument("--note"); rec.add_argument("--version"); rec.add_argument("--commit")
     rec.set_defaults(fn=cmd_record)
+    rcp = sub.add_parser("rc", help="answer the release-candidate question for a "
+                                    "shipped build (recorded, never acted on)")
+    rcp.add_argument("project")
+    rcp.add_argument("--version", help="defaults to the last shipped version")
+    g = rcp.add_mutually_exclusive_group(required=True)
+    g.add_argument("--yes", action="store_true", help="this build IS a release candidate")
+    g.add_argument("--no", action="store_true", help="this build is NOT a release candidate")
+    rcp.add_argument("--note")
+    rcp.set_defaults(fn=cmd_rc)
     po = sub.add_parser("poll");       po.add_argument("project"); po.add_argument("--tail", type=int, default=60); po.set_defaults(fn=cmd_poll)
     a = sub.add_parser("alarm");       a.add_argument("project"); a.set_defaults(fn=cmd_alarm)
     rs = sub.add_parser("research");   rs.add_argument("project"); rs.add_argument("--no-llm", action="store_true")

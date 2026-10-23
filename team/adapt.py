@@ -48,6 +48,13 @@ DEFAULTS = {
     "ci_trigger": "bump",
     "src_root": None,
     "whatsnew_file": None,
+    # How this project's Play release notes are produced:
+    #   whatsnew_curated — the owner writes them by hand; the pipeline only READS
+    #     the file (never rewrites it) and reports what will ship.
+    #   whatsnew_max_chars — the store's allowed length for one release note
+    #     (Play rejects longer ones); default 500.
+    "whatsnew_curated": False,
+    "whatsnew_max_chars": 500,
     "components_dir": None,
     "theme_dir": None,
     "reference_screen": None,
@@ -66,7 +73,8 @@ def _state_defaults(state: dict) -> list[str]:
     out = []
     for key, default in (("runs", []), ("shipped", []), ("queue", []),
                          ("goal_log", []), ("tree_changes", []),
-                         ("alignment_log", []), ("last_run", {})):
+                         ("alignment_log", []), ("release_candidates", []),
+                         ("last_run", {})):
         if key not in state:
             state[key] = default
             out.append(f"state: added '{key}' (this team version records it)")
