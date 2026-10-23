@@ -1060,11 +1060,20 @@ def cmd_status(args: argparse.Namespace) -> None:
     from team import research as research_mod
     print(research_mod.plan_review_line(project))
     if state.get("queue"):
+        from team import scan as scan_mod
         # Plain: group the queue by the goal it serves, by TITLE not id — the
         # owner should not have to hold the codes in their head. Any branch counts
         # (work may serve a sub-goal deeper in the tree), not just milestones.
+        # A shipped entry STAYS in the queue on purpose (removing it is the
+        # planner's verdict, so no task vanishes silently) and the picker skips
+        # it — but reporting it as "waiting" tells the owner work is pending that
+        # is already on internal testing, so it is counted out and named.
+        delivered = [q for q in state["queue"]
+                     if scan_mod.already_delivered(q, state)]
         groups: dict[str, int] = {}
         for q in state["queue"]:
+            if scan_mod.already_delivered(q, state):
+                continue
             key = str(q.get("advances") or "").strip()
             groups[key] = groups.get(key, 0) + 1
         parts = []
@@ -1074,7 +1083,14 @@ def cmd_status(args: argparse.Namespace) -> None:
                 "off-goal (declared)" if mid == "none" else
                 ("no goal declared" if not mid else mid))
             parts.append(f"{n} serving \"{what}\"")
-        print(f"queue:      {len(state['queue'])} waiting — " + "; ".join(parts))
+        line = f"queue:      {len(state['queue']) - len(delivered)} waiting"
+        if parts:
+            line += " — " + "; ".join(parts)
+        if delivered:
+            line += (" · " + str(len(delivered)) + " already delivered (skipped "
+                     "by the picker, dropped by the next plan review): "
+                     + ", ".join(f"\"{q['label']}\"" for q in delivered))
+        print(line)
     print(f"targets:    {len(profile['targets'])} shipped-do: "
           f"{sum(1 for s in surfaces if s['status'] == 'shipped')} "
           f"animated: {sum(1 for s in surfaces if s['status'] == 'animated')} "
