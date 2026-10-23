@@ -94,10 +94,13 @@ def task_for(profile: dict, t: dict, seq: int) -> dict:
     }
 
 
-def scan_surfaces(project: Path) -> list[dict]:
+def scan_surfaces(project: Path, tree: Path | None = None) -> list[dict]:
+    """`tree` lets a caller that already materialized the origin/main worktree
+    (research_collect does, to put the path in the synthesis prompt) hand it in
+    instead of paying for a second fetch+checkout. Default: resolve it here."""
     profile = profile_of(project)
     state = state_of(project)
-    tree = origin_tree(project)
+    tree = tree or origin_tree(project)
     shipped = {s["target"] for s in state.get("shipped", [])}
     out = []
     for t in profile["targets"]:

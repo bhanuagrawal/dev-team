@@ -433,7 +433,14 @@ def research_collect(project: Path, log: RunLog) -> dict:
     """All deterministic collectors → research dict (no LLM)."""
     profile = profile_of(project)
     state = state_of(project)
-    surfaces = scan.scan_surfaces(project)
+    # The tree that MATCHES what is shipped. Both the surface scan and any agent
+    # reading project code for this review must use it: the owner's own checkout
+    # may lag origin/main by many commits or carry unrelated WIP, so a focused
+    # review that reads "the app source" from there reviews code that is not
+    # deployed. Resolved once here (the scan uses the same tree) and published in
+    # signals.repo so the prompt can name it.
+    read_tree = scan.origin_tree(project, log)
+    surfaces = scan.scan_surfaces(project, tree=read_tree)
     remaining = [{"label": s["label"], "paths": s.get("targets", []),
                   "risk": s.get("risk", "safe")}
                  for s in surfaces if s["status"] == "unanimated"]
@@ -460,6 +467,7 @@ def research_collect(project: Path, log: RunLog) -> dict:
             },
             "repo": {
                 "latest_tag": latest,
+                "read_tree": str(read_tree),
                 "shipped_versions_in_state": shipped_versions,
                 "last_success_date": state.get("last_success_date"),
                 "runs_recorded": len(state.get("runs", [])),
@@ -553,6 +561,12 @@ Decide what to BUILD NEXT. Output STRICT JSON only (no prose, no code fence):
   ]
 }}
 Rules:
+- READING SOURCE CODE: read project files from `signals.repo.read_tree` — that is
+  the worktree at origin/main and it is what is actually SHIPPED. The owner's own
+  checkout may lag origin/main by many commits or carry unrelated work in
+  progress, so never judge the product from it (a review that does reviews code
+  that is not deployed). Repo-relative paths in this prompt are all relative to
+  that tree.
 - YOU OWN THE PLAN — you are the ONLY agent that changes the goal tree or the
   queue. If the work that should happen next has no place in the tree, CHANGE
   THE TREE (`goal_changes`: add a branch, park a dead one, set-status, retire,
@@ -984,7 +998,8 @@ FOCUS_TMPL = """
 === THIS CYCLE'S OWNER REQUEST (make the review cover this) ===
 The owner asked, in these words: "{focus}"
 Treat it as the FOCUS of this cycle's review: inspect the area it names for real
-(the relevant files under the project, read-only) BEFORE judging, ground your
+(read the relevant files under `signals.repo.read_tree`, read-only — the owner's
+working copy may lag origin/main) BEFORE judging, ground your
 `insights` in what you actually inspected (name the files/screens), and use
 `goal_changes` if that area reveals something the plan does not cover — or a
 measure the tree should hold. The focus changes WHAT you look at, never the rules
