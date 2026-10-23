@@ -32,31 +32,44 @@ MAX_QUEUE = 6
 #
 # Owner decision 2026-10-18 set the first shape ("plan lead task not too small,
 # [the developer] agent might take 20-25 min to complete it") as target 25 /
-# band 15-35. Owner revision 2026-10-23: "agents take less time to deliver a
+# band 15-35. Owner revision 2026-10-23 (a): "agents take less time to deliver a
 # task … we are considering more time … fix this in the code where we are doing
 # the estimate." The numbers were being written as HUMAN effort while the unit
-# that pays for them is an agent session, and the two are several times apart.
+# that pays for them is an agent session, and the two are several times apart —
+# that revision moved the target 25 → 60.
+#
+# Owner revision 2026-10-23 (b), same day: "Replan, we are shipping too less code
+# in one workflow run." 60 was still a human-sized entry wearing agent numbers:
+# one run ships exactly ONE queue entry (queue[0] is the handover), so a
+# conservatively-sized head means the most expensive thing in the pipeline — the
+# release (verify + version bump + CI + internal-testing build) — is spent on the
+# smallest unit the plan dared to commit to. The lever is the SIZE OF THE HEAD,
+# not the number of runs (a run per entry multiplies the fixed cost the owner is
+# paying for), so the target moves UP again with the band scaled to match.
 #
 # Measured in this pipeline: the nightly of 2026-10-23 ran plan → developer →
 # verify → release → alarm in 01:00:05–01:11:51 (~12 min wall clock for one
 # shipped release, of which the CI watch is ~7 min); a developer session that
-# shipped a 1305-line deletion measured ~5 min (lessons 2026-10-22). So the
-# developer's minutes are the CHEAP part of a run and the release is the
-# expensive part — the fixed cost does not shrink with the task. That is why the
-# target moves UP (fewer, richer entries per release), not toward more runs.
+# shipped a 1305-line deletion measured ~5 min (lessons 2026-10-22). The
+# effort_min : wall-clock ratio observed is therefore ~6-10x, which is what
+# bounds the ceiling (below) rather than taste.
 #
 # The band stays a band: a wide one is the same as none (lessons 2026-10-16).
-TARGET_EFFORT_MIN = 60
-MIN_EFFORT_MIN = 40
-# The ceiling is bounded because the one thing the original reasoning got right
-# is that an entry must still finish, verify and release in a SINGLE pass. Sized
-# work of ~90 min is roughly 10-15 min of agent wall clock — comfortably inside
-# the developer role's 3600 s timeout (config/runtimes.json) — while an entry
-# two or three times that is a half-session again.
-MAX_EFFORT_MIN = 90
+TARGET_EFFORT_MIN = 150
+MIN_EFFORT_MIN = 90
+# The ceiling is bounded because an entry must still finish, verify and release
+# in a SINGLE pass: at the measured ~6-10x ratio, 240 min of sized work is
+# roughly 25-40 min of agent wall clock, comfortably inside the developer role's
+# 3600 s timeout (config/runtimes.json). Beyond that the session risks the
+# timeout and the "one pass" guarantee, which is the whole point of the band.
+MAX_EFFORT_MIN = 240
 # motion is sized by its surface (one surface per entry, enforced elsewhere), so
 # only these types carry the sizing gate.
 SIZED_TYPES = ("feature", "bugfix", "investigation")
+# Types that put code a user can see into the release. Used by the CODE-FIRST
+# HEAD gate: a run builds only queue[0], so an investigation may not be the
+# handover while one of these is queued behind it.
+EXECUTABLE_TYPES = ("motion", "feature", "bugfix")
 
 
 def file_asks(project: Path, log: RunLog, issues: list[dict]) -> None:
@@ -592,7 +605,7 @@ Decide what to BUILD NEXT. Output STRICT JSON only (no prose, no code fence):
   "queue": [
     {{"type": "motion|bugfix|feature|investigation", "label": "...",
       "target": "<motion: the exact surface path; feature/bugfix: the repo-relative path(s) you will edit, comma-separated — this BECOMES the developer's edit allow-list, so no prose here; investigation: a short topic>",
-      "effort_min": 60,
+      "effort_min": {target_effort},
       "priority": 1, "reason": "one line grounded in research",
       "advances": "<milestone id this task serves, or 'none'>",
       "supersedes": ["<exact label of an already-queued task this makes irrelevant>"]}}
@@ -660,25 +673,27 @@ Rules:
   entry is to propose the NEXT milestone (as a feature/bugfix that starts it,
   or an issues_to_file for an owner decision) rather than inventing off-goal
   polish.
-- SIZE EVERY ENTRY — a queue entry is ONE developer session, sized at ~60
-  minutes of developer work (hard band 40-90). Set `effort_min` to your honest
-  estimate; code rejects entries outside the band and prints a SIZING line for
-  the owner. Calibration matters here: an agent session runs several times
-  faster than a human would, while the fixed cost of a RUN (verify + version
-  bump + CI + internal-testing build) is unchanged — so the developer's minutes
-  are the cheap part and the release is the expensive part. FEWER, RICHER
-  entries are the healthy shape: a plan of 2-4 entries is normal, and you must
-  never pad the queue to reach a count.
-  - TOO SMALL (below 40): do NOT queue micro-work (a one-line fix, a single
-    string, one test file, a tweak, one screen of one polish item). FOLD it into
-    the related entry — list that entry's exact label in your new entry's
+- SIZE EVERY ENTRY — a queue entry is ONE developer session, sized at ~{target_effort}
+  minutes of developer work (hard band {min_effort}-{max_effort}). Set `effort_min` to
+  your honest estimate; code rejects entries outside the band and prints a SIZING
+  line for the owner. Calibration matters here: an agent session runs several
+  times faster than a human would, while the fixed cost of a RUN (verify +
+  version bump + CI + internal-testing build) is unchanged — so the developer's
+  minutes are the cheap part and the release is the expensive part. ONE RUN SHIPS
+  ONE ENTRY (queue[0]), so a small head wastes the most expensive thing in the
+  pipeline: size the head so the release pays for itself. FEWER, RICHER entries
+  are the healthy shape: a plan of 2-4 entries is normal, and you must never pad
+  the queue to reach a count.
+  - TOO SMALL (below {min_effort}): do NOT queue micro-work (a one-line fix, a
+    single string, one test file, a tweak, one screen of one polish item). FOLD it
+    into the related entry — list that entry's exact label in your new entry's
     "supersedes" — or BUNDLE sibling changes into one coherent entry: several
     screens that share one theme (one shared component, one copy pass, one
     consistency rule) are ONE entry, not five. A release costs a version bump, a
-    CI run and an internal-testing build; spending it on five minutes of edits
+    CI run and an internal-testing build; spending it on a few minutes of edits
     wastes the pipeline.
-  - TOO BIG (above 90): SPLIT it into sequential entries that each stand alone
-    and each still deliver something a user could see. One entry must be
+  - TOO BIG (above {max_effort}): SPLIT it into sequential entries that each stand
+    alone and each still deliver something a user could see. One entry must be
     finishable, verifiable and releasable in a single pass.
   - Exception: the delivery-restoring entry (signals.ci red, queue[0]) may be
     any size — restoring delivery outranks sizing.
@@ -701,6 +716,15 @@ Rules:
   capped at 2 entries and each MUST, in its "reason", name the owner decision
   or the code task it feeds — a decision-linked investigation is fine,
   analysis-for-its-own-sake is not.
+- CODE-FIRST HEAD (owner directive 2026-10-23: "we are shipping too less code in
+  one workflow run"): queue[0] is the ONLY entry a run builds, so it MUST be
+  executable work (motion/bugfix/feature) whenever ANY executable entry exists in
+  the queue you hand over. An investigation is never the handover while code is
+  queued behind it — a run that ships an investigation ships no code at all, and
+  the release it pays for is wasted. Code validates this: a plan whose head is an
+  investigation while any queued entry is executable is REJECTED. An
+  investigation may still be listed (behind the code), and it may be the head only
+  when nothing executable exists at all — in which case say so in its "reason".
 - An issues_to_file entry counts as the run's OWNER ASK; if you can see no
   buildable work at all, your job is the ask: file the decision issue that
   would unlock one (e.g. a feature proposal for approval, a freeze lift, a
@@ -787,6 +811,20 @@ def _validate(result: dict, research: dict | None = None) -> str | None:
                     and q.get("type") not in ("bugfix", "feature"):
                 return ("signals.ci is red — the first queue entry must be the "
                         "bugfix/feature that restores delivery")
+            # CODE-FIRST HEAD (owner directive 2026-10-23): a run builds only
+            # queue[0], so an analysis head while code is queued behind it ships
+            # no code. Enforced here because it is the one way the plan can
+            # silently spend a release on nothing a user can see.
+            if q is result["queue"][0] and q.get("type") == "investigation" \
+                    and ci_last != "failure" \
+                    and any(e.get("type") in EXECUTABLE_TYPES
+                            for e in result["queue"][:MAX_QUEUE]):
+                return ("queue[0] is an investigation while executable work "
+                        "(motion/bugfix/feature) is queued behind it — the run "
+                        "would ship ANALYSIS, not code. A run builds only the "
+                        "head, so put the executable entry first; the "
+                        "investigation may stay queued behind it. The head may be "
+                        "an investigation only when nothing executable is queued")
             # Competitor evidence is data, not a licence to invent: a reason may
             # cite a rival only when a recon report is actually behind it.
             competitors = (research.get("signals", {}).get("competitors") or {})
@@ -872,7 +910,7 @@ def _validate(result: dict, research: dict | None = None) -> str | None:
     if result["queue"]:
         if sum(1 for q in result["queue"] if q.get("type") == "investigation") > 2:
             return "at most 2 investigation entries per cycle"
-        executable = any(q.get("type") in ("motion", "bugfix", "feature")
+        executable = any(q.get("type") in EXECUTABLE_TYPES
                          for q in result["queue"])
         if not executable and not result.get("issues_to_file"):
             return ("queue has no executable work and no owner-ask issue — "
@@ -1096,6 +1134,9 @@ def render_prompt(project: Path, research: dict, log: RunLog | None = None,
     prompt = PROMPT_TMPL.format(project=research["project"],
                                 goals=goals.prompt_block(profile, state),
                                 research=json.dumps(research, indent=2),
+                                target_effort=TARGET_EFFORT_MIN,
+                                min_effort=MIN_EFFORT_MIN,
+                                max_effort=MAX_EFFORT_MIN,
                                 max_queue=MAX_QUEUE)
     focus = (focus or "").strip()
     if focus:

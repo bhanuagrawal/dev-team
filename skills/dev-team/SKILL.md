@@ -323,21 +323,34 @@ never silently blocking.
      task they feed.
    - SIZE IS PART OF THE PLAN (owner decision 2026-10-18: *"plan lead task not too
      small, [the developer] agent might take 20-25 min to complete it"* — **revised
-     by the owner 2026-10-23**: *"agents take less time to deliver a task … we are
-     considering more time … fix this in the code where we are doing the estimate"*):
+     by the owner 2026-10-23 (a)**: *"agents take less time to deliver a task … we are
+     considering more time … fix this in the code where we are doing the estimate"* —
+     **revised again 2026-10-23 (b)**: *"Replan, we are shipping too less code in one
+     workflow run"*):
      every feature/bugfix/investigation entry carries `effort_min` — minutes of
-     developer work, target ~60, hard band 40-90, enforced in code. The numbers are
+     developer work, target ~150, hard band 90-240, enforced in code. ONE RUN SHIPS
+     ONE ENTRY, so a head smaller than the run costs the owner the release it paid
+     for. The numbers are
      calibrated to what an AGENT session costs, not to human effort: measured here,
      a whole nightly (plan → developer → verify → release incl. the CI watch) runs
-     ~12 min, and a developer session that shipped a 1305-line deletion took ~5 min.
+     ~12 min, and a developer session that shipped a 1305-line deletion took ~5 min
+     (an `effort_min` : wall-clock ratio of ~6-10x, which is what bounds the 240
+     ceiling against the developer role's 3600 s timeout).
      The fixed cost of a RUN (verify + version bump + CI + internal-testing build)
-     dominates the developer's minutes, so the target moved UP — fewer, richer
+     dominates the developer's minutes, so the target moved UP twice — fewer, richer
      entries per release. A plan of 2-4 entries is the healthy shape; the queue is
      never padded to a count. A too-small entry must be folded into the related one
      via `supersedes` or bundled with its siblings (several screens sharing one
      theme = one entry); a too-big one must be split. The review block prints a
      `SIZING` line, and the estimate travels into the developer prompt. The
      delivery-restoring head (red CI) is exempt — the fire outranks sizing.
+    - **CODE-FIRST HEAD** (owner directive 2026-10-23: *"we are shipping too less code
+      in one workflow run"*): because a run builds only `queue[0]`, the head must be
+      executable work (motion/bugfix/feature) whenever any executable entry is queued —
+      an investigation is never the handover while code sits behind it, or the release
+      ships analysis a user cannot see. Enforced in code (the plan is rejected); an
+      investigation may head the queue only when nothing executable exists, and then its
+      `reason` says so.
    - Every cycle runs an IMPACT REVIEW: the synthesis must judge each
      already-queued task; the CLI prints a `QUEUE IMPACT` block (added / kept /
      replaced / obsolete / dropped). A queued task can never vanish silently.
@@ -382,7 +395,7 @@ never silently blocking.
 4. Compose the task spec JSON:
    {"id": "dt-<label-slug>-<seq>", "type": "motion|bugfix|feature|investigation",
     "surface": {"label": "<label>", "targets": ["<repo-relative path(s)>"]},
-    "risk": "safe", "effort_min": 25, "created": "<iso>"}
+    "risk": "safe", "effort_min": 150, "created": "<iso>"}
    Write it to `.pipeline/tasks/<id>.json`. `effort_min` (from the picked queue
    entry) is the expected size of ONE developer session — the developer prompt
    shows it, so the task is worked at its intended depth rather than gold-plated
@@ -401,8 +414,8 @@ never silently blocking.
 6. Get the exact developer prompt (keep it verbatim):
    `python3 <team>/cli.py developer-prompt <project> .pipeline/tasks/<id>.json`
 7. SPAWN THE DEVELOPER AS A SUBAGENT — your tool's own native mechanism:
-   - budget the session at the task's `effort_min` (~60 is the norm for a healthy
-     entry, band 40-90 — sized in developer-effort minutes, which an agent spends
+   - budget the session at the task's `effort_min` (~150 is the norm for a healthy
+     entry, band 90-240 — sized in developer-effort minutes, which an agent spends
      several times faster than a human would): one coherent change, verified, no
      gold-plating beyond the spec. If the agent is clearly done in a couple of
      minutes, the entry was too small — say so in the run report and fold such
