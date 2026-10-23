@@ -654,7 +654,10 @@ def cmd_pick(args: argparse.Namespace) -> int:
     spec_path.write_text(json.dumps(task, indent=2) + "\n")
     print(json.dumps({"pick": task, "spec": str(spec_path),
                       "worktree_cmd": f"python3 cli.py worktree-start {project.name} --task-id {task['id']}",
-                      "prompt_cmd": f"python3 cli.py developer-prompt {project.name} {spec_path.name}"},
+                      # .pipeline/tasks/ is relative to the PROJECT dir, which
+                      # developer-prompt already searches — a bare filename
+                      # resolves nowhere (CWD/team dir hold no tasks/).
+                      "prompt_cmd": f"python3 cli.py developer-prompt {project.name} .pipeline/tasks/{spec_path.name}"},
                      indent=2))
     # The pick executes the head the planner marked. If the plan has not been
     # reviewed today, say so on stderr (the JSON above stays clean for agents) —
