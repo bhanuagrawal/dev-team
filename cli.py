@@ -896,7 +896,8 @@ def cmd_plan(args: argparse.Namespace) -> int:
             research.research_apply_file(project, Path(args.apply_result), log)
         else:
             applied = research.research_run(project, log,
-                                            use_llm=not args.no_llm and can_spawn)
+                                            use_llm=not args.no_llm and can_spawn,
+                                            focus=getattr(args, "focus", None))
     except SystemExit as e:
         code = e.code
         if code in (0, None):
@@ -1030,7 +1031,8 @@ def cmd_research(args: argparse.Namespace) -> int:
         if args.apply_result:
             research.research_apply_file(project, Path(args.apply_result), log)
         else:
-            research.research_run(project, log, use_llm=not args.no_llm)
+            research.research_run(project, log, use_llm=not args.no_llm,
+                                  focus=getattr(args, "focus", None))
     except SystemExit as e:
         if e.code in (0, None):
             return 0
@@ -1223,6 +1225,7 @@ def main() -> None:
     a = sub.add_parser("alarm");       a.add_argument("project"); a.set_defaults(fn=cmd_alarm)
     rs = sub.add_parser("research");   rs.add_argument("project"); rs.add_argument("--no-llm", action="store_true")
     rs.add_argument("--apply-result", help="synthesis JSON produced by the host tool's native agent; applies through the same validation + goal gate")
+    rs.add_argument("--focus", help="the owner's scoped review request for this cycle (e.g. 'review the existing UX'); injected into the prompt as a labelled block")
     rs.set_defaults(fn=cmd_research)
     pl = sub.add_parser("plan", help="THE PLANNER — step 2 of every run: review the plan "
                                      "against fresh data, maintain the tree and the queue, "
@@ -1232,6 +1235,7 @@ def main() -> None:
                     help="stop after collection and write the prompt for the host "
                          "tool's own agent (then: --apply-result <json>)")
     pl.add_argument("--apply-result", help="planner JSON produced by the host tool's native agent")
+    pl.add_argument("--focus", help="the owner's scoped review request for this cycle (e.g. 'review the existing UX'); injected into the prompt as a labelled block, so a focused review needs no hand-edited prompt")
     pl.set_defaults(fn=cmd_plan)
     do = sub.add_parser("doctor");     do.add_argument("project"); do.set_defaults(fn=cmd_doctor)
     ad = sub.add_parser("adapt");      ad.add_argument("project")

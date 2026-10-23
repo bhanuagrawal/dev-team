@@ -326,6 +326,12 @@ never silently blocking.
      hand it to your OWN native agent, then apply its JSON with
      `plan <project> --apply-result <file>`; the same schema, impact-review
      and goal gates run in code (nothing is trusted just because an agent said it).
+   - A SCOPED OWNER REQUEST ("review the existing UX", "look at onboarding") is
+     a flag, not a hand-edited prompt: `plan <project> --focus "<the owner's
+     words>"` injects it into the prompt as a labelled block (works on the
+     `--no-llm` export and the in-process synthesis alike). It only aims the
+     review — the same gates still judge the result — so pass the owner's request
+     through verbatim and let the planner decide whether the tree moves.
 3. DETERMINISTIC PICK (runbook step 3 is code now):
    `python3 <team>/cli.py pick <project>` [--supervised]
    → returns the next task spec file + worktree/prompt command bundle:

@@ -980,20 +980,49 @@ def capability_upgrades(signals: dict, profile: dict, project: Path | None = Non
     return up
 
 
-def render_prompt(project: Path, research: dict, log: RunLog | None = None) -> str:
+FOCUS_TMPL = """
+=== THIS CYCLE'S OWNER REQUEST (make the review cover this) ===
+The owner asked, in these words: "{focus}"
+Treat it as the FOCUS of this cycle's review: inspect the area it names for real
+(the relevant files under the project, read-only) BEFORE judging, ground your
+`insights` in what you actually inspected (name the files/screens), and use
+`goal_changes` if that area reveals something the plan does not cover — or a
+measure the tree should hold. The focus changes WHAT you look at, never the rules
+above: the schema, the goal gate, the queue-impact verdicts and sizing all still
+apply, and the long-term VISION is still the owner's.
+"""
+
+
+def render_prompt(project: Path, research: dict, log: RunLog | None = None,
+                  focus: str | None = None) -> str:
     """The exact synthesis prompt (goals + research + rules). Exported by
     --no-llm so a host tool that has no subprocess command can hand it to its
     OWN native agent verbatim, then apply the returned JSON with
-    `research --apply-result <file>` — same validation, same goal gate."""
+    `research --apply-result <file>` — same validation, same goal gate.
+
+    `focus` is the owner's scoped review request for this cycle ("review the
+    existing UX"): it is injected as a labelled block so a focused review is a
+    CLI argument (plan --focus) rather than a hand-edited prompt file. It can
+    only direct attention; code still validates every word of the result."""
     profile, state = profile_of(project), state_of(project)
     if log and goals.has_goals(profile):
         act = goals.active_milestone(profile, state)
         log(f"goal: active milestone = {act['id'] if act else 'none'} "
             f"({(profile.get('goals') or {}).get('vision','')[:80]})")
-    return PROMPT_TMPL.format(project=research["project"],
-                              goals=goals.prompt_block(profile, state),
-                              research=json.dumps(research, indent=2),
-                              max_queue=MAX_QUEUE)
+    prompt = PROMPT_TMPL.format(project=research["project"],
+                                goals=goals.prompt_block(profile, state),
+                                research=json.dumps(research, indent=2),
+                                max_queue=MAX_QUEUE)
+    focus = (focus or "").strip()
+    if focus:
+        # Injected by replace (not .format) so owner text cannot break the
+        # template with stray braces.
+        prompt = prompt.replace(
+            "\nRESPOND WITH JSON ONLY.",
+            FOCUS_TMPL.format(focus=focus) + "\nRESPOND WITH JSON ONLY.")
+        if log:
+            log(f"planner: owner focus this cycle → {focus[:120]}")
+    return prompt
 
 
 def _preview_goal_changes(profile: dict, result: dict) -> tuple[dict, list, str]:
@@ -1267,21 +1296,26 @@ def research_apply_file(project: Path, result_path: Path, log: RunLog) -> None:
     apply_result(project, result, research, log)
 
 
-def research_run(project: Path, log: RunLog, use_llm: bool = True) -> bool:
+def research_run(project: Path, log: RunLog, use_llm: bool = True,
+                 focus: str | None = None) -> bool:
     """Collect (always), then synthesize + apply (unless --no-llm). Returns True
     when a plan was actually applied, False when the prompt was only written out
-    for the host tool's own agent."""
+    for the host tool's own agent.
+
+    `focus` is the owner's scoped review request for this cycle — it is written
+    into the exported prompt (--no-llm) and the in-process synthesis alike, so a
+    focused review never requires hand-editing the prompt file."""
     research = research_collect(project, log)
     if not use_llm:
         # Hand the prompt to the calling agent: the team's contract is "the LLM
         # proposes, code validates and applies", and the host tool may be the
         # only thing that can spawn an agent (no roles.*.command configured).
         p = project / ".pipeline" / "research-prompt.txt"
-        p.write_text(render_prompt(project, research, log))
+        p.write_text(render_prompt(project, research, log, focus=focus))
         log(f"research: --no-llm stop; prompt → {p.name} "
             "(apply the agent's JSON with `research <project> --apply-result <file>`)")
         return False
-    prompt = render_prompt(project, research, log)
+    prompt = render_prompt(project, research, log, focus=focus)
     result, err = None, ""
     for attempt in (1, 2):
         raw = _llm(prompt, log)
