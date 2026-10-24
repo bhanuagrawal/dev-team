@@ -1126,7 +1126,13 @@ def capability_upgrades(signals: dict, profile: dict, project: Path | None = Non
             "how": "owner, with a human at the device: `recon research --term "
                    "\"<what a rival is>\" --dir <project>/.pipeline/competitors` "
                    "(needs an emulator; never chained into the nightly). The "
-                   "planner reads the reports on the next run",
+                   "planner reads the reports on the next run. A launcher-style "
+                   "rival gates behind the Android HOME role, so the crawl stops at "
+                   "the role dialog and reports one screen until the human clears "
+                   "it: grant the role (`adb shell cmd role add-role-holder "
+                   "android.app.role.HOME <pkg>`) and re-crawl, then `adb uninstall` "
+                   "the rival and confirm the role has no holder — never leave a "
+                   "third-party home app on the shared test AVD",
         })
     return up
 
