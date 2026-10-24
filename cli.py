@@ -373,6 +373,9 @@ def print_release_handover(project: Path, task: dict, version: str,
         if profile.get("whatsnew_curated"):
             source = (f"owner-curated in {wf_rel} — the pipeline read it, did not "
                       "rewrite it; update that file for the next release")
+        elif isinstance(task, dict) and (task.get("whatsnew") or "").strip():
+            source = (f"written into the task spec by the orchestrator, used "
+                      f"verbatim into {wf_rel}")
         else:
             source = f"pipeline-generated from the task into {wf_rel}"
         if not note:

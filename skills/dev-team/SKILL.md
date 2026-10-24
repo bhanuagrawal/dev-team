@@ -152,6 +152,30 @@ agentconfig.env`) — without it `doctor` correctly reports the agents blocked
   the owner had open deliberately. Tell the developer subagent to start an AVD
   through `with-emulator <avd> -- <cmd>` (teardown guaranteed by an EXIT trap).
   A leak is warn-only: it never reds a gate, but the run report must mention it.
+  **When the device gate fails on the emulator itself, diagnose before retrying.**
+  A failed `:app:connectedDebugAndroidTest` is not always the code. Three
+  emulator-only failure modes seen in the wild, in the order they cascade, all of
+  which look like unrelated build errors in the gate's output:
+  1. `Failed to load snapshot 'default_boot'` + `Emulator process has exited
+     early` — the AVD saved a corrupt snapshot on a previous exit. `android
+     emulator start` (which is what `with-emulator` calls) LOADS a snapshot by
+     default, so ONE bad save poisons every later run. A test AVD should not
+     snapshot: set `fastboot.forceColdBoot=yes` / `fastboot.forceFastBoot=no` in
+     the AVD's `config.ini` and delete `snapshots/`, or boot with
+     `android emulator start --cold`.
+  2. `FATAL | Running multiple emulators with the same AVD` — a zombie
+     `qemu-system-aarch64` from the failed attempt is still alive (`adb devices`
+     shows nothing, so it looks idle) and holds the AVD lock. Kill it and remove
+     `~/.android/avd/<avd>.avd/*.lock`.
+  3. The boot never comes online within 300 s although the process is alive:
+     check the tail of `~/.android/<avd>/emulator.log` for `Showing crashdialog
+     to get consent` — a crashed emulator blocks startup on a GUI consent dialog
+     that no headless agent can click. Clear `/tmp/android-*/emu-crash-*.db` (the
+     pending crash report is what it wants consent to send) and start again.
+  Verify the emulator is the problem by checking whether the CODE gates
+  (scope/localization/compile/test) already passed: if they did, the failure is
+  device infrastructure, and repairing the AVD is part of the run, not a reason
+  to record `failed`.
 
 ## Where everything lives
 - team code/scripts:  `<this skill's dir>/../..`  (the dev-team repo)
