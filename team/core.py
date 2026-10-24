@@ -67,55 +67,6 @@ def target_looks_like_paths(target: Any) -> bool:
     return all("/" in t and not any(c.isspace() for c in t) for t in items)
 
 
-def path_items(target: Any) -> list[str]:
-    """Normalised repo-relative paths from a target, for comparing two pieces of
-    work by the files they touch.
-
-    Flattens every shape `target` arrives in: a list, a comma- or newline-joined
-    string, an item inside a list that is itself comma-joined (how the queue
-    stores `target` and `pick` wraps it), and a glob — `a/b/**` normalises to
-    `a/b`, its directory, because "does this touch the same place" is a question
-    about directories once a whole subtree is in scope."""
-    out: list[str] = []
-    for item in target_items(target):
-        for piece in str(item).split(","):
-            p = piece.strip().strip("/")
-            if not p:
-                continue
-            if p.endswith("/**"):
-                p = p[:-3].rstrip("/")
-            elif p.endswith("/*"):
-                p = p[:-2].rstrip("/")
-            if p and p not in out:
-                out.append(p)
-    return out
-
-
-def paths_overlap(a: str, b: str) -> bool:
-    """Do two repo-relative paths refer to the same place (a file, or one inside
-    the other's directory)?
-
-    Used to tell an increment that STANDS ALONE from one that is half of a change
-    still in flight: two parts that edit the same file or the same subtree are
-    the same unit of work continued, two parts on sibling directories are not.
-    Deliberately conservative — a bare shared prefix is not overlap, which is why
-    the comparison is segment-wise ('.../a/b' vs '.../a/bc' do NOT overlap).
-    Normalises both sides itself (globs included), so a raw `target` may be
-    passed straight in without going through `path_items` first."""
-    norm = []
-    for p in (a, b):
-        p = str(p).strip().strip("/")
-        for suf in ("/**", "/*"):
-            if p.endswith(suf):
-                p = p[: -len(suf)].strip("/")
-        norm.append(p)
-    a, b = norm
-    if not a or not b:
-        return False
-    return a == b or a.startswith(b + "/") or b.startswith(a + "/")
-
-
-
 def now_iso() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
 

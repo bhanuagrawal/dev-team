@@ -321,8 +321,9 @@ def latest_shipped_version(state: dict) -> str:
 
 
 def rc_verdict(state: dict, version: str) -> dict | None:
-    """The release-candidate CALL for `version` — newest wins, so an owner
-    override supersedes the team's computed call. None when neither is recorded."""
+    """The release-candidate CALL recorded for `version` — newest wins, so a later
+    call (an owner override) supersedes an earlier one. None until someone
+    records one."""
     for e in reversed(state.get("release_candidates") or []):
         if str(e.get("version") or "") == str(version):
             return e
@@ -343,18 +344,24 @@ def _prev_shipped_entry(state: dict, version: str) -> dict | None:
 def print_release_handover(project: Path, task: dict, version: str,
                            commit: str = "") -> None:
     """Hand the owner the shipped build: its release note, what to test by hand,
-    and the team's release-candidate CALL (computed from the plan, stated — never
-    asked; owner directive 2026-10-24). Printed by code on every shipped
-    `record` — the run banner quotes this block verbatim.
+    and the release-candidate call. Printed by code on every shipped `record` —
+    the run banner quotes this block verbatim.
 
     WHY these three and nothing else: the pipeline's gates prove the build
     compiles, passes its tests and installs; they cannot feel the app. This run's
     sibling lessons are the proof — a device gate passed while a success screen
     printed a MediaStore id, and a hand walk found seven defects the crawler's
     "0 blocked taps" had hidden. So the run reports WHAT a user will read, WHAT
-    to walk by hand, and asks the ONE release question the owner owns (is this a
-    release candidate?). Nothing here acts on the verdict: promoting beyond
-    internal testing stays the owner's manual step in Play Console."""
+    to walk by hand, and the release-candidate call.
+
+    The CALL IS NOT COMPUTED HERE (owner directive 2026-10-24, second pass:
+    *"let llm decide this, ask this to llm only which made the changes, that's
+    it, no eval nothing"*): nothing in this codebase rules on whether a build
+    stands on its own — that judgment is the LLM's, and the one to ask is the LLM
+    THAT MADE THE CHANGE. So when no call is recorded we print the question and
+    the one command that records the answer, and leave it. Nothing acts on the
+    verdict either: promoting beyond internal testing stays the owner's manual
+    step in Play Console."""
     profile = profile_of(project)
     state = state_of(project)
     wf_rel = profile.get("whatsnew_file")
@@ -403,34 +410,32 @@ def print_release_handover(project: Path, task: dict, version: str,
               "walk it; report what you find back to the agent — a defect here becomes "
               "the next cycle's queue head")
     verdict = rc_verdict(state, version)
-    if verdict is None:
-        # No stored call (an older state, or a hand-run record): compute it now.
-        verdict = {**goals.rc_call(profile, state, task,
-                                   shipped_label=str((task.get("surface") or {}).get("label") or "")),
-                   "version": version}
-    who = "your override" if verdict.get("by") == "owner" else "the team's call"
-    print(f"  release candidate?  {'YES ✅' if verdict.get('rc') else 'NO'} — "
-          f"{verdict.get('why', '')}  [{who}]")
-    if verdict.get("by") == "owner":
-        team = next((v for v in reversed(state.get("release_candidates") or [])
-                     if str(v.get("version") or "") == str(version)
-                     and v.get("by") != "owner"), None)
-        if team:
-            print(f"    (the team had said {'YES' if team.get('rc') else 'NO'}: "
-                  f"{team.get('why', '')})")
+    if verdict:
+        who = "your override" if verdict.get("by") == "owner" else "the agent that made the change"
+        print(f"  release candidate?  {'YES ✅' if verdict.get('rc') else 'NO'} — "
+              f"{verdict.get('why') or verdict.get('note') or ''}  [{who}]")
     else:
-        print(f"    override anytime: python3 cli.py rc {project.name} --yes|--no "
-              f"--version {version} --note \"why\"")
+        print("  release candidate?  NOT CALLED YET — let the LLM that made this change "
+              "decide (no rule, no scoring); record its one-line answer:")
+        print(f"    ask it: \"you made these changes — does this build stand on its own "
+              f"in front of users, yes or no?\"")
+        print(f"    then: python3 cli.py rc {project.name} --version {version} "
+              '--yes|--no --note "<its one line>"')
 
 
 def cmd_rc(args: argparse.Namespace) -> None:
-    """OVERRIDE the team's release-candidate call for a shipped version.
+    """Record the release-candidate call for a shipped version.
 
-    The call itself is the team's (computed by `goals.rc_call` from the plan —
-    owner directive 2026-10-24: the agent tells the owner, it does not ask). This
-    command exists to correct a wrong computation or to record a deliberate
-    exception, and it says so when it disagrees with the team. Exactly one of
-    --yes/--no: a default would let a stray flag record a verdict nobody gave."""
+    The call belongs to the LLM that MADE the change (owner directive
+    2026-10-24, second pass: *"let llm decide this, ask this to llm only which
+    made the changes, that's it, no eval nothing"*) — no rule computes it, no
+    scoring, no validation of the answer. This command is only the pen: the agent
+    (or the owner, with --owner) states yes/no and one line of why.
+
+    Asked of the orchestrator's developer session — the agent that wrote the code
+    — because it is the one that knows whether the work it did is a complete
+    thing a user could receive; if that session is closed, the orchestrating LLM
+    answers, having seen the diff and the developer's report."""
     project = resolve_project(args.project)
     if bool(args.yes) == bool(args.no):
         raise SystemExit("pass exactly one of --yes / --no")
@@ -438,21 +443,20 @@ def cmd_rc(args: argparse.Namespace) -> None:
     version = str(args.version or latest_shipped_version(state))
     if not version:
         raise SystemExit("no shipped version to answer for — pass --version <ver>")
-    team = next((v for v in reversed(state.get("release_candidates") or [])
-                 if str(v.get("version") or "") == version and v.get("by") != "owner"), None)
+    by = "owner" if args.owner else "agent"
     entry = {"version": version, "rc": bool(args.yes), "note": args.note or "",
-             "why": args.note or "owner override", "date": today(), "by": "owner"}
+             "why": args.note or "", "date": today(), "by": by}
     state.setdefault("release_candidates", []).append(entry)
     save_state(project, state)
     verdict = "a RELEASE CANDIDATE (✅)" if entry["rc"] else "NOT a release candidate"
-    print(f"recorded override: v{version} is {verdict}"
+    print(f"recorded ({by}): v{version} is {verdict}"
           + (f" — {entry['note']}" if entry["note"] else ""))
-    if team is not None:
-        agree = bool(team.get("rc")) == entry["rc"]
-        if not agree:
-            print(f"  (the team's call was {'YES' if team.get('rc') else 'NO'}: "
-                  f"{team.get('why', '')} — your override stands and nothing acts on either)")
-    print_page(project, "refreshed by this answer")
+    prev = [v for v in reversed(state["release_candidates"][:-1])
+            if str(v.get("version") or "") == version]
+    if prev and bool(prev[-1].get("rc")) != entry["rc"]:
+        print(f"  (this replaces an earlier call on v{version}: "
+              f"{'YES' if prev[-1].get('rc') else 'NO'} by {prev[-1].get('by')})")
+    print_page(project, "refreshed by this call")
 
 
 def print_page(project: Path, note: str = "", file=None,
@@ -725,14 +729,6 @@ def cmd_record(args: argparse.Namespace) -> None:
                 "advances": adv})
         state["last_success_date"] = today()
         state["last_run"] = {**entry, "pushed_sha": args.commit or ""}
-        # THE release-candidate call, computed by code from the plan (never asked
-        # of the owner — owner directive 2026-10-24): a build is a candidate when
-        # it completes the plan for its milestone. Stored per version so the
-        # answer cannot drift as the plan moves on, and printed by the handover.
-        call = goals.rc_call(profile_of(project), state, task,
-                            shipped_label=label, shipped_task_id=str(entry["task_id"]))
-        state.setdefault("release_candidates", []).append(
-            {**call, "version": args.version or "", "date": today(), "by": "team"})
     elif args.result in ("failed", "blocked") :
         state["last_run"] = entry
     state["remaining"] = [
@@ -760,8 +756,9 @@ def cmd_record(args: argparse.Namespace) -> None:
     # EVERY record too: a shipped build must not swallow the ask.
     print_owner_asks(project)
     # A shipped run also hands the owner the BUILD itself: the note Play will
-    # show, what to walk by hand, and the release-candidate question. Same rule
-    # as the blocks above — code prints it, the banner quotes it.
+    # show, what to walk by hand, and the release-candidate call (asked of the
+    # LLM that made the change — see SKILL 10d). Same rule as the blocks above:
+    # code prints it, the banner quotes it.
     if args.result == "shipped":
         print_release_handover(project, task,
                               str(args.version or latest_shipped_version(state)),
@@ -1158,23 +1155,14 @@ def cmd_status(args: argparse.Namespace) -> None:
     rel = latest_shipped_version(state)
     if rel:
         verdict = rc_verdict(state, rel)
-        who = "your override" if (verdict or {}).get("by") == "owner" else "team"
-        if verdict is None:
-            # Shipped before the call was recorded (or a hand-run record). Compute
-            # it from the ledger row rather than leaving the owner with nothing:
-            # the call is a pure function of the plan, so it can always be stated.
-            row = next((s for s in reversed(state.get("shipped") or [])
-                        if str(s.get("version") or "") == str(rel)), {})
-            verdict = {"version": rel, "by": "team",
-                       **goals.rc_call(profile, state, {"advances": row.get("advances"),
-                                                        "label": row.get("label"),
-                                                        "id": row.get("task_id")},
-                                       shipped_label=str(row.get("label") or ""),
-                                       shipped_task_id=str(row.get("task_id") or ""))}
-            who = "team, recomputed"
-        print(f"last release: v{rel} — release candidate "
-              f"{'✅ yes' if verdict.get('rc') else 'no'} ({who}) — "
-              f"{verdict.get('why') or verdict.get('note') or ''}")
+        if verdict:
+            who = "your override" if verdict.get("by") == "owner" else "the agent that made it"
+            print(f"last release: v{rel} — release candidate "
+                  f"{'✅ yes' if verdict.get('rc') else 'no'} ({who}) — "
+                  f"{verdict.get('why') or verdict.get('note') or ''}")
+        else:
+            print(f"last release: v{rel} — release-candidate call not recorded yet "
+                  f"(`devteam rc {project.name} --yes|--no` records the making agent's call)")
     r = subprocess.run(["git", "log", "--oneline", "-1"], cwd=project,
                        capture_output=True, text=True)
     print(f"local HEAD: {r.stdout.strip()}")
@@ -1429,15 +1417,16 @@ def main() -> None:
               choices=["shipped", "failed", "blocked"])
     rec.add_argument("--note"); rec.add_argument("--version"); rec.add_argument("--commit")
     rec.set_defaults(fn=cmd_record)
-    rcp = sub.add_parser("rc", help="OVERRIDE the team's release-candidate call "
-                                    "for a shipped build (the team states its own; "
-                                    "recording is not a promotion request)")
+    rcp = sub.add_parser("rc", help="record the release-candidate call for a shipped "
+                                    "build — the LLM that made the change decides it")
     rcp.add_argument("project")
     rcp.add_argument("--version", help="defaults to the last shipped version")
     g = rcp.add_mutually_exclusive_group(required=True)
     g.add_argument("--yes", action="store_true", help="this build IS a release candidate")
     g.add_argument("--no", action="store_true", help="this build is NOT a release candidate")
-    rcp.add_argument("--note")
+    rcp.add_argument("--note", help="the agent's one line of why")
+    rcp.add_argument("--owner", action="store_true",
+                     help="mark this as the owner's own call rather than the agent's")
     rcp.set_defaults(fn=cmd_rc)
     po = sub.add_parser("poll");       po.add_argument("project"); po.add_argument("--tail", type=int, default=60); po.set_defaults(fn=cmd_poll)
     a = sub.add_parser("alarm");       a.add_argument("project"); a.set_defaults(fn=cmd_alarm)

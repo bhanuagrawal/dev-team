@@ -148,16 +148,16 @@ A run ends in EXACTLY ONE of these — never in silence:
   is the default terminal state whenever the queue holds (or research can
   legitimately refill with) buildable work. **A shipped run hands the owner the
   build, not just the news:** its banner MUST carry the `RELEASE HANDOVER` block
-  (what's new, what to manually test, and the team's release-candidate call) —
-  see "The release handover" below. A shipped run without it is a run-report
-  failure.
+  (what's new, what to manually test, and the release-candidate call the LLM that
+  made the change recorded) — see "The release handover" below. A shipped run
+  without it is a run-report failure.
 - ❓ **OWNER ASK** — the ONLY questions you ever ask are ones no agent can
   answer: a freeze lift/sign-off, a kill-switch flip, discard-vs-keep on user
   WIP. Production promotion is NOT one of them (see the delivery rule above) —
   never ask it, never file it. **The release-candidate call is NOT an owner ask:
-  the team makes it and tells the owner** (owner directive 2026-10-24) — it is
-  part of the RELEASE HANDOVER, computed from the plan, and `devteam rc` only
-  overrides it. Even then: ask AFTER squeezing every
+  the LLM that made the change makes it and the owner is told** (owner directive
+  2026-10-24) — it is part of the RELEASE HANDOVER, recorded with `devteam rc`
+  (the owner can replace it with `--owner`). Even then: ask AFTER squeezing every
   non-blocking stage, and if all you have is analysis, convert it — a decision
   issue + a made-ready task spec that becomes buildable on "yes".
   **A STANDING ASK IS NOT OPTIONAL TO RELAY.** `adapt`/`doctor` print the open
@@ -475,11 +475,17 @@ never silently blocking.
     with that ask.
 10d. **A shipped run also hands over the BUILD** — `record --result shipped`
     prints a `RELEASE HANDOVER` block (release note + length, what to test by
-    hand, and the team's release-candidate call: does this build stand on its own
-    as a slice the owner could promote?). Quote it in the banner and STATE the call
-    in your own words — as a statement, not a question: the owner is told whether
-    the build is a release candidate, they are not asked to guess it. Details
-    below.
+    hand, and the release-candidate call). Two duties here, in order:
+    (1) ASK THE LLM THAT MADE THE CHANGE — the developer session you spawned
+    (continue that conversation if your tool can): "you made these changes — does
+    this build stand on its own in front of users, yes or no?" — then record the
+    answer with `devteam rc <project> --version <v> --yes|--no --note "<its one
+    line>"`. No rule, no scoring, nothing to validate: the judgment is the
+    agent's (owner directive 2026-10-24). If the session is closed, answer it
+    yourself from the diff and the developer's report.
+    (2) STATE the call in the banner as a statement, not a question: the owner is
+    told whether the build is a release candidate, never asked to guess it.
+    Details below.
 
 ## The release handover (owner requirement 2026-10-23)
 A build on internal testing is only useful if the owner knows what it says and
@@ -505,30 +511,26 @@ by code (`record`) and quoted verbatim by the orchestrator:
    walk it. This is not ceremony: on 2026-10-23 a device gate went green while a
    success screen printed a MediaStore id, and a hand walk found seven defects an
    agent crawl's "0 blocked taps" had hidden.
-3. **Is this build a release candidate? — the TEAM answers this, the owner is
-   told.** Owner directive 2026-10-24: *"if a build is a release candidate that
-   agent has to tell, not human."* The call is computed by code (`goals.rc_call`)
-   and it is **lenient**: a task in this pipeline must be independently
-   verifiable and releasable, so a shipped increment normally IS a coherent slice
-   the owner could promote — being part 2 of 7 is reported as context, never used
-   to withhold. The report says `YES ✅ — this increment stands on its own (part 5
-   of 7 …) — the remaining 2 parts touch other surfaces: …`.
-   The ONE thing that withholds it is positive evidence the change is still in
-   flight: a part still queued for the same milestone that edits the **same files
-   or the same subtree** (`core.paths_overlap`), i.e. a shared component shipped
-   before the screens that consume it. Five settings in five files are five
-   independent increments (candidate at 2 of 5); one file still being extended is
-   not. Off-goal work (`advances: none`) and a project with no goal tree never
-   complete a milestone, so they are never candidates. The call is stored per
-   version in `state['release_candidates']` and shown by `status`, so it cannot
-   drift as the plan moves on.
-   `devteam rc <project> --yes|--no [--version <v>] [--note "..."]` **overrides**
-   the team's call (it prints the disagreement and keeps both) — for correcting a
-   wrong computation, e.g. a same-file part that genuinely stands on its own.
-   **Nothing acts on either verdict**: there is still no promotion path in this
-   team, and neither the report nor the override is ever phrased as "should we
-   promote it" — promoting beyond internal testing stays the owner's manual step
-   in Play Console.
+3. **Is this build a release candidate? — the LLM that MADE the change decides;
+   nothing in the code rules on it.** Owner directive 2026-10-24: first *"if a
+   build is a release candidate that agent has to tell, not human"*, then *"let
+   llm decide this, ask this to llm only which made the changes, that's it, no
+   eval nothing"*. So there is **no rule, no scoring, no file-overlap check and no
+   validation of the answer** — the handover prints the question and the single
+   command that records the answer, and the judgment belongs to the agent:
+   - **Ask the developer session** (the agent that wrote the code — continue its
+     conversation if your tool can): *"you made these changes — does this build
+     stand on its own in front of users, yes or no?"* One line of why.
+   - If that session is gone, the orchestrating LLM answers it, having seen the
+     diff and the developer's report.
+   - Record it: `devteam rc <project> --version <v> --yes|--no --note "<the one
+     line>"`. The owner can replace the call later with `--owner`, and both stay
+     in `state['release_candidates']` (newest wins, so it cannot drift).
+   **State the call in the run banner** — as a statement, not a question: the
+   owner is told whether the build is a release candidate, never asked to guess.
+   **Nothing acts on the verdict**: there is still no promotion path in this
+   team, and the line is never phrased as "should we promote it" — promoting
+   beyond internal testing stays the owner's manual step in Play Console.
 
 ## Interactive (human-present) sessions
 Same procedure; `supervised` tasks become available when a human is with you —

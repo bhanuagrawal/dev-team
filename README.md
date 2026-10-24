@@ -242,20 +242,17 @@ prints what the owner needs to USE the build — quoted verbatim by the banner:
   passes and installs; they cannot feel the app, and on 2026-10-23 a green device
   gate hid a success screen printing a MediaStore id that a hand walk caught at
   once;
-- **is this build a release candidate?** — the TEAM answers this and tells the
-  owner (owner directive 2026-10-24: the agent tells, it does not ask). The call
-  is LENIENT: a plan entry must be independently verifiable and releasable, so a
-  shipped increment normally stands on its own and IS a candidate — its position
-  in the milestone's plan is reported as context (`YES ✅ — this increment stands
-  on its own (part 5 of 7 …) — the remaining 2 parts touch other surfaces: …`),
-  not used to withhold. The one thing that withholds it is evidence the change is
-  still in flight: a part still queued for the same milestone that edits the same
-  files or subtree (`core.paths_overlap`) — a shared component shipped before the
-  screens that consume it. Computed by `goals.rc_call` and stored per version, so
-  it cannot drift. `cli.py rc <project> --yes|--no [--version <v>] [--note "…"]`
-  OVERRIDES the team's call (the disagreement is printed and both are kept).
-  Nothing acts on either verdict: there is still no promotion path here, and
-  neither is ever phrased as "should we promote it".
+- **is this build a release candidate?** — the LLM that MADE the change decides
+  and the owner is told, never asked (owner directives 2026-10-24: "that agent
+  has to tell, not human", then "let llm decide this, ask this to llm only which
+  made the changes, that's it, no eval nothing"). Nothing in the code rules on
+  it: no rule, no scoring, no file checks, no validation of the answer. The
+  handover prints the question and the orchestrator asks it of the developer
+  session that wrote the code (or answers itself if that session is gone), then
+  records it with `cli.py rc <project> --version <v> --yes|--no --note "…"` — one
+  line of why, stored per version in `state['release_candidates']`. The owner can
+  replace any call with `--owner`. Nothing acts on the verdict: there is still no
+  promotion path here, and it is never phrased as "should we promote it".
 
 Every one of those blocks is printed by code on every outcome, so the banner
 cannot drop one by forgetting: a run that ships while the app has no long-term
@@ -455,9 +452,9 @@ python3 cli.py vision <project> "one sentence"  # the owner's goal
 python3 cli.py align <project> "<request>" [--apply]
 python3 cli.py emulators <project> [--record [--reset]]
 python3 cli.py alarm <project> ; python3 cli.py poll <project> ; python3 cli.py schedules
-python3 cli.py rc <project> --yes|--no [--version V] [--note "…"]
-                                                # OVERRIDE the team's
-                                                # release-candidate call
+python3 cli.py rc <project> --yes|--no [--version V] [--note "…"] [--owner]
+                                                # record the release-candidate
+                                                # call (the making LLM decides)
 python3 cli.py onboard <path> ; python3 cli.py setup --project <path> [--at HH:MM]
 ```
 
