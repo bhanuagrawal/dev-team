@@ -701,7 +701,10 @@ Rules:
   feature/bugfix it must be repo-relative PATH(S) (files, dirs or globs, e.g.
   'app/src/main/java/**/ui/Foo.kt'); put the explanation in 'reason'. A prose
   target is rejected in code — it would silently replace the allow-list and
-  fail the build step.
+  fail the build step. EVERY item needs a path separator: a TOP-LEVEL file (one
+  that sits at the repo root, e.g. settings.gradle.kts or build.gradle.kts)
+  must be written './settings.gradle.kts', never a bare filename — the
+  validator rejects a separator-less item and the whole plan is refused.
 - THE FREEZE IS DATA, NOT A COUNT: `constraints.frozen_paths` lists the paths an
   agent may NOT change and `constraints.lifted_paths` lists the ones the owner has
   already exempted. Check every entry's `target` against them BEFORE you queue it.
