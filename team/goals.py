@@ -24,7 +24,7 @@ before (goal-less mode).
 """
 from __future__ import annotations
 
-from .core import now_iso
+from .core import now_iso, path_items, paths_overlap
 
 _OPS = {"<": lambda a, b: a < b, "<=": lambda a, b: a <= b,
         ">": lambda a, b: a > b, ">=": lambda a, b: a >= b,
@@ -246,36 +246,45 @@ def milestone_ancestor(profile: dict, node_id: str) -> str:
     return ""
 
 
+def _clip(s: str, n: int = 70) -> str:
+    """A label shortened on a word boundary, for one-line owner-facing reasons."""
+    s = str(s)
+    return s if len(s) <= n else s[:n].rsplit(" ", 1)[0] + "…"
+
+
 def rc_call(profile: dict, state: dict, entry: dict,
             shipped_label: str = "", shipped_task_id: str = "") -> dict:
     """THE release-candidate call — computed by code from the plan, not asked.
 
-    A build is a release candidate when it COMPLETES the plan for its milestone:
-    the shipped task was the last part still queued for the milestone (or any
-    branch under it), so there is nothing left queued to finish before the owner
-    may consider promoting it. While parts remain, the build is an ordinary
-    internal-testing build of a milestone still in progress — telling the owner
-    "part 3 of 5, two to go" is both truer and more useful than asking them to
-    guess, which is why this is a CALL the team states rather than a question
-    (owner directive 2026-10-24).
+    LENIENT BY DEFAULT (owner directive 2026-10-24, second pass): *"if something
+    can be shipped it should [be a release candidate], even if it is part 2/7 …
+    let's say 5 tasks were creating 1 setting per task, if shipping 2 settings
+    only makes sense then it is release candidate."* So position in the plan does
+    NOT decide it. What decides it is whether the shipped increment STANDS ALONE:
+    a task in this pipeline is required to be independently verifiable and
+    releasable, so the normal case is a coherent slice the owner could promote —
+    being the 2nd of 7 parts is a fact worth reporting, never a reason to withhold.
 
-    The series is scoped to the ACTIVE milestone, not to the single sub-goal the
-    task was tagged with: entries spread across a milestone's sub-goals are parts
-    of delivering that milestone, and the owner reads them that way. Off-goal
-    work ('advances: none') and a project with no goal tree never complete a
-    milestone, so both come back as 'not a release candidate' with the reason.
+    The ONE thing that withholds the call is evidence the change is still in
+    flight: a part still queued for the same milestone that edits the SAME FILES
+    as the one just shipped. Five settings in five files are five independent
+    increments (candidate at 2 of 5); a shared component plus the screens that
+    consume it are one change in pieces (not a candidate until the consumers
+    land). Paths are compared segment-wise via `core.paths_overlap`, and when the
+    shipped files are unknown the call is lenient — absence of evidence is not
+    evidence of half-done work.
 
-    Returns {rc, why, part, total, scope, scope_title} — see `rc_verdict`, which
-    stores it per version so the answer cannot drift as the plan moves on."""
+    Returns {rc, why, part, total, scope, scope_title, withheld_by} — stored per
+    version by `record` so the call cannot drift as the plan moves on."""
     act = active_milestone(profile, state)
     mid = queue_entry_milestone(entry, profile, state)
     if mid == "none":
         return {"rc": False, "part": 0, "total": 0, "scope": "", "scope_title": "",
+                "withheld_by": [],
                 "why": ("off-goal work (the entry declared 'advances: none') — it "
                         "completes no milestone, so no build of it is a candidate")}
     # The series is the TASK'S OWN MILESTONE, found by walking up the tree — a
-    # sub-goal's parent, not the tag itself. That is what "part 3 of 5" means to
-    # the owner: a part of delivering that milestone, not of its innermost branch.
+    # sub-goal's parent, not the tag itself.
     scope = milestone_ancestor(profile, mid) if mid else ""
     if not scope:
         scope = act["id"] if act else ""
@@ -288,17 +297,14 @@ def rc_call(profile: dict, state: dict, entry: dict,
         return descends_from(profile, m, scope)
 
     if not scope:
-        why = ("no milestone to complete — the app has no goal tree, so a build "
-               "cannot be 'the build' for anything")
-        if mid == "none":
-            why = "off-goal work (declared 'advances: none') — it completes no milestone"
-        return {"rc": False, "why": why, "part": 0, "total": 0,
-                "scope": "", "scope_title": ""}
+        return {"rc": False, "part": 0, "total": 0, "scope": "", "scope_title": "",
+                "withheld_by": [],
+                "why": ("no milestone to complete — the app has no goal tree, so a "
+                        "build cannot be 'the build' for anything")}
 
-    # How many parts of this milestone's plan are already shipped. Counted from
-    # the ledger by task_id (labels are the fallback for pre-task_id rows), with
-    # THIS ship removed then added back — so the count is right whether or not
-    # the caller has already appended its row.
+    # Parts of this milestone's plan already shipped (by task_id; labels are the
+    # fallback for pre-task_id rows), with THIS ship removed then added back — so
+    # the count is right whether or not the caller already appended its row.
     done_ids, done_labels = set(), set()
     for s in state.get("shipped") or []:
         if not in_scope(s):
@@ -314,28 +320,53 @@ def rc_call(profile: dict, state: dict, entry: dict,
         done_labels.discard(shipped_label)
     done = len(done_ids) + len(done_labels) + 1
 
-    # Parts of the same milestone's plan still waiting (the shipped one is out of
-    # the queue by the time record runs, but a plan can lag a delivery — exclude
-    # it explicitly so a stale entry cannot make a finished plan look unfinished).
-    left = [str(e.get("label") or "?") for e in (state.get("queue") or [])
+    # Parts of the same milestone's plan still waiting (a plan can lag a delivery,
+    # so the just-shipped entry is excluded explicitly by label and task id).
+    left = [e for e in (state.get("queue") or [])
             if in_scope(e) and str(e.get("label") or "") != shipped_label
             and not (tid_now and str(e.get("task_id") or "") == tid_now)]
     total = done + len(left)
+
+    # What this release touched, compared against what the remaining parts touch.
+    shipped_paths = path_items((entry.get("surface", {}) or {}).get("targets"))
+    if not shipped_paths:
+        # A recompute from a ledger row has no targets: recover them from the
+        # queue entry carrying the same label (a stale plan often still holds it).
+        for q in state.get("queue") or []:
+            if str(q.get("label") or "") == shipped_label:
+                shipped_paths = path_items(q.get("target"))
+                break
+    withheld_by = []
+    if shipped_paths:
+        for e in left:
+            if any(paths_overlap(sp, lp)
+                   for sp in shipped_paths for lp in path_items(e.get("target"))):
+                withheld_by.append(str(e.get("label") or "?"))
+
+    if withheld_by:
+        n_hold = len(withheld_by)
+        preview = "; ".join(_clip(l) for l in withheld_by[:2]) + (" …" if n_hold > 2 else "")
+        verb = "edits" if n_hold == 1 else "edit"
+        return {"rc": False, "scope": scope, "scope_title": title, "part": done,
+                "total": total, "withheld_by": withheld_by,
+                "why": (f"this is part of a change still in flight — "
+                        f"{n_hold} more part{'s' if n_hold != 1 else ''} of the plan "
+                        f'for "{title}" {verb} the same files: {preview}')}
+
     if not left:
         return {"rc": True, "scope": scope, "scope_title": title, "part": done,
-                "total": total,
+                "total": total, "withheld_by": [],
                 "why": (f'this completes the plan for "{title}" — nothing else is '
                         f"queued for it (part {done} of {total})")}
 
-    def _clip(s: str, n: int = 70) -> str:
-        return s if len(s) <= n else s[:n].rsplit(" ", 1)[0] + "…"
-
-    preview = "; ".join(_clip(l) for l in left[:2]) + (" …" if len(left) > 2 else "")
-    n_left = f"{len(left)} part{'s' if len(left) != 1 else ''} still queued"
-    return {"rc": False, "scope": scope, "scope_title": title, "part": done,
-            "total": total,
-            "why": (f'part {done} of {total} of the plan for "{title}" — '
-                    f"{n_left}: {preview}")}
+    n_left = f"{len(left)} part{'s' if len(left) != 1 else ''}"
+    preview = "; ".join(_clip(str(e.get("label") or "?")) for e in left[:2]) \
+        + (" …" if len(left) > 2 else "")
+    return {"rc": True, "scope": scope, "scope_title": title, "part": done,
+            "total": total, "withheld_by": [],
+            "why": (f'this increment stands on its own (part {done} of {total} of '
+                    f"the plan for \"{title}\") — the remaining {n_left} touch other "
+                    f"surfaces: {preview}")}
 
 
 def validate_advances(result: dict, profile: dict, state: dict,

@@ -243,15 +243,19 @@ prints what the owner needs to USE the build — quoted verbatim by the banner:
   gate hid a success screen printing a MediaStore id that a hand walk caught at
   once;
 - **is this build a release candidate?** — the TEAM answers this and tells the
-  owner (owner directive 2026-10-24: the agent tells, it does not ask). A build
-  is a candidate when it **completes the plan for its milestone** — the shipped
-  task was the last part still queued for that milestone or anything under it —
-  and otherwise the report states where it sits (`NO — part 5 of 7 of the plan
-  for "…": 2 parts still queued`). Computed by `goals.rc_call` from the goal tree
-  and stored per version, so it cannot drift. `cli.py rc <project> --yes|--no
-  [--version <v>] [--note "…"]` OVERRIDES the team's call (the disagreement is
-  printed and both are kept). Nothing acts on either verdict: there is still no
-  promotion path here, and neither is ever phrased as "should we promote it".
+  owner (owner directive 2026-10-24: the agent tells, it does not ask). The call
+  is LENIENT: a plan entry must be independently verifiable and releasable, so a
+  shipped increment normally stands on its own and IS a candidate — its position
+  in the milestone's plan is reported as context (`YES ✅ — this increment stands
+  on its own (part 5 of 7 …) — the remaining 2 parts touch other surfaces: …`),
+  not used to withhold. The one thing that withholds it is evidence the change is
+  still in flight: a part still queued for the same milestone that edits the same
+  files or subtree (`core.paths_overlap`) — a shared component shipped before the
+  screens that consume it. Computed by `goals.rc_call` and stored per version, so
+  it cannot drift. `cli.py rc <project> --yes|--no [--version <v>] [--note "…"]`
+  OVERRIDES the team's call (the disagreement is printed and both are kept).
+  Nothing acts on either verdict: there is still no promotion path here, and
+  neither is ever phrased as "should we promote it".
 
 Every one of those blocks is printed by code on every outcome, so the banner
 cannot drop one by forgetting: a run that ships while the app has no long-term

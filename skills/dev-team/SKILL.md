@@ -475,8 +475,8 @@ never silently blocking.
     with that ask.
 10d. **A shipped run also hands over the BUILD** — `record --result shipped`
     prints a `RELEASE HANDOVER` block (release note + length, what to test by
-    hand, and the team's release-candidate call: is this build the one that
-    completes its milestone's plan?). Quote it in the banner and STATE the call
+    hand, and the team's release-candidate call: does this build stand on its own
+    as a slice the owner could promote?). Quote it in the banner and STATE the call
     in your own words — as a statement, not a question: the owner is told whether
     the build is a release candidate, they are not asked to guess it. Details
     below.
@@ -507,24 +507,28 @@ by code (`record`) and quoted verbatim by the orchestrator:
    agent crawl's "0 blocked taps" had hidden.
 3. **Is this build a release candidate? — the TEAM answers this, the owner is
    told.** Owner directive 2026-10-24: *"if a build is a release candidate that
-   agent has to tell, not human."* So the call is computed by code from the plan
-   (`goals.rc_call`): a build IS a candidate when it **completes the plan for its
-   milestone** — the shipped task was the last part still queued for that
-   milestone (or anything under it) — and otherwise the report says where it sits
-   (`NO — part 5 of 7 of the plan for "…": 2 parts still queued`). The series is
-   scoped by walking a task's branch up to its top-level milestone, so work spread
-   across sub-goals counts as parts of the milestone it delivers. Off-goal work
-   (`advances: none`) and a project with no goal tree never complete a milestone,
-   so they are never candidates. The call is stored per version in
-   `state['release_candidates']` and shown by `status`, so it cannot drift as the
-   plan moves on.
+   agent has to tell, not human."* The call is computed by code (`goals.rc_call`)
+   and it is **lenient**: a task in this pipeline must be independently
+   verifiable and releasable, so a shipped increment normally IS a coherent slice
+   the owner could promote — being part 2 of 7 is reported as context, never used
+   to withhold. The report says `YES ✅ — this increment stands on its own (part 5
+   of 7 …) — the remaining 2 parts touch other surfaces: …`.
+   The ONE thing that withholds it is positive evidence the change is still in
+   flight: a part still queued for the same milestone that edits the **same files
+   or the same subtree** (`core.paths_overlap`), i.e. a shared component shipped
+   before the screens that consume it. Five settings in five files are five
+   independent increments (candidate at 2 of 5); one file still being extended is
+   not. Off-goal work (`advances: none`) and a project with no goal tree never
+   complete a milestone, so they are never candidates. The call is stored per
+   version in `state['release_candidates']` and shown by `status`, so it cannot
+   drift as the plan moves on.
    `devteam rc <project> --yes|--no [--version <v>] [--note "..."]` **overrides**
-   the team's call (it prints the disagreement and keeps both), for correcting a
-   wrong computation or recording a deliberate exception. **Nothing acts on
-   either verdict**: there is still no promotion path in this team, and neither
-   the report nor the override is ever phrased as "should we promote it" —
-   promoting beyond internal testing stays the owner's manual step in Play
-   Console.
+   the team's call (it prints the disagreement and keeps both) — for correcting a
+   wrong computation, e.g. a same-file part that genuinely stands on its own.
+   **Nothing acts on either verdict**: there is still no promotion path in this
+   team, and neither the report nor the override is ever phrased as "should we
+   promote it" — promoting beyond internal testing stays the owner's manual step
+   in Play Console.
 
 ## Interactive (human-present) sessions
 Same procedure; `supervised` tasks become available when a human is with you —
