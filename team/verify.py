@@ -229,6 +229,11 @@ def instrumented_check(worktree: Path, profile: dict, log) -> tuple[bool, str]:
         if not Path(wrapper).exists():
             return False, ("instrumented: on-device tests exist but `with-emulator` "
                            "is missing — refusing to boot an emulator that might leak")
+        # Nothing is booted, so a lock file can only be debris from a dead
+        # instance — and `android emulator start` refuses to run at all while
+        # one exists ("Running multiple emulators with the same AVD"). Clear it
+        # here rather than making the operator discover it (2026-10-25).
+        emulator.clear_stale_locks(avd, log)
         log(f"~ instrumented: booting '{avd}' via with-emulator (teardown guaranteed)")
         argv = [wrapper, avd, "--", "./gradlew", task]
 

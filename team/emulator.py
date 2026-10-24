@@ -69,6 +69,56 @@ def _label(entry: dict) -> str:
     return f"{entry['avd']} ({entry['serial']})" if entry.get("avd") else entry["serial"]
 
 
+def _emulator_process_alive() -> bool | None:
+    """True/False from the PROCESS TABLE, or None when we cannot tell.
+
+    Deliberately not adb: `running()` sees only BOOTED devices, so a crashed or
+    half-exited emulator is invisible there while still holding the AVD lock
+    (2026-10-25 — the next boot died with `FATAL | Running multiple emulators
+    with the same AVD`). None means "no pgrep on this machine": callers must read
+    that as "assume alive" and change nothing, because unlinking a live
+    emulator's lock is worse than a failed boot."""
+    pg = shutil.which("pgrep")
+    if not pg:
+        return None
+    try:
+        r = subprocess.run([pg, "-f", "qemu-system|/emulator/emulator"],
+                           capture_output=True, text=True, timeout=15)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if r.returncode == 0:
+        return True
+    if r.returncode == 1:
+        return False
+    return None
+
+
+def clear_stale_locks(avd: str, log=None) -> list[str]:
+    """Remove leftover `*.lock` files for `avd`, but ONLY when no emulator
+    process is alive.
+
+    A boot that is about to start is exactly when this is safe and useful: the
+    caller has already established nothing is booted, so a lock file can only be
+    debris from a dead instance. Guarded on the process table (not adb) and
+    skipped entirely when liveness cannot be determined."""
+    if _emulator_process_alive() is not False:
+        return []
+    d = Path.home() / ".android" / "avd" / f"{avd}.avd"
+    if not d.is_dir():
+        return []
+    cleared: list[str] = []
+    for f in sorted(d.glob("*.lock")):
+        try:
+            f.unlink()
+            cleared.append(f.name)
+        except OSError:
+            pass
+    if cleared and log:
+        log(f"~ emulator: cleared stale lock(s) left by a dead emulator: "
+            f"{', '.join(cleared)}")
+    return cleared
+
+
 def baseline_path(project: Path) -> Path:
     return pipeline_dir(project) / "emulators.baseline.json"
 
