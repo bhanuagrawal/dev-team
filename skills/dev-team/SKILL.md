@@ -111,11 +111,11 @@ agentconfig.env`) — without it `doctor` correctly reports the agents blocked
 - The ONLY delivery goal is CI → Play **internal testing** (the version-bump
   push triggers the project's CI). Production promotion is human-only: no path
   in this team, and never an owner ask or a filed issue — the owner promotes
-  manually in Play Console whenever they choose. The ONE release question the
-  team does put to the owner is "**is this build a release candidate?**" (see
-  "The release handover" below): it is asked, recorded with `devteam rc`
-  and shown, and NOTHING acts on the answer — asking it is not a promotion
-  request, and it must never be phrased as one.
+  manually in Play Console whenever they choose. The team DOES make one release
+  call and states it (owner directive 2026-10-24): **is this build a release
+  candidate?** — computed from the plan, told to the owner, never asked of them
+  (see "The release handover" below). Stating it is not a promotion request and
+  must never be phrased as one.
 - **Release notes are a first-class deliverable, not a by-product.** They are
   what a user reads in the store, they are length-limited by the store (Play
   rejects a note over `profile['whatsnew_max_chars']`, default 500), and a
@@ -148,15 +148,16 @@ A run ends in EXACTLY ONE of these — never in silence:
   is the default terminal state whenever the queue holds (or research can
   legitimately refill with) buildable work. **A shipped run hands the owner the
   build, not just the news:** its banner MUST carry the `RELEASE HANDOVER` block
-  (what's new, what to manually test, the release-candidate question) — see "The
-  release handover" below. A shipped run without it is a run-report failure.
+  (what's new, what to manually test, and the team's release-candidate call) —
+  see "The release handover" below. A shipped run without it is a run-report
+  failure.
 - ❓ **OWNER ASK** — the ONLY questions you ever ask are ones no agent can
   answer: a freeze lift/sign-off, a kill-switch flip, discard-vs-keep on user
   WIP. Production promotion is NOT one of them (see the delivery rule above) —
-  never ask it, never file it. **The one release question that IS the owner's is
-  "is this build a release candidate?"** — asked on every shipped run as part of
-  the RELEASE HANDOVER and answerable with `devteam rc` (recording an opinion,
-  never a promotion request). Even then: ask AFTER squeezing every
+  never ask it, never file it. **The release-candidate call is NOT an owner ask:
+  the team makes it and tells the owner** (owner directive 2026-10-24) — it is
+  part of the RELEASE HANDOVER, computed from the plan, and `devteam rc` only
+  overrides it. Even then: ask AFTER squeezing every
   non-blocking stage, and if all you have is analysis, convert it — a decision
   issue + a made-ready task spec that becomes buildable on "yes".
   **A STANDING ASK IS NOT OPTIONAL TO RELAY.** `adapt`/`doctor` print the open
@@ -474,8 +475,11 @@ never silently blocking.
     with that ask.
 10d. **A shipped run also hands over the BUILD** — `record --result shipped`
     prints a `RELEASE HANDOVER` block (release note + length, what to test by
-    hand, the release-candidate question). Quote it in the banner, and put the
-    release-candidate question to the owner in the same message. Details below.
+    hand, and the team's release-candidate call: is this build the one that
+    completes its milestone's plan?). Quote it in the banner and STATE the call
+    in your own words — as a statement, not a question: the owner is told whether
+    the build is a release candidate, they are not asked to guess it. Details
+    below.
 
 ## The release handover (owner requirement 2026-10-23)
 A build on internal testing is only useful if the owner knows what it says and
@@ -501,14 +505,26 @@ by code (`record`) and quoted verbatim by the orchestrator:
    walk it. This is not ceremony: on 2026-10-23 a device gate went green while a
    success screen printed a MediaStore id, and a hand walk found seven defects an
    agent crawl's "0 blocked taps" had hidden.
-3. **Is this build a release candidate?** The one release question the owner
-   owns. Answer it with `devteam rc <project> --yes|--no [--version <v>]
-   [--note "..."]` — recorded per version in `state['release_candidates']`,
-   shown by `status`, and asked only until answered (an ask with no channel is
-   decoration). **Nothing acts on the answer**: `rc` records an opinion; there is
-   still no promotion path in this team, and the question must never be phrased
-   as "should we promote it" — promoting beyond internal testing stays the
-   owner's manual step in Play Console, and `rc --yes` is not a request for it.
+3. **Is this build a release candidate? — the TEAM answers this, the owner is
+   told.** Owner directive 2026-10-24: *"if a build is a release candidate that
+   agent has to tell, not human."* So the call is computed by code from the plan
+   (`goals.rc_call`): a build IS a candidate when it **completes the plan for its
+   milestone** — the shipped task was the last part still queued for that
+   milestone (or anything under it) — and otherwise the report says where it sits
+   (`NO — part 5 of 7 of the plan for "…": 2 parts still queued`). The series is
+   scoped by walking a task's branch up to its top-level milestone, so work spread
+   across sub-goals counts as parts of the milestone it delivers. Off-goal work
+   (`advances: none`) and a project with no goal tree never complete a milestone,
+   so they are never candidates. The call is stored per version in
+   `state['release_candidates']` and shown by `status`, so it cannot drift as the
+   plan moves on.
+   `devteam rc <project> --yes|--no [--version <v>] [--note "..."]` **overrides**
+   the team's call (it prints the disagreement and keeps both), for correcting a
+   wrong computation or recording a deliberate exception. **Nothing acts on
+   either verdict**: there is still no promotion path in this team, and neither
+   the report nor the override is ever phrased as "should we promote it" —
+   promoting beyond internal testing stays the owner's manual step in Play
+   Console.
 
 ## Interactive (human-present) sessions
 Same procedure; `supervised` tasks become available when a human is with you —

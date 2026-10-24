@@ -242,11 +242,16 @@ prints what the owner needs to USE the build — quoted verbatim by the banner:
   passes and installs; they cannot feel the app, and on 2026-10-23 a green device
   gate hid a success screen printing a MediaStore id that a hand walk caught at
   once;
-- **is this build a release candidate?** — answered with
-  `cli.py rc <project> --yes|--no [--version <v>] [--note "…"]`, recorded per
-  version, shown by `status`, and asked only until answered. `rc` records an
-  opinion: nothing acts on it, there is still no promotion path here, and the
-  question is never phrased as "should we promote it".
+- **is this build a release candidate?** — the TEAM answers this and tells the
+  owner (owner directive 2026-10-24: the agent tells, it does not ask). A build
+  is a candidate when it **completes the plan for its milestone** — the shipped
+  task was the last part still queued for that milestone or anything under it —
+  and otherwise the report states where it sits (`NO — part 5 of 7 of the plan
+  for "…": 2 parts still queued`). Computed by `goals.rc_call` from the goal tree
+  and stored per version, so it cannot drift. `cli.py rc <project> --yes|--no
+  [--version <v>] [--note "…"]` OVERRIDES the team's call (the disagreement is
+  printed and both are kept). Nothing acts on either verdict: there is still no
+  promotion path here, and neither is ever phrased as "should we promote it".
 
 Every one of those blocks is printed by code on every outcome, so the banner
 cannot drop one by forgetting: a run that ships while the app has no long-term
@@ -447,8 +452,8 @@ python3 cli.py align <project> "<request>" [--apply]
 python3 cli.py emulators <project> [--record [--reset]]
 python3 cli.py alarm <project> ; python3 cli.py poll <project> ; python3 cli.py schedules
 python3 cli.py rc <project> --yes|--no [--version V] [--note "…"]
-                                                # answer the release-candidate
-                                                # question for a shipped build
+                                                # OVERRIDE the team's
+                                                # release-candidate call
 python3 cli.py onboard <path> ; python3 cli.py setup --project <path> [--at HH:MM]
 ```
 

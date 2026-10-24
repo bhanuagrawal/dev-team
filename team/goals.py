@@ -214,6 +214,130 @@ def queue_entry_milestone(entry: dict, profile: dict, state: dict) -> str:
     return act["id"] if act else ""
 
 
+def descends_from(profile: dict, node_id: str, ancestor_id: str) -> bool:
+    """Is `node_id` the ancestor itself, or a branch under it?
+    A milestone's PLAN is delivered by work queued anywhere in its sub-tree, so
+    'is this part of that milestone's series' is a tree question, not a tag
+    comparison."""
+    cur, seen = node_id, set()
+    while cur and cur not in seen:
+        if cur == ancestor_id:
+            return True
+        seen.add(cur)
+        n = find_node(profile, cur)
+        cur = str(n["parent"]) if n else ""
+    return False
+
+
+def milestone_ancestor(profile: dict, node_id: str) -> str:
+    """The top-level milestone `node_id` sits under (itself, when it already IS
+    one). The tree hangs off 'vision', so the first ancestor whose parent is
+    'vision' is the milestone — arbitrarily deep sub-goals collapse onto it, which
+    is exactly the grouping a release-candidate call needs."""
+    cur, seen = node_id, set()
+    while cur and cur not in seen:
+        seen.add(cur)
+        n = find_node(profile, cur)
+        if not n:
+            return ""
+        if str(n["parent"]) == "vision":
+            return cur
+        cur = str(n["parent"])
+    return ""
+
+
+def rc_call(profile: dict, state: dict, entry: dict,
+            shipped_label: str = "", shipped_task_id: str = "") -> dict:
+    """THE release-candidate call — computed by code from the plan, not asked.
+
+    A build is a release candidate when it COMPLETES the plan for its milestone:
+    the shipped task was the last part still queued for the milestone (or any
+    branch under it), so there is nothing left queued to finish before the owner
+    may consider promoting it. While parts remain, the build is an ordinary
+    internal-testing build of a milestone still in progress — telling the owner
+    "part 3 of 5, two to go" is both truer and more useful than asking them to
+    guess, which is why this is a CALL the team states rather than a question
+    (owner directive 2026-10-24).
+
+    The series is scoped to the ACTIVE milestone, not to the single sub-goal the
+    task was tagged with: entries spread across a milestone's sub-goals are parts
+    of delivering that milestone, and the owner reads them that way. Off-goal
+    work ('advances: none') and a project with no goal tree never complete a
+    milestone, so both come back as 'not a release candidate' with the reason.
+
+    Returns {rc, why, part, total, scope, scope_title} — see `rc_verdict`, which
+    stores it per version so the answer cannot drift as the plan moves on."""
+    act = active_milestone(profile, state)
+    mid = queue_entry_milestone(entry, profile, state)
+    if mid == "none":
+        return {"rc": False, "part": 0, "total": 0, "scope": "", "scope_title": "",
+                "why": ("off-goal work (the entry declared 'advances: none') — it "
+                        "completes no milestone, so no build of it is a candidate")}
+    # The series is the TASK'S OWN MILESTONE, found by walking up the tree — a
+    # sub-goal's parent, not the tag itself. That is what "part 3 of 5" means to
+    # the owner: a part of delivering that milestone, not of its innermost branch.
+    scope = milestone_ancestor(profile, mid) if mid else ""
+    if not scope:
+        scope = act["id"] if act else ""
+    title = (find_node(profile, scope) or {}).get("title", scope) if scope else ""
+
+    def in_scope(e: dict) -> bool:
+        m = str(e.get("advances") or "").strip()
+        if m == "none" or not scope:
+            return False
+        return descends_from(profile, m, scope)
+
+    if not scope:
+        why = ("no milestone to complete — the app has no goal tree, so a build "
+               "cannot be 'the build' for anything")
+        if mid == "none":
+            why = "off-goal work (declared 'advances: none') — it completes no milestone"
+        return {"rc": False, "why": why, "part": 0, "total": 0,
+                "scope": "", "scope_title": ""}
+
+    # How many parts of this milestone's plan are already shipped. Counted from
+    # the ledger by task_id (labels are the fallback for pre-task_id rows), with
+    # THIS ship removed then added back — so the count is right whether or not
+    # the caller has already appended its row.
+    done_ids, done_labels = set(), set()
+    for s in state.get("shipped") or []:
+        if not in_scope(s):
+            continue
+        tid = str(s.get("task_id") or "")
+        if tid:
+            done_ids.add(tid)
+        elif s.get("label"):
+            done_labels.add(str(s["label"]))
+    tid_now = str(shipped_task_id or entry.get("id") or "")
+    done_ids.discard(tid_now)
+    if shipped_label:
+        done_labels.discard(shipped_label)
+    done = len(done_ids) + len(done_labels) + 1
+
+    # Parts of the same milestone's plan still waiting (the shipped one is out of
+    # the queue by the time record runs, but a plan can lag a delivery — exclude
+    # it explicitly so a stale entry cannot make a finished plan look unfinished).
+    left = [str(e.get("label") or "?") for e in (state.get("queue") or [])
+            if in_scope(e) and str(e.get("label") or "") != shipped_label
+            and not (tid_now and str(e.get("task_id") or "") == tid_now)]
+    total = done + len(left)
+    if not left:
+        return {"rc": True, "scope": scope, "scope_title": title, "part": done,
+                "total": total,
+                "why": (f'this completes the plan for "{title}" — nothing else is '
+                        f"queued for it (part {done} of {total})")}
+
+    def _clip(s: str, n: int = 70) -> str:
+        return s if len(s) <= n else s[:n].rsplit(" ", 1)[0] + "…"
+
+    preview = "; ".join(_clip(l) for l in left[:2]) + (" …" if len(left) > 2 else "")
+    n_left = f"{len(left)} part{'s' if len(left) != 1 else ''} still queued"
+    return {"rc": False, "scope": scope, "scope_title": title, "part": done,
+            "total": total,
+            "why": (f'part {done} of {total} of the plan for "{title}" — '
+                    f"{n_left}: {preview}")}
+
+
 def validate_advances(result: dict, profile: dict, state: dict,
                       extra_ids: tuple = ()) -> str | None:
     """Deterministic gate on the research plan: with a goal tree defined, every
