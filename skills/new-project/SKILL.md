@@ -46,13 +46,24 @@ Backup ask (one line): after you generate the keystore, they copy it + password
 off-machine (you generate; they never generate).
 
 ## STEP 2 — project creation (official sources, not hand-rolled)
-1. Scaffold from the official JetBrains KMP template:
-   `git clone https://github.com/JetBrains/KotlinMultiplatformTemplate <name>`
-   (or the KMP wizard output if the template moved). Keep ONE `composeApp`
-   module; DELETE the iOS target config and iosMain — Android-first is a
-   recorded owner decision; do not ship iOS until told.
+1. Scaffold from the official JetBrains KMP template. The old
+   `JetBrains/KotlinMultiplatformTemplate` repo is GONE — if that clone 404s,
+   find the current one with `android docs search "Kotlin Multiplatform app
+   template"` (at time of writing: `Kotlin/KMP-App-Template` or
+   `JetBrains/compose-multiplatform-template`). NEVER re-create the scaffold by
+   memory: trust the template's own module layout, because it tracks the current
+   AGP. **AGP 9 splits a KMP app into a KMP library module + an Android app
+   module** ("Splitting a KMP + Android Application Module for AGP 9.0" in the
+   Android KB) — the single-module `composeApp` layout with both
+   `kotlinMultiplatform` and `androidApplication` applied is the AGP 8 shape and
+   still works if you pin AGP 8.x, but do not assume it on AGP 9. Pick one shape
+   and make `profile['version_file']` / `verify` / the CI workflow match, or the
+   first bump push is red. Android-first is a recorded owner decision; delete
+   the iOS target config and iosMain regardless of shape.
 2. Rename package/app per intake; keep `commonMain` as home for ALL product
-   code; `androidMain` = MainActivity host only.
+   code; `androidMain` = the Android host + platform adapters only (express
+   platform differences as interfaces in commonMain with implementations in
+   androidMain — prefer that to expect/actual when only one target exists).
 3. Install the dev-team MVI core (references/mvi-core/*.kt) under
    `composeApp/src/commonMain/kotlin/<pkg>/core/event/` + rename package.
    These become FROZEN files. Follow references release-proven.yml /
@@ -82,16 +93,28 @@ off-machine (you generate; they never generate).
    of silently missing whatever the team learned since.
 
 ## STEP 3 — signing + secrets + repo (agent does; user only backs up + passes tokens)
+**Order matters — set secrets BEFORE the first push** (see note below).
 ```bash
 keytool -genkeypair -v -keystore config/keystore.jks -alias upload \
   -keyalg RSA -keysize 2048 -validity 10000 -storepass $PW -keypass $PW \
   -dname "CN=<name>"
 OWNER="$(gh api user -q .login)"   # authenticated account — never hard-coded in the skill
-gh repo create "$OWNER/<slug>" --private --source . --push
+git init -b main && git add -A && git commit -m "feat: initial <app>"
+gh repo create "$OWNER/<slug>" --private --source .    # create, do NOT push yet
 gh secret set RELEASE_KEYSTORE_BASE64 -R "$OWNER/<slug>" --body "$(base64 -i config/keystore.jks)"
 gh secret set KEYSTORE_PASSWORD/KEY_ALIAS/KEY_PASSWORD -R ... (keystore PW/alias/pw)
 gh secret set PLAY_SERVICE_ACCOUNT_JSON -R ... --body-file <userProvided.json>   # when they give it
+git push -u origin main                                # push LAST, so the first CI run sees the secrets
 ```
+**Why the order:** the initial push touches the version file and fires the
+version-bump workflow. If the secrets are not set yet, that first run builds a
+signed bundle with an EMPTY `KEY_ALIAS` and fails at `signReleaseBundle`
+("Failed to read key  from store … Tag number over 30"), leaving a red `main`
+that the next nightly's planner reads as a delivery failure. Set the secrets,
+then push.
+`git init` must happen before `devteam onboard <project>` — `resolve_project`
+looks for `.git` and otherwise reports the project "not found".
+
 Write `.pipeline/secrets.json` locally (keystore path+pws, chmod 600,
 gitignored). gitignore: keystore/config, .pipeline/, build, local.properties.
 

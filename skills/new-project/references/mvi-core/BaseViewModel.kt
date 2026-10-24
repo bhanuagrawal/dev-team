@@ -36,7 +36,14 @@ abstract class BaseViewModel<UI_DATA : UIData, E : Event>(
         scope.launch {
             handler.handle(event, _state.value.ui).collect { res ->
                 when (res) {
-                    is StateChange<UI_DATA> -> _state.value = State(res.mutator(_state.value.ui))
+                    // `is StateChange<UI_DATA>` does not compile on Kotlin 2.x
+                    // ("cannot check for instance of erased type"). Match the
+                    // star-projection and cast, as below.
+                    is StateChange<*> -> {
+                        @Suppress("UNCHECKED_CAST")
+                        val change = res as StateChange<UI_DATA>
+                        _state.value = State(change.mutator(_state.value.ui))
+                    }
                     is ExecuteAction -> _actions.tryEmit(res.block)
                 }
             }
