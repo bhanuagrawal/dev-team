@@ -98,6 +98,22 @@ def file_asks(project: Path, log: RunLog, issues: list[dict]) -> None:
         log(f"issue {'filed' if ok else 'FAILED'}: {title[:60]}  {out[:120]}")
 
 
+# A release sitting on internal testing is the run's DELIVERABLE, never an open
+# question: production promotion is the owner's own manual step in Play Console
+# (standing decision, recorded in the profile of every project). The runbook has
+# told the synthesizer for months never to file such an ask, and nothing checked
+# it — so the owner's tracker accumulated exactly those issues (2026-10-25: two
+# promotion asks closed as "must not exist"). This enforces the rule in code.
+# TITLES ONLY, deliberately: the body of a legitimate ask may discuss promotion
+# as a FACT ("promotion is human-only, so this does not ask for it") and must
+# never be rejected for saying so. It is a guard against the ask, not a topic ban.
+_PROMOTION_TITLE_RE = re.compile(
+    r"\b(?:promot\w+|publish\w+)\b[^\n]{0,60}?"
+    r"\b(?:production|play\s+store|unattended|pipeline|lineage)\b"
+    r"|\b(?:to|into)\s+production\b",
+    re.IGNORECASE)
+
+
 def _issue_key(title: str) -> str:
     """A comparison key for an owner ask: casing, spacing and punctuation
     collapsed, so the same ask proposed twice compares equal."""
@@ -920,6 +936,17 @@ def _validate(result: dict, research: dict | None = None) -> str | None:
                     "a run must end in a build, an owner ask, or both")
     if not isinstance(result.get("off_goal", []), list):
         return "'off_goal' must be a list"
+    # The runbook's one PERMANENT prohibition, enforced instead of merely stated:
+    # an owner ask must never be a production promotion (human-only, the owner's
+    # own manual step) — see _PROMOTION_TITLE_RE.
+    for iss in result.get("issues_to_file", []) or []:
+        title = (iss.get("title") or "") if isinstance(iss, dict) else ""
+        if _PROMOTION_TITLE_RE.search(title):
+            return ("issues_to_file asks for production promotion/publishing — "
+                    f"'{title[:80]}'. That is human-only and permanently out of "
+                    "scope: the team never raises it as an owner ask and never "
+                    "files an issue about it. Report the build on internal testing "
+                    "as a FACT and drop the ask")
     return None
 
 

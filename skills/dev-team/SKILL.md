@@ -22,6 +22,25 @@ store reviews → churn reasons from users who uninstall same-day; Play vitals
 yet) gets the same research pipeline as an established project — just with an
 explicit "here's what connecting this would buy you" line.
 
+**An upgrade is a HYPOTHESIS about what is missing — verify it before you hand
+it to the owner as work.** An upgrade's `how` describes the WHOLE path to a
+connection (declare the block, place the key, enable the API, grant access), so
+it reads as a list of owner chores even when only the last inch is left. On
+2026-10-25 two of three flags on one project were fixed in minutes: the Play
+service-account key already existed on disk and both Play APIs already answered
+for it — the only missing thing was the `connections.play_vitals` /
+`connections.play_reviews` declaration in the profile. Before relaying an upgrade,
+run `doctor` and a live probe (`research`, or the collector directly):
+- key file exists and the read answers → the missing piece is the DECLARATION.
+  Add it to the project profile (it is config, not app code, and `doctor` verifies
+  it) and re-run `research`; the flag clears itself, presence-driven.
+- the read answers with an honest zero (no reviews below a public listing, no
+  vitals rows below Play's small-sample threshold) → that is `status=ok` and the
+  flag is CLEARED, not stuck; say so rather than leaving the owner chasing it.
+- the precondition genuinely is absent (no key, no access, or it needs an emulator
+  and a human, as `competitor-recon` does) → THEN it is an owner ask, and it is
+  worth stating the single missing step rather than the whole path.
+
 ## MODE SELECTION (do this first, every invocation)
 - Project exists and has .pipeline/profile.json → MODE A (nightly run
   procedure below). STEP 0 of MODE A is `adapt` — a project onboarded under an
