@@ -504,6 +504,23 @@ by code (`record`) and quoted verbatim by the orchestrator:
      it (and the report says which of the two it was — an owner must never be
      shown boilerplate as if it were their own words, nor their words replaced
      silently).
+   - **THE GENERATED LINE IS ONLY AS GOOD AS THE LABEL, so write one when the
+     label is pipeline-shaped.** The fallback note interpolates the task's label
+     verbatim (`✓ New in this update: <label>`), and `_short_label` only cuts a
+     long mechanism sentence at its first clause — it does NOT humanize a slug, by
+     design (de-hyphenating would mangle a real product name like `PDF-Kit`, the
+     exact hazard its docstring names). So a queue label such as
+     `day-one-pause-runthrough` would ship to the store as
+     `✓ New in this update: day-one-pause-runthrough` — internal words in a user's
+     listing. The seam is already there: the task spec (`.pipeline/tasks/<id>.json`,
+     which the ORCHESTRATOR owns) may carry an explicit `"whatsnew"` string and
+     `_whatsnew_text` uses it verbatim (clamped to `whatsnew_max_chars`). When the
+     picked entry's label is a slug or otherwise reads as pipeline vocabulary, the
+     orchestrator writes the user-facing line into the spec before spawning the
+     developer, and the handover then quotes that copy. Never "fix" this with a
+     copy heuristic in team code — a judgment about storefront wording is exactly
+     the kind of approximation the owner has told the team to stop computing
+     (lessons 2026-10-24, pass 3).
 2. **What to manually test.** The pipeline's gates prove the build compiles,
    passes its tests and installs — they cannot feel the app. So the handover
    lists the areas the diff touched (derived from the task's targets, never
