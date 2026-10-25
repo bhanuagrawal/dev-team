@@ -465,6 +465,19 @@ never silently blocking.
      minutes, the entry was too small — say so in the run report and fold such
      work into the next plan cycle.
    - agent prompt = the exact prompt from step 6
+   - PLATFORM-CONFORMANCE WORK NEEDS THE OFFICIAL SKILL, BY ABSOLUTE PATH.
+     When a task touches an area Google publishes a current skill for
+     (edge-to-edge, adaptive/resizability, styles, predictive back, navigation,
+     performance), add that skill to the developer's mandatory reads — and give
+     the path in the MAIN checkout (`<project>/.agents/skills/<name>/SKILL.md`),
+     never a worktree-relative one: the official skills are installed into the
+     project root by `android skills add` and are gitignored, so a git worktree
+     does NOT contain them and the developer would find nothing at that path.
+     Read the skill's own PREREQUISITES before queueing the work, too: they can
+     be unreachable (a 2026 skill may require a newer compileSdk, Compose BOM or
+     Navigation 3), and any prerequisite that needs a dependency change lands in
+     the frozen build file — report that as a gap rather than queueing work that
+     cannot build.
    - run with cwd = WORKTREE_PATH (pass this in the subagent's initial
      instruction: "work ONLY inside directory <WORKTREE_PATH>")
    - MODEL: read roles.developer.model from <team>/config/runtimes.json and
