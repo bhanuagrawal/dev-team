@@ -11,10 +11,93 @@ import subprocess
 from pathlib import Path
 
 from . import emulator
-from .core import profile_of, run
+from .core import git, profile_of, run
 
 JAVA_HOME = "/Applications/Android Studio.app/Contents/jbr/Contents/Home"
 GRADLE_ENV = {"JAVA_HOME": JAVA_HOME, "TERM": "dumb", "CI": "true"}
+
+# --------------------------------------------------------------------------- #
+# release knobs — protect the FIELDS, not the file
+# --------------------------------------------------------------------------- #
+# A Gradle build file does two unrelated jobs: it is the DEPENDENCY LIST and it
+# is the RELEASE MACHINERY (version, signing material, SDK levels). Freezing the
+# whole file protects the second by blocking the first, so adding a library
+# becomes an owner approval — a blunt instrument aimed at the wrong thing (and
+# doubly wrong because the release step EDITS that file on every run to bump the
+# version; only the code-writing agent was ever blocked).
+#
+# These checks protect the fields instead of the file: a task may edit the build
+# file to add a dependency, and may not change the version, the signing material
+# or the SDK levels. Those belong to the release step and to the owner.
+RELEASE_KNOBS: tuple[tuple[str, str], ...] = (
+    (r'versionName\s*[=:]\s*["\']([^"\']*)["\']', "versionName"),
+    (r'versionCode\s*[=:]\s*(\d+)', "versionCode"),
+    (r'\b(minSdk|targetSdk|compileSdk)\s*[=:]\s*([^\n,]+)', "SDK level"),
+    (r'\b(storeFile|storePassword|keyAlias|keyPassword)\s*[=:]\s*([^\n]+)', "signing material"),
+    (r'(signingConfig\s*=\s*[^\n]+)', "signing config"),
+)
+
+# The catalog is where KMP projects actually keep their SDK levels, so checking
+# only the version file would leave the most consequential knob unguarded.
+RELEASE_FILES_EXTRA = ("gradle/libs.versions.toml",)
+
+
+def _knobs(text: str) -> dict[str, list[str]]:
+    """Every release knob in a file, as label -> the values found, in order.
+
+    Lists rather than single values: a label can legitimately appear more than
+    once (several versionCodes across flavours), and losing the extra ones would
+    make a change to them invisible. Every pattern captures the VALUE as well as
+    the name — capture the name alone and a changed value looks unchanged, which
+    is exactly how this check silently passed a targetSdk change the first time
+    it was exercised."""
+    out: dict[str, list[str]] = {}
+    for pattern, label in RELEASE_KNOBS:
+        vals = ["=".join(g for g in m.groups() if g).strip()
+                for m in re.finditer(pattern, text)]
+        out[label] = vals
+    return out
+
+
+def release_knobs_check(profile: dict, worktree: Path, base: str) -> tuple[bool, str]:
+    """Refuse a change to the release knobs, wherever the project keeps them.
+
+    Returns (ok, message). Generic: it reads `profile['version_file']` (every
+    project has one) plus the Gradle version catalog when the project has one.
+    A file that is new in this change, or absent, is skipped — there is no
+    baseline to compare, and inventing one would fail honest work."""
+    rels = [profile.get("version_file")]
+    rels += [r for r in RELEASE_FILES_EXTRA if (worktree / r).exists()]
+    rels = [r for r in rels if r]
+
+    checked, changes = [], []
+    for rel in rels:
+        wt_file = worktree / rel
+        if not wt_file.exists():
+            continue
+        base_r = git(["show", f"{base}:{rel}"], cwd=worktree, timeout=60)
+        if base_r.returncode != 0:
+            continue          # new file in this change — nothing to protect
+        before, after = _knobs(base_r.stdout), _knobs(wt_file.read_text())
+        for label in sorted(set(before) | set(after)):
+            if before.get(label, []) != after.get(label, []):
+                changes.append(
+                    f"{label} in {rel}:\n"
+                    f"      before: {before.get(label, []) or '(absent)'}\n"
+                    f"      after:  {after.get(label, []) or '(absent)'}")
+        checked.append(rel)
+
+    if changes:
+        return False, (
+            "RELEASE KNOB CHANGED — this belongs to the release step and the "
+            "owner, not to a code task:\n    " + "\n    ".join(changes) +
+            "\n\n  The pipeline bumps the version itself, and the SDK levels and "
+            "signing material are owner decisions. Editing the build file to add "
+            "a dependency is fine; changing these fields needs a constraint lift, "
+            "not an edit.")
+    return True, ("release knobs unchanged in " + ", ".join(checked)) if checked \
+        else "no release file had a baseline — knobs not checked"
+
 
 # On-device test source sets: KMP names the Android instrumented set
 # `androidInstrumentedTest` (KGP 2.x), a pure-Android module calls it `androidTest`.
@@ -258,6 +341,13 @@ def verify_all(project: Path, worktree: Path, base: str, log, gradle: bool = Tru
 
     ok, msg = scope_check(profile, files)
     log(f"scope: {msg.replace(chr(10), ' | ')}" if not ok else f"scope ok ({len(files)} files)")
+    if not ok:
+        failures.append(msg)
+        return False, failures
+
+    # The fields the file freeze used to protect by blocking the whole file.
+    ok, msg = release_knobs_check(profile, worktree, base)
+    log(f"release knobs: {msg}" if ok else "release knobs: FAIL")
     if not ok:
         failures.append(msg)
         return False, failures
