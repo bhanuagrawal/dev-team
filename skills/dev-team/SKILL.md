@@ -616,6 +616,23 @@ by code (`record`) and quoted verbatim by the orchestrator:
    team, and the line is never phrased as "should we promote it" — promoting
    beyond internal testing stays the owner's manual step in Play Console.
 
+## When the owner hands over a SPEC (do this before planning it)
+A spec arrives as a document, not as a queue entry, and it is usually part-wrong
+about the app. Before it reaches the planner, DIFF it against the shipped tree
+and answer three questions per item: is it ALREADY BUILT, is it PARTIAL, or does
+it CONTRADICT what is shipped? Then check the spec against the store's own rules.
+Two incidents, one session apart, both caught before any code was written: the
+spec asked for `targetSdk 34` when Play rejects anything below its current floor
+(shipping it would have failed the release), and it asked for Compose Material3
+UI on an app the same owner had already ordered to be fully canvas-drawn with no
+stock widget anywhere. A spec is also the cheapest place to find work that DOES
+NOT need doing — its "core" was already implemented and unit-tested, and
+building it again would have been pure waste. Report the diff to the owner as
+ALIGNED / PARTIAL / CONFLICT with evidence (file + line where possible), let
+them resolve the conflicts, and only then let the planner turn it into queue
+entries. Record the adopted spec as the project's source of truth (its PRD) so
+the two cannot drift.
+
 ## Interactive (human-present) sessions
 Same procedure; `supervised` tasks become available when a human is with you —
 say so in your report, then run the task with the human watching.
