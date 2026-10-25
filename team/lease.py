@@ -80,7 +80,7 @@ def _load(path: Path) -> dict | None:
 
 def _held_message(resource: str, held: dict) -> str:
     since = held.get("since", "?")
-    until = held.get("until", "?")
+    until = ts2iso(held.get("until_ts"))
     return (f"cannot lease {resource}: it is HELD by '{held.get('owner')}' "
             f"(since {since}, until {until}). Another run — or the owner, on "
             f"purpose — owns it. Wait for it to be recorded/expired; "
