@@ -637,6 +637,15 @@ ALIGNED / PARTIAL / CONFLICT with evidence (file + line where possible), let
 them resolve the conflicts, and only then let the planner turn it into queue
 entries. Record the adopted spec as the project's source of truth (its PRD) so
 the two cannot drift.
+**QUESTION THE STACK, NOT JUST THE FEATURES.** A spec's stack line ("use X",
+"via Y") reads like a requirement and is actually a *suggestion about how* — and
+it can contradict the spec's own principles. A spec that demands "fully local, no
+backend" while naming a hosted billing service is the common case: the service is
+a LAYER on top of the store's own billing, not an alternative to it, so adopting
+it adds a third party and an account (plus a revenue-share fee) in exchange for
+benefits the app may not be able to use yet. Check what a named service actually
+DOES before it becomes the plan, say plainly what it would and would not buy, and
+record the deviation if the app's constraints make the leaner path the right one.
 
 ## Interactive (human-present) sessions
 Same procedure; `supervised` tasks become available when a human is with you —
