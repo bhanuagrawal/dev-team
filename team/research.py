@@ -508,6 +508,32 @@ def _competitors_pull(project: Path) -> dict:
     }
 
 
+def _open_asks_pull(profile: dict) -> list[dict]:
+    """Open GitHub issues on the project (number + title), so the synthesis can
+    SEE which owner asks are already filed and not re-propose one.
+
+    The re-plan re-proposes the same ask in fresh words each cycle (the previous
+    cycle's apply is not in its context), and `file_asks` dedupes on NORMALIZED
+    TITLE only — so two cycles that phrase the same ask differently still filed
+    it twice (2026-10-23 #1 and 2026-10-24 #2: the phase-2 workflow freeze lift,
+    identical subject, different words). Title dedup is the code's safety net;
+    the prompt seeing the open asks is the fix for the drift above it. gh is an
+    optional data source: no/unauthorized gh yields [] and the plan still runs
+    (MINIMAL-TOOLS principle) — the flag is the absence, never a blocked run."""
+    slug = profile.get("repo_slug")
+    if not slug:
+        return []
+    from . import alarm
+    r = run(["gh", "issue", "list", "-R", slug, "--state", "open",
+             "--json", "number,title"], None, timeout=60)
+    if r.returncode != 0:
+        return []
+    try:
+        return json.loads(r.stdout or "[]")
+    except json.JSONDecodeError:
+        return []
+
+
 def research_collect(project: Path, log: RunLog) -> dict:
     """All deterministic collectors → research dict (no LLM)."""
     profile = profile_of(project)
@@ -565,6 +591,7 @@ def research_collect(project: Path, log: RunLog) -> dict:
                     for q in state.get("queue", [])],
                 "queue_impact_log": state.get("queue_events", [])[-8:],
                 "insights": state.get("insights", {}),
+                "open_asks": _open_asks_pull(profile),
             },
             "stages": {
                 "ci_workflow": profile.get("ci_workflow"),
@@ -810,6 +837,12 @@ Rules:
   them may be reported as facts, not as an open question. Do not re-file an
   issue that recent_runs/notes or the described
   consensus already answers; check before queueing one.
+  CHECK signals.repo.open_asks FIRST: it lists the owner asks ALREADY open on
+  the repo (`number` + `title`). Before putting anything in issues_to_file,
+  read those titles — if the same ask is already open (even phrased
+  differently), do NOT re-file it; your banner and your analysis may reference
+  the existing issue by number instead. Only an ask whose subject genuinely is
+  NOT among the open titles belongs in issues_to_file.
 
 
 RESPOND WITH JSON ONLY."""
