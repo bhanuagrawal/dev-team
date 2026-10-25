@@ -500,6 +500,17 @@ never silently blocking.
      `profile['whatsnew_max_chars']`, and NOT AT ALL when the project's notes are
      owner-curated — see "The release handover"), commits, pushes to origin
      main, and watches CI. CI delivers to Play internal testing.
+   - READ THE DEVELOPER'S "NOTICED BUT NOT FIXED" NOTES — THEY ARE THE
+     PIPELINE'S ONLY FEED-FORWARD. The prompt tells the developer to note
+     unrelated defects rather than fix them, and those notes exist ONLY in the
+     subagent's final message: no collector, no state field and no queue
+     admission reads them, so a real defect the developer actually saw is lost
+     the moment the transcript scrolls out of context. Before recording the run,
+     take each note and either QUEUE it (folding it into an entry that already
+     touches that file when it is too small to justify its own release) or drop
+     it with a stated reason — never leave one unread. A bugfix that removed an
+     invented-winner defect from one screen left the identical defect on another
+     screen, and only the developer's closing note surfaced it.
 9. Bookkeeping (one command, every outcome):
    `python3 <team>/cli.py record <project> --result shipped|failed|blocked
      [--task-spec .pipeline/tasks/<id>.json] [--version <ver>] [--commit <sha>]
