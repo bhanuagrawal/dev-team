@@ -511,6 +511,44 @@ def cmd_worktree_start(args: argparse.Namespace) -> None:
     print(f"WORKTREE_BASE={base}")
 
 
+def cmd_fanout_start(args: argparse.Namespace) -> None:
+    """Validate a split and create one worktree + one spec per segment."""
+    from team import fanout
+    project = resolve_project(args.project)
+    task = json.loads(task_spec_path(project, args.task_spec).read_text())
+    pid = task.get("id") or "?"
+    log = RunLog(project, "fanout-start-" + pid)
+    if args.split:
+        split = json.loads(task_spec_path(project, args.split).read_text())
+    else:
+        # The queue entry's own `fanout` (carried into the spec by pick) IS the
+        # split — no hand-authored file needed when the planner already declared
+        # one, and the same validator checks it either way.
+        blocks = task.get("fanout") or []
+        if not blocks:
+            raise SystemExit("no split to validate: pass --split <file> or declare "
+                             "'fanout' on the task spec (pick carries it from the "
+                             "queue entry)")
+        split = {"segments": blocks}
+    res = fanout.start(project, task, split, log)
+    for seg in res["segments"]:
+        rel = Path(seg["spec"]).relative_to(project)
+        seg["prompt_cmd"] = f"python3 cli.py developer-prompt {project.name} {rel}"
+    print(json.dumps(res, indent=2))
+    print("\nnext: spawn ONE developer subagent per segment, each in its own worktree "
+          "with its own spec prompt; then `fanout-merge` and verify/review/release ONCE "
+          "on the merged parent worktree.", file=sys.stderr)
+
+
+def cmd_fanout_merge(args: argparse.Namespace) -> None:
+    """Merge the segments into the parent worktree — or discard the fan-out."""
+    from team import fanout
+    project = resolve_project(args.project)
+    task = json.loads(task_spec_path(project, args.task_spec).read_text())
+    log = RunLog(project, "fanout-merge-" + str(task.get("id")))
+    print(json.dumps(fanout.merge(project, task, log), indent=2))
+
+
 def cmd_run_start(args: argparse.Namespace) -> None:
     """START THE RUN: record it as the active run and lease every shared
     resource the spec declares in `needs` (e.g. the machine's AVD).
@@ -880,6 +918,11 @@ def _end_run(project: Path, state: dict, task_id: str) -> None:
             except SystemExit as e:
                 print(f"warning: lease {res} not returned: {e}", file=sys.stderr)
         state.pop("active", None)
+        if (state.get("fanout") or {}).get("parent") == task_id:
+            # The split belonged to this run: a record left behind would describe
+            # the NEXT run's merge. The worktrees stay on disk as evidence —
+            # record returns resources, it never deletes trees.
+            state.pop("fanout", None)
         changed = True
     elif task_id != "?":
         print(f"warning: recorded '{task_id}' but the active run is "
@@ -987,6 +1030,8 @@ def _carry_queue_fields(state: dict, task: dict) -> None:
             task["dependencies_added"] = entry["dependencies_added"]
         if entry.get("needs"):
             task["needs"] = list(entry["needs"])
+        if entry.get("fanout"):
+            task["fanout"] = entry["fanout"]
         break
 
 
@@ -1620,6 +1665,8 @@ def main() -> None:
     rs = sub.add_parser("run-start", help="start the run: record it active and lease the spec's `needs` (shared resources, e.g. the AVD)"); rs.add_argument("project"); rs.add_argument("--task-spec", required=True); rs.add_argument("--force", action="store_true", help="take over a prev run's active marker + leases (its run must be dead)"); rs.add_argument("--ttl-min", type=int); rs.set_defaults(fn=cmd_run_start)
     ls = sub.add_parser("leases", help="who holds which shared resource on this machine"); ls.set_defaults(fn=cmd_leases)
     lz = sub.add_parser("lease", help="hand-op a resource outside a run (claim the device for yourself / force-drop a dead run's lease)"); lz.add_argument("resource"); lz.add_argument("--take", action="store_true"); lz.add_argument("--drop", action="store_true"); lz.add_argument("--owner", help="who owns this lease (default: manual)"); lz.add_argument("--ttl-min", type=int); lz.add_argument("--force", action="store_true"); lz.set_defaults(fn=cmd_lease)
+    fs = sub.add_parser("fanout-start", help="validate a split statically and create one worktree + spec per segment (default stays ONE developer)"); fs.add_argument("project"); fs.add_argument("--task-spec", required=True); fs.add_argument("--split", help="split JSON; omit to use the spec's own 'fanout' blocks (carried from the queue entry)"); fs.set_defaults(fn=cmd_fanout_start)
+    fm = sub.add_parser("fanout-merge", help="merge the segments into the run's worktree — a conflict DISCARDS the fan-out"); fm.add_argument("project"); fm.add_argument("--task-spec", required=True); fm.set_defaults(fn=cmd_fanout_merge)
     dp = sub.add_parser("developer-prompt"); dp.add_argument("project"); dp.add_argument("task_spec"); dp.add_argument("--template", choices=["motion", "generic", "auto"], default="auto"); dp.set_defaults(fn=cmd_developer_prompt)
     rp = sub.add_parser("review-prompt"); rp.add_argument("project"); rp.add_argument("task_spec"); rp.add_argument("--worktree"); rp.add_argument("--gates", default=""); rp.set_defaults(fn=cmd_review_prompt)
     rr = sub.add_parser("review-record"); rr.add_argument("project"); rr.add_argument("task_spec"); rr.add_argument("--verdict", choices=["ship", "fix", "block"]); rr.add_argument("--json"); rr.add_argument("--note", default=""); rr.add_argument("--finding", action="append"); rr.add_argument("--worktree"); rr.set_defaults(fn=cmd_review_record)

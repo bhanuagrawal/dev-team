@@ -56,9 +56,11 @@ run `doctor` and a live probe (`research`, or the collector directly):
 | orchestrator | skill (this file) | the agentic tool you are |
 | create-agent | skill (`skills/new-project/SKILL.md`) | delegated on MODE B |
 | developer | skill (prompts/developer.md + this runbook) | YOUR native subagent |
+| reviewer (QA) | CODE prompt builder (`cli.py review-prompt`) + the verdict budget in `review-record` | YOUR native subagent in a FRESH session — never the developer's |
 | research (product) | CODE collectors + ONE synthesis (`cli.py plan`, raw: `cli.py research`) | EVERY run, step 2 |
 | alarm | CODE (`cli.py alarm`) | nightly end + on demand |
 | verifier/gates | CODE (`cli.py verify`) | before every release |
+| fan-out (optional) | CODE (`cli.py fanout-start` / `fanout-merge`) | N developer subagents, then ONE merge — the default is still one developer |
 | release-agent | CODE (`cli.py release`) | after green gates |
 | scribe | CODE (runs on `record`) | ledger + mirrors |
 
@@ -193,6 +195,10 @@ agentconfig.env`) — without it `doctor` correctly reports the agents blocked
                       frozen paths, verify commands, reference screen/pickers)
 - run logs:           `<project>/.pipeline/runs/<run_id>.log`
 - task specs:         `<project>/.pipeline/tasks/<task_id>.json`
+- fan-out artifacts:  `<project>/.pipeline/fanout/<task_id>/` — the ACCEPTED split
+                      (`split.json`) and one segment spec per agent
+                      (`segments/<segment id>.json`), kept as evidence even when
+                      a merge conflict later discards the fan-out
 - shared-resource leases: `~/.dev-team/locks/` (**machine-wide**, not per
                       project — the AVD is not project-scoped), with the
                       acquire/takeover/drop trail in `~/.dev-team/leases.log`.
@@ -493,6 +499,40 @@ never silently blocking.
    machine: the next run takes a stale lease over.
 6. Get the exact developer prompt (keep it verbatim):
    `python3 <team>/cli.py developer-prompt <project> .pipeline/tasks/<id>.json`
+6b. **FAN-OUT — one entry, N developers, ONE gate and ONE release** (default:
+   **do not**; the planner's default is one developer and so is yours). Use it
+   only when the entry is honestly N disjoint file sets — and the split is a
+   CLAIM the machine checks before anyone is spawned:
+   (a) ```
+       python3 <team>/cli.py fanout-start <project> --task-spec .pipeline/tasks/<id>.json
+         [--split <split.json>]
+       ```
+       Without `--split` it uses the spec's own `fanout` blocks (pick carries
+       them from the queue entry), so the planner's split is exactly what runs.
+       It REFUSES unless: 2-4 segments, pairwise-disjoint targets (path prefixes
+       — a mid-pattern glob is refused because disjointness cannot be proven from
+       it), every segment inside the parent's own targets, every segment >= 60 min
+       of work, and the parent leases NO device (one emulator cannot be driven by
+       two agents; device work is serial by construction). **A refusal is not a
+       failure** — it means run the entry as ONE developer (step 7).
+       On success it creates one worktree + one segment spec per segment and
+       prints each `developer-prompt` command.
+   (b) Spawn **one developer subagent per segment**, each in its OWN worktree with
+       its OWN spec prompt, same model rules, and each told it may only edit
+       inside its segment's targets. They may run in parallel.
+   (c) ```
+       python3 <team>/cli.py fanout-merge <project> --task-spec .pipeline/tasks/<id>.json
+       ```
+       Commits each segment and merges them into the run's own worktree. A merge
+       CONFLICT — or a segment that produced NO changes — **DISCARDS the whole
+       fan-out**: branches deleted, every worktree removed, the parent worktree
+       reset to its base, and the command tells you to redo the entry serially.
+       Never hand-resolve: nobody assigned that merge, and the reviewer would be
+       reading a change no one designed.
+   (d) Then **steps 8 / 8b / release run ONCE**, on the merged parent worktree
+       (the merge prints the exact verify command): one gate chain, one review,
+       one version bump, one CI release. The agents were parallel in WRITING;
+       shipping is serial, always.
 7. SPAWN THE DEVELOPER AS A SUBAGENT — your tool's own native mechanism:
    - budget the session at the task's `effort_min` (~150 is the norm for a healthy
      entry, band 90-240 — sized in developer-effort minutes, which an agent spends
