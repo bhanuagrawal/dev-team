@@ -779,7 +779,9 @@ Rules:
   work separates into genuinely disjoint file sets that each stand alone. The run
   checks the split IN CODE before spawning anyone: segment targets pairwise
   disjoint, the union inside the entry's own `target`, every segment worth a real
-  session (>= 60 min), and NO device work (a leased AVD has one owner; one
+  session (>= 60 min), and AT MOST ONE segment may claim the device (a segment
+  names the resource in its own `needs`, and it must be one the entry already
+  declares — the run owns it; two device segments are refused because one
   emulator cannot be driven by two agents). If the check refuses, the entry is
   simply run as ONE developer — a wrong split costs nothing, but the queue stays
   honest about what it expects. When in doubt, omit `fanout`: one developer is

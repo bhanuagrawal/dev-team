@@ -19,9 +19,11 @@ that decision is worthless if the split can be wrong silently):
   * at least 2, at most MAX_SEGMENTS (a fan-out of one is just a run);
   * every segment is worth a worktree (MIN_SEGMENT_EFFORT): subdividing a task
     into pieces smaller than one honest session buys merge risk, not speed;
-  * a parent that leases a DEVICE is refused. The lease from `run-start` has a
-    single owner and one emulator cannot be driven by two agents, so device work
-    is serial BY CONSTRUCTION rather than by coordination between agents.
+  * at most ONE segment may claim any given SHARED RESOURCE (the AVD). The run's
+    lease is single-owner — all segments hold it as the same task id — so it
+    serializes OTHER runs and can never serialize two agents inside one run. Two
+    agents on one emulator is therefore prevented by SHAPE, not by a lock: only
+    one segment may be device-facing, and it is run on its own.
 
 Then each agent gets its own worktree and its own spec, and the merge is a real
 git merge of real commits. A conflict means the split was not disjoint in
@@ -38,6 +40,7 @@ from pathlib import Path
 
 from .core import (git, now_iso, pipeline_dir, profile_of, save_state,
                    state_of, target_items)
+from .lease import claim_path
 
 MAX_SEGMENTS = 4
 #: A segment smaller than this is not worth a worktree, a merge and the
@@ -106,11 +109,9 @@ def validate(project: Path, parent: dict, split: dict) -> list[dict]:
     if not parent_targets:
         raise SystemExit("fan-out parent spec declares no surface targets — there is "
                          "nothing for segments to subdivide")
-    if parent.get("needs"):
-        raise SystemExit(
-            f"fan-out refused: this task leases {parent['needs']} — ONE owner, and one "
-            f"emulator cannot be driven by two agents. Device work is serial by "
-            f"construction: run it as a single developer")
+    parent_needs = list(parent.get("needs") or [])
+    for n in parent_needs:
+        claim_path(n)  # grammar: '<kind>:<name>'
 
     raw = (split or {}).get("segments")
     if not isinstance(raw, list) or not raw:
@@ -125,6 +126,7 @@ def validate(project: Path, parent: dict, split: dict) -> list[dict]:
             f"split this entry into sequential queue entries instead")
 
     segs = []
+    claimed: dict[str, str] = {}
     for i, seg in enumerate(raw, 1):
         if not isinstance(seg, dict):
             raise SystemExit(f"segment #{i} is not an object")
@@ -145,8 +147,26 @@ def validate(project: Path, parent: dict, split: dict) -> list[dict]:
                     f"machine cannot prove it disjoint from the other segments. Use a "
                     f"directory prefix ('.../ui/**'), a trailing '/*', or a literal file")
         if seg.get("needs"):
-            raise SystemExit(f"segment '{label}' declares needs {seg['needs']} — resources "
-                             f"are leased by the RUN (run-start), not by a segment")
+            seg_needs = list(seg["needs"])
+            for n in seg_needs:
+                claim_path(n)
+                if n not in parent_needs:
+                    raise SystemExit(
+                        f"segment '{label}' claims '{n}', which the RUN does not lease "
+                        f"({parent_needs or 'none'}) — a segment cannot conjure a shared "
+                        f"resource; declare it on the task (queue entry -> pick -> "
+                        f"run-start) so the run owns it")
+                if n in claimed:
+                    raise SystemExit(
+                        f"fan-out REFUSED: segments '{claimed[n]}' and '{label}' BOTH "
+                        f"claim '{n}'. The run's lease has ONE owner, so it cannot "
+                        f"serialize two agents inside one run — the second agent would "
+                        f"just refresh the first one's claim and drive the same device. "
+                        f"Only ONE segment may be device-facing; move the device work "
+                        f"into it, or run this entry as ONE developer")
+                claimed[n] = label
+        else:
+            seg_needs = []
         for t in targets:
             if not any(under(t, pt) for pt in parent_targets):
                 raise SystemExit(
@@ -168,7 +188,7 @@ def validate(project: Path, parent: dict, split: dict) -> list[dict]:
                 f"only when each piece is a real session; run this entry as a single "
                 f"developer, or split it into sequential queue entries")
         segs.append({"id": f"{pid}-s{i}", "label": label, "targets": targets,
-                     "effort_min": effort})
+                     "effort_min": effort, "needs": seg_needs})
 
     for i in range(len(segs)):
         for j in range(i + 1, len(segs)):
@@ -193,7 +213,7 @@ def validate(project: Path, parent: dict, split: dict) -> list[dict]:
                         f"{len(segs)}: {(parent.get('surface') or {}).get('label', pid)})",
                         "targets": seg["targets"]},
             "effort_min": seg["effort_min"],
-            "needs": [],
+            "needs": list(seg["needs"]),
             "parent": pid,
             "segment": seg["id"],
             "reason": f"segment of {pid}: {seg['label']}",

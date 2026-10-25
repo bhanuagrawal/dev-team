@@ -512,14 +512,20 @@ never silently blocking.
        It REFUSES unless: 2-4 segments, pairwise-disjoint targets (path prefixes
        — a mid-pattern glob is refused because disjointness cannot be proven from
        it), every segment inside the parent's own targets, every segment >= 60 min
-       of work, and the parent leases NO device (one emulator cannot be driven by
-       two agents; device work is serial by construction). **A refusal is not a
-       failure** — it means run the entry as ONE developer (step 7).
+       of work, and **at most ONE segment claims the device**. A segment may name
+       a resource in its own `needs` only if the task already declares it (the run
+       owns it, step 5b) — and only one may, because the run's lease has a single
+       owner and cannot serialize two agents INSIDE one run: a second device
+       segment would just refresh the first one's claim and drive the same
+       emulator. **A refusal is not a failure** — it means run the entry as ONE
+       developer (step 7).
        On success it creates one worktree + one segment spec per segment and
        prints each `developer-prompt` command.
    (b) Spawn **one developer subagent per segment**, each in its OWN worktree with
        its OWN spec prompt, same model rules, and each told it may only edit
-       inside its segment's targets. They may run in parallel.
+       inside its segment's targets. Segments WITHOUT `needs` may run in parallel;
+       **the device segment runs ALONE** (start it only when the others have
+       finished) — it is the only one holding the emulator.
    (c) ```
        python3 <team>/cli.py fanout-merge <project> --task-spec .pipeline/tasks/<id>.json
        ```

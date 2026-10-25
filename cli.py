@@ -565,6 +565,12 @@ def cmd_run_start(args: argparse.Namespace) -> None:
     if not task_id:
         raise SystemExit("task spec has no 'id' — the task id is the lease "
                          "owner, so run-start needs one")
+    if task.get("parent"):
+        raise SystemExit(
+            f"'{task_id}' is a FAN-OUT SEGMENT of '{task['parent']}', not a run — a "
+            f"segment is not a lease owner. The run is started once, on the parent "
+            f"spec; segments inherit its resources (run-start on a segment would hold "
+            f"the device under a DIFFERENT owner and fight the parent)")
     needs = task.get("needs") or []
     state = state_of(project)
     active = state.get("active") or {}
