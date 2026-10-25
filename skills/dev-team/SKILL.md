@@ -56,11 +56,9 @@ run `doctor` and a live probe (`research`, or the collector directly):
 | orchestrator | skill (this file) | the agentic tool you are |
 | create-agent | skill (`skills/new-project/SKILL.md`) | delegated on MODE B |
 | developer | skill (prompts/developer.md + this runbook) | YOUR native subagent |
-| reviewer (QA) | CODE prompt builder (`cli.py review-prompt`) + the verdict budget in `review-record` | YOUR native subagent in a FRESH session — never the developer's |
 | research (product) | CODE collectors + ONE synthesis (`cli.py plan`, raw: `cli.py research`) | EVERY run, step 2 |
 | alarm | CODE (`cli.py alarm`) | nightly end + on demand |
 | verifier/gates | CODE (`cli.py verify`) | before every release |
-| fan-out (optional) | CODE (`cli.py fanout-start` / `fanout-merge`) | N developer subagents, then ONE merge — the default is still one developer |
 | release-agent | CODE (`cli.py release`) | after green gates |
 | scribe | CODE (runs on `record`) | ledger + mirrors |
 
@@ -134,10 +132,6 @@ agentconfig.env`) — without it `doctor` correctly reports the agents blocked
   do not change either for them; propose instead. When in doubt whether a fix
   is generic enough, keep it out of team code and put it in the skill prose.
 - Never hand-edit `.pipeline/state.json` — write via `devteam record`.
-- A shared machine is LEASED, never assumed: `run-start` takes the spec's
-  `needs`, `record` gives them back. When `run-start` refuses, another run (or
-  the owner) owns the device — wait, and check `devteam leases`; never `--force`
-  a lease you cannot prove is dead.
 - The ONLY delivery goal is CI → Play **internal testing** (the version-bump
   push triggers the project's CI). Production promotion is human-only: no path
   in this team, and never an owner ask or a filed issue — the owner promotes
@@ -195,15 +189,6 @@ agentconfig.env`) — without it `doctor` correctly reports the agents blocked
                       frozen paths, verify commands, reference screen/pickers)
 - run logs:           `<project>/.pipeline/runs/<run_id>.log`
 - task specs:         `<project>/.pipeline/tasks/<task_id>.json`
-- fan-out artifacts:  `<project>/.pipeline/fanout/<task_id>/` — the ACCEPTED split
-                      (`split.json`) and one segment spec per agent
-                      (`segments/<segment id>.json`), kept as evidence even when
-                      a merge conflict later discards the fan-out
-- shared-resource leases: `~/.dev-team/locks/` (**machine-wide**, not per
-                      project — the AVD is not project-scoped), with the
-                      acquire/takeover/drop trail in `~/.dev-team/leases.log`.
-                      `devteam leases` reads it; `config/runtimes.json`
-                      `resources.avd` names this machine's AVD.
 
 ## Run-outcome contract (every run, both modes)
 A run ends in EXACTLY ONE of these — never in silence:
@@ -463,11 +448,7 @@ never silently blocking.
    Write it to `.pipeline/tasks/<id>.json`. `effort_min` (from the picked queue
    entry) is the expected size of ONE developer session — the developer prompt
    shows it, so the task is worked at its intended depth rather than gold-plated
-   or rushed. `needs` (optional) names the SHARED MACHINE resources the task
-   will occupy — `"needs": ["avd:<name>"]` when the work must drive or
-   screenshot the device. `pick` carries it from the queue entry; declare it by
-   hand only when you composed the spec yourself. run-start (step 5b) leases
-   exactly these.
+   or rushed.
 5. Prepare the sandbox (deterministic git plumbing is code, not you):
    `python3 <team>/cli.py worktree-start <project> --task-id <id>`
    → WORKTREE_PATH / WORKTREE_BRANCH / WORKTREE_BASE.
@@ -479,66 +460,8 @@ never silently blocking.
    device the owner started themselves as "leaked" and stops it, breaking the
    "never stop an emulator you did not start" rule. Recording the baseline here,
    before any device work, is what makes that check safe.
-5b. START THE RUN — record it active and LEASE what it will occupy:
-   `python3 <team>/cli.py run-start <project> --task-spec .pipeline/tasks/<id>.json`
-   It records the run as **ACTIVE** and acquires every resource in the spec's
-   `needs` as a **machine-global lease** owned by the task id. Two mechanical
-   consequences: `release` REFUSES to end any run but the active one, and
-   `record` (step 9, EVERY outcome) drops the leases — so a run that never
-   started cannot release, and a finished run cannot still hold the device.
-   A lease held by another run — or by the owner on purpose
-   (`devteam lease avd:<name> --take --owner <who>`) — makes run-start REFUSE,
-   naming the holder and when it expires. That is a **WAIT, never a
-   workaround**; `--force` exists only for a run you know is dead. The lease is
-   OWNERSHIP, not POWER: it is held while the emulator is off, and stopping an
-   AVD you started remains your job (baseline + leak check above).
-   `devteam leases` is the single source of truth and it is machine-wide, so it
-   shows leases held by runs in OTHER projects — per-project state could never
-   do that. A crash costs at most the TTL (6h; `--ttl-min` overrides), every
-   takeover is appended to `~/.dev-team/leases.log`, and no failure wedges the
-   machine: the next run takes a stale lease over.
 6. Get the exact developer prompt (keep it verbatim):
    `python3 <team>/cli.py developer-prompt <project> .pipeline/tasks/<id>.json`
-6b. **FAN-OUT — one entry, N developers, ONE gate and ONE release** (default:
-   **do not**; the planner's default is one developer and so is yours). Use it
-   only when the entry is honestly N disjoint file sets — and the split is a
-   CLAIM the machine checks before anyone is spawned:
-   (a) ```
-       python3 <team>/cli.py fanout-start <project> --task-spec .pipeline/tasks/<id>.json
-         [--split <split.json>]
-       ```
-       Without `--split` it uses the spec's own `fanout` blocks (pick carries
-       them from the queue entry), so the planner's split is exactly what runs.
-       It REFUSES unless: 2-4 segments, pairwise-disjoint targets (path prefixes
-       — a mid-pattern glob is refused because disjointness cannot be proven from
-       it), every segment inside the parent's own targets, every segment >= 60 min
-       of work, and **at most ONE segment claims the device**. A segment may name
-       a resource in its own `needs` only if the task already declares it (the run
-       owns it, step 5b) — and only one may, because the run's lease has a single
-       owner and cannot serialize two agents INSIDE one run: a second device
-       segment would just refresh the first one's claim and drive the same
-       emulator. **A refusal is not a failure** — it means run the entry as ONE
-       developer (step 7).
-       On success it creates one worktree + one segment spec per segment and
-       prints each `developer-prompt` command.
-   (b) Spawn **one developer subagent per segment**, each in its OWN worktree with
-       its OWN spec prompt, same model rules, and each told it may only edit
-       inside its segment's targets. Segments WITHOUT `needs` may run in parallel;
-       **the device segment runs ALONE** (start it only when the others have
-       finished) — it is the only one holding the emulator.
-   (c) ```
-       python3 <team>/cli.py fanout-merge <project> --task-spec .pipeline/tasks/<id>.json
-       ```
-       Commits each segment and merges them into the run's own worktree. A merge
-       CONFLICT — or a segment that produced NO changes — **DISCARDS the whole
-       fan-out**: branches deleted, every worktree removed, the parent worktree
-       reset to its base, and the command tells you to redo the entry serially.
-       Never hand-resolve: nobody assigned that merge, and the reviewer would be
-       reading a change no one designed.
-   (d) Then **steps 8 / 8b / release run ONCE**, on the merged parent worktree
-       (the merge prints the exact verify command): one gate chain, one review,
-       one version bump, one CI release. The agents were parallel in WRITING;
-       shipping is serial, always.
 7. SPAWN THE DEVELOPER AS A SUBAGENT — your tool's own native mechanism:
    - budget the session at the task's `effort_min` (~150 is the norm for a healthy
      entry, band 90-240 — sized in developer-effort minutes, which an agent spends
@@ -586,9 +509,12 @@ never silently blocking.
    - FAIL → append the failure output to the subagent's context (spawn a FRESH
      subagent with same prompt + "previous attempt failed as follows: ..." —
      max 2 attempts total, then `devteam record --result failed` and alarm).
-   - PASS → go to step 8b (the review) — do NOT release yet. A green gate chain
-     proves the change compiles, keeps the existing tests passing, stays in scope
-     and touches no protected field; it cannot say whether the change is RIGHT.
+   - PASS → `python3 <team>/cli.py release <project> --worktree <WORKTREE_PATH>
+     --task-spec .pipeline/tasks/<id>.json`
+     This bumps the version, writes release notes (within
+     `profile['whatsnew_max_chars']`, and NOT AT ALL when the project's notes are
+     owner-curated — see "The release handover"), commits, pushes to origin
+     main, and watches CI. CI delivers to Play internal testing.
    - READ THE DEVELOPER'S "NOTICED BUT NOT FIXED" NOTES — THEY ARE THE
      PIPELINE'S ONLY FEED-FORWARD. The prompt tells the developer to note
      unrelated defects rather than fix them, and those notes exist ONLY in the
@@ -600,54 +526,10 @@ never silently blocking.
      it with a stated reason — never leave one unread. A bugfix that removed an
      invented-winner defect from one screen left the identical defect on another
      screen, and only the developer's closing note surfaced it.
-8b. **REVIEW — the QA half of "dev plus QA"** (owner's direction, 2026-10-25:
-   *"one ticket is one task in the queue and that obviously can be done by [a]
-   set of pair of multiple dev + QA agent"*).
-   ```
-   python3 <team>/cli.py review-prompt <project> .pipeline/tasks/<id>.json \
-       --worktree <WORKTREE_PATH> > /tmp/review-prompt.txt
-   ```
-   Hand that prompt to a **FRESH subagent — NEVER the developer's session.** The
-   whole value is a reader who did not decide the change was good. Model:
-   `roles.reviewer.model` from `<team>/config/runtimes.json` (doctor validates it;
-   record which model you used, exactly as for the developer). The prompt already
-   carries the task, the FULL change (tracked diff **and** the untracked new files
-   — an uncommitted new file never appears in `git diff`, and the developer is told
-   to leave changes uncommitted), and a statement that the mechanical gates are
-   green so the reviewer spends its attention on what they cannot see.
-   Then record the answer and let CODE decide what happens next:
-   ```
-   python3 <team>/cli.py review-record <project> .pipeline/tasks/<id>.json \
-       --json <the reviewer's raw response> --worktree <WORKTREE_PATH>
-   ```
-   It prints the verdict, the findings, and **the next action, which is code's
-   call, not yours**:
-   - **`ship`** → release, as the next step describes.
-   - **`fix`** → spawn a FRESH developer session with the findings appended to its
-     prompt (the budget is 2 review rounds, then `record --result blocked` + the
-     owner ask). **Never re-run the reviewer on an unchanged diff** hoping for a
-     different answer — the same diff gets the same verdict and burns a round.
-   - **`block`** → `record --result blocked` + the owner ask; do not release.
-   A project may set `profile['review'] = {"advisory": true}` to record verdicts
-   without letting them stop a release, and `max_rounds` to change the budget.
-   **A verdict that could not be parsed is never a `ship`** — `review-record`
-   raises rather than assume, because "the review silently passed" is the exact
-   failure this stage exists to prevent.
-
-   Then release: `python3 <team>/cli.py release <project> --worktree
-   <WORKTREE_PATH> --task-spec .pipeline/tasks/<id>.json` — this bumps the
-   version, writes release notes (within `profile['whatsnew_max_chars']`, and NOT
-   AT ALL when the project's notes are owner-curated — see "The release
-   handover"), commits, pushes to origin main, and watches CI. CI delivers to Play
-   internal testing.
-
 9. Bookkeeping (one command, every outcome):
    `python3 <team>/cli.py record <project> --result shipped|failed|blocked
      [--task-spec .pipeline/tasks/<id>.json] [--version <ver>] [--commit <sha>]
      --note "<one line>"`
-   This also ENDS the run: it returns the leases step 5b took and clears the
-   active marker (which is why `release` can insist on an active run, and why a
-   run that is over never leaves the device held).
 10. `python3 <team>/cli.py alarm <project>` — staleness/CI reconciliation;
     may file a GitHub Issue. Then report the OUTCOME BANNER to the user/feed,
     one of the three contract states — e.g. `✅ SHIPPED vX → internal testing`

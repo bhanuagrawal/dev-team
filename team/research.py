@@ -20,8 +20,8 @@ from pathlib import Path
 from typing import Any
 
 from . import scan
-from .core import (RunLog, now_iso, pipeline_dir, profile_of, run, runtimes,
-                   save_json, save_state, state_of, target_looks_like_paths)
+from .core import (RunLog, now_iso, pipeline_dir, profile_of, run, save_json,
+                   save_state, state_of, target_looks_like_paths)
 from . import goals
 from . import queue as queue_mod
 
@@ -651,12 +651,6 @@ Decide what to BUILD NEXT. Output STRICT JSON only (no prose, no code fence):
       "effort_min": {target_effort},
       "priority": 1, "reason": "one line grounded in research",
       "advances": "<milestone id this task serves, or 'none'>",
-      "needs": ["avd:<name>"],   (OPTIONAL — only when the entry must drive or
-      screenshot the device on the AVD; see the SHARED MACHINES rule below.
-      Omit for code-and-docs work.)
-      "fanout": [{{"label": "...", "targets": ["<repo-relative path(s)>"],
-                  "effort_min": 70}}],  (OPTIONAL — only for GENUINELY disjoint
-      work; see the FAN-OUT rule. Omit when in doubt: one developer is the default.)
       "supersedes": ["<exact label of an already-queued task this makes irrelevant>"]}}
   ],
   "off_goal": [
@@ -765,27 +759,6 @@ Rules:
   store's own billing, which still charges its commission), and does this app
   need what the layer adds yet? Project-internal modules (`project(":design")`)
   are not dependencies in this sense and need no declaration.
-- SHARED MACHINES ARE LEASED, NOT ASSUMED: this machine has ONE emulator and
-  every run — plus the owner's own hand sessions — uses it. Any entry whose work
-  must DRIVE or SCREENSHOT the device on the AVD declares the resource it will
-  occupy: `"needs": ["avd:<name>"]`{machine_avd_line} `run-start` leases it for
-  the whole run (refusing, naming the holder, if another run or the owner owns
-  it) and `record` returns it on every outcome. Code-and-docs work occupies no
-  device: omit the field. An entry that silently assumes a free device is the
-  one a scheduled night run walks into mid-debug-session — the lease is what
-  makes shared hardware safe to hand to parallel schedules.
-- A FAN-OUT IS A SPLIT OF FILES, NOT OF INTENT: an entry may carry `fanout`
-  (2-4 segments, each a label + path targets + its own effort_min) ONLY when the
-  work separates into genuinely disjoint file sets that each stand alone. The run
-  checks the split IN CODE before spawning anyone: segment targets pairwise
-  disjoint, the union inside the entry's own `target`, every segment worth a real
-  session (>= 60 min), and AT MOST ONE segment may claim the device (a segment
-  names the resource in its own `needs`, and it must be one the entry already
-  declares — the run owns it; two device segments are refused because one
-  emulator cannot be driven by two agents). If the check refuses, the entry is
-  simply run as ONE developer — a wrong split costs nothing, but the queue stays
-  honest about what it expects. When in doubt, omit `fanout`: one developer is
-  always the default.
 - THE FREEZE IS DATA, NOT A COUNT: `constraints.frozen_paths` lists the paths an
   agent may NOT change and `constraints.lifted_paths` lists the ones the owner has
   already exempted. Check every entry's `target` against them BEFORE you queue it.
@@ -977,32 +950,6 @@ def _validate(result: dict, research: dict | None = None) -> str | None:
                         f"the {MAX_EFFORT_MIN}-minute ceiling: SPLIT it into "
                         "sequential entries that each stand alone and each still "
                         "deliver something verifiable in one session")
-        needs = q.get("needs")
-        if needs is not None:
-            if not isinstance(needs, list) or not needs or not all(
-                    isinstance(n, str) and re.match(r"^[a-z0-9_-]+:[A-Za-z0-9._-]+$", n)
-                    for n in needs):
-                return (f"queue entry '{q.get('label')}' has a 'needs' that is not a "
-                        "non-empty list of '<kind>:<name>' resource ids (e.g. "
-                        "['avd:<avd-name>']). run-start leases exactly these, so a "
-                        "bare 'avd' or prose there leases nothing — name the machine "
-                        "resource or omit the field entirely")
-        fan = q.get("fanout")
-        if fan is not None:
-            from .fanout import MAX_SEGMENTS
-            ok_fan = (isinstance(fan, list) and 2 <= len(fan) <= MAX_SEGMENTS
-                      and all(isinstance(f, dict)
-                              and str(f.get("label") or "").strip()
-                              and target_looks_like_paths(f.get("targets")
-                                                          or f.get("target"))
-                              for f in fan))
-            if not ok_fan:
-                return (f"queue entry '{q.get('label')}' has a 'fanout' that is not "
-                        f"2-{MAX_SEGMENTS} segments, each with a label and "
-                        "repo-relative path 'targets'. The RUN proves the segments "
-                        "disjoint — but it cannot repair a malformed split, so this "
-                        "would queue an entry whose fan-out is refused on arrival. "
-                        "Fix the segments or omit the field (one developer).")
         if q.get("type") in ("feature", "bugfix") and not target_looks_like_paths(q.get("target")):
             return (
                 f"{q.get('type')} queue entry '{q.get('label')}' names no "
@@ -1301,22 +1248,6 @@ apply, and the long-term VISION is still the owner's.
 """
 
 
-def _machine_avd_line() -> str:
-    """The machine's shared AVD, as an aside for the SHARED MACHINES rule.
-
-    Which emulator this host has is a fact about the HOST, so it lives in the
-    team's machine config (`runtimes.json` `resources.avd`) — never hardcoded in
-    the prompt (that is how a project/machine quirk gets baked into team code)
-    and never in a project's profile (the device is not project-scoped). Empty
-    when unconfigured, so the rule stays generic rather than inventing a name
-    that would lease nothing."""
-    avd = (runtimes().get("resources") or {}).get("avd")
-    if not avd or not str(avd).strip():
-        return ""
-    return (f" (on this machine the shared AVD is `avd:{avd}` — use exactly "
-            f"that name)")
-
-
 def render_prompt(project: Path, research: dict, log: RunLog | None = None,
                   focus: str | None = None) -> str:
     """The exact synthesis prompt (goals + research + rules). Exported by
@@ -1339,8 +1270,7 @@ def render_prompt(project: Path, research: dict, log: RunLog | None = None,
                                 target_effort=TARGET_EFFORT_MIN,
                                 min_effort=MIN_EFFORT_MIN,
                                 max_effort=MAX_EFFORT_MIN,
-                                max_queue=MAX_QUEUE,
-                                machine_avd_line=_machine_avd_line())
+                                max_queue=MAX_QUEUE)
     focus = (focus or "").strip()
     if focus:
         # Injected by replace (not .format) so owner text cannot break the
