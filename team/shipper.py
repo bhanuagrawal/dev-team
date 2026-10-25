@@ -279,6 +279,20 @@ def push_and_deliver(project: Path, worktree: Path, task: dict, new_version: str
             new_version = ".".join(map(str, (latest[0], latest[1], latest[2] + 1)))
             bump_version_file(worktree, (latest[0], latest[1], latest[2] + 1), log)
 
+        # An untracked file in the worktree is staged by `git add -A` and rides
+        # into the release commit even though it is part of no task. A crashed or
+        # interrupted developer session can leave scratch files behind (a stray
+        # `.diskprobe` was found this way), and scope_check cannot catch them:
+        # it blocks FROZEN paths, and a stray file is under no path at all.
+        # Not a gate (generated artifacts are sometimes legitimate) — just loud.
+        untracked = [f for f in git(["ls-files", "--others", "--exclude-standard"],
+                                    cwd=worktree).stdout.splitlines() if f.strip()]
+        if untracked:
+            shown = ", ".join(untracked[:8]) + (" …" if len(untracked) > 8 else "")
+            log(f"WARNING: {len(untracked)} untracked file(s) will be committed with this "
+                f"change and belong to no task — check they are not scratch left by a "
+                f"crashed session: {shown}")
+
         git(["add", "-A"], cwd=worktree)
         rc = git(["commit", "-m", bump_subject(task, new_version)], cwd=worktree)
         if rc.returncode != 0:
