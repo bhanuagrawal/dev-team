@@ -814,6 +814,33 @@ def _extract_json(text: str) -> dict:
     return json.loads(raw[start:end + 1])
 
 
+def _frozen_target_hit(target: str, frozen: list[str], lifted: list[str]) -> str | None:
+    """(frozen pattern hit, or None). Plan-time guard for the freeze.
+
+    The planner prompt TELLS the agent never to queue work under an un-lifted
+    frozen path, but nothing enforced it: a bogus entry sat in the queue and the
+    developer's scope gate only rejected it a whole run later, so a release ended
+    BLOCKED instead of shipped. Targets are allow-list globs, not real files, so
+    this is deliberately conservative — it catches the concrete, common case of a
+    target that IS a frozen path or sits directly under one (including a
+    './'-prefixed top-level spelling, which slips past a naive string compare),
+    and leaves the general "could this glob expand onto a frozen file?" question
+    to the scope gate at verify time, where the real changed-file list exists.
+    """
+    import fnmatch
+    for item in str(target or "").split(","):
+        norm = item.strip()
+        if norm.startswith("./"):
+            norm = norm[2:]
+        if not norm:
+            continue
+        for pat in frozen:
+            if (fnmatch.fnmatch(norm, pat) or norm == pat) \
+                    and not any(fnmatch.fnmatch(norm, lp) for lp in lifted):
+                return pat
+    return None
+
+
 def _validate(result: dict, research: dict | None = None) -> str | None:
     if "queue" not in result or not isinstance(result["queue"], list):
         return "missing list 'queue'"
@@ -890,6 +917,24 @@ def _validate(result: dict, research: dict | None = None) -> str | None:
                 "A TOP-LEVEL file with no '/' (e.g. settings.gradle.kts) must be "
                 "written './settings.gradle.kts' — every item needs a path separator."
             )
+        # The freeze is DATA the planner is told to respect — now enforced in code
+        # too, so a frozen target fails the PLAN instead of riding in the queue to
+        # block a whole later run at the developer's scope gate.
+        if research is not None and q.get("type") in ("feature", "bugfix"):
+            cons = research.get("constraints") or {}
+            hit = _frozen_target_hit(q.get("target") or "",
+                                     cons.get("frozen_paths") or [],
+                                     cons.get("lifted_paths") or [])
+            if hit:
+                return (
+                    f"{q.get('type')} queue entry '{q.get('label')}' targets a "
+                    f"FROZEN path ({hit}) with no owner lift — the developer's "
+                    "scope gate would reject it and the run would end BLOCKED, not "
+                    "shipped. Do not queue it: file an issues_to_file asking the "
+                    "owner for the lift (name the exact path, why the work needs "
+                    "it, and the cost of not acting), and queue the best "
+                    "freeze-clean step toward the same milestone instead."
+                )
         if q.get("type") == "motion":
             labels = {r.get("label"): set(r.get("paths") or []) for r in remaining}
             if q["label"] not in labels:
