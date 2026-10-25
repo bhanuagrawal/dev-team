@@ -721,6 +721,17 @@ Rules:
   that sits at the repo root, e.g. settings.gradle.kts or build.gradle.kts)
   must be written './settings.gradle.kts', never a bare filename — the
   validator rejects a separator-less item and the whole plan is refused.
+- A NEW DEPENDENCY IS A DECISION, NOT A DETAIL: if an entry's work needs a
+  third-party library, name it in the entry's `dependencies_added` (the alias,
+  the catalogue key or the coordinate — any of the three will do) AND say in
+  `reason` what it buys that the platform cannot already do. Code enforces this:
+  the verify gate REFUSES a new third-party dependency the task spec does not
+  declare, so an entry that omits it fails the run it was queued for. Before
+  naming one, ask the question the owner had to ask — is this service a LAYER on
+  top of something the platform already provides (a hosted billing SDK over the
+  store's own billing, which still charges its commission), and does this app
+  need what the layer adds yet? Project-internal modules (`project(":design")`)
+  are not dependencies in this sense and need no declaration.
 - THE FREEZE IS DATA, NOT A COUNT: `constraints.frozen_paths` lists the paths an
   agent may NOT change and `constraints.lifted_paths` lists the ones the owner has
   already exempted. Check every entry's `target` against them BEFORE you queue it.

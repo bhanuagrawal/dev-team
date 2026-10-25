@@ -653,8 +653,16 @@ def cmd_verify(args: argparse.Namespace) -> int:
                               capture_output=True, text=True).stdout.strip()
     else:
         base = "HEAD"
+    spec = None
+    if getattr(args, "task_spec", None):
+        sp = Path(args.task_spec)
+        if not sp.is_absolute():
+            sp = project / args.task_spec
+        if sp.exists():
+            import json as _json
+            spec = _json.loads(sp.read_text())
     ok, failures = gates.verify_all(project, tree, base, log,
-                                    gradle=not args.skip_gradle)
+                                    gradle=not args.skip_gradle, spec=spec)
     # Run-end emulator teardown: warn-only by owner decision (never flips the
     # gate). A skill asks an agent to stop its emulator; this is what holds when
     # it forgets — orphans are stopped and named in the run log. leak_check
@@ -816,6 +824,15 @@ def cmd_pick(args: argparse.Namespace) -> int:
         return 2
     pdir = pipeline_dir(project) / "tasks"
     pdir.mkdir(parents=True, exist_ok=True)
+    # Carry the queue entry's dependency declaration into the task spec: the
+    # verify gate REFUSES a new third-party dependency that the spec does not
+    # declare, and the spec is what the gate reads. Without this copy the
+    # declaration could never reach it and every dependency change would fail.
+    label = (task.get("surface") or {}).get("label")
+    for entry in (state_of(project).get("queue") or []):
+        if entry.get("label") == label and entry.get("dependencies_added"):
+            task["dependencies_added"] = entry["dependencies_added"]
+            break
     spec_path = pdir / f"{task['id']}.json"
     spec_path.write_text(json.dumps(task, indent=2) + "\n")
     print(json.dumps({"pick": task, "spec": str(spec_path),
@@ -1412,7 +1429,7 @@ def main() -> None:
     q.set_defaults(fn=cmd_queue)
     rh = sub.add_parser("run-headless"); rh.add_argument("project"); rh.add_argument("--task-spec", required=True); rh.add_argument("--supervised", action="store_true"); rh.set_defaults(fn=cmd_run_headless)
     ro = sub.add_parser("run-orchestrator"); ro.add_argument("project"); ro.add_argument("--prompt"); ro.add_argument("--timeout", type=int, default=5400); ro.set_defaults(fn=cmd_run_orchestrator)
-    v = sub.add_parser("verify");      v.add_argument("project"); v.add_argument("--worktree"); v.add_argument("--skip-gradle", action="store_true"); v.set_defaults(fn=cmd_verify)
+    v = sub.add_parser("verify");      v.add_argument("project"); v.add_argument("--worktree"); v.add_argument("--task-spec"); v.add_argument("--skip-gradle", action="store_true"); v.set_defaults(fn=cmd_verify)
     em = sub.add_parser("emulators");  em.add_argument("project"); em.add_argument("--record", action="store_true"); em.add_argument("--reset", action="store_true"); em.set_defaults(fn=cmd_emulators)
     r = sub.add_parser("release");     r.add_argument("project"); r.add_argument("--worktree", required=True); r.add_argument("--task-spec", required=True); r.set_defaults(fn=cmd_release)
     rec = sub.add_parser("record"); rec.add_argument("project")

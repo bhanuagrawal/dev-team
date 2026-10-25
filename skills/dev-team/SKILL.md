@@ -495,7 +495,17 @@ never silently blocking.
      which spawns the runtime subprocess from runtimes.json and applies the
      same gates.
 8. When the developer subagent returns, TRUST NOTHING:
-   `python3 <team>/cli.py verify <project> --worktree <WORKTREE_PATH>`
+   `python3 <team>/cli.py verify <project> --worktree <WORKTREE_PATH>
+   --task-spec .pipeline/tasks/<id>.json`
+   - Pass `--task-spec`: the dependency gate reads the task's
+     `dependencies_added` declaration from it. Without the spec the gate can
+     still REPORT a new third-party dependency but cannot judge it, so the one
+     check that forces "what does this library buy us?" goes quiet exactly when
+     it matters. Declare dependencies when you write the spec (step 4): a task
+     that adds a library names it there — alias, catalogue key or coordinate —
+     together with why, because a dependency is a third party, a supply chain, an
+     account, a licence and permanent maintenance, and the plan once adopted one
+     from a spec's stack line without anybody asking.
    - FAIL → append the failure output to the subagent's context (spawn a FRESH
      subagent with same prompt + "previous attempt failed as follows: ..." —
      max 2 attempts total, then `devteam record --result failed` and alarm).
