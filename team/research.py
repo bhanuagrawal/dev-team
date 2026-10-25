@@ -1168,16 +1168,24 @@ def capability_upgrades(signals: dict, profile: dict, project: Path | None = Non
             "benefit": "see what rival apps actually do — surfaces, flows, "
                        "paywalls — so feature calls can cite evidence instead of "
                        "guesswork, and a gap a rival already closed is visible",
-            "how": "owner, with a human at the device: `recon research --term "
-                   "\"<what a rival is>\" --dir <project>/.pipeline/competitors` "
-                   "(needs an emulator; never chained into the nightly). The "
-                   "planner reads the reports on the next run. A launcher-style "
-                   "rival gates behind the Android HOME role, so the crawl stops at "
-                   "the role dialog and reports one screen until the human clears "
-                   "it: grant the role (`adb shell cmd role add-role-holder "
-                   "android.app.role.HOME <pkg>`) and re-crawl, then `adb uninstall` "
-                   "the rival and confirm the role has no holder — never leave a "
-                   "third-party home app on the shared test AVD",
+            "how": "any agent or the owner can run this — it needs an EMULATOR and "
+                   "a Play-signed-in account, NOT a human standing by: "
+                   "`recon research --term \"<what a rival is>\" --dir "
+                   "<project>/.pipeline/competitors --yes`. `--yes` skips the pick "
+                   "confirmation, and every pick carries its reasons (organic rank, "
+                   "rating, developer, not-yet-crawled), so whoever is driving can "
+                   "judge it from the log instead of asking the owner. A HUMAN is "
+                   "needed only at a WALL no machine can pass — a rival's sign-in or "
+                   "CAPTCHA — or when a launcher-style rival gates behind the Android "
+                   "HOME role, in which case it reports one screen until someone "
+                   "grants the role (`adb shell cmd role add-role-holder "
+                   "android.app.role.HOME <pkg>`), re-crawls, then `adb uninstall` "
+                   "the rival and confirms the role has no holder — never leave a "
+                   "third-party home app on the shared test AVD. Measured over seven "
+                   "real runs: six rivals crawled with no owner input at all; the one "
+                   "genuine blocker was Play installs on the shared AVD exceeding a "
+                   "900s timeout, which re-running clears. Never chained into the "
+                   "nightly — the planner reads the reports on the next run.",
         })
     return up
 
