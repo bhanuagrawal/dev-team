@@ -116,9 +116,20 @@ def agent_requirements(profile: dict, project: Path) -> dict[str, list[tuple[str
          _model_fix("product_synthesis", syn)),
     ]
 
+    # The reviewer is a STAGE with its own model (dev plus QA). It is declared in
+    # config/runtimes.json and, until 2026-10-25, nothing invoked it — so the only
+    # check on a change was mechanical. A missing reviewer model means the QA stage
+    # cannot run, which is exactly the kind of blocked agent doctor exists to name.
+    rev = rt.get("reviewer", {})
+    review_checks = [
+        ("reviewer model configured", bool(resolve_model(rev)),
+         _model_fix("reviewer", rev)),
+    ]
+
     return {
         "orchestrator": dev_checks + synthesis_checks,
         "developer": dev_checks,
+        "reviewer": review_checks,
         "research-agent": ga4_checks + play_checks + synthesis_checks,
         "release-agent": ship_checks + synthesis_checks,
         "alarm-agent": ship_checks[:1],

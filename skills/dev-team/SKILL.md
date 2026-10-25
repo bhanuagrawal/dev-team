@@ -509,12 +509,9 @@ never silently blocking.
    - FAIL → append the failure output to the subagent's context (spawn a FRESH
      subagent with same prompt + "previous attempt failed as follows: ..." —
      max 2 attempts total, then `devteam record --result failed` and alarm).
-   - PASS → `python3 <team>/cli.py release <project> --worktree <WORKTREE_PATH>
-     --task-spec .pipeline/tasks/<id>.json`
-     This bumps the version, writes release notes (within
-     `profile['whatsnew_max_chars']`, and NOT AT ALL when the project's notes are
-     owner-curated — see "The release handover"), commits, pushes to origin
-     main, and watches CI. CI delivers to Play internal testing.
+   - PASS → go to step 8b (the review) — do NOT release yet. A green gate chain
+     proves the change compiles, keeps the existing tests passing, stays in scope
+     and touches no protected field; it cannot say whether the change is RIGHT.
    - READ THE DEVELOPER'S "NOTICED BUT NOT FIXED" NOTES — THEY ARE THE
      PIPELINE'S ONLY FEED-FORWARD. The prompt tells the developer to note
      unrelated defects rather than fix them, and those notes exist ONLY in the
@@ -526,6 +523,47 @@ never silently blocking.
      it with a stated reason — never leave one unread. A bugfix that removed an
      invented-winner defect from one screen left the identical defect on another
      screen, and only the developer's closing note surfaced it.
+8b. **REVIEW — the QA half of "dev plus QA"** (owner's direction, 2026-10-25:
+   *"one ticket is one task in the queue and that obviously can be done by [a]
+   set of pair of multiple dev + QA agent"*).
+   ```
+   python3 <team>/cli.py review-prompt <project> .pipeline/tasks/<id>.json \
+       --worktree <WORKTREE_PATH> > /tmp/review-prompt.txt
+   ```
+   Hand that prompt to a **FRESH subagent — NEVER the developer's session.** The
+   whole value is a reader who did not decide the change was good. Model:
+   `roles.reviewer.model` from `<team>/config/runtimes.json` (doctor validates it;
+   record which model you used, exactly as for the developer). The prompt already
+   carries the task, the FULL change (tracked diff **and** the untracked new files
+   — an uncommitted new file never appears in `git diff`, and the developer is told
+   to leave changes uncommitted), and a statement that the mechanical gates are
+   green so the reviewer spends its attention on what they cannot see.
+   Then record the answer and let CODE decide what happens next:
+   ```
+   python3 <team>/cli.py review-record <project> .pipeline/tasks/<id>.json \
+       --json <the reviewer's raw response> --worktree <WORKTREE_PATH>
+   ```
+   It prints the verdict, the findings, and **the next action, which is code's
+   call, not yours**:
+   - **`ship`** → release, as the next step describes.
+   - **`fix`** → spawn a FRESH developer session with the findings appended to its
+     prompt (the budget is 2 review rounds, then `record --result blocked` + the
+     owner ask). **Never re-run the reviewer on an unchanged diff** hoping for a
+     different answer — the same diff gets the same verdict and burns a round.
+   - **`block`** → `record --result blocked` + the owner ask; do not release.
+   A project may set `profile['review'] = {"advisory": true}` to record verdicts
+   without letting them stop a release, and `max_rounds` to change the budget.
+   **A verdict that could not be parsed is never a `ship`** — `review-record`
+   raises rather than assume, because "the review silently passed" is the exact
+   failure this stage exists to prevent.
+
+   Then release: `python3 <team>/cli.py release <project> --worktree
+   <WORKTREE_PATH> --task-spec .pipeline/tasks/<id>.json` — this bumps the
+   version, writes release notes (within `profile['whatsnew_max_chars']`, and NOT
+   AT ALL when the project's notes are owner-curated — see "The release
+   handover"), commits, pushes to origin main, and watches CI. CI delivers to Play
+   internal testing.
+
 9. Bookkeeping (one command, every outcome):
    `python3 <team>/cli.py record <project> --result shipped|failed|blocked
      [--task-spec .pipeline/tasks/<id>.json] [--version <ver>] [--commit <sha>]

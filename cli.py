@@ -578,6 +578,53 @@ def cmd_developer_prompt(args: argparse.Namespace) -> None:
                        tpl_override=getattr(args, "template", None)))
 
 
+def cmd_review_prompt(args: argparse.Namespace) -> None:
+    """Print the REVIEW prompt for a fresh session (the QA half of dev+QA)."""
+    project = resolve_project(args.project)
+    profile = profile_of(project)
+    task = json.loads(task_spec_path(project, args.task_spec).read_text())
+    worktree = Path(args.worktree).resolve() if args.worktree else project
+    base = "HEAD"
+    if args.worktree:
+        base = subprocess.run(["git", "rev-parse", "dt-base"], cwd=worktree,
+                              capture_output=True, text=True).stdout.strip()
+    from team.review import build_prompt
+    print(build_prompt(project, profile, task, worktree, base,
+                       gates=getattr(args, "gates", "") or ""))
+
+
+def cmd_review_record(args: argparse.Namespace) -> None:
+    """Record a reviewer verdict and print what the orchestrator must do next."""
+    project = resolve_project(args.project)
+    profile = profile_of(project)
+    state = state_of(project)
+    from team import review as rv
+    task = json.loads(task_spec_path(project, args.task_spec).read_text())
+    if args.json:
+        verdict = rv.parse_verdict(Path(args.json).read_text())
+    else:
+        if args.verdict not in rv.VERDICTS:
+            raise SystemExit(f"review-record needs --verdict one of {rv.VERDICTS}, "
+                             f"or --json <the reviewer's raw response>")
+        verdict = {"verdict": args.verdict,
+                   "findings": [{"what": f} for f in (args.finding or [])],
+                   "note": args.note or ""}
+    # Only a review that actually FAILED to arrive may be re-recorded: an unchanged
+    # diff re-reviewed produces the same verdict and burns a round.
+    entry = rv.record_review(state, task, verdict, worktree=str(args.worktree or ""))
+    save_state(project, state)
+    print(f"review #{rv.rounds_for(state, task.get('id'))} recorded: "
+          f"{entry['verdict'].upper()} — {entry['note']}")
+    for f in entry["findings"]:
+        if isinstance(f, dict):
+            print(f"  [{f.get('severity', '?')}] {f.get('file', '?')}: {f.get('what', '')}"
+                  + (f"  (why: {f.get('why')})" if f.get("why") else ""))
+        else:
+            print(f"  - {f}")
+    print()
+    print(rv.next_action(profile, state, task, verdict))
+
+
 def cmd_queue(args: argparse.Namespace) -> None:
     project = resolve_project(args.project)
     state = state_of(project)
@@ -1417,6 +1464,8 @@ def main() -> None:
     pk = sub.add_parser("pick"); pk.add_argument("project"); pk.add_argument("--supervised", action="store_true"); pk.set_defaults(fn=cmd_pick)
     w = sub.add_parser("worktree-start"); w.add_argument("project"); w.add_argument("--task-id", required=True); w.set_defaults(fn=cmd_worktree_start)
     dp = sub.add_parser("developer-prompt"); dp.add_argument("project"); dp.add_argument("task_spec"); dp.add_argument("--template", choices=["motion", "generic", "auto"], default="auto"); dp.set_defaults(fn=cmd_developer_prompt)
+    rp = sub.add_parser("review-prompt"); rp.add_argument("project"); rp.add_argument("task_spec"); rp.add_argument("--worktree"); rp.add_argument("--gates", default=""); rp.set_defaults(fn=cmd_review_prompt)
+    rr = sub.add_parser("review-record"); rr.add_argument("project"); rr.add_argument("task_spec"); rr.add_argument("--verdict", choices=["ship", "fix", "block"]); rr.add_argument("--json"); rr.add_argument("--note", default=""); rr.add_argument("--finding", action="append"); rr.add_argument("--worktree"); rr.set_defaults(fn=cmd_review_record)
     q = sub.add_parser("queue"); q.add_argument("project"); q.add_argument("--done")
     q.add_argument("action", nargs="?", choices=["add", "review"])
     q.add_argument("--spec"); q.add_argument("--type")
