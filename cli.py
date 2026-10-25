@@ -511,6 +511,93 @@ def cmd_worktree_start(args: argparse.Namespace) -> None:
     print(f"WORKTREE_BASE={base}")
 
 
+def cmd_run_start(args: argparse.Namespace) -> None:
+    """START THE RUN: record it as the active run and lease every shared
+    resource the spec declares in `needs` (e.g. the machine's AVD).
+
+    Two jobs, both enforced on the other end: `release` refuses to end any
+    run but the active one, and `record` (every outcome reaches it) drops the
+    leases and clears the marker. A lease held by another run is a WAIT — the
+    refusal names the holder; `--force` exists for a known-dead run, never to
+    share a device."""
+    from team import lease
+    project = resolve_project(args.project)
+    task = json.loads(task_spec_path(project, args.task_spec).read_text())
+    task_id = task.get("id")
+    if not task_id:
+        raise SystemExit("task spec has no 'id' — the task id is the lease "
+                         "owner, so run-start needs one")
+    needs = task.get("needs") or []
+    state = state_of(project)
+    active = state.get("active") or {}
+    if active.get("task_id") and active.get("task_id") != task_id:
+        if not args.force:
+            raise SystemExit(
+                f"run-start refused: an active run is already recorded for "
+                f"'{active.get('task_id')}' (since {active.get('since', '?')}) — "
+                f"record it first (record drops its leases), or pass --force if "
+                f"that run is actually dead")
+        for res in active.get("needs") or []:
+            lease.drop(res, active.get("task_id"), force=True)
+    ttl = args.ttl_min or lease.DEFAULT_TTL_MIN
+    acquired: list[str] = []
+    try:
+        for res in needs:
+            lease.acquire(res, task_id, project=project.name, ttl_min=ttl)
+            acquired.append(res)
+    except SystemExit:
+        # Never leave partial leases behind: a failed run-start holds nothing.
+        for res in reversed(acquired):
+            lease.drop(res, task_id, force=True)
+        raise
+    state["active"] = {"task_id": task_id, "needs": list(needs),
+                       "since": now_iso()}
+    save_state(project, state)
+    print(json.dumps({"run": task_id, "leased": acquired, "ttl_min": ttl,
+                      "note": "the run is active; `release` may now end only this "
+                              "run, and `record` (every outcome) drops the leases"},
+                     indent=2))
+
+
+def cmd_leases(args: argparse.Namespace) -> None:
+    """Who owns what on this machine — the single source of truth for shared
+    resources, including leases a run in ANOTHER project or a hand session
+    holds (per-project state could never show those)."""
+    from team import lease
+    rows = lease.list_leases()
+    if not rows:
+        print("no resource leases held — every shared resource is free")
+        return
+    print(f"{'RESOURCE':22} {'OWNER':32} {'PROJECT':14} {'SINCE':21} "
+          f"{'EXPIRES':21}  STATE")
+    for r in rows:
+        state = f"STALE {r['age_min']}m old (next run may take it over)" \
+            if r["stale"] else f"held ({r['age_min']}m old)"
+        print(f"{r['resource']:22} {r['owner']:32} {r['project']:14} "
+              f"{r['since']:21} {r['until']:21}  {state}")
+    print("audit trail: ~/.dev-team/leases.log (every acquire/takeover/drop)")
+
+
+def cmd_lease(args: argparse.Namespace) -> None:
+    """Hand operation of a resource OUTSIDE a run: the owner claiming the
+    device for themselves (so a scheduled run sees it held and waits), or
+    force-dropping a lease whose owning run is known to be dead."""
+    from team import lease
+    owner = args.owner or "manual"
+    if args.take:
+        d = lease.acquire(args.resource, owner, ttl_min=args.ttl_min or
+                          lease.DEFAULT_TTL_MIN, force=args.force)
+        print(f"leased {args.resource} as '{owner}' until "
+              f"{lease.ts2iso(d['until_ts'])}")
+    elif args.drop:
+        if lease.drop(args.resource, owner, force=args.force):
+            print(f"released {args.resource}")
+        else:
+            print(f"no lease on {args.resource} (already free)")
+    else:
+        raise SystemExit("lease: give --take or --drop")
+
+
 def cmd_run_headless(args: argparse.Namespace) -> int:
     """Skill-documented fallback for tools without subagents + bakeoff harness.
     Deterministic spawn from runtimes.json with identical gates."""
@@ -739,18 +826,67 @@ def cmd_emulators(args: argparse.Namespace) -> int:
 
 def cmd_release(args: argparse.Namespace) -> int:
     project = resolve_project(args.project)
+    # A release ENDS a run — the bump, the push, the CI handover are terminal —
+    # and it may only end the run that is active, because that run is the one
+    # holding the resource leases (the AVD) and spending the verify/review
+    # verdicts this step consumes. Refusing anything else is what turns "the
+    # 02:00 run and the hand run colliding" into a message instead of a mess.
+    task = json.loads(task_spec_path(project, args.task_spec).read_text())
+    active = state_of(project).get("active") or {}
+    if active.get("task_id") and active.get("task_id") != task.get("id"):
+        raise SystemExit(
+            f"release refused: the active run is '{active.get('task_id')}' "
+            f"(since {active.get('since', '?')}) but you are releasing "
+            f"'{task.get('id')}' — one release ends one run; record the active "
+            f"run first (record drops its leases)")
+    if not active.get("task_id"):
+        raise SystemExit(
+            f"release refused: there is no active run for '{task.get('id')}' — "
+            f"every run starts with `run-start` (it records the run and leases "
+            f"the spec's `needs`), and a run that was never started was never "
+            f"cleared to release")
     log = RunLog(project, "release-" + today())
     worktree = Path(args.worktree).resolve()
     latest = shipper.remote_latest_version(project)
     if latest is None:
         raise SystemExit("no v* tags on origin; cannot compute next version")
     new = (latest[0], latest[1], latest[2] + 1)
-    task = json.loads(task_spec_path(project, args.task_spec).read_text())
     name = shipper.bump_version_file(worktree, new, log)
     shipper.write_whatsnew(worktree, task, log)
     res = shipper.push_and_deliver(project, worktree, task, name, log)
     print(json.dumps(res, indent=2))
     return 0 if res.get("delivered") else 1
+
+
+def _end_run(project: Path, state: dict, task_id: str) -> None:
+    """End the run: return its leases and clear the active marker.
+
+    Called FIRST and unconditionally by `record`, because everything else
+    record does (ledger rows, a fresh scan, plan refresh) is bookkeeping that
+    can fail on a real project — and the run's hold on shared hardware must not
+    depend on it. Drops are idempotent and the state save here is repeated at
+    the end of record, so a later failure can never leave the device leased to
+    a run that is over."""
+    from team import lease
+    active = state.get("active") or {}
+    if not active.get("task_id"):
+        return
+    changed = False
+    if active.get("task_id") == task_id:
+        for res in active.get("needs") or []:
+            try:
+                lease.drop(res, active["task_id"])
+                print(f"released {res} (the run's lease is returned)")
+            except SystemExit as e:
+                print(f"warning: lease {res} not returned: {e}", file=sys.stderr)
+        state.pop("active", None)
+        changed = True
+    elif task_id != "?":
+        print(f"warning: recorded '{task_id}' but the active run is "
+              f"'{active.get('task_id')}' — its leases are untouched",
+              file=sys.stderr)
+    if changed:
+        save_state(project, state)
 
 
 def cmd_record(args: argparse.Namespace) -> None:
@@ -762,6 +898,9 @@ def cmd_record(args: argparse.Namespace) -> None:
              "result": args.result, "note": args.note or "",
              "finished": now_iso()}
     state.setdefault("runs", []).append(entry)
+    # END THE RUN before the bookkeeping below: the ledger scan can fail on a
+    # real project, and a run that is over must not still hold the device.
+    _end_run(project, state, entry["task_id"])
     if args.result == "shipped":
         entry["version"] = args.version or ""
         label = task.get("surface", {}).get("label", args.task or "?")
@@ -832,6 +971,25 @@ def cmd_record(args: argparse.Namespace) -> None:
     print_page(project, "refreshed by this record", published=published)
 
 
+def _carry_queue_fields(state: dict, task: dict) -> None:
+    """What a queue entry DECLARES travels with the task into its spec.
+
+    The spec is what the machine reads — verify reads `dependencies_added`
+    (a dependency the spec does not declare is refused) and `run-start` reads
+    `needs` (the shared resources the run will lease). A declaration left on
+    the queue entry could never reach either, so pick copies both, matched by
+    label exactly as the dependency copy always has been."""
+    label = (task.get("surface") or {}).get("label")
+    for entry in (state.get("queue") or []):
+        if entry.get("label") != label:
+            continue
+        if entry.get("dependencies_added"):
+            task["dependencies_added"] = entry["dependencies_added"]
+        if entry.get("needs"):
+            task["needs"] = list(entry["needs"])
+        break
+
+
 def cmd_pick(args: argparse.Namespace) -> int:
     project = resolve_project(args.project)
     profile = profile_of(project)
@@ -871,15 +1029,7 @@ def cmd_pick(args: argparse.Namespace) -> int:
         return 2
     pdir = pipeline_dir(project) / "tasks"
     pdir.mkdir(parents=True, exist_ok=True)
-    # Carry the queue entry's dependency declaration into the task spec: the
-    # verify gate REFUSES a new third-party dependency that the spec does not
-    # declare, and the spec is what the gate reads. Without this copy the
-    # declaration could never reach it and every dependency change would fail.
-    label = (task.get("surface") or {}).get("label")
-    for entry in (state_of(project).get("queue") or []):
-        if entry.get("label") == label and entry.get("dependencies_added"):
-            task["dependencies_added"] = entry["dependencies_added"]
-            break
+    _carry_queue_fields(state_of(project), task)
     spec_path = pdir / f"{task['id']}.json"
     spec_path.write_text(json.dumps(task, indent=2) + "\n")
     print(json.dumps({"pick": task, "spec": str(spec_path),
@@ -887,6 +1037,10 @@ def cmd_pick(args: argparse.Namespace) -> int:
                       # .pipeline/tasks/ is relative to the PROJECT dir, which
                       # developer-prompt already searches — a bare filename
                       # resolves nowhere (CWD/team dir hold no tasks/).
+                      # Same for the spec, and the lease that follows it:
+                      # run-start records the run as active and leases the
+                      # spec's `needs` before any device work happens.
+                      "run_start_cmd": f"python3 cli.py run-start {project.name} --task-spec .pipeline/tasks/{spec_path.name}",
                       "prompt_cmd": f"python3 cli.py developer-prompt {project.name} .pipeline/tasks/{spec_path.name}"},
                      indent=2))
     # The pick executes the head the planner marked. If the plan has not been
@@ -1463,6 +1617,9 @@ def main() -> None:
     sc = sub.add_parser("scan");       sc.add_argument("project"); sc.add_argument("--skip-gradle", action="store_true"); sc.set_defaults(fn=cmd_scan)
     pk = sub.add_parser("pick"); pk.add_argument("project"); pk.add_argument("--supervised", action="store_true"); pk.set_defaults(fn=cmd_pick)
     w = sub.add_parser("worktree-start"); w.add_argument("project"); w.add_argument("--task-id", required=True); w.set_defaults(fn=cmd_worktree_start)
+    rs = sub.add_parser("run-start", help="start the run: record it active and lease the spec's `needs` (shared resources, e.g. the AVD)"); rs.add_argument("project"); rs.add_argument("--task-spec", required=True); rs.add_argument("--force", action="store_true", help="take over a prev run's active marker + leases (its run must be dead)"); rs.add_argument("--ttl-min", type=int); rs.set_defaults(fn=cmd_run_start)
+    ls = sub.add_parser("leases", help="who holds which shared resource on this machine"); ls.set_defaults(fn=cmd_leases)
+    lz = sub.add_parser("lease", help="hand-op a resource outside a run (claim the device for yourself / force-drop a dead run's lease)"); lz.add_argument("resource"); lz.add_argument("--take", action="store_true"); lz.add_argument("--drop", action="store_true"); lz.add_argument("--owner", help="who owns this lease (default: manual)"); lz.add_argument("--ttl-min", type=int); lz.add_argument("--force", action="store_true"); lz.set_defaults(fn=cmd_lease)
     dp = sub.add_parser("developer-prompt"); dp.add_argument("project"); dp.add_argument("task_spec"); dp.add_argument("--template", choices=["motion", "generic", "auto"], default="auto"); dp.set_defaults(fn=cmd_developer_prompt)
     rp = sub.add_parser("review-prompt"); rp.add_argument("project"); rp.add_argument("task_spec"); rp.add_argument("--worktree"); rp.add_argument("--gates", default=""); rp.set_defaults(fn=cmd_review_prompt)
     rr = sub.add_parser("review-record"); rr.add_argument("project"); rr.add_argument("task_spec"); rr.add_argument("--verdict", choices=["ship", "fix", "block"]); rr.add_argument("--json"); rr.add_argument("--note", default=""); rr.add_argument("--finding", action="append"); rr.add_argument("--worktree"); rr.set_defaults(fn=cmd_review_record)

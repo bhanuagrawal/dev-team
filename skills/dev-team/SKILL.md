@@ -132,6 +132,10 @@ agentconfig.env`) — without it `doctor` correctly reports the agents blocked
   do not change either for them; propose instead. When in doubt whether a fix
   is generic enough, keep it out of team code and put it in the skill prose.
 - Never hand-edit `.pipeline/state.json` — write via `devteam record`.
+- A shared machine is LEASED, never assumed: `run-start` takes the spec's
+  `needs`, `record` gives them back. When `run-start` refuses, another run (or
+  the owner) owns the device — wait, and check `devteam leases`; never `--force`
+  a lease you cannot prove is dead.
 - The ONLY delivery goal is CI → Play **internal testing** (the version-bump
   push triggers the project's CI). Production promotion is human-only: no path
   in this team, and never an owner ask or a filed issue — the owner promotes
@@ -189,6 +193,11 @@ agentconfig.env`) — without it `doctor` correctly reports the agents blocked
                       frozen paths, verify commands, reference screen/pickers)
 - run logs:           `<project>/.pipeline/runs/<run_id>.log`
 - task specs:         `<project>/.pipeline/tasks/<task_id>.json`
+- shared-resource leases: `~/.dev-team/locks/` (**machine-wide**, not per
+                      project — the AVD is not project-scoped), with the
+                      acquire/takeover/drop trail in `~/.dev-team/leases.log`.
+                      `devteam leases` reads it; `config/runtimes.json`
+                      `resources.avd` names this machine's AVD.
 
 ## Run-outcome contract (every run, both modes)
 A run ends in EXACTLY ONE of these — never in silence:
@@ -448,7 +457,11 @@ never silently blocking.
    Write it to `.pipeline/tasks/<id>.json`. `effort_min` (from the picked queue
    entry) is the expected size of ONE developer session — the developer prompt
    shows it, so the task is worked at its intended depth rather than gold-plated
-   or rushed.
+   or rushed. `needs` (optional) names the SHARED MACHINE resources the task
+   will occupy — `"needs": ["avd:<name>"]` when the work must drive or
+   screenshot the device. `pick` carries it from the queue entry; declare it by
+   hand only when you composed the spec yourself. run-start (step 5b) leases
+   exactly these.
 5. Prepare the sandbox (deterministic git plumbing is code, not you):
    `python3 <team>/cli.py worktree-start <project> --task-id <id>`
    → WORKTREE_PATH / WORKTREE_BRANCH / WORKTREE_BASE.
@@ -460,6 +473,24 @@ never silently blocking.
    device the owner started themselves as "leaked" and stops it, breaking the
    "never stop an emulator you did not start" rule. Recording the baseline here,
    before any device work, is what makes that check safe.
+5b. START THE RUN — record it active and LEASE what it will occupy:
+   `python3 <team>/cli.py run-start <project> --task-spec .pipeline/tasks/<id>.json`
+   It records the run as **ACTIVE** and acquires every resource in the spec's
+   `needs` as a **machine-global lease** owned by the task id. Two mechanical
+   consequences: `release` REFUSES to end any run but the active one, and
+   `record` (step 9, EVERY outcome) drops the leases — so a run that never
+   started cannot release, and a finished run cannot still hold the device.
+   A lease held by another run — or by the owner on purpose
+   (`devteam lease avd:<name> --take --owner <who>`) — makes run-start REFUSE,
+   naming the holder and when it expires. That is a **WAIT, never a
+   workaround**; `--force` exists only for a run you know is dead. The lease is
+   OWNERSHIP, not POWER: it is held while the emulator is off, and stopping an
+   AVD you started remains your job (baseline + leak check above).
+   `devteam leases` is the single source of truth and it is machine-wide, so it
+   shows leases held by runs in OTHER projects — per-project state could never
+   do that. A crash costs at most the TTL (6h; `--ttl-min` overrides), every
+   takeover is appended to `~/.dev-team/leases.log`, and no failure wedges the
+   machine: the next run takes a stale lease over.
 6. Get the exact developer prompt (keep it verbatim):
    `python3 <team>/cli.py developer-prompt <project> .pipeline/tasks/<id>.json`
 7. SPAWN THE DEVELOPER AS A SUBAGENT — your tool's own native mechanism:
@@ -568,6 +599,9 @@ never silently blocking.
    `python3 <team>/cli.py record <project> --result shipped|failed|blocked
      [--task-spec .pipeline/tasks/<id>.json] [--version <ver>] [--commit <sha>]
      --note "<one line>"`
+   This also ENDS the run: it returns the leases step 5b took and clears the
+   active marker (which is why `release` can insist on an active run, and why a
+   run that is over never leaves the device held).
 10. `python3 <team>/cli.py alarm <project>` — staleness/CI reconciliation;
     may file a GitHub Issue. Then report the OUTCOME BANNER to the user/feed,
     one of the three contract states — e.g. `✅ SHIPPED vX → internal testing`

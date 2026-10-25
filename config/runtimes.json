@@ -14,5 +14,9 @@
     "product_synthesis": {
       "model": "thinker"
     }
+  },
+  "resources": {
+    "avd": "medium_phone",
+    "_comment": "Machine-shared resources, by instance name. Queue entries declare the ones a run needs (needs: ['avd:<name>'] — the planner's SHARED MACHINES rule); run-start leases them machine-globally (~/.dev-team/locks) so a nightly run and a hand run can never share one emulator."
   }
 }
