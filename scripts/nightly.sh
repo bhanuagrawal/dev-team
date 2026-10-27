@@ -37,29 +37,30 @@ else
 fi
 echo "=== nightly start $(date '+%F %T') project=$PROJECT ===" >> "$TEAM/logs/launchd.log"
 
-# Read the orchestrator model from runtimes.json
-MODEL=$(python3 -c "
+# Model for `opencode run --model`: prefer the orchestrator provider/model that
+# agentconfig publishes into the launchd session. Fall back to the role token in
+# runtimes.json (llm/thinker -> LLM_MODEL/THINKER_LLM_MODEL, qualified with
+# LLM_PROVIDER) only when those are missing. Never hardcode a provider/model.
+if [ -n "${OPENCODE_ORCHESTRATOR_PROVIDER:-}" ] && [ -n "${OPENCODE_ORCHESTRATOR_MODEL:-}" ]; then
+  MODEL="${OPENCODE_ORCHESTRATOR_PROVIDER}/${OPENCODE_ORCHESTRATOR_MODEL}"
+else
+  MODEL=$(python3 -c "
 import json, pathlib
 cfg = json.loads(pathlib.Path('$TEAM/config/runtimes.json').read_text())
 print(cfg.get('roles', {}).get('orchestrator', {}).get('model', ''))
 " 2>/dev/null)
-
-# Role token -> model id (agentconfig env se). LLM_MODEL / THINKER_LLM_MODEL are
-# bare ids for some providers (opencode/opencode-go/cerebras) and already
-# qualified for others (nebius/...), so qualify with LLM_PROVIDER only when
-# there is no "/" yet. Provider comes from env too — never hardcode it here.
-case "$MODEL" in
-  llm)     MODEL="${LLM_MODEL:-}" ;;
-  thinker) MODEL="${THINKER_LLM_MODEL:-}" ;;
-esac
-
-case "$MODEL" in
-  */*) ;;
-  *)   [ -n "${LLM_PROVIDER:-}" ] && MODEL="${LLM_PROVIDER}/${MODEL}" ;;
-esac
+  case "$MODEL" in
+    llm)     MODEL="${LLM_MODEL:-}" ;;
+    thinker) MODEL="${THINKER_LLM_MODEL:-}" ;;
+  esac
+  case "$MODEL" in
+    */*) ;;
+    *)   [ -n "${LLM_PROVIDER:-}" ] && MODEL="${LLM_PROVIDER}/${MODEL}" ;;
+  esac
+fi
 
 if [ -z "$MODEL" ]; then
-  echo "ERROR: no orchestrator model in config/runtimes.json" >> "$TEAM/logs/launchd.log"
+  echo "ERROR: no orchestrator model resolved (check agentconfig env)" >> "$TEAM/logs/launchd.log"
   rm -rf "$LOCK"
   exit 1
 fi
