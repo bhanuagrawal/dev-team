@@ -44,10 +44,18 @@ cfg = json.loads(pathlib.Path('$TEAM/config/runtimes.json').read_text())
 print(cfg.get('roles', {}).get('orchestrator', {}).get('model', ''))
 " 2>/dev/null)
 
-# Role token -> qualified model id (agentconfig env se)
+# Role token -> model id (agentconfig env se). LLM_MODEL / THINKER_LLM_MODEL are
+# bare ids for some providers (opencode/opencode-go/cerebras) and already
+# qualified for others (nebius/...), so qualify with LLM_PROVIDER only when
+# there is no "/" yet. Provider comes from env too — never hardcode it here.
 case "$MODEL" in
   llm)     MODEL="${LLM_MODEL:-}" ;;
   thinker) MODEL="${THINKER_LLM_MODEL:-}" ;;
+esac
+
+case "$MODEL" in
+  */*) ;;
+  *)   [ -n "${LLM_PROVIDER:-}" ] && MODEL="${LLM_PROVIDER}/${MODEL}" ;;
 esac
 
 if [ -z "$MODEL" ]; then
