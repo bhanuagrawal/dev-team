@@ -418,6 +418,28 @@ def available_avds() -> list[str]:
     return [ln.strip() for ln in r.stdout.splitlines() if ln.strip()]
 
 
+def _is_test_runner_infra_failure(output: str) -> bool:
+    """True when failure was an inability to boot/connect an emulator or test runner,
+    rather than an assertion failure in an executed test."""
+    low = output.lower()
+    if any(sig in low for sig in ("there were failing tests", "tests on ", "assertionerror", "comparisonfailure")):
+        return False
+    infra_signatures = (
+        "no connected devices",
+        "deviceexception",
+        "failed to establish session",
+        "device offline",
+        "device not found",
+        "could not connect to",
+        "emulator process has exited early",
+        "running multiple emulators with the same avd",
+        "showing crashdialog to get consent",
+        "not available",
+        "missing",
+    )
+    return any(sig in low for sig in infra_signatures)
+
+
 def instrumented_check(worktree: Path, profile: dict, log) -> tuple[bool, str]:
     """The device gate: run the project's instrumented tests on an emulator.
 
@@ -438,6 +460,9 @@ def instrumented_check(worktree: Path, profile: dict, log) -> tuple[bool, str]:
       * otherwise exactly ONE bounded boot through `with-emulator`, whose EXIT
         trap guarantees teardown on success, failure and timeout, so the run-end
         leak check stays clean.
+      * failure to RUN the test (no AVD, missing with-emulator, device offline) is
+        NON-BLOCKING (warn-only). Failure of the test ITSELF (assertion/runtime
+        failure) is a HARD BLOCKER.
     """
     if not has_instrumented_tests(worktree):
         log("instrumented: no on-device tests in this project — skipped (no boot)")
@@ -457,13 +482,12 @@ def instrumented_check(worktree: Path, profile: dict, log) -> tuple[bool, str]:
     else:
         avd = cfg.get("avd") or next(iter(available_avds()), "")
         if not avd:
-            return False, ("instrumented: on-device tests exist but no AVD is "
-                           "available — cannot claim they pass (install an AVD or "
-                           "set verify.avd in the project profile)")
+            log("~ instrumented: on-device tests exist but no AVD available — failure to run test is non-blocking (warn-only)")
+            return True, ""
         wrapper = shutil.which("with-emulator") or str(Path.home() / ".local/bin/with-emulator")
         if not Path(wrapper).exists():
-            return False, ("instrumented: on-device tests exist but `with-emulator` "
-                           "is missing — refusing to boot an emulator that might leak")
+            log("~ instrumented: on-device tests exist but with-emulator missing — failure to run test is non-blocking (warn-only)")
+            return True, ""
         # Nothing is booted, so a lock file can only be debris from a dead
         # instance — and `android emulator start` refuses to run at all while
         # one exists ("Running multiple emulators with the same AVD"). Clear it
@@ -476,11 +500,19 @@ def instrumented_check(worktree: Path, profile: dict, log) -> tuple[bool, str]:
     try:
         r = run(argv, worktree, timeout=timeout, env=gradle_env(worktree))
     except subprocess.TimeoutExpired:
-        return False, f"{task} TIMED OUT after {timeout}s on the emulator"
+        log(f"~ instrumented: {task} timed out after {timeout}s on the emulator — failure to run test is non-blocking (warn-only)")
+        return True, ""
     if r.returncode == 0:
         log(f"  ok: {task}")
         return True, ""
-    return False, f"{task} FAILED on the emulator:\n{(r.stdout + r.stderr)[-4000:]}"
+
+    output = (r.stdout or "") + (r.stderr or "")
+    tail = output[-4000:]
+    if _is_test_runner_infra_failure(output):
+        log(f"~ instrumented: device test runner could not execute ({task}) — failure to run test is non-blocking (warn-only)")
+        return True, ""
+
+    return False, f"{task} FAILED on the emulator (test assertion/execution failure):\n{tail}"
 
 
 

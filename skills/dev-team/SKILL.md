@@ -477,8 +477,9 @@ never silently blocking.
        - Follow the exact instructions, conventions, and constraints from the developer prompt generated in step 6.
        - Read mandatory style/design docs (`docs/design.md`, `profile.conventions`, official Google skills).
        - Edit ONLY files under the task's allow-list (`surface.targets`). NEVER edit on `main` directly.
+       - Write UI Tests: whenever adding or modifying UI screens, components, or interactive flows, write automated UI tests (in the project's test set, e.g. `commonTest` or `androidTest`) verifying layout math, interaction states, and user flows.
        - Never touch frozen paths or release knobs (versionName, versionCode, signing, targetSdk).
-       - Test incrementally inside the worktree using the project's verify commands (e.g. `gradle compileDebugKotlinAndroid testDebugUnitTest`).
+       - Test incrementally inside the worktree using the project's verify commands (e.g. `gradle compileDebugKotlinAndroid testDebugUnitTest`). Failure to run an on-device runner (no AVD/emulator) is non-blocking (warn-only), but any failure of the test assertions themselves is a hard blocker.
        - If you encounter a build or test error, diagnose and resolve it directly in the worktree.
    (B) SUBAGENT DELEGATION (Optional fallback when supported and conserving orchestrator context):
        - Budget the session at the task's `effort_min` (~150 is the norm for a healthy entry, band 90-240).

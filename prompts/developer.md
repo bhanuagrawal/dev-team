@@ -39,7 +39,7 @@ HARD RULES:
    environment, and an unrelated pin change in the verified diff fails the run.
 4. Do NOT commit. Do NOT push. Do NOT bump versions. Leave all changes UNCOMMITTED
    in the working tree; the pipeline commits after its own gates pass.
-5. Self-check before finishing: run {compile_cmd} and make sure it is green.
+5. UI Tests & Self-Check: Write automated UI tests for any new or modified UI components/surfaces verifying transitions, geometry, and states. Run {compile_cmd} and your tests to verify they are green. Failure to run on-device tests due to missing emulator is non-blocking, but test assertion failures are a hard block.
 6. Device hygiene: if you need an emulator, start it through
    `with-emulator <avd> -- <command...>` (teardown is guaranteed by an EXIT
    trap). If you start one by hand, `android emulator stop <avd>` before you

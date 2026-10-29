@@ -27,8 +27,12 @@ HARD RULES:
    environment, and an unrelated pin change in the verified diff fails the run.
 4. Do NOT commit. Do NOT push. Do NOT bump versions. Leave all changes UNCOMMITTED
    in the working tree; the pipeline commits after its own gates pass.
-5. Self-check before finishing: run {compile_cmd} and {test_cmd} and make sure
-   both are green.
+5. UI Tests & Self-Check:
+   - For every UI feature, screen, or component added/modified, WRITE automated UI tests
+     (e.g. in commonTest/androidTest) verifying layout math, interaction states, and user flows.
+   - Run {compile_cmd} and {test_cmd} and make sure all tests pass. If on-device tests cannot
+     run in this local environment (no emulator/device), that failure to run is non-blocking,
+     but any failure of the test assertions themselves is a hard blocker.
 6. Respect the project's package placement law (see conventions): shared
    utilities in the shared package, feature files in the feature package,
    no direct feature-to-feature imports.
