@@ -552,6 +552,15 @@ def _open_asks_pull(profile: dict) -> list[dict]:
         return []
 
 
+def _store_readiness_pull(project: Path) -> dict:
+    """Audit of Google Play Store readiness (targetSdk, permissions, icons, signing, privacy)."""
+    try:
+        from .store_readiness import store_readiness_dict
+        return store_readiness_dict(project)
+    except Exception as e:
+        return {"status": "error", "reason": str(e)[:200]}
+
+
 def research_collect(project: Path, log: RunLog) -> dict:
     """All deterministic collectors → research dict (no LLM)."""
     profile = profile_of(project)
@@ -581,6 +590,7 @@ def research_collect(project: Path, log: RunLog) -> dict:
             "ga4": _ga4_pull(project, profile),
             "vitals": _play_vitals_pull(project, profile),
             "reviews": _play_reviews_pull(project, profile),
+            "store_readiness": _store_readiness_pull(project),
             "competitors": _competitors_pull(project),
             "market": _market_pull(project),
             "codebase": {
@@ -644,6 +654,7 @@ def research_collect(project: Path, log: RunLog) -> dict:
     dest.write_text(json.dumps(research, indent=2) + "\n")
     log(f"research: collected → {dest.name} "
         f"(ga4={research['signals']['ga4'].get('status')}, "
+        f"store_readiness={research['signals']['store_readiness'].get('status')}, "
         f"remaining={len(remaining)}, upgrades={len(research['upgrades'])})")
     for u in research["upgrades"]:
         log(f"  upgrade available: {u['title']}")
@@ -695,6 +706,7 @@ Decide what to BUILD NEXT. Output STRICT JSON only (no prose, no code fence):
   ]
 }}
 Rules:
+- STORE READINESS: inspect `signals.store_readiness`. If blockers exist (or `is_ready_for_submission` is false), prioritize resolving those compliance issues (targetSdk, permissions, privacy policy, icons, release signing) before discretionary polish, keeping the app releasable on Google Play.
 - READING SOURCE CODE: read project files from `signals.repo.read_tree` — that is
   the worktree at origin/main and it is what is actually SHIPPED. The owner's own
   checkout may lag origin/main by many commits or carry unrelated work in
@@ -1249,6 +1261,23 @@ def capability_upgrades(signals: dict, profile: dict, project: Path | None = Non
                    "genuine blocker was Play installs on the shared AVD exceeding a "
                    "900s timeout, which re-running clears. Never chained into the "
                    "nightly — the planner reads the reports on the next run.",
+        })
+    readiness = signals.get("store_readiness", {})
+    if readiness.get("status") == "blocked":
+        blockers_summary = "; ".join(b.get("detail", "") for b in readiness.get("blockers", [])[:2])
+        up.append({
+            "id": "play-store-blockers",
+            "title": "Resolve Google Play Store readiness blockers",
+            "benefit": f"Submission compliance ({readiness.get('blockers_count', 0)} blockers: {blockers_summary})",
+            "how": "run `devteam store-readiness <project>` to inspect and resolve blockers in manifest/build config",
+        })
+    elif readiness.get("status") == "needs_review" and readiness.get("warnings"):
+        warnings_summary = "; ".join(w.get("detail", "") for w in readiness.get("warnings", [])[:2])
+        up.append({
+            "id": "play-store-warnings",
+            "title": "Review Google Play Store readiness warnings",
+            "benefit": f"Clean submission ({readiness.get('warnings_count', 0)} warnings: {warnings_summary})",
+            "how": "run `devteam store-readiness <project>` to review warnings before production release",
         })
     return up
 

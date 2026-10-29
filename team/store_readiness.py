@@ -388,3 +388,46 @@ def format_readiness_report(project: Path, checks: list[ReadinessCheck]) -> tupl
 
     lines.append(f"OVERALL STATUS: {overall}")
     return "\n".join(lines), is_ready
+
+
+def store_readiness_dict(project: Path) -> dict:
+    """Return a structured, JSON-serializable dictionary of store readiness audit for researcher / pipeline."""
+    checks = run_store_readiness_audit(project)
+    blockers = [
+        {"category": c.category, "name": c.name, "detail": c.detail, "fix": c.fix}
+        for c in checks if not c.passed and c.severity == "BLOCKER"
+    ]
+    warnings = [
+        {"category": c.category, "name": c.name, "detail": c.detail, "fix": c.fix}
+        for c in checks if not c.passed and c.severity == "WARNING"
+    ]
+    passed = [
+        {"category": c.category, "name": c.name, "detail": c.detail}
+        for c in checks if c.passed
+    ]
+    is_ready = len(blockers) == 0
+    status = "ready" if is_ready and not warnings else ("needs_review" if is_ready else "blocked")
+
+    return {
+        "status": status,
+        "is_ready_for_submission": is_ready and not warnings,
+        "total_checks": len(checks),
+        "passed_count": len(passed),
+        "blockers_count": len(blockers),
+        "warnings_count": len(warnings),
+        "blockers": blockers,
+        "warnings": warnings,
+        "passed_summary": [f"{c['category']}: {c['name']}" for c in passed],
+        "checks": [
+            {
+                "category": c.category,
+                "name": c.name,
+                "passed": c.passed,
+                "severity": c.severity,
+                "detail": c.detail,
+                "fix": c.fix,
+            }
+            for c in checks
+        ],
+    }
+
