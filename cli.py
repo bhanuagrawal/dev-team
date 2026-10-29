@@ -811,6 +811,12 @@ def cmd_pick(args: argparse.Namespace) -> int:
                   and any(s.get("risk") == "supervised" and s["status"] == "unanimated"
                           for s in surfaces))
     task = next_task(project, seq, supervised=getattr(args, "supervised", False))
+    if task is None and getattr(args, "auto_refill", False):
+        from team import refill
+        log = RunLog(project, "pick-refill-" + today())
+        r = refill.auto_refill(project, log=log)
+        if r.get("status") == "refilled":
+            task = next_task(project, seq, supervised=getattr(args, "supervised", False))
     if task is not None and unsup_only and not getattr(args, "supervised", False):
         print(json.dumps({"pick": None,
                           "note": "only supervised tasks remain — needs a human present",
@@ -1279,6 +1285,64 @@ def cmd_design(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_refill(args: argparse.Namespace) -> int:
+    """Scan market/competitor horizon and refill the queue when active tasks are exhausted."""
+    project = resolve_project(args.project)
+    log = RunLog(project, "refill-" + today())
+    from team import refill
+    res = refill.auto_refill(project, topic=getattr(args, "topic", "") or "",
+                             force=getattr(args, "force", False), log=log)
+    if res.get("status") == "refilled":
+        print(f"\nAutonomous Horizon Refilled:")
+        print(f"  Milestone: {res.get('milestone')}")
+        print(f"  Tasks Added: {res.get('tasks_added')}")
+        print(f"  Active Queue Total: {res.get('total_queued')}")
+        print_page(project, "horizon refilled")
+        return 0
+    elif res.get("status") == "not_needed":
+        print("refill: queue already has actionable tasks (use --force to override)")
+        return 0
+    elif res.get("status") == "no_vision":
+        print("refill: cannot formulate next horizon without profile.goals.vision set")
+        return 1
+    else:
+        print(f"refill: status={res.get('status')}")
+        return 1
+
+
+def cmd_loop(args: argparse.Namespace) -> int:
+    """Inspect and run autonomous workflow cycles back-to-back."""
+    project = resolve_project(args.project)
+    cycles = getattr(args, "cycles", 1) or 1
+    auto_refill = not getattr(args, "no_auto_refill", False)
+    log = RunLog(project, "loop-" + today())
+    from team import refill, scan
+    print(f"\n=== Autonomous Dev-Team Loop: {project.name} ({cycles} cycle{'s' if cycles > 1 else ''}) ===")
+
+    for i in range(1, cycles + 1):
+        print(f"\n--- Cycle {i}/{cycles} ---")
+        if auto_refill and refill.needs_refill(project):
+            print("Queue empty — triggering auto-refill from market & competitor horizon...")
+            r = refill.auto_refill(project, log=log)
+            if r.get("status") == "refilled":
+                print(f"  Refilled milestone: {r.get('milestone')} (+{r.get('tasks_added')} tasks)")
+            else:
+                print(f"  Refill result: {r.get('status')}")
+
+        state = state_of(project)
+        seq = len(state.get("runs", [])) + 1
+        task = scan.next_task(project, seq, supervised=getattr(args, "supervised", False))
+        if not task:
+            print("No actionable tasks in queue. Cycle halted.")
+            break
+        print(f"Next Task: [{task.get('id')}] {task.get('surface', {}).get('label')}")
+        print(f"  Type: {task.get('type')} · Effort: {task.get('effort_min', 150)} min · Priority: {task.get('priority', '-')}")
+        print(f"  Targets: {task.get('surface', {}).get('targets')}")
+        print(f"  Worktree: dt/{task.get('id')}")
+
+    return 0
+
+
 def cmd_research(args: argparse.Namespace) -> int:
     """The planner's ENGINE, raw: collectors + one synthesis, or --apply-result.
 
@@ -1460,7 +1524,7 @@ def main() -> None:
     o = sub.add_parser("onboard");     o.add_argument("project"); o.set_defaults(fn=cmd_onboard)
     s = sub.add_parser("status");      s.add_argument("project"); s.add_argument("--skip-gradle", action="store_true"); s.set_defaults(fn=cmd_status)
     sc = sub.add_parser("scan");       sc.add_argument("project"); sc.add_argument("--skip-gradle", action="store_true"); sc.set_defaults(fn=cmd_scan)
-    pk = sub.add_parser("pick"); pk.add_argument("project"); pk.add_argument("--supervised", action="store_true"); pk.set_defaults(fn=cmd_pick)
+    pk = sub.add_parser("pick"); pk.add_argument("project"); pk.add_argument("--supervised", action="store_true"); pk.add_argument("--auto-refill", action="store_true", help="synthesize next horizon and refill queue if empty"); pk.set_defaults(fn=cmd_pick)
     w = sub.add_parser("worktree-start"); w.add_argument("project"); w.add_argument("--task-id", required=True); w.set_defaults(fn=cmd_worktree_start)
     dp = sub.add_parser("developer-prompt"); dp.add_argument("project"); dp.add_argument("task_spec"); dp.add_argument("--template", choices=["motion", "generic", "auto"], default="auto"); dp.set_defaults(fn=cmd_developer_prompt)
     q = sub.add_parser("queue"); q.add_argument("project"); q.add_argument("--done")
@@ -1506,6 +1570,17 @@ def main() -> None:
     m.add_argument("--depth", choices=["basic", "advanced"], default="advanced")
     m.add_argument("--results", type=int, default=5)
     m.set_defaults(fn=cmd_market)
+    rf = sub.add_parser("refill", help="scan market/competitor horizon and refill queue with next milestone tasks")
+    rf.add_argument("project")
+    rf.add_argument("--topic", help="optional topic or focus area (defaults to project vision)")
+    rf.add_argument("--force", action="store_true", help="refill even if queue still has pending tasks")
+    rf.set_defaults(fn=cmd_refill)
+    lp = sub.add_parser("loop", help="autonomous multi-cycle runner with auto-refill")
+    lp.add_argument("project")
+    lp.add_argument("--cycles", type=int, default=1, help="number of cycles to execute (default: 1)")
+    lp.add_argument("--supervised", action="store_true", help="allow picking supervised tasks")
+    lp.add_argument("--no-auto-refill", action="store_true", help="do not auto-refill when queue empties")
+    lp.set_defaults(fn=cmd_loop)
     des = sub.add_parser("design", help="synthesize or enforce docs/design.md style law for an app")
     des.add_argument("project")
     des.add_argument("--topic", help="focus topic or aesthetic thesis (defaults to app vision)")

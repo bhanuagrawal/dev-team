@@ -1582,6 +1582,9 @@ def research_run(project: Path, log: RunLog, use_llm: bool = True,
     `focus` is the owner's scoped review request for this cycle — it is written
     into the exported prompt (--no-llm) and the in-process synthesis alike, so a
     focused review never requires hand-editing the prompt file."""
+    from . import refill
+    if refill.needs_refill(project):
+        refill.auto_refill(project, log=log)
     research = research_collect(project, log)
     if not use_llm:
         # Hand the prompt to the calling agent: the team's contract is "the LLM
