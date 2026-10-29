@@ -86,6 +86,12 @@ off-machine (you generate; they never generate).
    see what users do" (instrumentation), the third a retention/traction number.
    The pipeline then orders every release against these — see the dev-team
    skill's GOAL MODE section.
+   **Also write `docs/design.md` (Mandatory Design Law):** Run `python3 <team>/cli.py design <project>`
+   or research category standards via the Tavily MCP server / web research. Every new app
+   MUST have an enforced design system defining OLED high-contrast palettes, 8-point spatial grid,
+   typography hierarchy (hero numerals, tabular figures), touch target minimums (48dp), and
+   motion physics. Register `docs/design.md` in `profile.json['conventions']`. No app is ever
+   scaffolded with generic, default, or unstyled UI.
    **Also stamp `"profile_schema": 2`** (the team's current data shape) so the
    project is born current. From then on `devteam adapt <project>` — step 0 of
    every workflow run — keeps it that way as the team itself changes; a project

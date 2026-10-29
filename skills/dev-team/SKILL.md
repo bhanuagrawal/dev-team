@@ -728,6 +728,20 @@ The owner may ask for ONE agent only, and that must work:
   required only at a sign-in/CAPTCHA wall), or `recon play` / `recon install`
   for one step. Do NOT chain it into the pipeline and do not look for recon code
   here.
+- "use researcher to find a suitable design.md so that is enforced" / "run market research" →
+  The research agent has live web research capabilities via the **Tavily MCP Server**
+  (configured in `~/.gemini/config/mcp_config.json`, powered by `tavily-mcp` and `TAVILY_API_KEY`).
+  Tools available: `tavily_search`, `tavily_research`, `tavily_extract`, `tavily_crawl`, `tavily_map`
+  (or via code: `python3 <team>/cli.py market <project> "<topic>"`).
+  When asked to research a design system or market benchmark:
+  1. Researcher queries Tavily for modern Android/Compose design standards, typography scales,
+     spacing tokens, and competitor UX patterns.
+  2. Writes the design specification to `<project>/docs/design.md`.
+  3. Registers `docs/design.md` in `<project>/.pipeline/profile.json` under `conventions`.
+  4. Runs `python3 <team>/cli.py adapt <project>` to validate.
+  5. The developer agent's prompt automatically injects `docs/design.md` under
+     **CODING CONVENTIONS (MANDATORY READS — style law; must read before writing code)**
+     on all future runs, strictly enforcing the design system across the entire team.
 Rule: honor the narrower scope exactly — no pipeline chaining — except the
 non-negotiables (never commit on red gates; never touch frozen paths; never
 hand-edit state.json; MODE-B gates still asked). State a one-line report of

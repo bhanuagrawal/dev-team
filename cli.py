@@ -1233,6 +1233,52 @@ def cmd_schedules(args: argparse.Namespace) -> None:
           "`devteam setup --schedule auto [--at HH:MM]`)")
 
 
+def cmd_market(args: argparse.Namespace) -> int:
+    """Tavily web & market research for an app thesis, feature, or design pattern."""
+    project = resolve_project(args.project)
+    log = RunLog(project, "market-" + today())
+    from team import tavily
+    query = (args.query or "").strip()
+    if not query:
+        profile = profile_of(project)
+        query = (profile.get("goals") or {}).get("vision", "").strip()
+        if not query:
+            raise SystemExit("provide a query or topic, e.g.:\n"
+                             f"  devteam market {project.name} \"competitor features\"")
+    report = tavily.search_market(project, query, search_depth=args.depth,
+                                  max_results=args.results, log=log)
+    if report.get("status") == "error":
+        print(f"ERROR: {report.get('error')}", file=sys.stderr)
+        return 1
+    print(f"\nMarket Research: {query}")
+    if report.get("answer"):
+        print(f"\nSummary:\n{report['answer']}\n")
+    print(f"Sources ({report.get('results_count', 0)}):")
+    for r in report.get("results", [])[:5]:
+        print(f" - {r.get('title')}: {r.get('url')}")
+    print(f"\nSaved to .pipeline/market/report.json (folded into research signals)")
+    return 0
+
+
+def cmd_design(args: argparse.Namespace) -> int:
+    """Synthesize or enforce docs/design.md style law for an app."""
+    project = resolve_project(args.project)
+    log = RunLog(project, "design-" + today())
+    from team import design
+    res = design.ensure_design(project, topic=args.topic or "", force=args.force, log=log)
+    if res.get("status") == "exists":
+        print(f"\nDesign System: already active at {res['path']}")
+        print(f"Registered in .pipeline/profile.json conventions (mandatory read for developer agent).")
+        print(f"Use --force to re-synthesize from fresh market research.")
+    else:
+        print(f"\nDesign System synthesized and enforced:")
+        print(f"  Doc: {res['path']}")
+        print(f"  Query: {res.get('query')}")
+        print(f"  Market Sources: {res.get('sources', 0)}")
+        print(f"  Registered in .pipeline/profile.json conventions.")
+    return 0
+
+
 def cmd_research(args: argparse.Namespace) -> int:
     """The planner's ENGINE, raw: collectors + one synthesis, or --apply-result.
 
@@ -1454,6 +1500,17 @@ def main() -> None:
     rs.add_argument("--apply-result", help="synthesis JSON produced by the host tool's native agent; applies through the same validation + goal gate")
     rs.add_argument("--focus", help="the owner's scoped review request for this cycle (e.g. 'review the existing UX'); injected into the prompt as a labelled block")
     rs.set_defaults(fn=cmd_research)
+    m = sub.add_parser("market", help="run Tavily web & market research for an app thesis, feature, or design pattern")
+    m.add_argument("project")
+    m.add_argument("query", nargs="?", default="", help="topic, question or feature to research (defaults to project vision)")
+    m.add_argument("--depth", choices=["basic", "advanced"], default="advanced")
+    m.add_argument("--results", type=int, default=5)
+    m.set_defaults(fn=cmd_market)
+    des = sub.add_parser("design", help="synthesize or enforce docs/design.md style law for an app")
+    des.add_argument("project")
+    des.add_argument("--topic", help="focus topic or aesthetic thesis (defaults to app vision)")
+    des.add_argument("--force", action="store_true", help="overwrite existing docs/design.md with fresh synthesis")
+    des.set_defaults(fn=cmd_design)
     pl = sub.add_parser("plan", help="THE PLANNER — step 2 of every run: review the plan "
                                      "against fresh data, maintain the tree and the queue, "
                                      "and hand this run its task (the queue head)")

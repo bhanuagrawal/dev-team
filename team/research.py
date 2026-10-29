@@ -508,6 +508,24 @@ def _competitors_pull(project: Path) -> dict:
     }
 
 
+def _market_pull(project: Path) -> dict:
+    """Market research artifact generated via MCP / Tavily web research.
+    Like recon-agent, the seam is data: .pipeline/market/report.json.
+    """
+    root = project / ".pipeline" / "market" / "report.json"
+    if not root.exists():
+        return {"status": "none",
+                "reason": "no market/report.json — research subagent can run Tavily MCP search"}
+    try:
+        data = json.loads(root.read_text())
+        if isinstance(data, dict):
+            data.setdefault("status", "ok")
+            return data
+        return {"status": "ok", "data": data}
+    except Exception as e:
+        return {"status": "error", "reason": str(e)[:200]}
+
+
 def _open_asks_pull(profile: dict) -> list[dict]:
     """Open GitHub issues on the project (number + title), so the synthesis can
     SEE which owner asks are already filed and not re-propose one.
@@ -564,6 +582,7 @@ def research_collect(project: Path, log: RunLog) -> dict:
             "vitals": _play_vitals_pull(project, profile),
             "reviews": _play_reviews_pull(project, profile),
             "competitors": _competitors_pull(project),
+            "market": _market_pull(project),
             "codebase": {
                 "targets_total": len(profile["targets"]),
                 "shipped_count": sum(1 for s in surfaces if s["status"] == "shipped"),
