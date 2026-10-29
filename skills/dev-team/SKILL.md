@@ -6,8 +6,10 @@ description: >
   (A) run the nightly pipeline (status, ship a task, verify, release); or
   (B) CREATE a brand-new app project from an idea — the full setup workflow
   that ends with a build on Play Console internal testing and a nightly loop.
-  The orchestrator (YOU) decides and drives; development is performed by a
-  SUBAGENT you spawn; all quality gates and bookkeeping run via this CLI.
+  The orchestrator (YOU) decides and drives; development is performed
+  either directly by the orchestrator in the isolated worktree (universal
+  default across Claude Code, OpenCode, and Antigravity) or delegated to a
+  subagent you spawn; all quality gates and bookkeeping run via this CLI.
 
 ## MINIMAL-TOOLS PRINCIPLE (all agents, both modes)
 Every agent runs on whatever connections the project HAS and still produces
@@ -55,7 +57,7 @@ run `doctor` and a live probe (`research`, or the collector directly):
 |---|---|---|
 | orchestrator | skill (this file) | the agentic tool you are |
 | create-agent | skill (`skills/new-project/SKILL.md`) | delegated on MODE B |
-| developer | skill (prompts/developer.md + this runbook) | YOUR native subagent |
+| developer | skill (prompts/developer.md + this runbook) | direct orchestrator execution in worktree (default) OR spawned subagent |
 | research (product) | CODE collectors + ONE synthesis (`cli.py plan`, raw: `cli.py research`) | EVERY run, step 2 |
 | alarm | CODE (`cli.py alarm`) | nightly end + on demand |
 | verifier/gates | CODE (`cli.py verify`) | before every release |
@@ -114,8 +116,15 @@ agentconfig.env`) — without it `doctor` correctly reports the agents blocked
 (it now names the missing env var).
 
 ## Hard rules (never violate)
-- You NEVER edit project code directly. You may write `.pipeline/tasks/*.json`
-  and `.pipeline/` bookkeeping only. Code edits belong to your spawned developer.
+- **Worktree Isolation for All Code Edits:** You NEVER edit project code on
+  `main` directly. All development must occur strictly inside the isolated
+  task worktree (`dt/<task-id>`). In single-agent tools (e.g. Claude Code,
+  OpenCode, Cursor) or by orchestrator preference, the orchestrator performs
+  the development directly inside `WORKTREE_PATH`. In multi-agent environments,
+  the orchestrator may optionally delegate the worktree to a subagent. In all
+  cases, the exact same gates (`devteam verify`), allow-lists (`surface.targets`),
+  and release steps apply. Bookkeeping and `.pipeline/tasks/*.json` live in the
+  main checkout.
 - **Self-improvement is a standing duty, not a leftover:** after every run,
   append what surprised you to `dev-team/skills/lessons.md` (append-only) and,
   whenever a lesson yields a durable fix, APPLY IT to the team's own
@@ -462,41 +471,25 @@ never silently blocking.
    before any device work, is what makes that check safe.
 6. Get the exact developer prompt (keep it verbatim):
    `python3 <team>/cli.py developer-prompt <project> .pipeline/tasks/<id>.json`
-7. SPAWN THE DEVELOPER AS A SUBAGENT — your tool's own native mechanism:
-   - budget the session at the task's `effort_min` (~150 is the norm for a healthy
-     entry, band 90-240 — sized in developer-effort minutes, which an agent spends
-     several times faster than a human would): one coherent change, verified, no
-     gold-plating beyond the spec. If the agent is clearly done in a couple of
-     minutes, the entry was too small — say so in the run report and fold such
-     work into the next plan cycle.
-   - agent prompt = the exact prompt from step 6
-   - PLATFORM-CONFORMANCE WORK NEEDS THE OFFICIAL SKILL, BY ABSOLUTE PATH.
-     When a task touches an area Google publishes a current skill for
-     (edge-to-edge, adaptive/resizability, styles, predictive back, navigation,
-     performance), add that skill to the developer's mandatory reads — and give
-     the path in the MAIN checkout (`<project>/.agents/skills/<name>/SKILL.md`),
-     never a worktree-relative one: the official skills are installed into the
-     project root by `android skills add` and are gitignored, so a git worktree
-     does NOT contain them and the developer would find nothing at that path.
-     Read the skill's own PREREQUISITES before queueing the work, too: they can
-     be unreachable (a 2026 skill may require a newer compileSdk, Compose BOM or
-     Navigation 3), and any prerequisite that needs a dependency change lands in
-     the frozen build file — report that as a gap rather than queueing work that
-     cannot build.
-   - run with cwd = WORKTREE_PATH (pass this in the subagent's initial
-     instruction: "work ONLY inside directory <WORKTREE_PATH>")
-   - MODEL: read roles.developer.model from <team>/config/runtimes.json and
-     set it for the subagent if your tool supports per-subagent models; if it
-     does not, proceed with your default model and RECORD which model you
-     used in the run log. Never silently skip the model note.
-   - if your tool CANNOT spawn subagents at all, use the documented fallback:
-     tell the user you are doing so, then use the headless path:
-     `python3 <team>/cli.py run-headless <project> --task-spec .pipeline/tasks/<id>.json`
-     which spawns the runtime subprocess from runtimes.json and applies the
-     same gates.
-8. When the developer subagent returns, TRUST NOTHING:
-   `python3 <team>/cli.py verify <project> --worktree <WORKTREE_PATH>
-   --task-spec .pipeline/tasks/<id>.json`
+7. DEVELOP THE TASK — Two execution paths:
+   (A) DIRECT ORCHESTRATOR DEVELOPMENT (Universal Default — works in Claude Code, OpenCode, Antigravity, Cursor):
+       - You (the orchestrator) perform the implementation directly inside `WORKTREE_PATH`.
+       - Follow the exact instructions, conventions, and constraints from the developer prompt generated in step 6.
+       - Read mandatory style/design docs (`docs/design.md`, `profile.conventions`, official Google skills).
+       - Edit ONLY files under the task's allow-list (`surface.targets`). NEVER edit on `main` directly.
+       - Never touch frozen paths or release knobs (versionName, versionCode, signing, targetSdk).
+       - Test incrementally inside the worktree using the project's verify commands (e.g. `gradle compileDebugKotlinAndroid testDebugUnitTest`).
+       - If you encounter a build or test error, diagnose and resolve it directly in the worktree.
+   (B) SUBAGENT DELEGATION (Optional fallback when supported and conserving orchestrator context):
+       - Budget the session at the task's `effort_min` (~150 is the norm for a healthy entry, band 90-240).
+       - Spawn subagent with `cwd = WORKTREE_PATH` using your tool's native mechanism (e.g. `invoke_subagent`).
+       - Pass the exact prompt from step 6.
+       - Model: read `roles.developer.model` from `<team>/config/runtimes.json` if your tool supports per-subagent models.
+       - If your tool cannot spawn subagents and you choose not to develop directly, run headless:
+         `python3 <team>/cli.py run-headless <project> --task-spec .pipeline/tasks/<id>.json`
+
+8. VERIFY THE WORKTREE — TRUST NOTHING:
+   `python3 <team>/cli.py verify <project> --worktree <WORKTREE_PATH> --task-spec .pipeline/tasks/<id>.json`
    - Pass `--task-spec`: the dependency gate reads the task's
      `dependencies_added` declaration from it. Without the spec the gate can
      still REPORT a new third-party dependency but cannot judge it, so the one
@@ -506,24 +499,21 @@ never silently blocking.
      together with why, because a dependency is a third party, a supply chain, an
      account, a licence and permanent maintenance, and the plan once adopted one
      from a spec's stack line without anybody asking.
-   - FAIL → append the failure output to the subagent's context (spawn a FRESH
-     subagent with same prompt + "previous attempt failed as follows: ..." —
-     max 2 attempts total, then `devteam record --result failed` and alarm).
+   - FAIL → Diagnose the failure:
+     - If developing directly: fix the issue inside `WORKTREE_PATH` and re-run verify (up to 2 iterations).
+     - If using a subagent: append the failure output to the subagent's context (spawn a FRESH subagent with same prompt + "previous attempt failed as follows: ..." — max 2 attempts total, then `devteam record --result failed` and alarm).
    - PASS → `python3 <team>/cli.py release <project> --worktree <WORKTREE_PATH>
      --task-spec .pipeline/tasks/<id>.json`
      This bumps the version, writes release notes (within
      `profile['whatsnew_max_chars']`, and NOT AT ALL when the project's notes are
      owner-curated — see "The release handover"), commits, pushes to origin
      main, and watches CI. CI delivers to Play internal testing.
-   - READ THE DEVELOPER'S "NOTICED BUT NOT FIXED" NOTES — THEY ARE THE
-     PIPELINE'S ONLY FEED-FORWARD. The prompt tells the developer to note
-     unrelated defects rather than fix them, and those notes exist ONLY in the
-     subagent's final message: no collector, no state field and no queue
-     admission reads them, so a real defect the developer actually saw is lost
-     the moment the transcript scrolls out of context. Before recording the run,
-     take each note and either QUEUE it (folding it into an entry that already
-     touches that file when it is too small to justify its own release) or drop
-     it with a stated reason — never leave one unread. A bugfix that removed an
+   - READ "NOTICED BUT NOT FIXED" NOTES — THEY ARE THE
+     PIPELINE'S ONLY FEED-FORWARD. Note unrelated defects rather than fixing
+     them out-of-scope. Before recording the run, take each note and either
+     QUEUE it (folding it into an entry that already touches that file when it is
+     too small to justify its own release) or drop it with a stated reason —
+     never leave one unread. A bugfix that removed an
      invented-winner defect from one screen left the identical defect on another
      screen, and only the developer's closing note surfaced it.
 9. Bookkeeping (one command, every outcome):

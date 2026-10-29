@@ -26,8 +26,7 @@ passed.
 
 ### The order, end to end (one screen)
 
-The orchestrator has just two tools: **run a shell command**, and **spawn a
-subagent**. The skill is the checklist that names the commands; the run is a fixed
+The orchestrator has two tools: **run a shell command**, and **edit files in the task worktree** (or spawn a subagent). The skill is the checklist that names the commands; the run is a fixed
 sequence of them. Nothing below is invented at runtime — code decides *what is
 allowed*, the agent decides *what to do*.
 
@@ -40,14 +39,14 @@ allowed*, the agent decides *what to do*.
 | 3 | `cli.py pick` — then write `.pipeline/tasks/<id>.json` | code, then agent |
 | 4 | `cli.py worktree-start` | code |
 | 5 | `cli.py developer-prompt` | code |
-| 6 | spawn the developer subagent | agent (the host's own mechanism) |
+| 6 | develop the task inside worktree | direct orchestrator execution (default) or subagent |
 | 7 | `cli.py verify` | code (**gate**) |
 | 8 | `cli.py release` | code (**gate**, only on green) |
 | 9 | `cli.py record` | code |
 | 10 | `cli.py alarm` — then post the outcome banner | code + agent |
 | — | *tail* emulator teardown, then `alarm` again | shell |
 
-The agent's judgement is steps 3 (compose the spec) and 6 (spawn the developer) and
+The agent's judgement is steps 3 (compose the spec) and 6 (develop the task in worktree) and
 its choice of words in 10; **`plan`, `verify`, `release` and `record` are gates
 whose output it relays, never overrides.** It never edits project code — it runs
 commands, writes task specs, and spawns the developer. Each step is expanded below.
@@ -181,10 +180,10 @@ broken path.
 
 ### Step 6 — develop (agent)
 
-The orchestrator spawns **its own native subagent** with that prompt, working
-inside the worktree, using the developer model from `config/runtimes.json`. If the
-host tool cannot spawn subagents, the documented headless fallback
-(`cli.py run-headless`) runs the same task through the same gates.
+The orchestrator develops the task inside `WORKTREE_PATH` directly (universal default
+across Claude Code, OpenCode, Antigravity, Cursor) adhering to the developer prompt,
+conventions, and target allow-list. In multi-agent environments, the orchestrator may
+optionally spawn a native subagent or run headless (`cli.py run-headless`).
 
 ### Step 7 — trust nothing: gates (code)
 
@@ -199,8 +198,7 @@ agent's report:
 - **compile**, then **tests** (a single retry, for the one known flaky suite);
 - **emulator hygiene** (warn-only) — see *Safety rails*.
 
-FAIL → a fresh subagent is spawned with the failure output appended (max 2
-attempts), then the run records `failed` and alarms.
+FAIL → The orchestrator fixes the failure in the worktree (or re-prompts the subagent with the failure output, max 2 attempts total), then the run records `failed` and alarms.
 
 ### Step 8 — release (code)
 
@@ -465,8 +463,8 @@ alarms. Zero LLM, zero project names.
 
 | Layer | Who | What |
 |---|---|---|
-| Orchestrator | any agentic tool with the `dev-team` skill | decide + drive: adapt, **plan**, pick, sandbox, spawn the developer, gate, release, record, report |
-| Developer | the orchestrator's **native subagent** (model from `config/runtimes.json`) | edit code inside the task worktree, per `prompts/developer.md` |
+| Orchestrator | any agentic tool with the `dev-team` skill | decide + drive: adapt, **plan**, pick, sandbox, develop in worktree (or spawn developer), gate, release, record, report |
+| Developer | direct orchestrator execution in worktree (default) or **native subagent** | edit code inside the task worktree, per `prompts/developer.md` |
 | Research / **planner** | code collectors + **one** synthesis call (`cli.py plan`) | review the plan against fresh data: maintain the tree and the queue, then hand over the task (the queue head) — judged and applied by code |
 | Python (`cli.py`, `team/`) | deterministic only | gates, worktree plumbing, version bump, bookkeeping, plan rendering/publishing, alarms |
 | Scheduler | macOS `launchd` (`com.devteam.nightly`) | boot the orchestrator each night at the configured slot |
