@@ -22,6 +22,13 @@ from pathlib import Path
 from .core import RunLog, git, profile_of, run, target_items
 
 
+def _parse_version(s: str) -> tuple[int, int, int] | None:
+    m = re.match(r"^(\d+)\.(\d+)(?:\.(\d+))?$", str(s or "").strip())
+    if not m:
+        return None
+    return (int(m.group(1)), int(m.group(2)), int(m.group(3) or 0))
+
+
 def remote_latest_version(project: Path) -> tuple[int, int, int] | None:
     prefix = profile_of(project).get("tag_prefix", "v")
     r = git(["ls-remote", "--tags", "origin", f"refs/tags/{prefix}*"],
@@ -272,12 +279,16 @@ def push_and_deliver(project: Path, worktree: Path, task: dict, new_version: str
     for attempt in range(1, max_retries + 1):
         if attempt > 1:
             log(f"retry {attempt}/{max_retries}: re-bumping version and re-pushing")
-            # Fetch the latest remote tags to compute the next version
-            latest = remote_latest_version(project)
-            if latest is None:
-                return {"delivered": False, "error": "no remote tags for retry", "ci": {}}
-            new_version = ".".join(map(str, (latest[0], latest[1], latest[2] + 1)))
-            bump_version_file(worktree, (latest[0], latest[1], latest[2] + 1), log)
+            # Increment from the previously attempted version so each retry produces a fresh commit and version
+            cur = _parse_version(new_version)
+            if cur is None:
+                latest = remote_latest_version(project)
+                if latest is None:
+                    return {"delivered": False, "error": "no remote tags for retry", "ci": {}}
+                cur = latest
+            next_ver = (cur[0], cur[1], cur[2] + 1)
+            new_version = ".".join(map(str, next_ver))
+            bump_version_file(worktree, next_ver, log)
 
         # An untracked file in the worktree is staged by `git add -A` and rides
         # into the release commit even though it is part of no task. A crashed or
