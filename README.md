@@ -202,8 +202,9 @@ agent's report:
 
 FAIL → The orchestrator fixes the failure in the worktree (or re-prompts the subagent with the failure output, max 2 attempts total), then the run records `failed` and alarms.
 
-### Step 8 — release (code)
+### Step 8 — release & store readiness (code)
 
+`cli.py store-readiness <project>` audits Google Play Store launch compliance (targetSdk >= 34, restricted permissions, adaptive launcher icons, component exports, localization, release signing).
 `cli.py release` bumps the version from the latest remote tag, writes the
 release notes, commits, pushes to `origin/main` (fetch + rebase if the remote
 moved meanwhile), and then **watches CI**, retrying up to 3 times with a fresh

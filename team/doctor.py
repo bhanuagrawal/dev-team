@@ -116,12 +116,20 @@ def agent_requirements(profile: dict, project: Path) -> dict[str, list[tuple[str
          _model_fix("product_synthesis", syn)),
     ]
 
+    store_readiness_checks = [
+        ("manifest detectable", bool(list(project.glob("**/AndroidManifest.xml"))),
+         "ensure project contains AndroidManifest.xml"),
+        ("gradle configuration detectable", bool(list(project.glob("*build.gradle*")) or list(project.glob("*/*build.gradle*"))),
+         "ensure build.gradle or build.gradle.kts exists"),
+    ]
+
     return {
         "orchestrator": dev_checks + synthesis_checks,
         "developer": dev_checks,
         "research-agent": ga4_checks + play_checks + synthesis_checks,
         "release-agent": ship_checks + synthesis_checks,
         "alarm-agent": ship_checks[:1],
+        "store-readiness-agent": store_readiness_checks,
     }
 
 

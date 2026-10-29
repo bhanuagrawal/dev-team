@@ -27,7 +27,12 @@ HARD RULES:
    environment, and an unrelated pin change in the verified diff fails the run.
 4. Do NOT commit. Do NOT push. Do NOT bump versions. Leave all changes UNCOMMITTED
    in the working tree; the pipeline commits after its own gates pass.
-5. UI Tests, Hierarchy Assertions & Self-Check:
+5. UI/UX Excellence, Automated UI Tests & Hierarchy Assertions:
+   - Domain-Tailored Ergonomics: Always design for the physical context of use (ambient light/glare,
+     viewing distance, one-handed reachability, motion state). Never ship raw wireframe/canvas prototypes
+     or unstyled low-contrast text. Use cohesive design tokens (high-contrast palette, tabular display typography,
+     modern squircles 16-24dp, tactile press feedback). Cover all lifecycle states (empty guidance, active interaction,
+     frictionless undo recovery, and repeat/rematch loops).
    - For every UI feature, screen, or component added/modified, WRITE automated UI tests
      (e.g. in commonTest/androidTest) verifying layout math, interaction states, and user flows.
    - Run automated UI hierarchy assertions to ensure no sibling view bounds overlap and all text

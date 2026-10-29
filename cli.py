@@ -1517,6 +1517,15 @@ def cmd_setup(args: argparse.Namespace) -> None:
     print(f"  manual-mode alternative remains possible anytime".strip())
 
 
+def cmd_store_readiness(args: argparse.Namespace) -> int:
+    project = resolve_project(args.project)
+    from team.store_readiness import run_store_readiness_audit, format_readiness_report
+    checks = run_store_readiness_audit(project)
+    report_text, is_ready = format_readiness_report(project, checks)
+    print(report_text)
+    return 0 if is_ready else 1
+
+
 def main() -> None:
     ap = argparse.ArgumentParser(prog="devteam")
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -1642,6 +1651,9 @@ def main() -> None:
     al.add_argument("--task-spec", help="judge a picked task spec instead of free text")
     al.add_argument("--apply", help="apply a verdict JSON the agent wrote")
     al.set_defaults(fn=cmd_align)
+    sr = sub.add_parser("store-readiness", help="audit project for Google Play Store launch readiness")
+    sr.add_argument("project")
+    sr.set_defaults(fn=cmd_store_readiness)
 
     args = ap.parse_args()
     sys.exit(args.fn(args) or 0)

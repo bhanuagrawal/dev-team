@@ -477,7 +477,7 @@ never silently blocking.
        - Follow the exact instructions, conventions, and constraints from the developer prompt generated in step 6.
        - Read mandatory style/design docs (`docs/design.md`, `profile.conventions`, official Google skills).
        - Edit ONLY files under the task's allow-list (`surface.targets`). NEVER edit on `main` directly.
-       - Write UI Tests & Hierarchy Assertions: whenever adding or modifying UI screens, components, or interactive flows, write automated UI tests (in the project's test set, e.g. `commonTest` or `androidTest`) verifying layout math, interaction states, and user flows. Run automated UI hierarchy assertions to ensure no sibling view bounds overlap and all text container dimensions fully enclose their measured text bounds.
+       - UI/UX Excellence & Hierarchy Assertions: design for the real-world physical context of use (glanceability from 15ft, outdoor glare, one-handed reachability). Never ship raw wireframe/canvas prototypes or flat unstyled low-contrast text. Use cohesive design tokens (high-contrast palette, tabular display typography, modern squircles 16-24dp, tactile press feedback) and complete lifecycle states (empty guidance, active interaction, frictionless undo recovery, repeat/rematch loops). Whenever adding or modifying UI screens, components, or interactive flows, write automated UI tests (in the project's test set, e.g. `commonTest` or `androidTest`) verifying layout math, interaction states, and user flows. Run automated UI hierarchy assertions to ensure no sibling view bounds overlap and all text container dimensions fully enclose their measured text bounds.
        - Never touch frozen paths or release knobs (versionName, versionCode, signing, targetSdk).
        - Test incrementally inside the worktree using the project's verify commands (e.g. `gradle compileDebugKotlinAndroid testDebugUnitTest`). Failure to run an on-device runner (no AVD/emulator) is non-blocking (warn-only), but any failure of the test assertions themselves is a hard blocker.
        - If you encounter a build or test error, diagnose and resolve it directly in the worktree.
@@ -509,6 +509,7 @@ never silently blocking.
      `profile['whatsnew_max_chars']`, and NOT AT ALL when the project's notes are
      owner-curated — see "The release handover"), commits, pushes to origin
      main, and watches CI. CI delivers to Play internal testing.
+     (Note: Audit Google Play launch readiness anytime via `python3 <team>/cli.py store-readiness <project>`.)
    - READ "NOTICED BUT NOT FIXED" NOTES — THEY ARE THE
      PIPELINE'S ONLY FEED-FORWARD. Note unrelated defects rather than fixing
      them out-of-scope. Before recording the run, take each note and either
