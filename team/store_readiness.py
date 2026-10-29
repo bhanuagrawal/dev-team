@@ -8,11 +8,13 @@ from __future__ import annotations
 
 import json
 import re
+import struct
 import xml.etree.ElementTree as ET
+import zlib
 from pathlib import Path
 from typing import NamedTuple
 
-from .core import profile_of, run
+from .core import RunLog, profile_of, run, save_json, today
 
 
 class ReadinessCheck(NamedTuple):
@@ -44,6 +46,53 @@ RESTRICTED_PERMISSIONS = {
     "android.permission.REQUEST_INSTALL_PACKAGES": "Requires package installer justification",
     "android.permission.QUERY_ALL_PACKAGES": "Requires broad package querying justification",
 }
+
+
+def _png_dimensions(path: Path) -> tuple[int, int] | None:
+    try:
+        with open(path, "rb") as f:
+            data = f.read(24)
+            if len(data) >= 24 and data[:8] == b"\x89PNG\r\n\x1a\n" and data[12:16] == b"IHDR":
+                w, h = struct.unpack(">II", data[16:24])
+                return w, h
+    except Exception:
+        pass
+    return None
+
+
+def _find_listing_dir(project: Path) -> Path | None:
+    for rel in ("distribution/listing/en-US", "distribution/listing",
+                "fastlane/metadata/android/en-US", "src/main/play/listings/en-US"):
+        p = project / rel
+        if p.is_dir():
+            return p
+    return None
+
+
+def _make_solid_png(w: int, h: int, r: int, g: int, b: int,
+                    border_rgb: tuple[int, int, int] | None = None) -> bytes:
+    raw = bytearray()
+    row = bytearray()
+    for x in range(w):
+        if border_rgb and (x < 8 or x >= w - 8):
+            row.extend([border_rgb[0], border_rgb[1], border_rgb[2], 255])
+        else:
+            row.extend([r, g, b, 255])
+    for y in range(h):
+        raw.append(0)  # filter type None
+        if border_rgb and (y < 8 or y >= h - 8):
+            border_row = bytearray()
+            for _ in range(w):
+                border_row.extend([border_rgb[0], border_rgb[1], border_rgb[2], 255])
+            raw.extend(border_row)
+        else:
+            raw.extend(row)
+    comp = zlib.compress(bytes(raw), 9)
+    ihdr = struct.pack(">IIBBBBB", w, h, 8, 6, 0, 0, 0)
+    return (b"\x89PNG\r\n\x1a\n" +
+            struct.pack(">I", 13) + b"IHDR" + ihdr + struct.pack(">I", zlib.crc32(b"IHDR" + ihdr)) +
+            struct.pack(">I", len(comp)) + b"IDAT" + comp + struct.pack(">I", zlib.crc32(b"IDAT" + comp)) +
+            struct.pack(">I", 0) + b"IEND" + struct.pack(">I", zlib.crc32(b"IEND")))
 
 
 def _find_gradle_files(project: Path) -> list[Path]:
@@ -295,12 +344,146 @@ def run_store_readiness_audit(project: Path) -> list[ReadinessCheck]:
         fix="Provide ic_launcher_round in mipmap resources for circular launchers",
     ))
 
-    # ── 5. Localization Completeness ──────────────────────────────────────────
+    # Check if launcher icon still uses the default Android Studio starter purple
+    is_starter_template = False
+    for bf in project.glob("**/res/drawable*/ic_launcher_background.xml"):
+        if "build/" in str(bf) or ".gradle" in str(bf) or ".pipeline" in str(bf):
+            continue
+        text = bf.read_text(errors="ignore")
+        if "#4F378A" in text.upper():
+            is_starter_template = True
+            break
+    checks.append(ReadinessCheck(
+        category="Store Visual Assets",
+        name="Launcher Icon Brand Customization",
+        passed=not is_starter_template,
+        severity="WARNING" if is_starter_template else "INFO",
+        detail="Custom branded launcher icon vector detected" if not is_starter_template else "Launcher background still uses default Android Studio purple (#4F378A)",
+        fix="Replace starter ic_launcher vector assets with custom branded colors and iconography",
+    ))
+
+    # ── 5. Storefront Listing Copy ────────────────────────────────────────────
+    listing_dir = _find_listing_dir(project)
+    if not listing_dir:
+        checks.append(ReadinessCheck(
+            category="Storefront Listing Copy",
+            name="Store Listing Directory",
+            passed=False,
+            severity="WARNING",
+            detail="No distribution/listing/en-US or fastlane metadata directory found",
+            fix="Run `devteam store-readiness <project> --generate` to synthesize storefront listing files",
+        ))
+    else:
+        title_file = listing_dir / "title.txt"
+        if title_file.is_file():
+            t_len = len(title_file.read_text(errors="ignore").strip())
+            passed = 0 < t_len <= PLAY_APP_NAME_MAX_CHARS
+            checks.append(ReadinessCheck(
+                category="Storefront Listing Copy",
+                name="App Title",
+                passed=passed,
+                severity="WARNING" if not passed else "INFO",
+                detail=f"Title length: {t_len}/{PLAY_APP_NAME_MAX_CHARS} chars" if passed else f"Title exceeds maximum length ({t_len}/{PLAY_APP_NAME_MAX_CHARS} chars)",
+                fix=f"Ensure title is <= {PLAY_APP_NAME_MAX_CHARS} chars",
+            ))
+        else:
+            checks.append(ReadinessCheck(
+                category="Storefront Listing Copy",
+                name="App Title",
+                passed=False,
+                severity="WARNING",
+                detail="title.txt missing from listing directory",
+                fix="Create title.txt with app name (<= 30 chars)",
+            ))
+
+        short_file = listing_dir / "short_description.txt" if (listing_dir / "short_description.txt").is_file() else listing_dir / "short-description.txt"
+        if short_file.is_file():
+            s_len = len(short_file.read_text(errors="ignore").strip())
+            passed = 0 < s_len <= PLAY_SHORT_DESC_MAX_CHARS
+            checks.append(ReadinessCheck(
+                category="Storefront Listing Copy",
+                name="Short Description",
+                passed=passed,
+                severity="WARNING" if not passed else "INFO",
+                detail=f"Short description length: {s_len}/{PLAY_SHORT_DESC_MAX_CHARS} chars" if passed else f"Short description exceeds maximum length ({s_len}/{PLAY_SHORT_DESC_MAX_CHARS} chars)",
+                fix=f"Ensure short description is <= {PLAY_SHORT_DESC_MAX_CHARS} chars",
+            ))
+        else:
+            checks.append(ReadinessCheck(
+                category="Storefront Listing Copy",
+                name="Short Description",
+                passed=False,
+                severity="WARNING",
+                detail="short_description.txt missing from listing directory",
+                fix="Create short_description.txt (<= 80 chars)",
+            ))
+
+        full_file = listing_dir / "full_description.txt" if (listing_dir / "full_description.txt").is_file() else listing_dir / "full-description.txt"
+        if full_file.is_file():
+            f_len = len(full_file.read_text(errors="ignore").strip())
+            passed = 0 < f_len <= PLAY_FULL_DESC_MAX_CHARS
+            checks.append(ReadinessCheck(
+                category="Storefront Listing Copy",
+                name="Full Description",
+                passed=passed,
+                severity="WARNING" if not passed else "INFO",
+                detail=f"Full description length: {f_len}/{PLAY_FULL_DESC_MAX_CHARS} chars" if passed else f"Full description exceeds limit ({f_len}/{PLAY_FULL_DESC_MAX_CHARS} chars)",
+                fix=f"Ensure full description is <= {PLAY_FULL_DESC_MAX_CHARS} chars",
+            ))
+        else:
+            checks.append(ReadinessCheck(
+                category="Storefront Listing Copy",
+                name="Full Description",
+                passed=False,
+                severity="WARNING",
+                detail="full_description.txt missing from listing directory",
+                fix="Create full_description.txt (<= 4000 chars)",
+            ))
+
+    # ── 6. Storefront Graphic Assets ──────────────────────────────────────────
+    if listing_dir:
+        img_dir = listing_dir / "images" if (listing_dir / "images").is_dir() else (listing_dir / "graphics" if (listing_dir / "graphics").is_dir() else listing_dir)
+        icon_path = img_dir / "icon.png"
+        icon_dims = _png_dimensions(icon_path) if icon_path.is_file() else None
+        has_512 = icon_dims == (512, 512)
+        checks.append(ReadinessCheck(
+            category="Storefront Graphic Assets",
+            name="Play Store 512x512 Icon",
+            passed=has_512,
+            severity="WARNING" if not has_512 else "INFO",
+            detail=f"512x512 PNG icon present ({icon_dims[0]}x{icon_dims[1]})" if has_512 else ("Missing images/icon.png" if not icon_dims else f"Icon dimensions are {icon_dims[0]}x{icon_dims[1]}, expected 512x512"),
+            fix="Provide 512x512 32-bit PNG icon in images/icon.png",
+        ))
+
+        fg_path = img_dir / "featureGraphic.png" if (img_dir / "featureGraphic.png").is_file() else img_dir / "feature-graphic.png"
+        fg_dims = _png_dimensions(fg_path) if (fg_path and fg_path.is_file()) else None
+        has_1024 = fg_dims == (1024, 500)
+        checks.append(ReadinessCheck(
+            category="Storefront Graphic Assets",
+            name="Play Store Feature Graphic (1024x500)",
+            passed=has_1024,
+            severity="WARNING" if not has_1024 else "INFO",
+            detail=f"1024x500 feature graphic present ({fg_dims[0]}x{fg_dims[1]})" if has_1024 else ("Missing images/featureGraphic.png" if not fg_dims else f"Feature graphic dimensions are {fg_dims[0]}x{fg_dims[1]}, expected 1024x500"),
+            fix="Provide 1024x500 PNG/JPEG in images/featureGraphic.png",
+        ))
+
+        shots_dir = img_dir / "phoneScreenshots" if (img_dir / "phoneScreenshots").is_dir() else img_dir / "phone-screenshots"
+        shots = [f for f in shots_dir.glob("*.png")] + [f for f in shots_dir.glob("*.jpg")] if shots_dir.is_dir() else []
+        has_shots = len(shots) >= 2
+        checks.append(ReadinessCheck(
+            category="Storefront Graphic Assets",
+            name="Phone Screenshots (min 2)",
+            passed=has_shots,
+            severity="WARNING" if not has_shots else "INFO",
+            detail=f"{len(shots)} phone screenshots present" if has_shots else f"Found {len(shots)} screenshots (Google Play requires at least 2)",
+            fix="Provide at least 2 phone screenshots in images/phoneScreenshots/",
+        ))
+
+    # ── 7. Localization Completeness ──────────────────────────────────────────
     declared_locales = profile.get("locales", [])
     if declared_locales:
         missing_locales: list[str] = []
         for loc in declared_locales:
-            # Check for values-<loc>/strings.xml
             loc_matches = list(project.glob(f"**/res/values-{loc}/strings.xml"))
             if not loc_matches:
                 missing_locales.append(loc)
@@ -314,7 +497,7 @@ def run_store_readiness_audit(project: Path) -> list[ReadinessCheck]:
             fix="Ensure values-<loc>/strings.xml exists for every locale declared in profile.json",
         ))
 
-    # ── 6. Release Build & Signing Configuration ──────────────────────────────
+    # ── 8. Release Build & Signing Configuration ──────────────────────────────
     has_signing = "signingConfigs" in combined_gradle and ("getByName(\"release\")" in combined_gradle or "create(\"release\")" in combined_gradle)
     has_keystore_ref = "keystore.properties" in combined_gradle or "storeFile" in combined_gradle
     checks.append(ReadinessCheck(
@@ -326,21 +509,29 @@ def run_store_readiness_audit(project: Path) -> list[ReadinessCheck]:
         fix="Configure signingConfigs.release with keystore properties for Play App Bundle signing",
     ))
 
-    # ── 7. Privacy Policy & Data Safety ───────────────────────────────────────
+    # ── 9. Privacy Policy & Public HTTPS Hosting ──────────────────────────────
     conns = profile.get("connections", {})
     privacy_url = (conns.get("play_store", {}).get("privacy_policy_url") or
                    profile.get("privacy_policy_url") or
                    "")
-    # Also check if privacy doc exists in repo
-    has_privacy_doc = (project / "PRIVACY.md").is_file() or (project / "docs/privacy.md").is_file()
-    has_privacy = bool(privacy_url) or has_privacy_doc
+    has_privacy_doc = (project / "PRIVACY.md").is_file() or (project / "docs/privacy.md").is_file() or (project / "docs/privacy.html").is_file()
     checks.append(ReadinessCheck(
         category="Privacy & Policy",
-        name="Privacy Policy URL / Document",
-        passed=has_privacy,
-        severity="WARNING" if not has_privacy else "INFO",
-        detail=f"Privacy policy present ({privacy_url or 'in-repo privacy doc'})" if has_privacy else "No privacy policy URL declared in profile.json or PRIVACY.md",
-        fix="Declare privacy_policy_url in profile.json or create PRIVACY.md (mandatory for Google Play Store)",
+        name="Privacy Policy Document",
+        passed=has_privacy_doc,
+        severity="BLOCKER" if not has_privacy_doc else "INFO",
+        detail="In-repo privacy document present (PRIVACY.md / docs/privacy.html)" if has_privacy_doc else "No privacy document found in repo",
+        fix="Create PRIVACY.md documenting zero PII / offline storage practices",
+    ))
+
+    is_https = str(privacy_url).strip().startswith("https://")
+    checks.append(ReadinessCheck(
+        category="Privacy & Policy",
+        name="Public HTTPS Privacy Hosting",
+        passed=is_https,
+        severity="WARNING" if not is_https else "INFO",
+        detail=f"Public HTTPS URL configured: {privacy_url}" if is_https else "No public https:// privacy policy URL declared in profile.json",
+        fix="Run `devteam store-readiness <project> --generate` to host docs/privacy.html via GitHub Pages",
     ))
 
     return checks
@@ -429,5 +620,186 @@ def store_readiness_dict(project: Path) -> dict:
             }
             for c in checks
         ],
+    }
+
+
+def _compile_privacy_html(project: Path, title: str) -> Path:
+    privacy_md = project / "PRIVACY.md"
+    if not privacy_md.is_file():
+        privacy_md = project / "docs/privacy.md"
+    if privacy_md.is_file():
+        content = privacy_md.read_text(errors="ignore")
+    else:
+        content = f"# Privacy Policy for {title}\n\n**Last Updated:** {today()}\n\n{title} is an offline-first mobile application. We do not collect, store, transmit, or sell any personally identifiable data."
+
+    html_lines = []
+    for line in content.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        if line.startswith("# "):
+            html_lines.append(f"<h1>{line[2:]}</h1>")
+        elif line.startswith("## "):
+            html_lines.append(f"<h2>{line[3:]}</h2>")
+        elif line.startswith("### "):
+            html_lines.append(f"<h3>{line[4:]}</h3>")
+        elif line.startswith("- "):
+            html_lines.append(f"<li>{line[2:]}</li>")
+        else:
+            html_lines.append(f"<p>{line}</p>")
+    body_content = "\n".join(html_lines)
+
+    html = f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{title} — Privacy Policy</title>
+  <style>
+    :root {{
+      --bg: #0A0E14;
+      --card: #161F2E;
+      --text: #FFFFFF;
+      --muted: #8B949E;
+      --accent: #00E676;
+    }}
+    body {{
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.6;
+      margin: 0;
+      padding: 24px;
+      display: flex;
+      justify-content: center;
+    }}
+    .container {{
+      max-width: 760px;
+      width: 100%;
+      background: var(--card);
+      padding: 32px;
+      border-radius: 16px;
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+    }}
+    h1 {{ color: var(--accent); margin-top: 0; font-size: 28px; }}
+    h2 {{ color: var(--text); border-bottom: 1px solid rgba(255, 255, 255, 0.1); padding-bottom: 8px; margin-top: 24px; font-size: 20px; }}
+    p, li {{ color: #dfe2eb; font-size: 15px; }}
+    li {{ margin-bottom: 8px; }}
+    .footer {{ margin-top: 32px; font-size: 13px; color: var(--muted); border-top: 1px solid rgba(255, 255, 255, 0.08); padding-top: 16px; }}
+  </style>
+</head>
+<body>
+  <div class="container">
+    {body_content}
+    <div class="footer">
+      Generated automatically by dev-team Play Store Readiness engine.
+    </div>
+  </div>
+</body>
+</html>
+"""
+    out_dir = project / "docs"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    out_file = out_dir / "privacy.html"
+    out_file.write_text(html)
+    return out_file
+
+
+def generate_store_readiness_pack(project: Path, log: RunLog | None = None) -> dict:
+    """Deterministically generate storefront listing files, hosted privacy HTML,
+    and starter visual assets. Zero project names — generic across all apps.
+    
+    If StitchMCP or external design tools are unavailable in the current agent environment,
+    it records an orchestrator escalation request so the orchestrator can synthesize high-fidelity graphics.
+    """
+    profile = profile_of(project)
+    name = profile.get("name") or project.name
+    vision = (profile.get("goals") or {}).get("vision", "").strip()
+
+    generated: list[str] = []
+    orchestrator_requests: list[dict] = []
+
+    # 1. Compile docs/privacy.html
+    html_path = _compile_privacy_html(project, name)
+    generated.append(str(html_path.relative_to(project)))
+
+    # 2. Wire public HTTPS URL if repo_slug exists
+    repo_slug = profile.get("repo_slug")
+    if repo_slug and "/" in repo_slug:
+        owner, repo = repo_slug.split("/", 1)
+        public_url = f"https://{owner}.github.io/{repo}/privacy.html"
+        conns = profile.setdefault("connections", {})
+        play_cfg = conns.setdefault("play_store", {})
+        if play_cfg.get("privacy_policy_url") != public_url:
+            play_cfg["privacy_policy_url"] = public_url
+            save_json(project / ".pipeline/profile.json", profile)
+            generated.append(".pipeline/profile.json (privacy_policy_url)")
+
+    # 3. Create distribution/listing/en-US
+    listing_dir = project / "distribution/listing/en-US"
+    img_dir = listing_dir / "images"
+    shots_dir = img_dir / "phoneScreenshots"
+    shots_dir.mkdir(parents=True, exist_ok=True)
+
+    # title.txt (<= 30 chars)
+    title_file = listing_dir / "title.txt"
+    if not title_file.is_file():
+        title_candidate = f"{name}: Scorekeeper" if "score" in vision.lower() else f"{name}"
+        title = title_candidate[:PLAY_APP_NAME_MAX_CHARS].rstrip()
+        title_file.write_text(title + "\n")
+        generated.append(str(title_file.relative_to(project)))
+
+    # short_description.txt (<= 80 chars)
+    short_file = listing_dir / "short_description.txt"
+    if not short_file.is_file():
+        desc = re.split(r"[.—–|]", vision)[0].strip() if vision else "The modern, fast, offline-first mobile app."
+        if len(desc) > PLAY_SHORT_DESC_MAX_CHARS:
+            desc = desc[:PLAY_SHORT_DESC_MAX_CHARS].rsplit(" ", 1)[0].rstrip(" ,;.")
+        short_file.write_text(desc + "\n")
+        generated.append(str(short_file.relative_to(project)))
+
+    # full_description.txt (<= 4000 chars)
+    full_file = listing_dir / "full_description.txt"
+    if not full_file.is_file():
+        full_text = (
+            f"{name} is engineered for speed, focus, and reliability.\n\n"
+            f"KEY FEATURES:\n"
+            f"• High-contrast visual identity optimized for clarity\n"
+            f"• 100% offline-first architecture — all data stays on your device\n"
+            f"• Zero account registration, zero analytics tracking, zero ads\n"
+            f"• Fluid gestures and responsive feedback\n\n"
+            f"PRIVACY:\n"
+            f"{name} does not collect, store, or sell any personal data.\n"
+        )
+        full_file.write_text(full_text[:PLAY_FULL_DESC_MAX_CHARS])
+        generated.append(str(full_file.relative_to(project)))
+
+    # Starter 512x512 icon
+    icon_file = img_dir / "icon.png"
+    if not icon_file.is_file():
+        icon_file.write_bytes(_make_solid_png(512, 512, 10, 14, 20, border_rgb=(0, 230, 118)))
+        generated.append(str(icon_file.relative_to(project)))
+        orchestrator_requests.append({
+            "tool": "StitchMCP / image-generator",
+            "action": "Elevate starter 512x512 icon to branded graphic",
+            "target": str(icon_file.relative_to(project))
+        })
+
+    # Starter 1024x500 feature graphic
+    fg_file = img_dir / "featureGraphic.png"
+    if not fg_file.is_file():
+        fg_file.write_bytes(_make_solid_png(1024, 500, 16, 31, 46, border_rgb=(0, 230, 118)))
+        generated.append(str(fg_file.relative_to(project)))
+        orchestrator_requests.append({
+            "tool": "StitchMCP / image-generator",
+            "action": "Elevate starter 1024x500 banner to branded feature graphic",
+            "target": str(fg_file.relative_to(project))
+        })
+
+    return {
+        "generated": generated,
+        "summary": f"{len(generated)} storefront items created/updated",
+        "orchestrator_requests": orchestrator_requests
     }
 

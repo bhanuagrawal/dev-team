@@ -1519,7 +1519,16 @@ def cmd_setup(args: argparse.Namespace) -> None:
 
 def cmd_store_readiness(args: argparse.Namespace) -> int:
     project = resolve_project(args.project)
-    from team.store_readiness import run_store_readiness_audit, format_readiness_report
+    from team.store_readiness import (run_store_readiness_audit, format_readiness_report,
+                                      generate_store_readiness_pack)
+    if getattr(args, "generate", False):
+        res = generate_store_readiness_pack(project)
+        print(f"STORE-READINESS GENERATE: {res.get('summary', 'done')}")
+        for item in res.get("generated", []):
+            print(f"  + {item}")
+        for req in res.get("orchestrator_requests", []):
+            print(f"  * ORCHESTRATOR REQUEST ({req.get('tool')}): {req.get('action')}")
+        print()
     checks = run_store_readiness_audit(project)
     report_text, is_ready = format_readiness_report(project, checks)
     print(report_text)
@@ -1653,6 +1662,7 @@ def main() -> None:
     al.set_defaults(fn=cmd_align)
     sr = sub.add_parser("store-readiness", help="audit project for Google Play Store launch readiness")
     sr.add_argument("project")
+    sr.add_argument("--generate", action="store_true", help="generate missing storefront listing files, hosted privacy HTML, and starter assets")
     sr.set_defaults(fn=cmd_store_readiness)
 
     args = ap.parse_args()
