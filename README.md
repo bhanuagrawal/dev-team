@@ -182,8 +182,10 @@ broken path.
 
 The orchestrator develops the task inside `WORKTREE_PATH` directly (universal default
 across Claude Code, OpenCode, Antigravity, Cursor) adhering to the developer prompt,
-conventions, and target allow-list. In multi-agent environments, the orchestrator may
-optionally spawn a native subagent or run headless (`cli.py run-headless`).
+conventions, and target allow-list. Developers write automated UI tests & hierarchy assertions
+(ensuring no sibling view bounds overlap and all text container dimensions fully enclose their
+measured text bounds). In multi-agent environments, the orchestrator may optionally spawn a
+native subagent or run headless (`cli.py run-headless`).
 
 ### Step 7 — trust nothing: gates (code)
 
