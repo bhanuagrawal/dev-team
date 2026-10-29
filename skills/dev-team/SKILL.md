@@ -734,6 +734,8 @@ The owner may ask for ONE agent only, and that must work:
   5. The developer agent's prompt automatically injects `docs/design.md` under
      **CODING CONVENTIONS (MANDATORY READS — style law; must read before writing code)**
      on all future runs, strictly enforcing the design system across the entire team.
+- "store readiness" / "check store compliance" / "researcher store readiness" →
+  The researcher automatically ingests full Play Store compliance data under `signals.store_readiness` in `.pipeline/research.json` and `.pipeline/research-prompt.txt`. If blockers exist, the researcher prioritizes compliance tasks before discretionary features, and capability upgrades flag outstanding policy items. Standalone audit: `python3 <team>/cli.py store-readiness <project>`.
 Rule: honor the narrower scope exactly — no pipeline chaining — except the
 non-negotiables (never commit on red gates; never touch frozen paths; never
 hand-edit state.json; MODE-B gates still asked). State a one-line report of
