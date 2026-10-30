@@ -1548,6 +1548,18 @@ def cmd_store_assets(args: argparse.Namespace) -> int:
     return 0 if report.get("score", 0) >= 80 else 1
 
 
+def cmd_stitch_prompt(args: argparse.Namespace) -> int:
+    project = resolve_project(args.project)
+    from team.design import compile_stitch_screen_prompt
+    screen_type = getattr(args, "screen", "main")
+    prompt = compile_stitch_screen_prompt(project, screen_type=screen_type)
+    print(f"STITCH MCP SCREEN PROMPT ({project.name.upper()} • {screen_type.upper()}):")
+    print("=" * 65)
+    print(prompt)
+    print("=" * 65)
+    return 0
+
+
 def cmd_console(args: argparse.Namespace) -> int:
     project = resolve_project(args.project)
     from team.console import generate_console_setup_plan, generate_playwright_script
@@ -1724,6 +1736,10 @@ def main() -> None:
     cs.add_argument("project")
     cs.add_argument("--script", action="store_true", help="output automated Playwright JS script")
     cs.set_defaults(fn=cmd_console)
+    stp = sub.add_parser("stitch-prompt", help="compile specific, pre-locked, anti-generic screen prompt for Stitch MCP")
+    stp.add_argument("project")
+    stp.add_argument("--screen", default="main", help="screen type: main, scoreboard, summary, setup")
+    stp.set_defaults(fn=cmd_stitch_prompt)
 
     args = ap.parse_args()
     sys.exit(args.fn(args) or 0)
