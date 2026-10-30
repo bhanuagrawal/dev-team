@@ -273,4 +273,36 @@ def generate_all_marketing_templates(project: Path) -> dict[str, str]:
     p2.write_text(html2)
     templates["02_rules"] = str(p2)
 
+    # Frame 3: Custom Modes & Ruleset Flexibility
+    html3 = build_screenshot_html(
+        project_name=name,
+        badge_text="Custom Rules & Modes",
+        headline="Every Format & Ruleset",
+        sub_headline="Singles, doubles, tournament play to 11, 15, or 21, with win-by-2 or sudden death.",
+        card_top_label="MATCH SETUP • CONFIGURATION",
+        card_hero_value="11",
+        card_bottom_hint="DOUBLES • PLAY TO 11 • WIN BY 2",
+        colors=colors,
+        accent_color=colors.get("amber", "#FFB703"),
+    )
+    p3 = templates_dir / "03_modes.html"
+    p3.write_text(html3)
+    templates["03_modes"] = str(p3)
+
+    # Frame 4: Telemetry & Performance History
+    html4 = build_screenshot_html(
+        project_name=name,
+        badge_text="Post-Match Telemetry",
+        headline="Deep Performance Stats",
+        sub_headline="Track rally lengths, side-out efficiency, momentum streaks, and career wins.",
+        card_top_label="MATCH TELEMETRY • COURT LOG",
+        card_hero_value="11 - 9",
+        card_bottom_hint="68% SERVE EFFICIENCY • 4 SIDE-OUTS",
+        colors=colors,
+        accent_color=colors.get("primary", "#00E676"),
+    )
+    p4 = templates_dir / "04_analytics.html"
+    p4.write_text(html4)
+    templates["04_analytics"] = str(p4)
+
     return templates
