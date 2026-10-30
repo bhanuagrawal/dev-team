@@ -103,9 +103,9 @@ def resolve_project(name_or_path: str) -> Path:
 
     A name search prefers a candidate that is actually ONBOARDED (.pipeline/
     profile.json). Filesystems on macOS are case-insensitive, so a bare name can
-    match a different repository that merely shares the spelling: 'pdfkit'
-    landed on an un-onboarded sibling checkout while the project the team runs
-    is named differently, and the run died at `adapt` with 'no profile above
+    match a different repository that merely shares the spelling: a bare project
+    name landed on an un-onboarded sibling checkout while the project the team
+    runs is named differently, and the run died at `adapt` with 'no profile above
     <wrong dir>' — a message that reads like the project was never onboarded.
     So: keep searching for an onboarded match, and when only a non-onboarded one
     exists, say exactly that and point at the onboarded projects nearby

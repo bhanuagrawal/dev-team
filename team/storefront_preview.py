@@ -103,9 +103,6 @@ _SCENE_DEFAULTS: dict[str, list[dict[str, str]]] = {
     ],
 }
 
-_THEME_CANDIDATES = ("PdfKitTheme", "AppTheme", "ZenListTheme", "ZenCoachTheme", "AppTheme", "Theme")
-
-
 # --------------------------------------------------------------------------- #
 # discovery
 # --------------------------------------------------------------------------- #
@@ -533,11 +530,11 @@ def _gradlew(project: Path) -> str | None:
 
 def variant_cap(project: Path) -> str | None:
     """The product-flavor cap used by Gradle task names, from the project's own
-    verify commands (`:mod:compileZenlistDebugKotlinAndroid` -> `Zenlist`).
+    verify commands (`:mod:compile<Flavor>DebugKotlinAndroid` -> `<Flavor>`).
 
     A multi-flavor module has NO `updateDebugScreenshotTest`: Gradle rejects the
     unqualified name as ambiguous ("Candidates are: 'updateZencoach…',
-    'updateZenlist…'"), so the renderer must name the variant it renders. The
+    'update<Flavor>…'"), so the renderer must name the variant it renders. The
     profile already declares that variant for compile/test — the same one every
     gate runs — so the screenshots describe the build the pipeline verifies,
     instead of whichever candidate happens to sort first.

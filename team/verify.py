@@ -532,6 +532,18 @@ def verify_all(project: Path, worktree: Path, base: str, log, gradle: bool = Tru
         failures.append(msg)
         return False, failures
 
+    # TEAM GENERIC: the team repo must contain zero project references, whichever
+    # agent is driving the run. A project-keyed branch sat in team code for a day
+    # because doctor was the only check and nobody ran it (2026-10-30).
+    from .doctor import _team_generic_check
+    generic_bad = [(req, fix) for req, ok, fix in _team_generic_check() if not ok]
+    if generic_bad:
+        log("team generic: FAIL — " + "; ".join(r for r, _ in generic_bad))
+        failures.append("TEAM NOT GENERIC (project-specific code in dev-team): "
+                        + "; ".join(f"{r} → {fix}" for r, fix in generic_bad))
+        return False, failures
+    log("team generic: ok")
+
     # The fields the file freeze used to protect by blocking the whole file.
     ok, msg = release_knobs_check(profile, worktree, base)
     log(f"release knobs: {msg}" if ok else "release knobs: FAIL")

@@ -268,33 +268,9 @@ def build_icon_html(project_name: str, colors: dict[str, str]) -> str:
     acc = colors["primary"]
     sec = colors.get("secondary", "#7C4DFF")
     p_low = project_name.lower()
-    is_mindful = "mindful" in p_low or "launcher" in p_low
     is_court = any(k in p_low for k in ("pickle", "score", "court", "racket"))
 
-    if is_mindful:
-        inner_icon = f"""
-    <div style="width: 240px; height: 240px; border-radius: 50%; border: 3px solid {acc}66; display: flex; align-items: center; justify-content: center; position: relative; box-shadow: 0 0 40px {acc}33;">
-      <div style="width: 170px; height: 170px; border-radius: 50%; border: 3px solid {acc}aa; display: flex; align-items: center; justify-content: center; box-shadow: 0 0 30px {acc}44;">
-        <div style="width: 100px; height: 100px; border-radius: 50%; background: linear-gradient(135deg, {acc} 0%, {sec} 100%); display: flex; align-items: center; justify-content: center; box-shadow: 0 0 40px {acc}99;">
-          <svg width="52" height="52" viewBox="0 0 24 24" fill="none" stroke="#0A0E14" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-            <path d="M12 3a9 9 0 0 1 9 9c0 5-4 9-9 9s-9-4-9-9a9 9 0 0 1 9-9z"/>
-            <path d="M12 7a5 5 0 0 1 5 5c0 2.8-2.2 5-5 5s-5-2.2-5-5a5 5 0 0 1 5-5z"/>
-            <circle cx="12" cy="12" r="2" fill="#0A0E14"/>
-          </svg>
-        </div>
-      </div>
-    </div>
-    <div class="badge" style="background:{acc}; color:#0A0E14;">MINDFUL</div>
-        """
-    elif is_court:
-        inner_icon = f"""
-    <div style="width: 220px; height: 220px; border-radius: 40px; background: linear-gradient(135deg, {acc} 0%, {sec} 100%); display: flex; flex-direction: column; align-items: center; justify-content: center; box-shadow: 0 10px 30px {acc}55;">
-      <div style="font-family:'Anton',sans-serif; font-size:96px; color:#0A0E14; line-height:1;">11</div>
-    </div>
-    <div class="badge" style="background:#00E676; color:#0A0E14;">COURT</div>
-        """
-    else:
-        inner_icon = f"""
+    inner_icon = f"""
     <div class="doc-shape">
       <div class="fold"></div>
       <div class="fold-tab"></div>
@@ -406,47 +382,9 @@ def build_feature_graphic_html(project_name: str, vision: str, colors: dict[str,
     acc = colors["primary"]
     sec = colors.get("secondary", "#7C4DFF")
     p_low = project_name.lower()
-    is_mindful = "mindful" in p_low or "launcher" in p_low or "mindful" in vision.lower()
     is_court = any(k in p_low or k in vision.lower() for k in ("pickle", "score", "court", "racket"))
 
-    if is_mindful:
-        left_html = f"""
-    <div class="badge"><div class="badge-dot"></div>100% PRIVATE • ZERO DISTRACTIONS</div>
-    <div class="title">Reclaim Your Focus & Attention</div>
-    <div class="subtitle">Atmosphere 2.0: A calm, minimalist launcher with intentional pauses, digital wellbeing stats, and zero noise.</div>
-    <div class="features-row">
-      <div class="pill">🍃 MINIMALIST HOME</div>
-      <div class="pill">⏳ MINDFUL PAUSE</div>
-      <div class="pill">🔒 100% PRIVATE</div>
-    </div>
-        """
-        right_html = f"""
-    <div class="preview-card">
-      <div class="card-label">MINDFUL PAUSE</div>
-      <div class="card-metric">5s BREATH</div>
-      <div class="card-hint">14 distractions paused today • Screen time -42%</div>
-    </div>
-        """
-    elif is_court:
-        left_html = f"""
-    <div class="badge"><div class="badge-dot"></div>PRO COURT COMPANION</div>
-    <div class="title">Match Scoring & Live Telemetry</div>
-    <div class="subtitle">Official scoring rules, server rotation, momentum streaks, and post-match analytics.</div>
-    <div class="features-row">
-      <div class="pill">🎾 OFFICIAL RULES</div>
-      <div class="pill">⚡ FAST TAP</div>
-      <div class="pill">📊 STAT TRACKING</div>
-    </div>
-        """
-        right_html = f"""
-    <div class="preview-card">
-      <div class="card-label">MATCH SCORE</div>
-      <div class="card-metric">11 - 9</div>
-      <div class="card-hint">Game 3 • Serve Efficiency 68%</div>
-    </div>
-        """
-    else:
-        left_html = f"""
+    left_html = f"""
     <div class="badge"><div class="badge-dot"></div>100% PRIVATE • ON-DEVICE</div>
     <div class="title">Desktop-Class PDF Tools In Your Pocket</div>
     <div class="subtitle">Merge, split, compress, and convert documents instantly with zero cloud uploads or subscriptions.</div>
@@ -456,7 +394,7 @@ def build_feature_graphic_html(project_name: str, vision: str, colors: dict[str,
       <div class="pill">📄 PRO QUALITY</div>
     </div>
         """
-        right_html = f"""
+    right_html = f"""
     <div class="preview-card">
       <div class="card-label">SMART COMPRESS</div>
       <div class="card-metric">-88% SAVINGS</div>
@@ -605,7 +543,6 @@ def generate_all_marketing_templates(project: Path) -> dict[str, str]:
     templates: dict[str, str] = {}
     is_pdf = "pdf" in name.lower() or "pdf" in vision.lower() or "document" in vision.lower()
     is_court_sports = "pickleball" in vision.lower() or "scoreboard" in vision.lower() or "tennis" in vision.lower() or "court" in vision.lower()
-    is_mindful_launcher = "mindful" in name.lower() or "launcher" in name.lower() or "mindful" in vision.lower()
 
     if is_pdf:
         # Frame 1: Core Hero Workstation
@@ -876,210 +813,6 @@ def generate_all_marketing_templates(project: Path) -> dict[str, str]:
         p4 = templates_dir / "04_analytics.html"
         p4.write_text(html4)
         templates["04_analytics"] = str(p4)
-
-    elif is_mindful_launcher:
-        # Launcher / focus 4-frame narrative
-        # Frame 1: Minimalist Clutter-Free Home Screen
-        ui1 = f"""
-      <div style="text-align:center; margin: 30px 0 28px 0;">
-        <div style="font-family:'Space Grotesk',sans-serif; font-size:92px; font-weight:700; color:#FFFFFF; line-height:1; letter-spacing:-2px; text-shadow:0 0 35px {colors['primary']}55;">10:42</div>
-        <div style="font-family:'JetBrains Mono',monospace; font-size:16px; font-weight:700; color:{colors['primary']}; letter-spacing:3px; margin-top:8px;">TUESDAY, OCT 30</div>
-      </div>
-      <div style="background:linear-gradient(135deg, #161F2E 0%, #202B3C 100%); border-radius:28px; border:2px solid {colors['primary']}55; padding:26px; margin-bottom:18px; box-shadow:0 10px 30px rgba(0,0,0,0.5);">
-        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
-          <div style="font-family:'JetBrains Mono',monospace; font-size:14px; font-weight:700; color:{colors['primary']}; letter-spacing:1px;">FOCUS SESSION</div>
-          <div style="font-family:'JetBrains Mono',monospace; font-size:13px; color:#00E676; background:rgba(0,230,118,0.15); padding:4px 12px; border-radius:999px;">ACTIVE</div>
-        </div>
-        <div style="display:flex; justify-content:space-between; align-items:center;">
-          <div>
-            <div style="font-family:'Space Grotesk',sans-serif; font-size:28px; font-weight:700; color:#FFFFFF; margin-bottom:4px;">Deep Work</div>
-            <div style="font-size:15px; color:{colors['text_muted']};">Mindful Pause armed for 8 apps</div>
-          </div>
-          <div style="font-family:'Space Grotesk',sans-serif; font-size:34px; font-weight:700; color:{colors['primary']};">25:00</div>
-        </div>
-      </div>
-      <div style="background:#161F2E; border-radius:24px; border:1px solid #2B3A50; padding:22px; margin-bottom:28px;">
-        <div style="font-family:'JetBrains Mono',monospace; font-size:13px; font-weight:700; color:{colors['text_muted']}; margin-bottom:6px; letter-spacing:1px;">DAILY INTENTION</div>
-        <div style="font-size:18px; color:#FFFFFF; font-style:italic; line-height:1.4;">"Notice how you feel before you scroll."</div>
-      </div>
-      <div style="margin-top:auto; background:rgba(10,22,40,0.92); border:1px solid {colors['primary']}88; border-radius:32px; padding:18px 24px; display:flex; justify-content:space-around; align-items:center; box-shadow:0 10px 40px rgba(0,0,0,0.7), 0 0 30px {colors['primary']}22;">
-        <div style="text-align:center;">
-          <div style="width:52px; height:52px; border-radius:18px; background:rgba(255,255,255,0.08); display:flex; align-items:center; justify-content:center; font-size:24px; margin:0 auto 6px auto;">📞</div>
-          <div style="font-size:12px; color:{colors['text_muted']}; font-weight:600;">Phone</div>
-        </div>
-        <div style="text-align:center;">
-          <div style="width:52px; height:52px; border-radius:18px; background:rgba(255,255,255,0.08); display:flex; align-items:center; justify-content:center; font-size:24px; margin:0 auto 6px auto;">💬</div>
-          <div style="font-size:12px; color:{colors['text_muted']}; font-weight:600;">Messages</div>
-        </div>
-        <div style="text-align:center;">
-          <div style="width:52px; height:52px; border-radius:18px; background:rgba(45,212,191,0.2); border:1px solid {colors['primary']}; display:flex; align-items:center; justify-content:center; font-size:24px; margin:0 auto 6px auto;">🌿</div>
-          <div style="font-size:12px; color:{colors['primary']}; font-weight:700;">Pause</div>
-        </div>
-        <div style="text-align:center;">
-          <div style="width:52px; height:52px; border-radius:18px; background:rgba(255,255,255,0.08); display:flex; align-items:center; justify-content:center; font-size:24px; margin:0 auto 6px auto;">⚙️</div>
-          <div style="font-size:12px; color:{colors['text_muted']}; font-weight:600;">Settings</div>
-        </div>
-      </div>
-        """
-        html1 = build_screenshot_html(
-            project_name=name,
-            badge_text="Minimalist Android Launcher",
-            headline="Reclaim Your Focus",
-            sub_headline="A calm, clutter-free home screen designed to reduce screen time and eliminate digital fatigue.",
-            inner_ui_html=ui1,
-            colors=colors,
-            accent_color=colors["primary"],
-        )
-        p1 = templates_dir / "01_hero.html"
-        p1.write_text(html1)
-        templates["01_hero"] = str(p1)
-
-        # Frame 2: Mindful Pause (Breathing Friction)
-        ui2 = f"""
-      <div style="text-align:center; margin-top:16px; margin-bottom:24px;">
-        <div style="font-family:'JetBrains Mono',monospace; font-size:15px; font-weight:700; color:{colors['primary']}; letter-spacing:2px; text-transform:uppercase; margin-bottom:8px;">INSTAGRAM DETECTED</div>
-        <div style="font-family:'Space Grotesk',sans-serif; font-size:30px; font-weight:700; color:#FFFFFF;">Take a breath before you continue</div>
-      </div>
-      <div style="position:relative; width:280px; height:280px; margin:24px auto; display:flex; align-items:center; justify-content:center;">
-        <div style="position:absolute; inset:0; border-radius:50%; border:3px solid {colors['primary']}44; box-shadow:0 0 60px {colors['primary']}33;"></div>
-        <div style="position:absolute; inset:25px; border-radius:50%; border:2px solid {colors['primary']}88; box-shadow:0 0 40px {colors['primary']}44;"></div>
-        <div style="position:absolute; inset:50px; border-radius:50%; background:radial-gradient(circle, {colors['primary']}22 0%, transparent 70%);"></div>
-        <div style="font-family:'Space Grotesk',sans-serif; font-size:88px; font-weight:700; color:{colors['primary']}; z-index:2; text-shadow:0 0 40px {colors['primary']}aa;">05</div>
-      </div>
-      <div style="text-align:center; font-size:19px; color:{colors['text_muted']}; max-width:420px; margin:0 auto 32px auto; line-height:1.4;">
-        Notice how you feel. Is this action aligned with your current intention?
-      </div>
-      <div style="margin-top:auto; display:flex; flex-direction:column; gap:14px;">
-        <div style="background:#202B3C; border:1px solid #2B3A50; color:{colors['text_muted']}; font-family:'Space Grotesk',sans-serif; font-size:20px; font-weight:700; border-radius:18px; padding:18px; text-align:center;">
-          🔒 Pause in progress (5s)...
-        </div>
-        <div style="background:{colors['primary']}; color:#0A0E14; font-family:'Space Grotesk',sans-serif; font-size:20px; font-weight:700; border-radius:18px; padding:18px; text-align:center; box-shadow:0 0 30px {colors['primary']}66;">
-          Stay Mindful & Close App
-        </div>
-      </div>
-        """
-        html2 = build_screenshot_html(
-            project_name=name,
-            badge_text="Habit Friction Engine",
-            headline="Pause Before You Open",
-            sub_headline="Gentle breathing pauses introduce intentional friction before opening addictive apps.",
-            inner_ui_html=ui2,
-            colors=colors,
-            accent_color=colors["primary"],
-        )
-        p2 = templates_dir / "02_pause.html"
-        p2.write_text(html2)
-        templates["02_pause"] = str(p2)
-
-        # Frame 3: Screen Time Telemetry Dashboard
-        ui3 = f"""
-      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:20px;">
-        <div style="font-family:'Space Grotesk',sans-serif; font-size:30px; font-weight:700; color:#FFFFFF;">Screen Time</div>
-        <div style="font-family:'JetBrains Mono',monospace; font-size:15px; font-weight:700; color:#00E676; background:rgba(0,230,118,0.15); padding:6px 14px; border-radius:999px;">100% PRIVATE</div>
-      </div>
-      <div style="background:linear-gradient(135deg, #161F2E 0%, #202B3C 100%); border-radius:28px; border:2px solid {colors['primary']}66; padding:28px; margin-bottom:20px; box-shadow:0 10px 40px rgba(0,0,0,0.6);">
-        <div style="font-family:'JetBrains Mono',monospace; font-size:14px; font-weight:700; color:{colors['text_muted']}; margin-bottom:6px; letter-spacing:1px;">TODAY'S SCREEN TIME</div>
-        <div style="font-family:'Space Grotesk',sans-serif; font-size:62px; font-weight:700; color:#FFFFFF; line-height:1; margin-bottom:10px;">1h 42m</div>
-        <div style="display:flex; align-items:center; gap:8px; font-size:17px; color:{colors['primary']}; font-weight:600;">
-          <span>↓ 42m less than yesterday (-29%)</span>
-        </div>
-      </div>
-      <div style="background:#161F2E; border-radius:24px; border:1px solid #2B3A50; padding:22px; margin-bottom:20px;">
-        <div style="display:flex; justify-content:space-between; margin-bottom:16px;">
-          <div style="font-family:'JetBrains Mono',monospace; font-size:13px; font-weight:700; color:{colors['primary']}; letter-spacing:1px;">WEEKLY OVERVIEW</div>
-          <div style="font-size:13px; color:{colors['text_muted']};">Avg: 2h 10m/day</div>
-        </div>
-        <div style="display:flex; justify-content:space-between; align-items:flex-end; height:110px; padding:0 8px;">
-          <div style="text-align:center; flex:1;"><div style="width:22px; height:60px; background:#202B3C; border-radius:8px 8px 0 0; margin:0 auto;"></div><div style="font-size:11px; color:{colors['text_muted']}; margin-top:8px;">M</div></div>
-          <div style="text-align:center; flex:1;"><div style="width:22px; height:75px; background:#202B3C; border-radius:8px 8px 0 0; margin:0 auto;"></div><div style="font-size:11px; color:{colors['text_muted']}; margin-top:8px;">T</div></div>
-          <div style="text-align:center; flex:1;"><div style="width:22px; height:40px; background:{colors['primary']}; border-radius:8px 8px 0 0; margin:0 auto; box-shadow:0 0 20px {colors['primary']}88;"></div><div style="font-size:11px; color:{colors['primary']}; font-weight:700; margin-top:8px;">W</div></div>
-          <div style="text-align:center; flex:1;"><div style="width:22px; height:65px; background:#202B3C; border-radius:8px 8px 0 0; margin:0 auto;"></div><div style="font-size:11px; color:{colors['text_muted']}; margin-top:8px;">T</div></div>
-          <div style="text-align:center; flex:1;"><div style="width:22px; height:85px; background:#202B3C; border-radius:8px 8px 0 0; margin:0 auto;"></div><div style="font-size:11px; color:{colors['text_muted']}; margin-top:8px;">F</div></div>
-          <div style="text-align:center; flex:1;"><div style="width:22px; height:45px; background:#202B3C; border-radius:8px 8px 0 0; margin:0 auto;"></div><div style="font-size:11px; color:{colors['text_muted']}; margin-top:8px;">S</div></div>
-          <div style="text-align:center; flex:1;"><div style="width:22px; height:30px; background:#202B3C; border-radius:8px 8px 0 0; margin:0 auto;"></div><div style="font-size:11px; color:{colors['text_muted']}; margin-top:8px;">S</div></div>
-        </div>
-      </div>
-      <div style="margin-top:auto; display:flex; flex-direction:column; gap:10px;">
-        <div style="background:#161F2E; border:1px solid #2B3A50; border-radius:18px; padding:14px 18px; display:flex; justify-content:space-between; align-items:center;">
-          <div style="display:flex; align-items:center; gap:12px;">
-            <div style="width:36px; height:36px; border-radius:10px; background:rgba(45,212,191,0.15); display:flex; align-items:center; justify-content:center; font-size:18px;">📸</div>
-            <div>
-              <div style="font-weight:700; color:#FFFFFF; font-size:15px;">Instagram</div>
-              <div style="font-size:12px; color:{colors['text_muted']};">4 pauses triggered</div>
-            </div>
-          </div>
-          <div style="font-family:'Space Grotesk',sans-serif; font-size:17px; font-weight:700; color:{colors['primary']};">18 min</div>
-        </div>
-      </div>
-        """
-        html3 = build_screenshot_html(
-            project_name=name,
-            badge_text="Mindful Usage Telemetry",
-            headline="Understand Your Habits",
-            sub_headline="Track screen time, phone unlocks, and mindful pauses avoided with zero cloud tracking.",
-            inner_ui_html=ui3,
-            colors=colors,
-            accent_color=colors["primary"],
-        )
-        p3 = templates_dir / "03_dashboard.html"
-        p3.write_text(html3)
-        templates["03_dashboard"] = str(p3)
-
-        # Frame 4: Mindful+ Subscription Paywall
-        ui4 = f"""
-      <div style="text-align:center; margin-top:10px; margin-bottom:24px;">
-        <div style="font-family:'Space Grotesk',sans-serif; font-size:32px; font-weight:700; color:#FFFFFF; margin-bottom:6px;">Reclaim Your Attention</div>
-        <div style="font-size:17px; color:{colors['text_muted']};">Unlock the complete suite of mindful focus tools.</div>
-      </div>
-      <div style="background:linear-gradient(135deg, #161F2E 0%, #202B3C 100%); border-radius:26px; border:2px solid {colors['primary']}55; padding:24px; margin-bottom:20px; display:flex; flex-direction:column; gap:16px;">
-        <div style="display:flex; align-items:center; gap:12px;">
-          <div style="width:28px; height:28px; border-radius:50%; background:rgba(45,212,191,0.2); display:flex; align-items:center; justify-content:center; color:{colors['primary']}; font-weight:700; font-size:14px;">✓</div>
-          <div style="font-size:16px; color:#FFFFFF; font-weight:600;">Unlimited Mindful Pauses</div>
-        </div>
-        <div style="display:flex; align-items:center; gap:12px;">
-          <div style="width:28px; height:28px; border-radius:50%; background:rgba(45,212,191,0.2); display:flex; align-items:center; justify-content:center; color:{colors['primary']}; font-weight:700; font-size:14px;">✓</div>
-          <div style="font-size:16px; color:#FFFFFF; font-weight:600;">Custom Daily App Limits & Friction</div>
-        </div>
-        <div style="display:flex; align-items:center; gap:12px;">
-          <div style="width:28px; height:28px; border-radius:50%; background:rgba(45,212,191,0.2); display:flex; align-items:center; justify-content:center; color:{colors['primary']}; font-weight:700; font-size:14px;">✓</div>
-          <div style="font-size:16px; color:#FFFFFF; font-weight:600;">In-depth Screen Time Analytics</div>
-        </div>
-        <div style="display:flex; align-items:center; gap:12px;">
-          <div style="width:28px; height:28px; border-radius:50%; background:rgba(45,212,191,0.2); display:flex; align-items:center; justify-content:center; color:{colors['primary']}; font-weight:700; font-size:14px;">✓</div>
-          <div style="font-size:16px; color:#FFFFFF; font-weight:600;">Atmosphere 2.0 Dark Navy Theme</div>
-        </div>
-      </div>
-      <div style="background:#161F2E; border:2px solid {colors['primary']}; border-radius:22px; padding:20px; margin-bottom:22px; position:relative; box-shadow:0 0 30px {colors['primary']}33;">
-        <div style="position:absolute; top:-12px; right:20px; background:{colors['primary']}; color:#0A0E14; font-family:'JetBrains Mono',monospace; font-size:11px; font-weight:700; padding:3px 12px; border-radius:999px;">MOST POPULAR</div>
-        <div style="display:flex; justify-content:space-between; align-items:center;">
-          <div>
-            <div style="font-family:'Space Grotesk',sans-serif; font-size:22px; font-weight:700; color:#FFFFFF;">Annual Plan</div>
-            <div style="font-size:14px; color:{colors['primary']}; margin-top:2px;">$19.99/year (7-Day Free Trial)</div>
-          </div>
-          <div style="font-size:24px; color:{colors['primary']};">✓</div>
-        </div>
-      </div>
-      <div style="margin-top:auto;">
-        <div style="background:{colors['primary']}; color:#0A0E14; font-family:'Space Grotesk',sans-serif; font-size:22px; font-weight:700; border-radius:18px; padding:20px; text-align:center; box-shadow:0 0 35px {colors['primary']}66;">
-          START 7-DAY FREE TRIAL
-        </div>
-        <div style="text-align:center; font-size:13px; color:{colors['text_muted']}; margin-top:10px;">
-          Cancel anytime. No charge during trial period.
-        </div>
-      </div>
-        """
-        html4 = build_screenshot_html(
-            project_name=name,
-            badge_text="Mindful+ Subscription",
-            headline="Invest In Peace Of Mind",
-            sub_headline="Unlock unlimited pause apps, deep usage analytics, and custom Atmosphere themes.",
-            inner_ui_html=ui4,
-            colors=colors,
-            accent_color=colors["primary"],
-        )
-        p4 = templates_dir / "04_paywall.html"
-        p4.write_text(html4)
-        templates["04_paywall"] = str(p4)
 
     else:
         # Generic high-contrast fallback

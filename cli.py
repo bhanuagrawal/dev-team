@@ -130,7 +130,7 @@ def cmd_onboard(args: argparse.Namespace) -> None:
                 name = m.group(1)
                 if name in (t for t in tokens):
                     continue
-                if re.match(r"(Entrance|Mindful|Settings|Animated|Press|Step|Icon|Badge|Stat)", name) or \
+                if re.match(r"(Entrance|Settings|Animated|Press|Step|Icon|Badge|Stat|Card|Sheet|Chip|Pill|Bar|Glow)", name) or \
                    "Animated" in name or "Fade" in name:
                     tokens.append(name)
                     comps.append(name)
@@ -1800,6 +1800,13 @@ def cmd_stitch_curate(args: argparse.Namespace) -> int:
         # Fall back to saved metadata JSON files under projects/*/screens/
         devteam_dir = Path(__file__).resolve().parent
         p_name = project.name.lower()
+        # Vocabulary the project itself declares — the team must not know what any
+        # project "is", only what its profile says.
+        try:
+            _prof = profile_of(project)
+            vision = ((_prof.get("goals") or {}).get("vision") or "") + " " + (_prof.get("name") or "")
+        except Exception:
+            vision = project.name
         profile = profile_of(project)
         stitch_pid = profile.get("design", {}).get("stitch_project_id", "")
         for pdir in sorted((devteam_dir / "projects").glob("*/screens/*.json")):
@@ -1812,12 +1819,12 @@ def cmd_stitch_curate(args: argparse.Namespace) -> int:
                 if stitch_pid and pid == stitch_pid:
                     screens.append(meta)
                 elif not stitch_pid:
-                    # Filter by project domain/name to avoid cross-project contamination
-                    if "pdf" in p_name and ("pdf" in t_low or "compress" in t_low or "obsidian" in t_low or "split" in t_low or "merge" in t_low):
-                        screens.append(meta)
-                    elif "mindful" in p_name and ("mindful" in t_low or "atmosphere" in t_low or "pause" in t_low or "wellbeing" in t_low):
-                        screens.append(meta)
-                    elif any(k in p_name for k in ("score", "pickle", "sport")) and any(k in t_low for k in ("pickleball", "scoreboard", "court")):
+                    # No declared stitch_project_id: match the screen to the project by
+                    # SHARED VOCABULARY from its own name + vision, never by a hardcoded
+                    # domain word — the team does not know what any project "is".
+                    p_tokens = set(re.findall(r"[a-z]{4,}", p_name))
+                    p_tokens |= set(re.findall(r"[a-z]{4,}", vision.lower()))
+                    if p_tokens & set(re.findall(r"[a-z]{4,}", t_low)):
                         screens.append(meta)
             except Exception:
                 continue

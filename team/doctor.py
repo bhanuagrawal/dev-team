@@ -8,6 +8,7 @@ project). BLOCKED reasons are phrased as one precise ask for the owner.
 from __future__ import annotations
 
 import json
+import re
 import shutil
 from pathlib import Path
 
@@ -150,10 +151,47 @@ def _pipeline_json_check(project: Path) -> list[tuple[str, bool, str]]:
     return checks
 
 
+# Words that are ordinary product/Android vocabulary. They cannot identify a project on
+# their own ('a launcher-style rival' is generic prose), so they are not searched as
+# tokens — the project's DISTINCTIVE words are, and the full name always matches.
+GENERIC_TOKENS = {
+    "launcher", "player", "coach", "tracker", "notes", "tasks", "list", "pdf", "kit",
+    "app", "apps", "android", "studio", "focus", "pause", "calm", "daily", "habit",
+    "routine", "budget", "wallet", "news", "music", "photos", "maps", "social", "video",
+    "score", "court", "board", "media", "clean", "split", "merge", "convert", "share",
+    "image", "images", "document", "documents", "file", "files", "text", "notes",
+}
+
+
+def _name_tokens(name: str) -> set[str]:
+    """The distinctive words of a project name, e.g. 'X Y Launcher' -> {'x','y'}."""
+    words = re.findall(r"[A-Z]?[a-z]{2,}|[A-Z]{2,}(?![a-z])", name or "")
+    return {w.lower() for w in words if len(w) >= 4}
+
+
+def _distinctive_tokens(names: set[str]) -> set[str]:
+    toks: set[str] = set()
+    for n in names:
+        toks |= _name_tokens(n)
+    return toks - GENERIC_TOKENS
+
+
 def _find_name_hits(text: str, names: set[str]) -> list[str]:
-    """Project names present in `text` (case-insensitive). Pure + testable."""
+    """Project references present in `text` — full names AND distinctive name words.
+
+    Matching only the full name let a project-keyed branch through untouched: code read
+    a branch tested one lowercase word of the project's name while the registered name
+    was the full CamelCase form, so a 300-line project-specific screenshot template sat
+    inside the team's generic generator and every gate stayed green (2026-10-30). A
+    distinctive word of the name identifies the project just as well as the full name,
+    in any casing.
+    """
     low = text.lower()
-    return sorted({n for n in names if n and n.lower() in low})
+    hits = {n for n in names if n and n.lower() in low}
+    for tok in _distinctive_tokens(names):
+        if re.search(rf"\b{re.escape(tok)}\b", low):
+            hits.add(tok)
+    return sorted(hits)
 
 
 def _registered_project_names() -> set[str]:
