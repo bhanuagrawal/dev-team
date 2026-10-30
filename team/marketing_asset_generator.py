@@ -46,18 +46,29 @@ def re_hex(text: str) -> str | None:
     return m.group(0)[:7] if m else None
 
 
-def app_accent(project: Path) -> str | None:
-    """The accent the APP actually ships, read from its own colour token file.
+def _delivery_text(project: Path, rel: str) -> str | None:
+    """Deprecated shim — the shared delivery-ref reader lives in core."""
+    from .core import read_delivery_file
+    return read_delivery_file(project, rel, fallback_to_checkout=False)
 
-    `docs/design.md` is a specification, and specifications drift from shipped code —
-    on the first real render this project's design doc said cyan while the composables
-    rendered red. Store art must follow the app, not the promise, so this wins over the
-    design doc whenever the two disagree.
+
+def app_accent(project: Path) -> str | None:
+    """The accent the APP actually ships, read from the delivery tree's colour tokens.
+
+    Two drifts make "the brand" non-obvious, and both were observed: `docs/design.md`
+    is a specification that drifts from code, and the local checkout drifts from
+    origin/main. So the order of authority is: origin/main's token file, then the
+    working tree, and a design doc never wins over either.
     """
-    for f in project.rglob("*Color*.kt"):
-        if "build" in f.parts or "screenshotTest" in f.parts:
+    for f in sorted(project.rglob("*Color*.kt")):
+        parts = f.parts
+        if "build" in parts or "screenshotTest" in parts or "worktrees" in parts:
             continue
-        text = f.read_text(errors="ignore")
+        try:
+            rel = f.relative_to(project).as_posix()
+        except ValueError:
+            continue
+        text = _delivery_text(project, rel) or f.read_text(errors="ignore")
         for name in ("BrandPrimary", "Accent", "Primary"):
             m = re.search(rf"\bval\s+{name}\w*\s*=\s*Color\(0x[Ff]{{2}}([0-9A-Fa-f]{{6}})\)", text)
             if m:

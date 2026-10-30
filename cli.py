@@ -1125,6 +1125,21 @@ def cmd_status(args: argparse.Namespace) -> None:
     surfaces = scan.scan_surfaces(project)
     print(f"== {profile['name']} ==")
     print(f"repo:       {profile['repo_slug']} (branch {profile['main_branch']})")
+    # Which tree is authoritative. A stale/diverged checkout has twice produced a
+    # confident wrong answer ("we ship red" while origin shipped cyan), so the
+    # distance from the delivery ref is stated on every status, not discovered later.
+    from team.core import git_ref_state
+    ref = git_ref_state(project)
+    if ref.get("error") or not ref.get("ref_sha"):
+        print(f"delivery:   {ref['ref']} unknown ({ref.get('error') or 'no ref'}) — reads fall back to the checkout")
+    elif ref["stale"] or ref["ahead"]:
+        kind = "DIVERGED" if ref["diverged"] else ("STALE" if ref["stale"] else "unpushed")
+        print(f"delivery:   {kind} — checkout {ref['head']} is {ref['ahead']} ahead / "
+              f"{ref['behind']} behind {ref['ref']} @ {ref['ref_sha']}")
+        print(f"            project code is read from {ref['ref']}; "
+              f"run `git -C {project} rebase origin/{profile['main_branch']}` to sync")
+    else:
+        print(f"delivery:   checkout matches {ref['ref']} @ {ref['ref_sha']}")
     # Where the work is going (deterministic, LLM-free): vision → milestone →
     # queue. A project with no goal tree prints a one-line goal-less notice.
     print(goals.goal_block(profile, state))
@@ -1598,7 +1613,12 @@ def cmd_storefront_scenes(args: argparse.Namespace) -> int:
 
     if do_all or getattr(args, "render", False):
         print("~ rendering composables off-device (AGP layoutlib)")
-        res = sp.render_previews(project, log=print)
+        tree = None
+        if getattr(args, "from_checkout", False):
+            tree = project
+            print("  DELIVERY: --from-checkout — screenshots will describe the local "
+                  "checkout, NOT the app CI ships")
+        res = sp.render_previews(project, log=print, tree=tree)
         if res.get("status") != "OK":
             print(f"  ✗ {res.get('status')}: {res.get('error')}")
             if res.get("missing"):
@@ -1628,6 +1648,8 @@ def cmd_storefront_scenes(args: argparse.Namespace) -> int:
 
 def cmd_store_assets(args: argparse.Namespace) -> int:
     project = resolve_project(args.project)
+    from team.core import delivery_notice
+    print(delivery_notice(project))
     if getattr(args, "generate", False):
         from team.marketing_asset_generator import generate_all_marketing_templates, render_storefront_assets
         print(f"~ synthesizing marketing storefront templates for {project.name}")
@@ -1919,6 +1941,8 @@ def main() -> None:
     sfp.add_argument("--status", action="store_true", help="show scene bindings and provenance")
     sfp.add_argument("--force", action="store_true", help="overwrite the harness and existing framed screenshots")
     sfp.add_argument("--dry-run", action="store_true", help="print Gradle wiring changes without writing them")
+    sfp.add_argument("--from-checkout", action="store_true",
+                     help="render the local checkout instead of origin/main (screenshots then describe unshipped code)")
     sfp.set_defaults(fn=cmd_storefront_scenes)
     cs = sub.add_parser("console", help="plan or drive Google Play Console setup")
     cs.add_argument("project")

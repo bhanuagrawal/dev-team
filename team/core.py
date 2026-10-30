@@ -278,6 +278,71 @@ def run(args: list[str], cwd: Path | None, timeout: int = 300, env: dict | None 
     )
 
 
+# --------------------------------------------------------------------------- #
+# The delivery ref: one answer to "what do users actually get?"
+#
+# A claim about the app (its brand, its permissions, its store readiness) is a
+# claim about the SHIPPED tree, and the owner's checkout is routinely stale or
+# diverged — 2026-10-30: a checkout 67 commits behind origin/main made an audit
+# read the on-disk theme, report the wrong brand colour with full confidence, and
+# generate store screenshots from code Play would never receive. Code read for a
+# DECISION goes through these helpers, and every stage says which tree it read.
+# --------------------------------------------------------------------------- #
+DELIVERY_REF = "origin/main"
+
+
+def git_ref_state(project: Path, ref: str = DELIVERY_REF) -> dict[str, Any]:
+    """How far the working checkout is from the delivery ref (never raises)."""
+    state: dict[str, Any] = {"ref": ref, "head": None, "ref_sha": None,
+                             "ahead": 0, "behind": 0, "stale": False,
+                             "diverged": False, "error": None}
+    try:
+        head = git(["rev-parse", "HEAD"], cwd=project, timeout=30)
+        state["head"] = head.stdout.strip()[:12] if head.returncode == 0 else None
+        git(["fetch", "origin"], cwd=project, timeout=120)
+        r = git(["rev-list", "--left-right", "--count", f"HEAD...{ref}"], cwd=project, timeout=30)
+        if r.returncode != 0:
+            state["error"] = (r.stderr or "").strip()[-200:]
+            return state
+        ahead, behind = (r.stdout.split() + ["0", "0"])[:2]
+        state["ahead"], state["behind"] = int(ahead), int(behind)
+        sha = git(["rev-parse", ref], cwd=project, timeout=30)
+        state["ref_sha"] = sha.stdout.strip()[:12] if sha.returncode == 0 else None
+        state["stale"] = state["behind"] > 0
+        state["diverged"] = state["ahead"] > 0 and state["behind"] > 0
+    except Exception as e:  # offline, no git, not a repo — never a hard failure
+        state["error"] = str(e)[:200]
+    return state
+
+
+def delivery_notice(project: Path) -> str:
+    """One line stating which tree is authoritative, for stages that read code."""
+    s = git_ref_state(project)
+    if s.get("error") or not s.get("ref_sha"):
+        return (f"DELIVERY: {s['ref']} unavailable ({s.get('error') or 'no ref'}) "
+                "— reading the checkout")
+    if not s["stale"] and not s["ahead"]:
+        return f"DELIVERY: checkout matches {s['ref']} @ {s['ref_sha']}"
+    kind = "DIVERGED" if s["diverged"] else ("STALE" if s["stale"] else "unpushed")
+    return (f"DELIVERY: {kind} — checkout {s['head'] or '?'} is {s['ahead']} ahead / "
+            f"{s['behind']} behind {s['ref']} @ {s['ref_sha']}; reading {s['ref']}")
+
+
+def read_delivery_file(project: Path, rel: str, fallback_to_checkout: bool = True) -> str | None:
+    """Contents of a repo-relative file at the delivery ref (falls back to disk)."""
+    try:
+        r = git(["show", f"{DELIVERY_REF}:{rel}"], cwd=project, timeout=30)
+        if r.returncode == 0 and r.stdout.strip():
+            return r.stdout
+    except Exception:
+        pass
+    if fallback_to_checkout:
+        f = project / rel
+        if f.is_file():
+            return f.read_text(errors="ignore")
+    return None
+
+
 class RunLog:
     """Timestamped run log: streams to stdout AND appends to .pipeline/runs/<id>.log
 

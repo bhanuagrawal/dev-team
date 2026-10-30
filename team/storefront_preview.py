@@ -36,7 +36,15 @@ from .core import profile_of, save_json
 from .marketing_asset_generator import _find_chrome_executable
 
 SCREENSHOT_PLUGIN_ID = "com.android.compose.screenshot"
-SCREENSHOT_PLUGIN_VERSION = "0.0.1-alpha03"
+SCREENSHOT_PLUGIN_VERSION = "0.0.1-alpha03"  # fallback only; see screenshot_plugin_version()
+# The plugin is bound to an AGP range and REJECTS the build outside it ("requires
+# AGP version between 8.5.0-beta01 and 8.7"). AGP moves on shipped tasks, so the
+# version is chosen from the tree's own AGP rather than a constant.
+SCREENSHOT_PLUGIN_BY_AGP: list[tuple[tuple[int, int], str]] = [
+    ((8, 9), "0.0.1-alpha16"),   # verified against AGP 8.9.1
+    ((8, 6), "0.0.1-alpha09"),
+    ((0, 0), "0.0.1-alpha03"),   # verified against AGP 8.5.2
+]
 UI_TOOLING_FALLBACK = "1.7.5"
 COMPOSE_BOM_FALLBACK = "2024.10.01"
 
@@ -143,8 +151,32 @@ def _module_namespace(module: Path) -> str:
     return "storefront"
 
 
+def screenshot_plugin_version(project: Path) -> str:
+    """The plugin version that matches this tree's Android Gradle Plugin."""
+    major_minor = _agp_version(project)
+    for (maj, minor), version in SCREENSHOT_PLUGIN_BY_AGP:
+        if major_minor >= (maj, minor):
+            return version
+    return SCREENSHOT_PLUGIN_VERSION
+
+
+def _agp_version(project: Path) -> tuple[int, int]:
+    """AGP version from the version catalog or the plugins block (0,0 if unknown)."""
+    for rel in ("gradle/libs.versions.toml", "build.gradle.kts", "build.gradle"):
+        f = project / rel
+        if not f.is_file():
+            continue
+        text = f.read_text(errors="ignore")
+        m = re.search(r'^agp\s*=\s*"(\d+)\.(\d+)', text, re.M)
+        if m:
+            return int(m.group(1)), int(m.group(2))
+        m = re.search(r'com\.android\.(?:application|library)"?\)?\s*version\s*"(\d+)\.(\d+)', text)
+        if m:
+            return int(m.group(1)), int(m.group(2))
+    return (0, 0)
+
+
 def _compose_ui_tooling_version(project: Path) -> str:
-    """Prefer the project's own Compose BOM so ui-tooling matches the app's Compose."""
     for rel in ("gradle/libs.versions.toml", "build.gradle.kts", "build.gradle"):
         f = project / rel
         if not f.is_file():
@@ -229,9 +261,13 @@ def _insert_plugin_alias(text: str, alias: str) -> str:
 
 
 def _insert_after(text: str, pattern: str, insertion: str) -> str:
-    m = re.search(pattern, text)
+    m = re.search(pattern, text, re.M)
     if not m:
-        return text
+        # A silent no-op here produces a build.gradle.kts that references a plugin
+        # the catalog never declared — the failure then surfaces 30s later as a
+        # cryptic "Unresolved reference". Say it at the source instead.
+        raise SystemExit(f"cannot find anchor to insert {insertion.strip()[:60]!r} after: "
+                         f"pattern {pattern!r} missing")
     end = text.index("\n", m.end()) + 1 if "\n" in text[m.end():] else len(text)
     return text[:end] + insertion + text[end:]
 
@@ -244,22 +280,32 @@ def ensure_tooling(project: Path, module: Path, dry_run: bool = False) -> list[s
     original = text
 
     # 1. plugin — via the project's version catalog when it has one.
+    wanted = screenshot_plugin_version(project)
     catalog = project / "gradle/libs.versions.toml"
     if catalog.is_file():
         cat = catalog.read_text()
         if SCREENSHOT_PLUGIN_ID not in cat:
             cat = _insert_after(
                 cat, r"^\[plugins\]\s*$",
-                f'screenshot = {{ id = "{SCREENSHOT_PLUGIN_ID}", version = "{SCREENSHOT_PLUGIN_VERSION}" }}\n',
+                f'screenshot = {{ id = "{SCREENSHOT_PLUGIN_ID}", version = "{wanted}" }}\n',
             )
             if not dry_run:
                 catalog.write_text(cat)
-            changed.append(str(catalog.relative_to(project)) + " (plugin)")
+            changed.append(str(catalog.relative_to(project)) + f" (plugin {wanted})")
+        else:
+            # A stale version in an existing catalog entry is worse than no entry:
+            # it fails inside Gradle with "requires AGP version between …".
+            m = re.search(rf'({re.escape(SCREENSHOT_PLUGIN_ID)}",\s*version = ")([^"]+)(")', cat)
+            if m and m.group(2) != wanted:
+                cat = cat[:m.start(2)] + wanted + cat[m.end(2):]
+                if not dry_run:
+                    catalog.write_text(cat)
+                changed.append(str(catalog.relative_to(project)) + f" (plugin {m.group(2)} -> {wanted})")
         text = _insert_plugin_alias(text, "alias(libs.plugins.screenshot)")
     else:
         m = re.search(r"plugins\s*\{", text)
         if m and SCREENSHOT_PLUGIN_ID not in text:
-            text = text[:m.end()] + f'\n    id("{SCREENSHOT_PLUGIN_ID}") version "{SCREENSHOT_PLUGIN_VERSION}"' + text[m.end():]
+            text = text[:m.end()] + f'\n    id("{SCREENSHOT_PLUGIN_ID}") version "{wanted}"' + text[m.end():]
 
     # 2. flag that enables the screenshotTest source set (plugin alpha requirement)
     if "android.experimental.enableScreenshotTest" not in text:
@@ -376,9 +422,38 @@ def _gradlew(project: Path) -> str | None:
     return str(w) if w.is_file() else (shutil.which("gradle") or None)
 
 
-def render_previews(project: Path, log: Any = None, timeout: int = 900) -> dict[str, Any]:
-    """Run AGP's layoutlib renderer and collect one PNG per scene."""
-    spec = load_spec(project)
+def _delivery_tree(project: Path, log: Any = None) -> Path:
+    """A worktree at origin/main — the tree CI builds, i.e. what users receive.
+
+    Rendering the checkout instead is how screenshots once described code Play
+    would never get (the checkout was 68 commits behind). The tree is also given
+    the project-owned spec + generated harness, since those are dev-team outputs.
+    """
+    from .scan import origin_tree
+    tree = origin_tree(project, log)
+    local_props = project / "local.properties"
+    if local_props.is_file() and not (tree / "local.properties").is_file():
+        shutil.copy2(local_props, tree / "local.properties")  # gitignored, needed by AGP
+    if not (tree / SPEC_REL).is_file() and (project / SPEC_REL).is_file():
+        shutil.copy2(project / SPEC_REL, tree / SPEC_REL)
+    return tree
+
+
+def render_previews(project: Path, log: Any = None, timeout: int = 900,
+                    tree: Path | None = None) -> dict[str, Any]:
+    """Run AGP's layoutlib renderer and collect one PNG per scene.
+
+    Renders the DELIVERY tree by default: a screenshot is a claim about the app,
+    so it must come from the code CI ships, never from a stale checkout.
+    """
+    if tree is None:
+        tree = _delivery_tree(project, log)
+    if log:
+        from .core import delivery_notice
+        log("  " + delivery_notice(project))
+        log(f"  rendering {tree.relative_to(project) if tree.is_relative_to(project) else tree}")
+
+    spec = load_spec(tree) if (tree / SPEC_REL).is_file() else load_spec(project)
     missing = unbound_scenes(spec)
     if missing:
         return {
@@ -387,24 +462,45 @@ def render_previews(project: Path, log: Any = None, timeout: int = 900) -> dict[
             "missing": missing,
             "hint": "set \"composable\" for each scene (e.g. \"CompressScreen(data = CompressUIData(...), ...)\")",
         }
+    spec["module"] = spec.get("module") or find_compose_module(tree).name
+    write_harness(tree, spec)
+    # The tree is disposable and may not carry the preview tooling yet (the wiring
+    # can live only in an unpushed branch). Wiring it HERE keeps "render what ships"
+    # true even then — the alternative is a cryptic "task not found".
+    module_dir = tree / spec["module"]
+    wired = ensure_tooling(tree, module_dir)
+    if wired and log:
+        log("  + wired preview tooling in the delivery tree: " + ", ".join(wired))
 
-    gw = _gradlew(project)
+    gw = _gradlew(tree)
     if not gw:
         return {"status": "ERROR", "error": "no gradlew and no gradle on PATH"}
 
-    module = spec.get("module") or find_compose_module(project).name
+    module = spec.get("module") or find_compose_module(tree).name
     task = f":{module}:updateDebugScreenshotTest"
     if log:
         log(f"  ~ {task}")
     try:
         res = subprocess.run(
             [gw, task, "--no-configuration-cache", "--console=plain", "-q"],
-            cwd=project, capture_output=True, text=True, timeout=timeout,
+            cwd=tree, capture_output=True, text=True, timeout=timeout,
         )
     except subprocess.TimeoutExpired:
         return {"status": "ERROR", "error": f"{task} timed out after {timeout}s"}
 
     if res.returncode != 0:
+        blob = (res.stderr or "") + (res.stdout or "")
+        if "Required value was null" in blob and "compileDebugScreenshotTestKotlin" in blob:
+            return {
+                "status": "UNSUPPORTED",
+                "error": ("AGP's preview-screenshot plugin cannot compile the screenshotTest "
+                          "source set for this module (known: KMP androidTarget on AGP >= 8.8 — "
+                          "the plugin only wires the variant on the AGP 8.5-8.7 line)"),
+                "hint": ("screenshots were NOT generated; do not ship the previous frames as if "
+                         "they described this build. Render from a compatible checkout with "
+                         "`--from-checkout` (only when it is not stale — see `devteam status`), "
+                         "or move the harness to Roborazzi/Robolectric in androidUnitTest."),
+            }
         return {
             "status": "ERROR",
             "error": f"{task} failed",
@@ -412,7 +508,7 @@ def render_previews(project: Path, log: Any = None, timeout: int = 900) -> dict[
             "stderr": (res.stderr or "")[-3000:],
         }
 
-    reference = project / module / "build/reference"
+    reference = tree / module / "build/reference"
     if not reference.is_dir():
         reference = project / module / "src/debug/screenshotTest/reference"
     pngs = sorted(reference.rglob("*.png"))
@@ -433,10 +529,19 @@ def render_previews(project: Path, log: Any = None, timeout: int = 900) -> dict[
         collected.append({"id": sid, "file": str(dest.relative_to(project)),
                           "bytes": dest.stat().st_size, "source": str(match.relative_to(project))})
 
+    from .core import DELIVERY_REF, git_ref_state
+    ref_state = git_ref_state(project)
     manifest = {
         "provenance": "compose_preview" if collected else "none",
         "renderer": SCREENSHOT_PLUGIN_ID,
         "version": SCREENSHOT_PLUGIN_VERSION,
+        "rendered_from": {
+            "tree": "origin-main" if "scan" in tree.parts else "checkout",
+            "ref": DELIVERY_REF,
+            "ref_sha": ref_state.get("ref_sha"),
+            "stale_checkout": ref_state.get("stale"),
+            "checkout_behind": ref_state.get("behind"),
+        },
         "scenes": collected,
         "unresolved": unknown,
     }
