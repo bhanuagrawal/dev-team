@@ -1,0 +1,595 @@
+"""Compose Preview Storefront Renderer — photographs the REAL app, not an impression of it.
+
+Why this exists
+---------------
+The HTML template generator (`marketing_asset_generator`) draws a believable *idea* of
+the UI. It cannot know what the app actually looks like, so its screenshots drift from
+the product the moment a screen changes — and worse, it seeds colour from `docs/design.md`,
+which is a *specification*, not the shipped theme. A store listing that shows a mock is a
+deliverable nobody can verify.
+
+This module renders the app's own composables off-device and frames the result:
+
+    scene binding (docs/storefront.json)
+        -> @Preview in src/screenshotTest (project-owned Kotlin)
+        -> AGP preview screenshot rendering (layoutlib, JVM, no emulator)
+        -> <ns>/build/reference PNGs at exactly 1080x2400
+        -> marketing frame (1620x3600, 1080-wide device opening, zero resampling)
+        -> distribution/listing/en-US/images/phoneScreenshots/
+
+Determinism is the point: no device, no animation clock, no notification shade, no
+network images — and the fixture data is explicit, so the shot shows a populated screen
+instead of the empty state a device would happen to be in.
+
+Zero project names — generic across all Android / KMP projects.
+"""
+from __future__ import annotations
+
+import json
+import re
+import shutil
+import subprocess
+from pathlib import Path
+from typing import Any
+
+from .core import profile_of, save_json
+from .marketing_asset_generator import _find_chrome_executable
+
+SCREENSHOT_PLUGIN_ID = "com.android.compose.screenshot"
+SCREENSHOT_PLUGIN_VERSION = "0.0.1-alpha03"
+UI_TOOLING_FALLBACK = "1.7.5"
+COMPOSE_BOM_FALLBACK = "2024.10.01"
+
+# Play phone screenshot canvas, and the marketing frame that contains it 1:1.
+SCREEN_W, SCREEN_H = 1080, 2400
+FRAME_W, FRAME_H = 1620, 3600
+BEZEL_BORDER = 22
+BEZEL_W = SCREEN_W + BEZEL_BORDER * 2
+BEZEL_X = (FRAME_W - BEZEL_W) // 2
+BEZEL_TOP = 1120
+
+SPEC_REL = "docs/storefront.json"
+MARKER = "devteam storefront-preview"
+
+_SCENE_DEFAULTS: dict[str, list[dict[str, str]]] = {
+    "pdf": [
+        {"id": "01_hero", "badge": "Desktop-Grade Toolbox",
+         "headline": "All-In-One PDF Workstation",
+         "sub": "Merge, split, compress and convert documents on your device with instant offline speed."},
+        {"id": "02_compress", "badge": "Lossless Compression",
+         "headline": "Shrink Files Up To 90%",
+         "sub": "Intelligent downsampling cuts file size while keeping vector text razor sharp."},
+        {"id": "03_organize", "badge": "Visual Page Canvas",
+         "headline": "Drag Pages, Not Paperwork",
+         "sub": "Reorder, rotate, split and merge pages with real-time previews."},
+        {"id": "04_privacy", "badge": "Local-First Privacy",
+         "headline": "Zero Cloud Uploads. Ever.",
+         "sub": "Your documents never leave your device."},
+    ],
+    "court": [
+        {"id": "01_hero", "badge": "Core User Loop",
+         "headline": "The Screen IS The Scoreboard",
+         "sub": "Full-bleed targets engineered for fast tapping without looking."},
+        {"id": "02_rules", "badge": "Smart Rules Engine",
+         "headline": "Accurate Serving Rotation",
+         "sub": "Handles doubles starts, second-server transitions and side-outs automatically."},
+        {"id": "03_modes", "badge": "Custom Rules & Modes",
+         "headline": "Every Format & Ruleset",
+         "sub": "Singles, doubles and tournament play with win-by-2 or sudden death."},
+        {"id": "04_stats", "badge": "Post-Match Telemetry",
+         "headline": "Deep Performance Stats",
+         "sub": "Rally lengths, side-out efficiency, momentum streaks and career wins."},
+    ],
+    "generic": [
+        {"id": "01_hero", "badge": "Core Experience",
+         "headline": "Built For Speed",
+         "sub": "The essential experience, without the clutter."},
+        {"id": "02_detail", "badge": "Every Detail",
+         "headline": "Everything In Reach",
+         "sub": "A surface for every action you take most often."},
+    ],
+}
+
+_THEME_CANDIDATES = ("PdfKitTheme", "AppTheme", "ZenListTheme", "ZenCoachTheme", "AppTheme", "Theme")
+
+
+# --------------------------------------------------------------------------- #
+# discovery
+# --------------------------------------------------------------------------- #
+def detect_narrative(project: Path) -> str:
+    """Declared narrative wins; keyword detection is only a first-run guess."""
+    profile = profile_of(project)
+    declared = ((profile.get("storefront") or {}).get("narrative") or "").strip().lower()
+    if declared in _SCENE_DEFAULTS:
+        return declared
+    text = ((profile.get("name") or "") + " " + ((profile.get("goals") or {}).get("vision") or "")).lower()
+    if any(k in text for k in ("pdf", "document", "scanner", "office")):
+        return "pdf"
+    if any(k in text for k in ("pickleball", "scoreboard", "tennis", "court", "padel")):
+        return "court"
+    return "generic"
+
+
+def find_compose_module(project: Path) -> Path:
+    """The Gradle module that owns the composables (composeApp, app, …)."""
+    profile = profile_of(project)
+    declared = (profile.get("build") or {}).get("module")
+    candidates = [declared] if declared else []
+    candidates += ["composeApp", "app", "androidApp", "shared"]
+    for name in candidates:
+        if not name:
+            continue
+        d = project / name
+        if (d / "build.gradle.kts").is_file() or (d / "build.gradle").is_file():
+            return d
+    raise SystemExit(f"no compose module found in {project} (looked for {', '.join(candidates)})")
+
+
+def _build_file(module: Path) -> Path:
+    kts = module / "build.gradle.kts"
+    return kts if kts.is_file() else module / "build.gradle"
+
+
+def _module_namespace(module: Path) -> str:
+    text = _build_file(module).read_text(errors="ignore")
+    m = re.search(r'namespace\s*=\s*"([\w.]+)"', text)
+    if m:
+        return m.group(1)
+    main = module / "src/main"
+    for f in main.rglob("*.kt"):
+        pkg = re.search(r"^package\s+([\w.]+)", f.read_text(errors="ignore"), re.M)
+        if pkg:
+            return pkg.group(1)
+    return "storefront"
+
+
+def _compose_ui_tooling_version(project: Path) -> str:
+    """Prefer the project's own Compose BOM so ui-tooling matches the app's Compose."""
+    for rel in ("gradle/libs.versions.toml", "build.gradle.kts", "build.gradle"):
+        f = project / rel
+        if not f.is_file():
+            continue
+        m = re.search(r'compose-bom\s*=\s*"([^"]+)"', f.read_text(errors="ignore"))
+        if m:
+            return m.group(1)
+    return COMPOSE_BOM_FALLBACK
+
+
+def _theme_composable(project: Path, module: Path) -> str | None:
+    """Find the app's theme wrapper so a scene renders with shipped colours, not defaults."""
+    declared = (profile_of(project).get("storefront") or {}).get("theme")
+    if declared:
+        return declared
+    for f in (module / "src").rglob("*Theme.kt"):
+        m = re.search(r"^fun\s+(\w*[Tt]heme)\s*\(\s*content", f.read_text(errors="ignore"), re.M)
+        if m:
+            return m.group(1)
+    return None
+
+
+# --------------------------------------------------------------------------- #
+# docs/storefront.json — the copy + bindings, owned by the project
+# --------------------------------------------------------------------------- #
+def load_spec(project: Path, create: bool = True, save: bool = True) -> dict[str, Any]:
+    spec_file = project / SPEC_REL
+    if spec_file.is_file():
+        return json.loads(spec_file.read_text())
+
+    if not create:
+        raise SystemExit(f"{SPEC_REL} missing — run: devteam storefront-scenes <project> --scaffold")
+
+    profile = profile_of(project)
+    module = find_compose_module(project)
+    narrative = detect_narrative(project)
+    spec = {
+        "_comment": "Storefront scene copy. This file is a DELIVERABLE: edit it freely, "
+                    "'--scaffold' regenerates the Kotlin harness from it.",
+        "narrative": narrative,
+        "module": module.name,
+        "package": f"{_module_namespace(module)}.storefront",
+        "theme": _theme_composable(project, module),
+        "imports": [],
+        "fixtures": "object StorefrontFixtures {\n    // TODO: impressive, domain-true sample data (no lorem/test/Item 1)\n}",
+        "scenes": [dict(s, composable="") for s in _SCENE_DEFAULTS[narrative]],
+    }
+    if not save:
+        return spec
+    save_json(spec_file, spec)
+
+    # Make the guess auditable and correctable instead of silent.
+    if not (profile.get("storefront") or {}).get("narrative"):
+        profile.setdefault("storefront", {})["narrative"] = narrative
+        save_json(project / ".pipeline/profile.json", profile)
+    return spec
+
+
+def unbound_scenes(spec: dict[str, Any]) -> list[str]:
+    return [s["id"] for s in spec.get("scenes", []) if not (s.get("composable") or "").strip()]
+
+
+# --------------------------------------------------------------------------- #
+# Gradle wiring (idempotent, marker-based)
+# --------------------------------------------------------------------------- #
+def _insert_plugin_alias(text: str, alias: str) -> str:
+    if f"libs.plugins.screenshot" in text or SCREENSHOT_PLUGIN_ID in text:
+        return text
+    m = re.search(r"plugins\s*\{", text)
+    if not m:
+        raise SystemExit("no `plugins { }` block in module build file")
+    depth, i = 0, m.end()
+    while i < len(text):
+        if text[i] == "{":
+            depth += 1
+        elif text[i] == "}":
+            if depth == 0:
+                return text[:i] + f"    {alias}\n" + text[i:]
+            depth -= 1
+        i += 1
+    raise SystemExit("unterminated plugins block")
+
+
+def _insert_after(text: str, pattern: str, insertion: str) -> str:
+    m = re.search(pattern, text)
+    if not m:
+        return text
+    end = text.index("\n", m.end()) + 1 if "\n" in text[m.end():] else len(text)
+    return text[:end] + insertion + text[end:]
+
+
+def ensure_tooling(project: Path, module: Path, dry_run: bool = False) -> list[str]:
+    """Wire the AGP preview-screenshot plugin into the module. Safe to re-run."""
+    changed: list[str] = []
+    build = _build_file(module)
+    text = build.read_text()
+    original = text
+
+    # 1. plugin — via the project's version catalog when it has one.
+    catalog = project / "gradle/libs.versions.toml"
+    if catalog.is_file():
+        cat = catalog.read_text()
+        if SCREENSHOT_PLUGIN_ID not in cat:
+            cat = _insert_after(
+                cat, r"^\[plugins\]\s*$",
+                f'screenshot = {{ id = "{SCREENSHOT_PLUGIN_ID}", version = "{SCREENSHOT_PLUGIN_VERSION}" }}\n',
+            )
+            if not dry_run:
+                catalog.write_text(cat)
+            changed.append(str(catalog.relative_to(project)) + " (plugin)")
+        text = _insert_plugin_alias(text, "alias(libs.plugins.screenshot)")
+    else:
+        m = re.search(r"plugins\s*\{", text)
+        if m and SCREENSHOT_PLUGIN_ID not in text:
+            text = text[:m.end()] + f'\n    id("{SCREENSHOT_PLUGIN_ID}") version "{SCREENSHOT_PLUGIN_VERSION}"' + text[m.end():]
+
+    # 2. flag that enables the screenshotTest source set (plugin alpha requirement)
+    if "android.experimental.enableScreenshotTest" not in text:
+        text = _insert_after(
+            text, r"^android\s*\{",
+            '    experimentalProperties["android.experimental.enableScreenshotTest"] = true\n',
+        )
+    gp = project / "gradle.properties"
+    gp_text = gp.read_text() if gp.is_file() else ""
+    if "android.experimental.enableScreenshotTest" not in gp_text:
+        if not dry_run:
+            gp.write_text(gp_text.rstrip("\n") + "\nandroid.experimental.enableScreenshotTest=true\n")
+        changed.append("gradle.properties (flag)")
+
+    # 3. ui-tooling on the screenshotTest configuration, pinned to the app's Compose BOM
+    if MARKER not in text and "screenshotTestImplementation" not in text:
+        bom = _compose_ui_tooling_version(project)
+        block = (
+            f"    // {MARKER}: renders real composables off-device (layoutlib)\n"
+            f'    screenshotTestImplementation(platform("androidx.compose:compose-bom:{bom}"))\n'
+            f'    screenshotTestImplementation("androidx.compose.ui:ui-tooling")\n'
+        )
+        m = re.search(r"^dependencies\s*\{", text, re.M)
+        if not m:
+            text = text.rstrip("\n") + f"\n\ndependencies {{\n{block}}}\n"
+        else:
+            depth, i = 0, m.end()
+            while i < len(text):
+                if text[i] == "{":
+                    depth += 1
+                elif text[i] == "}":
+                    if depth == 0:
+                        text = text[:i] + block + text[i:]
+                        break
+                    depth -= 1
+                i += 1
+
+    if text != original:
+        if not dry_run:
+            build.write_text(text)
+        changed.append(str(build.relative_to(project)))
+    return changed
+
+
+# --------------------------------------------------------------------------- #
+# Kotlin harness generation
+# --------------------------------------------------------------------------- #
+def _san(name: str) -> str:
+    return re.sub(r"[^A-Za-z0-9]+", "_", name).strip("_")
+
+
+def harness_source(spec: dict[str, Any], ns: str | None = None) -> str:
+    pkg = spec.get("package") or "storefront"
+    theme = spec.get("theme")
+    imports = "\n".join(f"import {i}" for i in (spec.get("imports") or []))
+    fixtures = (spec.get("fixtures") or "").strip() or "object StorefrontFixtures"
+
+    out = [
+        f"// GENERATED by {MARKER} from {SPEC_REL} — edit the JSON, not this file.",
+        f"package {pkg}",
+        "",
+        "import androidx.compose.runtime.Composable",
+        "import androidx.compose.ui.tooling.preview.Preview",
+    ]
+    if imports:
+        out.append(imports)
+    out += [
+        "",
+        "/** Exactly the Play Store phone screenshot size: 1080x2400 @ 440dpi. */",
+        'private const val PHONE = "spec:width=1080px,height=2400px,dpi=440"',
+        "",
+        fixtures,
+        "",
+    ]
+    for scene in spec.get("scenes", []):
+        sid = scene["id"]
+        body = (scene.get("composable") or "").strip()
+        inner = f"{theme} {{\n        {body}\n    }}" if theme else f"    {body}"
+        out += [
+            f'@Preview(name = "{sid}", device = PHONE, showBackground = true)',
+            "@Composable",
+            f"fun Scene_{_san(sid)}() {{",
+            f"    {inner}",
+            "}",
+            "",
+        ]
+    return "\n".join(out)
+
+
+def write_harness(project: Path, spec: dict[str, Any], force: bool = False, dry_run: bool = False) -> Path:
+    """The Kotlin harness is GENERATED — the JSON is the source of truth, so it always syncs."""
+    module = project / spec.get("module", find_compose_module(project).name)
+    pkg_path = (spec.get("package") or "storefront").replace(".", "/")
+    target = module / "src/screenshotTest/kotlin" / pkg_path / "StorefrontScenes.kt"
+
+    bound = [s for s in spec.get("scenes", []) if (s.get("composable") or "").strip()]
+    if not bound:
+        return target  # nothing bindable yet; render refuses with the unbound list
+
+    source = harness_source({**spec, "scenes": bound})
+    if target.is_file() and target.read_text() == source:
+        return target
+    if not dry_run:
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(source)
+    return target
+
+
+# --------------------------------------------------------------------------- #
+# render + collect
+# --------------------------------------------------------------------------- #
+def _gradlew(project: Path) -> str | None:
+    w = project / "gradlew"
+    return str(w) if w.is_file() else (shutil.which("gradle") or None)
+
+
+def render_previews(project: Path, log: Any = None, timeout: int = 900) -> dict[str, Any]:
+    """Run AGP's layoutlib renderer and collect one PNG per scene."""
+    spec = load_spec(project)
+    missing = unbound_scenes(spec)
+    if missing:
+        return {
+            "status": "UNBOUND",
+            "error": "scenes not bound to a composable in " + SPEC_REL,
+            "missing": missing,
+            "hint": "set \"composable\" for each scene (e.g. \"CompressScreen(data = CompressUIData(...), ...)\")",
+        }
+
+    gw = _gradlew(project)
+    if not gw:
+        return {"status": "ERROR", "error": "no gradlew and no gradle on PATH"}
+
+    module = spec.get("module") or find_compose_module(project).name
+    task = f":{module}:updateDebugScreenshotTest"
+    if log:
+        log(f"  ~ {task}")
+    try:
+        res = subprocess.run(
+            [gw, task, "--no-configuration-cache", "--console=plain", "-q"],
+            cwd=project, capture_output=True, text=True, timeout=timeout,
+        )
+    except subprocess.TimeoutExpired:
+        return {"status": "ERROR", "error": f"{task} timed out after {timeout}s"}
+
+    if res.returncode != 0:
+        return {
+            "status": "ERROR",
+            "error": f"{task} failed",
+            "stdout": (res.stdout or "")[-3000:],
+            "stderr": (res.stderr or "")[-3000:],
+        }
+
+    reference = project / module / "build/reference"
+    if not reference.is_dir():
+        reference = project / module / "src/debug/screenshotTest/reference"
+    pngs = sorted(reference.rglob("*.png"))
+    if not pngs:
+        return {"status": "ERROR", "error": f"no reference PNGs under {reference}"}
+
+    out_dir = project / ".pipeline/storefront_scenes"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    collected, unknown = [], []
+    for scene in spec.get("scenes", []):
+        sid = scene["id"]
+        match = next((p for p in pngs if f"_{sid}_" in p.name), None)
+        if not match:
+            unknown.append(sid)
+            continue
+        dest = out_dir / f"{sid}.png"
+        shutil.copy2(match, dest)
+        collected.append({"id": sid, "file": str(dest.relative_to(project)),
+                          "bytes": dest.stat().st_size, "source": str(match.relative_to(project))})
+
+    manifest = {
+        "provenance": "compose_preview" if collected else "none",
+        "renderer": SCREENSHOT_PLUGIN_ID,
+        "version": SCREENSHOT_PLUGIN_VERSION,
+        "scenes": collected,
+        "unresolved": unknown,
+    }
+    save_json(out_dir / "manifest.json", manifest)
+    if log:
+        for c in collected:
+            log(f"  ✓ {c['id']} ({round(c['bytes'] / 1024, 1)} KB)")
+        for u in unknown:
+            log(f"  ! scene '{u}' produced no PNG")
+    return {"status": "OK", **manifest}
+
+
+# --------------------------------------------------------------------------- #
+# marketing frame: 1620x3600 canvas, 1080-wide opening, zero resampling
+# --------------------------------------------------------------------------- #
+def _frame_html(scene: dict[str, Any], img_uri: str, colors: dict[str, str]) -> str:
+    acc = colors.get("primary", "#00E5FF")
+    sec = colors.get("secondary", "#7C4DFF")
+    badge = scene.get("badge", "")
+    headline = scene.get("headline", "")
+    sub = scene.get("sub", "")
+    return f"""<!DOCTYPE html>
+<html><head><meta charset="utf-8">
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@600;700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@700&display=swap" rel="stylesheet">
+<style>
+  * {{ box-sizing: border-box; margin: 0; padding: 0; }}
+  body {{ width: {FRAME_W}px; height: {FRAME_H}px; overflow: hidden; position: relative;
+         background: radial-gradient(circle at 50% 10%, #16263B 0%, {colors.get('canvas', '#0A0E14')} 62%);
+         font-family: 'Inter', sans-serif; color: #fff; }}
+  .aura {{ position: absolute; top: 520px; left: 50%; transform: translateX(-50%);
+           width: 1200px; height: 1200px;
+           background: radial-gradient(circle, {acc}26 0%, {sec}1a 45%, transparent 70%);
+           filter: blur(110px); }}
+  .header {{ position: absolute; top: 170px; left: 90px; right: 90px; text-align: center; }}
+  .badge {{ display: inline-flex; align-items: center; gap: 14px; font-family: 'JetBrains Mono', monospace;
+            font-size: 30px; font-weight: 700; letter-spacing: 3px; text-transform: uppercase;
+            color: {acc}; background: {acc}1a; border: 2px solid {acc}66;
+            padding: 12px 34px; border-radius: 999px; }}
+  .dot {{ width: 14px; height: 14px; border-radius: 50%; background: {acc}; box-shadow: 0 0 14px {acc}; }}
+  h1 {{ font-family: 'Space Grotesk', sans-serif; font-size: 104px; font-weight: 700; line-height: 1.05;
+        letter-spacing: -1px; text-transform: uppercase; margin: 34px 0 22px;
+        background: linear-gradient(180deg, #FFFFFF 0%, #D8E2F0 100%);
+        -webkit-background-clip: text; -webkit-text-fill-color: transparent; }}
+  p {{ font-size: 42px; line-height: 1.35; color: {colors.get('text_muted', '#94A3B8')}; max-width: 1320px; margin: 0 auto; }}
+  .bezel {{ position: absolute; top: {BEZEL_TOP}px; left: {BEZEL_X}px;
+            width: {BEZEL_W}px; height: {FRAME_H - BEZEL_TOP + 60}px;
+            background: #151D2A; border: 4px solid #2B3A50; border-bottom: none;
+            border-radius: 104px 104px 0 0;
+            box-shadow: 0 -30px 90px rgba(0,0,0,0.85), 0 0 130px {acc}33; }}
+  .screen {{ position: absolute; top: {BEZEL_BORDER}px; left: {BEZEL_BORDER}px;
+             width: {SCREEN_W}px; height: {SCREEN_H}px; overflow: hidden;
+             border-radius: 80px 80px 0 0; background: #000; }}
+  .screen img {{ display: block; width: {SCREEN_W}px; height: {SCREEN_H}px; }}
+</style></head>
+<body>
+  <div class="aura"></div>
+  <div class="header">
+    <div class="badge"><div class="dot"></div>{badge}</div>
+    <h1>{headline}</h1>
+    <p>{sub}</p>
+  </div>
+  <div class="bezel"><div class="screen"><img src="{img_uri}"></div></div>
+</body></html>"""
+
+
+def compose_frames(project: Path, log: Any = None, force: bool = False) -> dict[str, Any]:
+    """Wrap each rendered scene in the marketing frame and write Play-ready PNGs."""
+    spec = load_spec(project, create=False)
+    scenes_dir = project / ".pipeline/storefront_scenes"
+    if not scenes_dir.is_dir():
+        return {"status": "ERROR", "error": "no rendered scenes — run storefront-scenes --render first"}
+
+    manifest_file = scenes_dir / "manifest.json"
+    if manifest_file.is_file() and json.loads(manifest_file.read_text()).get("provenance") != "compose_preview":
+        return {"status": "ERROR", "error": "manifest is not compose_preview provenance"}
+
+    chrome = _find_chrome_executable()
+    if not chrome:
+        return {"status": "ERROR", "error": "Google Chrome / Chromium not found"}
+
+    from .marketing_asset_generator import _extract_brand_colors
+    colors = _extract_brand_colors(project)
+    module = project / (spec.get("module") or "")
+    shipped = _app_accent(project, module if module.is_dir() else None)
+    if shipped:
+        colors["primary"] = shipped
+
+    listing = project / "distribution/listing/en-US/images/phoneScreenshots"
+    listing.mkdir(parents=True, exist_ok=True)
+    frames_dir = project / ".pipeline/storefront_frames"
+    frames_dir.mkdir(parents=True, exist_ok=True)
+
+    copy_by_id = {s["id"]: s for s in spec.get("scenes", [])}
+    keep = {f"{s['id']}.png" for s in spec.get("scenes", [])}
+    stale = _stale_screenshots(listing, keep)
+    if log:
+        for name in stale:
+            log(f"  ! {name} is not owned by any scene — left in place; remove it if it is an old mock")
+    written: list[dict[str, Any]] = []
+    for png in sorted(scenes_dir.glob("*.png")):
+        sid = png.stem
+        scene = copy_by_id.get(sid, {"id": sid, "badge": "", "headline": "", "sub": ""})
+        html_file = frames_dir / f"{png.stem}.html"
+        out_png = listing / f"{sid}.png"
+        if out_png.is_file() and not force:
+            written.append({"id": sid, "file": str(out_png.relative_to(project)), "status": "SKIPPED (exists)"})
+            continue
+        html_file.write_text(_frame_html(scene, png.resolve().as_uri(), colors))
+        try:
+            subprocess.run(
+                [chrome, "--headless", "--disable-gpu", "--hide-scrollbars",
+                 "--force-device-scale-factor=1", f"--window-size={FRAME_W},{FRAME_H}",
+                 f"--screenshot={out_png.resolve()}", html_file.resolve().as_uri()],
+                capture_output=True, text=True, timeout=60,
+            )
+        except Exception as e:
+            written.append({"id": sid, "status": f"ERROR: {e}"})
+            continue
+        if out_png.is_file():
+            written.append({"id": sid, "file": str(out_png.relative_to(project)),
+                            "bytes": out_png.stat().st_size, "status": "OK"})
+            if log:
+                log(f"  ✓ frame {out_png.name} ({round(out_png.stat().st_size / 1024, 1)} KB)")
+    return {"status": "OK", "frames": written,
+            "count": len([w for w in written if w.get("status") == "OK"]),
+            "stale": stale}
+
+
+def _app_accent(project: Path, module: Path | None = None) -> str | None:
+    """Delegates to the shared implementation so frames and icons agree."""
+    from .marketing_asset_generator import app_accent
+    return app_accent(project)
+
+
+def _stale_screenshots(listing: Path, keep: set[str]) -> list[str]:
+    """Old screenshots that no scene owns — surfaced, never deleted (owner may have added them)."""
+    if not listing.is_dir():
+        return []
+    return sorted(p.name for p in listing.glob("*.png") if p.name not in keep)
+
+
+def preview_status(project: Path) -> dict[str, Any]:
+    spec_file = project / SPEC_REL
+    if not spec_file.is_file():
+        return {"configured": False, "hint": f"run: devteam storefront-scenes <project> --scaffold"}
+    spec = load_spec(project)
+    manifest = project / ".pipeline/storefront_scenes/manifest.json"
+    data = json.loads(manifest.read_text()) if manifest.is_file() else {}
+    return {
+        "configured": True,
+        "narrative": spec.get("narrative"),
+        "scenes": [s["id"] for s in spec.get("scenes", [])],
+        "unbound": unbound_scenes(spec),
+        "provenance": data.get("provenance"),
+        "rendered": len(data.get("scenes", [])),
+    }

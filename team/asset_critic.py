@@ -11,6 +11,7 @@ Zero project names — generic across all Android / KMP projects.
 """
 from __future__ import annotations
 
+import json
 import os
 import re
 import struct
@@ -31,6 +32,30 @@ def _png_dimensions(path: Path) -> tuple[int, int] | None:
     except Exception:
         pass
     return None
+
+
+PROVENANCE_CAP: dict[str, int | None] = {
+    "compose_preview": None,   # rendered from the app's own composables — no cap
+    "stitch": None,            # canonical Stitch screen, design-locked
+    "html_mock": 70,           # an impression of the UI, not the UI
+    "unknown": 70,
+}
+
+
+def _provenance(project: Path) -> str:
+    """Where did the screenshots come from? Measured from the pipeline, not asserted."""
+    manifest = project / ".pipeline/storefront_scenes/manifest.json"
+    if manifest.is_file():
+        try:
+            data = json.loads(manifest.read_text())
+        except Exception:
+            data = {}
+        if data.get("provenance") == "compose_preview" and data.get("scenes"):
+            return "compose_preview"
+    templates = project / ".pipeline/storefront_templates"
+    if templates.is_dir() and any(templates.glob("0*.html")):
+        return "html_mock"
+    return "unknown"
 
 
 def _find_listing_dir(project: Path) -> Path | None:
@@ -221,8 +246,21 @@ def review_store_assets(project: Path) -> dict[str, Any]:
 
     report["dimensions"]["brand_coherence"] = {"score": brand_score, "max": 15, "notes": brand_notes}
 
-    # ── Total Score & Rating ──────────────────────────────────────────────────
+    # ── Provenance gate: an impression of the UI cannot outscore the UI ───────
+    # A green score on an HTML mock is what made the "screenshots don't look like
+    # the app" gap invisible for so long. Provenance is measured, not asserted.
+    provenance = _provenance(project)
+    report["provenance"] = provenance
     total_score = tech_score + headline_score + framing_score + story_score + brand_score
+    cap = PROVENANCE_CAP.get(provenance)
+    if cap is not None and total_score > cap:
+        tech_issues.append(
+            f"Screenshots are {provenance} (not rendered from the app); score capped at {cap}."
+        )
+        report["dimensions"]["technical_compliance"]["issues"] = tech_issues
+        total_score = cap
+
+    # ── Total Score & Rating ──────────────────────────────────────────────────
     report["score"] = total_score
 
     if total_score >= 90:

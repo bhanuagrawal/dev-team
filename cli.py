@@ -1561,6 +1561,71 @@ def cmd_store_readiness(args: argparse.Namespace) -> int:
     return 0 if is_ready else 1
 
 
+def cmd_storefront_scenes(args: argparse.Namespace) -> int:
+    project = resolve_project(args.project)
+    from team import storefront_preview as sp
+
+    do_all = getattr(args, "all", False)
+    if not any([do_all, getattr(args, "scaffold", False), getattr(args, "render", False),
+                getattr(args, "frame", False), getattr(args, "status", False)]):
+        do_all = True
+
+    if do_all or getattr(args, "scaffold", False):
+        spec_file_before = (project / sp.SPEC_REL).is_file()
+        spec = sp.load_spec(project, create=True, save=not getattr(args, "dry_run", False))
+        module = project / spec.get("module", "")
+        if not module.is_dir():
+            module = sp.find_compose_module(project)
+            spec["module"] = module.name
+        print(f"~ storefront spec: {sp.SPEC_REL} (narrative: {spec.get('narrative')})")
+        if not spec.get("theme"):
+            print("  ! no theme composable detected; scenes render with default Material colours")
+        for change in sp.ensure_tooling(project, module, dry_run=getattr(args, "dry_run", False)):
+            print(f"  + wired {change}")
+        harness = sp.write_harness(project, spec, force=getattr(args, "force", False),
+                                   dry_run=getattr(args, "dry_run", False))
+        print(f"  + harness {harness.relative_to(project)}")
+        missing = sp.unbound_scenes(spec)
+        if missing:
+            print(f"  ! {len(missing)} scene(s) not bound to a composable in {sp.SPEC_REL}:")
+            for m in missing:
+                print(f"      - {m}")
+            print(f"    set \"composable\" for each (e.g. \"CompressScreen(data = CompressUIData(Fixtures.report, "
+                  f"CompressQuality.MEDIUM), isLoading = false, errorMessage = null, onEvent = {{}}, "
+                  f"onPickFile = {{}}, onBack = {{}})\"), then re-run --render")
+        if not spec_file_before:
+            print(f"  ~ {sp.SPEC_REL} was created — edit the copy and fixtures, then re-run")
+
+    if do_all or getattr(args, "render", False):
+        print("~ rendering composables off-device (AGP layoutlib)")
+        res = sp.render_previews(project, log=print)
+        if res.get("status") != "OK":
+            print(f"  ✗ {res.get('status')}: {res.get('error')}")
+            if res.get("missing"):
+                print(f"    unbound: {', '.join(res['missing'])}")
+            if res.get("stderr"):
+                print(res["stderr"].strip()[-1500:])
+            return 1
+        print(f"  {res.get('count', len(res.get('scenes', [])))} scene(s) rendered -> .pipeline/storefront_scenes")
+
+    if do_all or getattr(args, "frame", False):
+        print("~ compositing marketing frames (1620x3600, 1080-wide opening)")
+        res = sp.compose_frames(project, log=print, force=getattr(args, "force", False))
+        if res.get("status") != "OK":
+            print(f"  ✗ {res.get('error')}")
+            return 1
+        print(f"  {res.get('count', 0)} frame(s) -> distribution/listing/en-US/images/phoneScreenshots")
+
+    if getattr(args, "status", False) or do_all:
+        st = sp.preview_status(project)
+        print(f"\nSTOREFRONT PREVIEW STATUS: {st.get('provenance') or 'not rendered'}")
+        print(f"  scenes:   {', '.join(st.get('scenes') or []) or '(none)'}")
+        print(f"  rendered: {st.get('rendered', 0)}")
+        if st.get("unbound"):
+            print(f"  unbound:  {', '.join(st['unbound'])}")
+    return 0
+
+
 def cmd_store_assets(args: argparse.Namespace) -> int:
     project = resolve_project(args.project)
     if getattr(args, "generate", False):
@@ -1844,6 +1909,17 @@ def main() -> None:
     sa.add_argument("--generate", action="store_true", help="synthesize marketing HTML templates and render PNG assets to distribution/listing/en-US/images")
     sa.add_argument("--render-only", action="store_true", help="render existing HTML templates to PNGs without regenerating templates")
     sa.set_defaults(fn=cmd_store_assets)
+    sfp = sub.add_parser("storefront-scenes",
+                         help="render REAL app composables to Play screenshots via Compose preview (no emulator)")
+    sfp.add_argument("project")
+    sfp.add_argument("--scaffold", action="store_true", help="create docs/storefront.json + Kotlin preview harness and wire the Gradle plugin")
+    sfp.add_argument("--render", action="store_true", help="render the harness off-device into .pipeline/storefront_scenes")
+    sfp.add_argument("--frame", action="store_true", help="composite marketing frames into distribution/listing/en-US/images/phoneScreenshots")
+    sfp.add_argument("--all", action="store_true", help="scaffold, render and frame in one pass (default)")
+    sfp.add_argument("--status", action="store_true", help="show scene bindings and provenance")
+    sfp.add_argument("--force", action="store_true", help="overwrite the harness and existing framed screenshots")
+    sfp.add_argument("--dry-run", action="store_true", help="print Gradle wiring changes without writing them")
+    sfp.set_defaults(fn=cmd_storefront_scenes)
     cs = sub.add_parser("console", help="plan or drive Google Play Console setup")
     cs.add_argument("project")
     cs.add_argument("--script", action="store_true", help="output automated Playwright JS script")

@@ -205,6 +205,8 @@ FAIL → The orchestrator fixes the failure in the worktree (or re-prompts the s
 ### Step 8 — release & store readiness (code)
 
 `cli.py store-readiness <project>` audits Google Play Store launch compliance (targetSdk >= 34, restricted permissions, adaptive launcher icons, component exports, localization, release signing).
+
+`cli.py storefront-scenes <project> --all` renders the **app's own composables** to Play phone screenshots — no emulator, no mock: it wires AGP's preview-screenshot plugin, generates a `@Preview` harness from `docs/storefront.json` (project-owned copy + fixtures + composable bindings), renders at exactly 1080x2400, then composites a 1620x3600 marketing frame around each shot with a 1080-wide device opening and zero resampling. `asset_critic` records provenance, so screenshots that are an HTML *impression* of the UI are capped at 70 while composable-rendered ones are not.
 `cli.py release` bumps the version from the latest remote tag, writes the
 release notes, commits, pushes to `origin/main` (fetch + rebase if the remote
 moved meanwhile), and then **watches CI**, retrying up to 3 times with a fresh

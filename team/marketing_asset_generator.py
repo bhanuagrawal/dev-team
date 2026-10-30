@@ -46,8 +46,27 @@ def re_hex(text: str) -> str | None:
     return m.group(0)[:7] if m else None
 
 
+def app_accent(project: Path) -> str | None:
+    """The accent the APP actually ships, read from its own colour token file.
+
+    `docs/design.md` is a specification, and specifications drift from shipped code —
+    on the first real render this project's design doc said cyan while the composables
+    rendered red. Store art must follow the app, not the promise, so this wins over the
+    design doc whenever the two disagree.
+    """
+    for f in project.rglob("*Color*.kt"):
+        if "build" in f.parts or "screenshotTest" in f.parts:
+            continue
+        text = f.read_text(errors="ignore")
+        for name in ("BrandPrimary", "Accent", "Primary"):
+            m = re.search(rf"\bval\s+{name}\w*\s*=\s*Color\(0x[Ff]{{2}}([0-9A-Fa-f]{{6}})\)", text)
+            if m:
+                return "#" + m.group(1).upper()
+    return None
+
+
 def _extract_brand_colors(project: Path) -> dict[str, str]:
-    """Extract authoritative color tokens from docs/design.md or profile."""
+    """Extract authoritative color tokens from docs/design.md, then the shipped theme."""
     colors = {
         "canvas": "#0A0E14",
         "surface": "#161F2E",
@@ -85,6 +104,9 @@ def _extract_brand_colors(project: Path) -> dict[str, str]:
             elif "AccentWarning" in line_str or "warning:" in line_str.lower():
                 m = re_hex(line_str)
                 if m: colors["amber"] = m
+    shipped = app_accent(project)
+    if shipped:
+        colors["primary"] = shipped
     return colors
 
 
@@ -330,7 +352,6 @@ def build_icon_html(project_name: str, colors: dict[str, str]) -> str:
       <div class="fold"></div>
       <div class="fold-tab"></div>
       <div class="doc-text">PDF</div>
-      <div class="badge">PRO</div>
     </div>
   </div>
 </body>
@@ -825,6 +846,16 @@ def render_storefront_assets(
 
     rendered: list[dict[str, Any]] = []
 
+    # Provenance guard: once screenshots come from the app's own composables
+    # (storefront-scenes), an HTML impression must never overwrite them.
+    manifest = project / ".pipeline/storefront_scenes/manifest.json"
+    previews_are_real = False
+    if manifest.is_file():
+        try:
+            previews_are_real = json.loads(manifest.read_text()).get("provenance") == "compose_preview"
+        except Exception:
+            previews_are_real = False
+
     # Map templates to target PNG files and viewport sizes
     render_tasks = [
         ("icon.html", img_dir / "icon.png", 512, 512),
@@ -832,9 +863,12 @@ def render_storefront_assets(
     ]
 
     # Collect screenshot templates
-    for html_file in sorted(templates_dir.glob("0*.html")):
-        png_name = html_file.stem + ".png"
-        render_tasks.append((html_file.name, shots_dir / png_name, 1080, 2400))
+    if not previews_are_real:
+        for html_file in sorted(templates_dir.glob("0*.html")):
+            png_name = html_file.stem + ".png"
+            render_tasks.append((html_file.name, shots_dir / png_name, 1080, 2400))
+    elif log:
+        log("  ~ phone screenshots are compose_preview — skipping HTML mock renders")
 
     for template_name, target_png, width, height in render_tasks:
         src_file = templates_dir / template_name
