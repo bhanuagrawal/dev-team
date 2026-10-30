@@ -1,0 +1,363 @@
+<!DOCTYPE html>
+
+<html class="dark" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" name="viewport"/>
+<title>PDF KIT — Mobile Precision PDF Workstation</title>
+<!-- Fonts -->
+<link href="https://fonts.googleapis.com" rel="preconnect"/>
+<link crossorigin="" href="https://fonts.gstatic.com" rel="preconnect"/>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;family=Public+Sans:wght@400;500;600&amp;family=Space+Grotesk:wght@500;600;700;800&amp;display=swap" rel="stylesheet"/>
+<!-- Material Symbols -->
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<!-- Tailwind CSS -->
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<script id="tailwind-config">
+    tailwind.config = {
+      darkMode: "class",
+      theme: {
+        extend: {
+          colors: {
+            background: "#0A0E14",
+            surface: "#101622",
+            "surface-container": "#161F2E",
+            "surface-container-high": "#1E2A3E",
+            primary: "#00E5FF",
+            "on-primary": "#001E24",
+            "primary-container": "#004D57",
+            "on-primary-container": "#A5F5FF",
+            outline: "#27384D",
+            "outline-variant": "#1A2535",
+            "on-surface": "#F0F4F8",
+            "on-surface-variant": "#8B9BB4",
+            accent: "#00FFB2"
+          },
+          borderRadius: {
+            "DEFAULT": "0.5rem",
+            "lg": "1rem",
+            "xl": "1.5rem",
+            "full": "9999px"
+          },
+          fontFamily: {
+            headline: ["Space Grotesk", "sans-serif"],
+            display: ["Space Grotesk", "sans-serif"],
+            body: ["Inter", "sans-serif"],
+            label: ["Public Sans", "sans-serif"]
+          }
+        },
+      },
+    }
+  </script>
+<style>
+    .material-symbols-outlined {
+      font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+      line-height: 1;
+      display: inline-block;
+      vertical-align: middle;
+    }
+    
+    /* Subtle tech grid backdrop */
+    .bg-grid-subtle {
+      background-size: 24px 24px;
+      background-image: 
+        linear-gradient(to right, rgba(0, 229, 255, 0.03) 1px, transparent 1px),
+        linear-gradient(to bottom, rgba(0, 229, 255, 0.03) 1px, transparent 1px);
+    }
+
+    /* Glow glow effects */
+    .glow-cyan {
+      box-shadow: 0 0 24px -4px rgba(0, 229, 255, 0.25);
+    }
+    .glow-cyan-button {
+      box-shadow: 0 4px 20px -2px rgba(0, 229, 255, 0.45);
+    }
+    
+    /* Custom scrollbar hiding for clean app ergonomics */
+    ::-webkit-scrollbar {
+      display: none;
+    }
+    * {
+      -ms-overflow-style: none;
+      scrollbar-width: none;
+      -webkit-tap-highlight-color: transparent;
+    }
+  </style>
+<style>
+    body {
+      min-height: max(884px, 100dvh);
+    }
+  </style>
+  </head>
+<body class="bg-background text-on-surface font-body antialiased min-h-screen pb-28 pt-16 select-none bg-grid-subtle flex flex-col justify-between">
+<!-- TopAppBar Component (Exact anchor implementation) -->
+<header class="fixed top-0 left-0 w-full z-50 flex items-center justify-between px-5 py-3 bg-surface/90 dark:bg-surface/90 backdrop-blur-xl">
+<div class="flex items-center gap-2.5">
+<div class="w-9 h-9 rounded-xl bg-primary/10 border border-primary/30 flex items-center justify-center text-primary shadow-inner">
+<span class="material-symbols-outlined text-xl" data-icon="picture_as_pdf">picture_as_pdf</span>
+</div>
+<span class="font-headline font-bold text-xl tracking-widest text-on-surface dark:text-on-surface">PDF KIT</span>
+</div>
+<!-- Security/Privacy Badge -->
+<div class="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-surface-container border border-outline/50 shadow-sm">
+<span class="w-1.5 h-1.5 rounded-full bg-accent animate-pulse"></span>
+<span class="font-label text-[10px] font-semibold tracking-wider text-on-surface-variant uppercase">100% Offline • Private</span>
+</div>
+<button aria-label="Settings" class="text-on-surface-variant hover:text-primary transition-colors duration-150 active:scale-95 transition-transform duration-150 p-1.5 rounded-lg bg-surface-container/60 hover:bg-surface-container border border-outline/40" type="button">
+<span class="material-symbols-outlined text-xl" data-icon="settings">settings</span>
+</button>
+</header>
+<!-- Main Content Canvas -->
+<main class="w-full max-w-md mx-auto px-4 pt-3 space-y-6">
+<!-- HERO FEATURE CARD: Lossless Compress -->
+<section class="relative rounded-2xl p-5 bg-gradient-to-b from-surface-container to-surface border border-primary/40 glow-cyan overflow-hidden">
+<!-- Ambient decorative gradient spot -->
+<div class="absolute -right-16 -top-16 w-44 h-44 bg-primary/15 rounded-full blur-3xl pointer-events-none"></div>
+<div class="relative z-10 flex flex-col">
+<div class="flex items-center justify-between mb-3">
+<div class="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-primary/15 border border-primary/30">
+<span class="material-symbols-outlined text-primary text-xs" data-icon="bolt">bolt</span>
+<span class="font-label text-[10px] font-bold uppercase tracking-wider text-primary">Engine v4.2 Pro</span>
+</div>
+<span class="font-label text-[11px] text-on-surface-variant font-medium tabular-nums">Max 250 MB</span>
+</div>
+<h1 class="font-headline font-bold text-2xl tracking-tight text-on-surface leading-tight">
+          Smart Lossless Compress
+        </h1>
+<p class="text-xs text-on-surface-variant mt-1 leading-relaxed">
+          Shrink file footprint with perceptual precision downscaling.
+        </p>
+<!-- Metric Badges -->
+<div class="grid grid-cols-2 gap-2 mt-4">
+<div class="bg-background/70 border border-outline/40 rounded-xl p-2.5 flex items-center gap-2">
+<span class="material-symbols-outlined text-primary text-lg" data-icon="speed">speed</span>
+<div>
+<div class="text-[10px] uppercase font-label tracking-wider text-on-surface-variant">Compression</div>
+<div class="font-headline font-bold text-sm text-on-surface tabular-nums">Up to 85%</div>
+</div>
+</div>
+<div class="bg-background/70 border border-outline/40 rounded-xl p-2.5 flex items-center gap-2">
+<span class="material-symbols-outlined text-accent text-lg" data-icon="verified">verified</span>
+<div>
+<div class="text-[10px] uppercase font-label tracking-wider text-on-surface-variant">Clarity</div>
+<div class="font-headline font-bold text-sm text-on-surface">Zero Loss</div>
+</div>
+</div>
+</div>
+<!-- Call to Action / Drop Area -->
+<div class="mt-4 pt-1">
+<button class="w-full bg-primary text-on-primary font-headline font-bold text-sm tracking-wide py-3.5 px-4 rounded-xl flex items-center justify-center gap-2.5 glow-cyan-button active:scale-95 transition-all duration-150" type="button">
+<span class="material-symbols-outlined text-xl" data-icon="upload_file">upload_file</span>
+<span>Select PDF Document</span>
+</button>
+<div class="flex items-center justify-center gap-1.5 mt-2.5 text-on-surface-variant/80">
+<span class="material-symbols-outlined text-[14px]" data-icon="touch_app">touch_app</span>
+<span class="text-[11px] font-label font-normal">or drag &amp; drop anywhere on canvas</span>
+</div>
+</div>
+</div>
+</section>
+<!-- CORE WORKSTATION TOOLS (Bento Grid 2x2) -->
+<section>
+<div class="flex items-center justify-between mb-3 px-1">
+<h2 class="font-headline font-bold text-base tracking-tight text-on-surface flex items-center gap-2">
+<span>Core Utilities</span>
+<span class="text-[11px] font-normal text-on-surface-variant px-1.5 py-0.5 rounded bg-surface-container font-label">Offline</span>
+</h2>
+<span class="font-label text-xs text-primary font-medium tracking-tight">4 Ready</span>
+</div>
+<div class="grid grid-cols-2 gap-3">
+<!-- 1. Merge PDFs Card -->
+<div class="group bg-surface-container hover:bg-surface-container-high border border-outline/50 hover:border-primary/40 rounded-2xl p-4 transition-all duration-150 flex flex-col justify-between active:scale-[0.98] cursor-pointer">
+<div class="flex items-start justify-between">
+<div class="w-10 h-10 rounded-xl bg-primary/10 border border-primary/20 flex items-center justify-center text-primary">
+<span class="material-symbols-outlined text-xl" data-icon="call_merge">call_merge</span>
+</div>
+<span class="text-[10px] font-label font-bold uppercase tracking-wider text-accent bg-accent/10 border border-accent/20 px-1.5 py-0.5 rounded">2+ files</span>
+</div>
+<div class="mt-4">
+<h3 class="font-headline font-bold text-sm text-on-surface group-hover:text-primary transition-colors">Merge PDFs</h3>
+<p class="text-[11px] text-on-surface-variant mt-0.5 line-clamp-1">Unify sheets in custom sequence</p>
+</div>
+</div>
+<!-- 2. Split PDF Card -->
+<div class="group bg-surface-container hover:bg-surface-container-high border border-outline/50 hover:border-primary/40 rounded-2xl p-4 transition-all duration-150 flex flex-col justify-between active:scale-[0.98] cursor-pointer">
+<div class="flex items-start justify-between">
+<div class="w-10 h-10 rounded-xl bg-primary/10 border border-primary/20 flex items-center justify-center text-primary">
+<span class="material-symbols-outlined text-xl" data-icon="content_cut">content_cut</span>
+</div>
+<span class="text-[10px] font-label font-bold uppercase tracking-wider text-on-surface-variant bg-background/60 px-1.5 py-0.5 rounded">Ranges</span>
+</div>
+<div class="mt-4">
+<h3 class="font-headline font-bold text-sm text-on-surface group-hover:text-primary transition-colors">Split PDF</h3>
+<p class="text-[11px] text-on-surface-variant mt-0.5 line-clamp-1">Extract single sheets or batches</p>
+</div>
+</div>
+<!-- 3. Convert Card -->
+<div class="group bg-surface-container hover:bg-surface-container-high border border-outline/50 hover:border-primary/40 rounded-2xl p-4 transition-all duration-150 flex flex-col justify-between active:scale-[0.98] cursor-pointer">
+<div class="flex items-start justify-between">
+<div class="w-10 h-10 rounded-xl bg-primary/10 border border-primary/20 flex items-center justify-center text-primary">
+<span class="material-symbols-outlined text-xl" data-icon="transform">transform</span>
+</div>
+<div class="flex items-center text-[10px] font-label font-semibold text-primary bg-primary/10 px-1.5 py-0.5 rounded gap-0.5">
+<span>PDF</span>
+<span class="material-symbols-outlined text-[10px]" data-icon="sync_alt">sync_alt</span>
+<span>IMG</span>
+</div>
+</div>
+<div class="mt-4">
+<h3 class="font-headline font-bold text-sm text-on-surface group-hover:text-primary transition-colors">Convert</h3>
+<p class="text-[11px] text-on-surface-variant mt-0.5 line-clamp-1">PNG, JPG, TIFF to PDF &amp; back</p>
+</div>
+</div>
+<!-- 4. Rearrange Card -->
+<div class="group bg-surface-container hover:bg-surface-container-high border border-outline/50 hover:border-primary/40 rounded-2xl p-4 transition-all duration-150 flex flex-col justify-between active:scale-[0.98] cursor-pointer">
+<div class="flex items-start justify-between">
+<div class="w-10 h-10 rounded-xl bg-primary/10 border border-primary/20 flex items-center justify-center text-primary">
+<span class="material-symbols-outlined text-xl" data-icon="drag_indicator">drag_indicator</span>
+</div>
+<span class="text-[10px] font-label font-bold uppercase tracking-wider text-on-surface-variant bg-background/60 px-1.5 py-0.5 rounded">Visual</span>
+</div>
+<div class="mt-4">
+<h3 class="font-headline font-bold text-sm text-on-surface group-hover:text-primary transition-colors">Rearrange</h3>
+<p class="text-[11px] text-on-surface-variant mt-0.5 line-clamp-1">Drag, rotate, or discard pages</p>
+</div>
+</div>
+</div>
+</section>
+<!-- RECENT DOCUMENTS SECTION -->
+<section class="space-y-3 pb-2">
+<div class="flex items-center justify-between px-1">
+<h2 class="font-headline font-bold text-base tracking-tight text-on-surface flex items-center gap-1.5">
+<span>Recent Documents</span>
+<span class="text-xs font-label text-on-surface-variant tabular-nums font-normal">(3)</span>
+</h2>
+<a class="font-label text-xs font-medium text-primary hover:underline flex items-center gap-0.5" href="#recents">
+<span>View All</span>
+<span class="material-symbols-outlined text-sm" data-icon="chevron_right">chevron_right</span>
+</a>
+</div>
+<div class="space-y-2.5">
+<!-- Document Row 1 -->
+<div class="bg-surface-container/90 hover:bg-surface-container-high border border-outline/40 hover:border-outline rounded-xl p-3 flex items-center justify-between transition-colors active:scale-[0.99] cursor-pointer">
+<div class="flex items-center gap-3 min-w-0">
+<div class="w-10 h-10 rounded-lg bg-surface border border-outline/60 flex items-center justify-center text-primary shrink-0 relative">
+<span class="material-symbols-outlined text-xl" data-icon="description">description</span>
+<span class="absolute -bottom-1 -right-1 text-[8px] font-bold font-label bg-primary text-on-primary px-1 rounded">PDF</span>
+</div>
+<div class="min-w-0">
+<p class="font-headline font-bold text-xs text-on-surface truncate tracking-tight">Q3_Financial_Audit_Final.pdf</p>
+<div class="flex items-center gap-2 mt-1 text-[11px] font-label text-on-surface-variant tabular-nums">
+<span>24 pages</span>
+<span class="text-outline-variant">•</span>
+<span>3.8 MB</span>
+<span class="text-outline-variant">•</span>
+<span class="text-primary/90">Edited 2h ago</span>
+</div>
+</div>
+</div>
+<div class="flex items-center gap-1 shrink-0 ml-2">
+<button aria-label="Share" class="p-1.5 text-on-surface-variant hover:text-primary rounded-lg hover:bg-surface" type="button">
+<span class="material-symbols-outlined text-lg" data-icon="share">share</span>
+</button>
+<button aria-label="More options" class="p-1.5 text-on-surface-variant hover:text-primary rounded-lg hover:bg-surface" type="button">
+<span class="material-symbols-outlined text-lg" data-icon="more_vert">more_vert</span>
+</button>
+</div>
+</div>
+<!-- Document Row 2 -->
+<div class="bg-surface-container/90 hover:bg-surface-container-high border border-outline/40 hover:border-outline rounded-xl p-3 flex items-center justify-between transition-colors active:scale-[0.99] cursor-pointer">
+<div class="flex items-center gap-3 min-w-0">
+<div class="w-10 h-10 rounded-lg bg-surface border border-outline/60 flex items-center justify-center text-primary shrink-0 relative">
+<span class="material-symbols-outlined text-xl" data-icon="description">description</span>
+<span class="absolute -bottom-1 -right-1 text-[8px] font-bold font-label bg-primary text-on-primary px-1 rounded">PDF</span>
+</div>
+<div class="min-w-0">
+<p class="font-headline font-bold text-xs text-on-surface truncate tracking-tight">Design_Sprint_Brief_v2.pdf</p>
+<div class="flex items-center gap-2 mt-1 text-[11px] font-label text-on-surface-variant tabular-nums">
+<span>8 pages</span>
+<span class="text-outline-variant">•</span>
+<span>1.2 MB</span>
+<span class="text-outline-variant">•</span>
+<span>Yesterday</span>
+</div>
+</div>
+</div>
+<div class="flex items-center gap-1 shrink-0 ml-2">
+<button aria-label="Share" class="p-1.5 text-on-surface-variant hover:text-primary rounded-lg hover:bg-surface" type="button">
+<span class="material-symbols-outlined text-lg" data-icon="share">share</span>
+</button>
+<button aria-label="More options" class="p-1.5 text-on-surface-variant hover:text-primary rounded-lg hover:bg-surface" type="button">
+<span class="material-symbols-outlined text-lg" data-icon="more_vert">more_vert</span>
+</button>
+</div>
+</div>
+<!-- Document Row 3 -->
+<div class="bg-surface-container/90 hover:bg-surface-container-high border border-outline/40 hover:border-outline rounded-xl p-3 flex items-center justify-between transition-colors active:scale-[0.99] cursor-pointer">
+<div class="flex items-center gap-3 min-w-0">
+<div class="w-10 h-10 rounded-lg bg-surface border border-outline/60 flex items-center justify-center text-primary shrink-0 relative">
+<span class="material-symbols-outlined text-xl" data-icon="description">description</span>
+<span class="absolute -bottom-1 -right-1 text-[8px] font-bold font-label bg-accent text-on-primary px-1 rounded">OPT</span>
+</div>
+<div class="min-w-0">
+<p class="font-headline font-bold text-xs text-on-surface truncate tracking-tight">Client_Contract_Signed_Archived.pdf</p>
+<div class="flex items-center gap-2 mt-1 text-[11px] font-label text-on-surface-variant tabular-nums">
+<span>4 pages</span>
+<span class="text-outline-variant">•</span>
+<span>640 KB</span>
+<span class="text-outline-variant">•</span>
+<span>Oct 28</span>
+</div>
+</div>
+</div>
+<div class="flex items-center gap-1 shrink-0 ml-2">
+<button aria-label="Share" class="p-1.5 text-on-surface-variant hover:text-primary rounded-lg hover:bg-surface" type="button">
+<span class="material-symbols-outlined text-lg" data-icon="share">share</span>
+</button>
+<button aria-label="More options" class="p-1.5 text-on-surface-variant hover:text-primary rounded-lg hover:bg-surface" type="button">
+<span class="material-symbols-outlined text-lg" data-icon="more_vert">more_vert</span>
+</button>
+</div>
+</div>
+</div>
+</section>
+</main>
+<!-- BottomNavBar Component (Literal transcription & semantic active mapping: 'Tools' is Active) -->
+<nav class="fixed bottom-0 left-0 w-full z-50 flex justify-around items-center px-4 py-2 bg-surface/95 dark:bg-surface/95 backdrop-blur-md">
+<!-- Item 1: Tools (Active) -->
+<button class="flex flex-col items-center justify-center text-primary dark:text-primary py-1 gap-1 font-semibold hover:opacity-100 hover:text-primary transition-all duration-150 active:scale-90 transition-transform duration-100" type="button">
+<span class="material-symbols-outlined text-2xl" data-icon="grid_view" style="font-variation-settings: 'FILL' 1;">grid_view</span>
+<span class="font-label text-xs tracking-tight">Tools</span>
+</button>
+<!-- Item 2: Compress -->
+<button class="flex flex-col items-center justify-center text-on-surface-variant dark:text-on-surface-variant py-1 gap-1 font-normal opacity-70 hover:opacity-100 hover:text-primary transition-all duration-150 active:scale-90 transition-transform duration-100" type="button">
+<span class="material-symbols-outlined text-2xl" data-icon="speed">speed</span>
+<span class="font-label text-xs tracking-tight">Compress</span>
+</button>
+<!-- Item 3: Recents -->
+<button class="flex flex-col items-center justify-center text-on-surface-variant dark:text-on-surface-variant py-1 gap-1 font-normal opacity-70 hover:opacity-100 hover:text-primary transition-all duration-150 active:scale-90 transition-transform duration-100" type="button">
+<span class="material-symbols-outlined text-2xl" data-icon="history">history</span>
+<span class="font-label text-xs tracking-tight">Recents</span>
+</button>
+<!-- Item 4: Settings -->
+<button class="flex flex-col items-center justify-center text-on-surface-variant dark:text-on-surface-variant py-1 gap-1 font-normal opacity-70 hover:opacity-100 hover:text-primary transition-all duration-150 active:scale-90 transition-transform duration-100" type="button">
+<span class="material-symbols-outlined text-2xl" data-icon="tune">tune</span>
+<span class="font-label text-xs tracking-tight">Settings</span>
+</button>
+</nav>
+<!-- Interactive Drag & Drop Visual Scripting -->
+<script>
+    document.addEventListener('DOMContentLoaded', () => {
+      // Micro-interaction for feedback on touchable cards
+      const actionCards = document.querySelectorAll('.group, .glow-cyan-button');
+      actionCards.forEach(card => {
+        card.addEventListener('click', () => {
+          card.classList.add('ring-2', 'ring-primary', 'ring-opacity-50');
+          setTimeout(() => {
+            card.classList.remove('ring-2', 'ring-primary', 'ring-opacity-50');
+          }, 300);
+        });
+      });
+    });
+  </script>
+</body></html>

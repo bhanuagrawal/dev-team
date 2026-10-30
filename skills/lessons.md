@@ -723,3 +723,13 @@ CONVERTED 2026-10-16 (both lessons from earlier today, first instance of the sta
   regex over build scripts must ignore prose. A project whose policy doc is called
   `privacy-policy.html` was also being reported as having none — match conventions,
   not one filename.
+
+## 2026-10-30 — store asset generation was domain-hardcoded, and stitch-curate contaminated projects
+
+- Run: PdfKitKMP UI redesign & Play Store asset run workflow update.
+- Surprises & defects converted:
+  1. `marketing_asset_generator` claimed zero project names, but hardcoded court scoreboard strings ("The Screen IS The Scoreboard", "0-0-2"), failing or generating bogus copy for any non-sports app. Converted to domain-aware narrative dispatch (PDF workstation, court sports, digital wellness, and generic fallback) with an automated headless Chrome renderer that compiles and snaps authentic 1080x2400 phone screenshots, 512x512 app icons, and 1024x500 feature graphics directly into `distribution/listing/en-US/images/`.
+  2. `stitch-curate` scanned all `projects/*/screens/` indiscriminately, causing MindfulLauncher screens to be judged canonical for PdfKitKMP while genuine PDF screens were flagged as obsolete. Scoped curation scans to the project's declared `stitch_project_id` or domain keywords, and added PDFKit workstation tokens.
+  3. `doctor`'s `_team_generic_check` caught explicit project name occurrences in team files — converted to domain/vision indicators, keeping team code strictly generic.
+  4. Redesigned PdfKit under "Obsidian Studio" (`projects/4389758809377541972` on Stitch MCP), curating canonical screens for Home and Smart Lossless Compress, achieving 100/100 (A Grade) on `store-assets`.
+

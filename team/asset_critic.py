@@ -174,7 +174,7 @@ def review_store_assets(project: Path) -> dict[str, Any]:
 
     if avg_shot_size >= 200_000:
         framing_score += 25
-        framing_critiques.append("Device mockup frame detected with realistic drop shadow, bezel curvature, and authentic in-app scoreboard UI.")
+        framing_critiques.append("Device mockup frame detected with realistic drop shadow, bezel curvature, and authentic in-app UI surfaces.")
     elif avg_shot_size >= 70_000:
         framing_score += 15
         framing_critiques.append("Basic UI framing detected. Adding subtle 3D tilt, realistic bezel, and dynamic island elevates visual authority.")
@@ -211,7 +211,7 @@ def review_store_assets(project: Path) -> dict[str, Any]:
         has_dark_palette = any(tok in design_text for tok in ("SurfaceBase", "#0A0E14", "dark-first", "Obsidian"))
         if has_dark_palette and icon_ok and fg_ok and shots_ok:
             brand_score = 15
-            brand_notes.append("Visual assets perfectly match docs/design.md dark-first high-contrast athletic design law.")
+            brand_notes.append("Visual assets perfectly match docs/design.md dark-first high-contrast design law.")
         else:
             brand_score = 10
             brand_notes.append("Design system exists; visual assets partially follow tokens.")

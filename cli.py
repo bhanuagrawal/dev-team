@@ -1556,6 +1556,19 @@ def cmd_store_readiness(args: argparse.Namespace) -> int:
 
 def cmd_store_assets(args: argparse.Namespace) -> int:
     project = resolve_project(args.project)
+    if getattr(args, "generate", False):
+        from team.marketing_asset_generator import generate_all_marketing_templates, render_storefront_assets
+        print(f"~ synthesizing marketing storefront templates for {project.name}")
+        generate_all_marketing_templates(project)
+        print(f"~ rendering marketing storefront PNGs via headless Chrome")
+        res = render_storefront_assets(project, log=print)
+        print(f"  rendered {res.get('count', 0)} visual assets")
+    elif getattr(args, "render_only", False):
+        from team.marketing_asset_generator import render_storefront_assets
+        print(f"~ rendering marketing storefront PNGs via headless Chrome")
+        res = render_storefront_assets(project, log=print)
+        print(f"  rendered {res.get('count', 0)} visual assets")
+
     from team.asset_critic import review_store_assets, format_critic_report
     report = review_store_assets(project)
     print(format_critic_report(report))
@@ -1585,11 +1598,26 @@ def cmd_stitch_curate(args: argparse.Namespace) -> int:
     else:
         # Fall back to saved metadata JSON files under projects/*/screens/
         devteam_dir = Path(__file__).resolve().parent
-        for pdir in (devteam_dir / "projects").glob("*/screens/*.json"):
+        p_name = project.name.lower()
+        profile = profile_of(project)
+        stitch_pid = profile.get("design", {}).get("stitch_project_id", "")
+        for pdir in sorted((devteam_dir / "projects").glob("*/screens/*.json")):
             try:
                 import json
                 meta = json.loads(pdir.read_text())
-                screens.append(meta)
+                pid = pdir.parent.parent.name
+                t_low = meta.get("title", "").lower()
+                # If project explicitly declares stitch_project_id, match it
+                if stitch_pid and pid == stitch_pid:
+                    screens.append(meta)
+                elif not stitch_pid:
+                    # Filter by project domain/name to avoid cross-project contamination
+                    if "pdf" in p_name and ("pdf" in t_low or "compress" in t_low or "obsidian" in t_low or "split" in t_low or "merge" in t_low):
+                        screens.append(meta)
+                    elif "mindful" in p_name and ("mindful" in t_low or "atmosphere" in t_low or "pause" in t_low or "wellbeing" in t_low):
+                        screens.append(meta)
+                    elif any(k in p_name for k in ("score", "pickle", "sport")) and any(k in t_low for k in ("pickleball", "scoreboard", "court")):
+                        screens.append(meta)
             except Exception:
                 continue
 
@@ -1800,8 +1828,10 @@ def main() -> None:
     sr.add_argument("--generate", action="store_true", help="generate missing storefront listing files, hosted privacy HTML, and starter assets")
     sr.add_argument("--score-assets", action="store_true", help="score visual storefront assets against ASO quality criteria")
     sr.set_defaults(fn=cmd_store_readiness)
-    sa = sub.add_parser("store-assets", help="audit and score Google Play visual storefront assets (icon, feature graphic, screenshots)")
+    sa = sub.add_parser("store-assets", help="audit, generate, and score Google Play visual storefront assets (icon, feature graphic, screenshots)")
     sa.add_argument("project")
+    sa.add_argument("--generate", action="store_true", help="synthesize marketing HTML templates and render PNG assets to distribution/listing/en-US/images")
+    sa.add_argument("--render-only", action="store_true", help="render existing HTML templates to PNGs without regenerating templates")
     sa.set_defaults(fn=cmd_store_assets)
     cs = sub.add_parser("console", help="plan or drive Google Play Console setup")
     cs.add_argument("project")

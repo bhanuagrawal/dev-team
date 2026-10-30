@@ -1,0 +1,456 @@
+<!DOCTYPE html>
+
+<html class="dark" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" name="viewport"/>
+<title>Smart Lossless Compress - PDF Kit</title>
+<!-- Fonts -->
+<link href="https://fonts.googleapis.com" rel="preconnect"/>
+<link crossorigin="" href="https://fonts.gstatic.com" rel="preconnect"/>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&amp;family=Public+Sans:wght@400;500;600;700&amp;family=Space+Grotesk:wght@500;600;700&amp;display=swap" rel="stylesheet"/>
+<!-- Material Symbols -->
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<!-- Tailwind CSS -->
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<script id="tailwind-config">
+    tailwind.config = {
+      darkMode: "class",
+      theme: {
+        extend: {
+          colors: {
+            surface: "#0A0E14",
+            "surface-container": "#111722",
+            "surface-container-high": "#182232",
+            "surface-card": "#0F1622",
+            primary: "#00E5FF",
+            "primary-container": "#00363D",
+            "on-primary": "#001F24",
+            "on-surface": "#F0F4F8",
+            "on-surface-variant": "#8695A8",
+            "outline-variant": "#1E293B",
+            accent: {
+              cyan: "#00E5FF",
+              emerald: "#10B981",
+              emeraldGlow: "rgba(16, 185, 129, 0.15)",
+              cyanGlow: "rgba(0, 229, 255, 0.2)"
+            }
+          },
+          borderRadius: {
+            "DEFAULT": "0.5rem",
+            "lg": "1rem",
+            "xl": "1.5rem",
+            "full": "9999px"
+          },
+          fontFamily: {
+            headline: ["Space Grotesk", "sans-serif"],
+            display: ["Space Grotesk", "sans-serif"],
+            body: ["Inter", "sans-serif"],
+            label: ["Public Sans", "sans-serif"]
+          }
+        }
+      }
+    }
+  </script>
+<style>
+    .material-symbols-outlined {
+      font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+      display: inline-block;
+      vertical-align: middle;
+      line-height: 1;
+    }
+    
+    /* Subtle Obsidian Grid Blueprint Pattern */
+    .bg-obsidian-grid {
+      background-color: #0A0E14;
+      background-image: 
+        radial-gradient(circle at 50% 0%, rgba(0, 229, 255, 0.08) 0%, transparent 50%),
+        linear-gradient(rgba(30, 41, 59, 0.3) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(30, 41, 59, 0.3) 1px, transparent 1px);
+      background-size: 100% 100%, 24px 24px, 24px 24px;
+    }
+
+    /* Range slider custom styling */
+    input[type=range]::-webkit-slider-thumb {
+      -webkit-appearance: none;
+      height: 24px;
+      width: 24px;
+      border-radius: 9999px;
+      background: #00E5FF;
+      box-shadow: 0 0 16px rgba(0, 229, 255, 0.8), 0 0 2px #fff;
+      cursor: pointer;
+      border: 3px solid #0A0E14;
+      transition: transform 0.1s ease, box-shadow 0.2s ease;
+    }
+    input[type=range]::-webkit-slider-thumb:active {
+      transform: scale(1.15);
+      box-shadow: 0 0 24px rgba(0, 229, 255, 1);
+    }
+    
+    /* Smooth Pulse Glow */
+    @keyframes pulseGlow {
+      0%, 100% { opacity: 0.85; filter: drop-shadow(0 0 10px rgba(0, 229, 255, 0.4)); }
+      50% { opacity: 1; filter: drop-shadow(0 0 18px rgba(0, 229, 255, 0.75)); }
+    }
+    .neon-pulse {
+      animation: pulseGlow 3s infinite ease-in-out;
+    }
+  </style>
+<style>
+    body {
+      min-height: max(884px, 100dvh);
+    }
+  </style>
+  </head>
+<body class="bg-obsidian-grid text-on-surface font-body antialiased min-h-screen pb-28 pt-16 select-none overflow-x-hidden">
+<!-- ================= TOP APP BAR (Shared Anchor) ================= -->
+<header class="fixed top-0 left-0 w-full z-50 flex justify-between items-center px-4 py-3 bg-surface/90 backdrop-blur-md border-b border-outline-variant/30">
+<button aria-label="Go Back" class="p-2 -ml-1 rounded-full text-on-surface-variant hover:text-on-surface hover:bg-surface-container-high/40 transition-colors active:scale-95 duration-150 flex items-center justify-center" type="button">
+<span class="material-symbols-outlined text-[22px]">arrow_back</span>
+</button>
+<div class="flex flex-col items-center text-center">
+<div class="flex items-center gap-1.5">
+<span class="w-1.5 h-1.5 rounded-full bg-primary animate-ping"></span>
+<h1 class="font-headline text-lg font-bold tracking-tight text-on-surface">Smart Compress</h1>
+</div>
+<span class="font-label text-[10px] uppercase tracking-wider text-primary/80 font-semibold">Engine v4.2 • Lossless Hybrid</span>
+</div>
+<button aria-label="Reset Settings" class="p-2 -mr-1 rounded-full text-on-surface-variant hover:text-primary hover:bg-surface-container-high/40 transition-colors active:scale-95 duration-150 flex items-center justify-center" onclick="resetPreset()" type="button">
+<span class="material-symbols-outlined text-[22px]">restart_alt</span>
+</button>
+</header>
+<!-- ================= MAIN CONTENT CANVAS ================= -->
+<main class="max-w-md mx-auto px-4 pt-4 space-y-4">
+<!-- 1. DOCUMENT INSPECTION CARD -->
+<section class="bg-surface-card/90 backdrop-blur-sm border border-outline-variant/40 rounded-xl p-4 shadow-lg relative overflow-hidden group">
+<!-- Glow ambient accent -->
+<div class="absolute -right-12 -top-12 w-32 h-32 bg-primary/10 rounded-full blur-2xl pointer-events-none"></div>
+<div class="flex items-start gap-3.5 relative z-10">
+<!-- PDF Document Icon / Badge -->
+<div class="w-12 h-14 rounded-lg bg-surface-container border border-primary/20 flex flex-col items-center justify-center relative shadow-inner shrink-0 group-hover:border-primary/50 transition-colors">
+<span class="text-[9px] font-headline font-bold text-primary tracking-widest uppercase mb-0.5">PDF</span>
+<span class="material-symbols-outlined text-primary text-[22px]" style="font-variation-settings: 'FILL' 1;">description</span>
+<span class="absolute -bottom-1.5 bg-primary-container text-primary font-label text-[8px] font-bold px-1.5 py-0.2 rounded-full border border-primary/30">1.7</span>
+</div>
+<!-- Document Details -->
+<div class="flex-1 min-w-0">
+<div class="flex items-center justify-between gap-1">
+<h2 class="font-headline font-semibold text-sm text-on-surface truncate tracking-tight" title="Annual_Report_2026_Final.pdf">
+              Annual_Report_2026_Final.pdf
+            </h2>
+<span class="shrink-0 flex items-center gap-1 text-[10px] font-label font-medium text-emerald-400 bg-emerald-950/40 border border-emerald-500/30 px-2 py-0.5 rounded-full">
+<span class="w-1 h-1 rounded-full bg-emerald-400"></span>
+              Ready
+            </span>
+</div>
+<!-- Technical Specs Grid -->
+<div class="flex items-center gap-3 mt-2 text-xs font-label text-on-surface-variant">
+<div class="flex items-center gap-1">
+<span class="material-symbols-outlined text-[14px] text-on-surface-variant/80">straighten</span>
+<span class="text-on-surface font-semibold">18.4 MB</span>
+</div>
+<span class="text-outline-variant">•</span>
+<div class="flex items-center gap-1">
+<span class="material-symbols-outlined text-[14px] text-on-surface-variant/80">layers</span>
+<span>48 Pages</span>
+</div>
+<span class="text-outline-variant">•</span>
+<span class="text-[11px] text-on-surface-variant/90">A4 Vector</span>
+</div>
+<!-- Sub-badge -->
+<div class="mt-2.5 flex items-center gap-1.5 text-[11px] font-label text-primary/90 bg-primary/5 border border-primary/15 rounded-md px-2 py-1 w-fit">
+<span class="material-symbols-outlined text-[13px] text-primary">analytics</span>
+<span>Raster + Vector data detected</span>
+</div>
+</div>
+</div>
+</section>
+<!-- 2. TACTILE COMPRESSION LEVEL SELECTOR & SLIDER -->
+<section class="bg-surface-card/90 backdrop-blur-sm border border-outline-variant/40 rounded-xl p-4 shadow-lg space-y-4">
+<div class="flex items-center justify-between">
+<label class="font-headline text-xs font-bold uppercase tracking-wider text-on-surface flex items-center gap-1.5" for="compressionSlider">
+<span class="material-symbols-outlined text-primary text-[16px]">tune</span>
+          Compression Level
+        </label>
+<span class="font-label text-[11px] font-bold text-primary bg-primary/10 border border-primary/30 px-2.5 py-0.5 rounded-full" id="activePresetBadge">
+          Recommended (~88%)
+        </span>
+</div>
+<!-- Segmented Tactile Steps Visual Row -->
+<div class="grid grid-cols-3 gap-2 text-left">
+<!-- Step 1 -->
+<button class="preset-card relative p-2.5 rounded-lg border border-outline-variant/40 bg-surface-container/60 hover:bg-surface-container transition-all text-left" id="presetBtn0" onclick="setPreset(0)" type="button">
+<div class="text-[11px] font-headline font-bold text-on-surface">Print Hi-Fi</div>
+<div class="text-[10px] font-label text-on-surface-variant mt-0.5">~40% cut</div>
+<div class="text-[9px] text-on-surface-variant/70 mt-1">Lossless DPI</div>
+</button>
+<!-- Step 2 (Default Active) -->
+<button class="preset-card relative p-2.5 rounded-lg border-2 border-primary bg-primary-container/20 text-left transition-all shadow-[0_0_12px_rgba(0,229,255,0.15)]" id="presetBtn1" onclick="setPreset(1)" type="button">
+<div class="absolute -top-2 right-2 bg-primary text-on-primary font-headline text-[8px] font-extrabold px-1.5 py-0.2 rounded-full uppercase tracking-tighter">
+            Smart Pick
+          </div>
+<div class="text-[11px] font-headline font-bold text-primary">Balanced</div>
+<div class="text-[10px] font-label text-emerald-400 font-semibold mt-0.5">~88% cut</div>
+<div class="text-[9px] text-on-surface-variant/90 mt-1">Perceptual</div>
+</button>
+<!-- Step 3 -->
+<button class="preset-card relative p-2.5 rounded-lg border border-outline-variant/40 bg-surface-container/60 hover:bg-surface-container transition-all text-left" id="presetBtn2" onclick="setPreset(2)" type="button">
+<div class="text-[11px] font-headline font-bold text-on-surface">Extreme</div>
+<div class="text-[10px] font-label text-on-surface-variant mt-0.5">~95% cut</div>
+<div class="text-[9px] text-on-surface-variant/70 mt-1">Email / Web</div>
+</button>
+</div>
+<!-- Tactile Slider Container -->
+<div class="pt-2 px-1">
+<div class="relative flex items-center">
+<input class="w-full h-2 bg-surface-container rounded-lg appearance-none cursor-pointer outline-none relative z-10" id="compressionSlider" max="2" min="0" oninput="handleSliderChange(this.value)" step="1" type="range" value="1"/>
+<!-- Active Track Fill Line -->
+<div class="absolute left-0 h-2 bg-gradient-to-r from-primary/50 to-primary rounded-l-lg pointer-events-none z-0" id="sliderFill" style="width: 50%;"></div>
+</div>
+<!-- Rail Step Markers -->
+<div class="flex justify-between items-center px-1 mt-2 text-[10px] font-label font-medium text-on-surface-variant/70">
+<span class="flex items-center gap-0.5"><span class="w-1 h-1 rounded-full bg-outline-variant"></span> 300 DPI</span>
+<span class="flex items-center gap-0.5 text-primary"><span class="w-1.5 h-1.5 rounded-full bg-primary shadow-[0_0_6px_#00e5ff]"></span> 150 DPI</span>
+<span class="flex items-center gap-0.5"><span class="w-1 h-1 rounded-full bg-outline-variant"></span> 72 DPI</span>
+</div>
+</div>
+<!-- Active Preset Explanation Pill -->
+<div class="bg-surface-container/70 border border-outline-variant/30 rounded-lg p-2.5 flex items-start gap-2 text-xs font-body text-on-surface-variant" id="presetDescriptionBox">
+<span class="material-symbols-outlined text-primary text-[18px] shrink-0 mt-0.5">verified</span>
+<p class="text-[11px] leading-relaxed" id="presetDescText">
+<strong class="text-on-surface font-medium">Recommended (Balanced):</strong> Adaptive structural downsampling maintaining clean vector typography and crisp image legibility for all business presentations.
+        </p>
+</div>
+</section>
+<!-- 3. LIVE TELEMETRY & PROJECTED OUTPUT CARD -->
+<section class="bg-surface-card/90 backdrop-blur-sm border border-outline-variant/40 rounded-xl p-4 shadow-lg relative overflow-hidden">
+<!-- Background neon gradient wash -->
+<div class="absolute -left-16 bottom-0 w-36 h-36 bg-emerald-500/10 rounded-full blur-3xl pointer-events-none"></div>
+<div class="flex items-center justify-between pb-3 border-b border-outline-variant/30">
+<div class="flex items-center gap-1.5">
+<span class="material-symbols-outlined text-emerald-400 text-[18px]">query_stats</span>
+<span class="font-headline text-xs font-bold uppercase tracking-wider text-on-surface">Estimated Result</span>
+</div>
+<!-- Glowing Neon Emerald Savings Badge -->
+<div class="flex items-center gap-1 px-2.5 py-1 rounded-full bg-emerald-950/80 border border-emerald-500/50 shadow-[0_0_12px_rgba(16,185,129,0.25)]" id="savingsBadge">
+<span class="material-symbols-outlined text-emerald-400 text-[14px]">trending_down</span>
+<span class="font-headline font-bold text-xs text-emerald-300" id="savingsPct">-88% (Saved 16.3 MB)</span>
+</div>
+</div>
+<!-- Size Transition Comparison Row -->
+<div class="grid grid-cols-7 items-center gap-2 my-4">
+<!-- Before -->
+<div class="col-span-3 bg-surface-container/80 rounded-lg p-2.5 border border-outline-variant/30 text-center">
+<span class="font-label text-[10px] uppercase tracking-wider text-on-surface-variant font-semibold block">Original</span>
+<span class="font-headline text-base font-bold text-on-surface mt-0.5 block">18.4 MB</span>
+<span class="text-[9px] font-label text-on-surface-variant/70">Raw Embedded</span>
+</div>
+<!-- Transform Arrow Indicator -->
+<div class="col-span-1 flex flex-col items-center justify-center">
+<div class="w-7 h-7 rounded-full bg-primary/10 border border-primary/30 flex items-center justify-center text-primary shadow-[0_0_8px_rgba(0,229,255,0.3)]">
+<span class="material-symbols-outlined text-[16px]">arrow_forward</span>
+</div>
+</div>
+<!-- Projected After -->
+<div class="col-span-3 bg-primary/10 rounded-lg p-2.5 border border-primary/40 text-center shadow-[inset_0_0_12px_rgba(0,229,255,0.08)]">
+<span class="font-label text-[10px] uppercase tracking-wider text-primary font-bold block">Optimized</span>
+<span class="font-headline text-base font-extrabold text-primary mt-0.5 block" id="projectedSize">2.1 MB</span>
+<span class="text-[9px] font-label text-emerald-400 font-medium">99.8% Visual Match</span>
+</div>
+</div>
+<!-- Mini Breakdown Metrics -->
+<div class="grid grid-cols-3 gap-2 pt-2 border-t border-outline-variant/20 text-center font-label">
+<div class="bg-surface-container/50 rounded-lg py-1.5 px-1 border border-outline-variant/20">
+<div class="text-[9px] text-on-surface-variant">Image DPI</div>
+<div class="text-[11px] font-headline font-semibold text-on-surface mt-0.5" id="dpiMetric">150 DPI</div>
+</div>
+<div class="bg-surface-container/50 rounded-lg py-1.5 px-1 border border-outline-variant/20">
+<div class="text-[9px] text-on-surface-variant">Font Subsetting</div>
+<div class="text-[11px] font-headline font-semibold text-emerald-400 mt-0.5 flex items-center justify-center gap-0.5">
+<span class="material-symbols-outlined text-[12px]">check_circle</span> Active
+          </div>
+</div>
+<div class="bg-surface-container/50 rounded-lg py-1.5 px-1 border border-outline-variant/20">
+<div class="text-[9px] text-on-surface-variant">Metadata</div>
+<div class="text-[11px] font-headline font-semibold text-on-surface mt-0.5">Stripped</div>
+</div>
+</div>
+</section>
+<!-- 4. PRIMARY HIGH-IMPACT CTA -->
+<div class="pt-2">
+<button class="w-full relative group overflow-hidden rounded-xl bg-gradient-to-r from-primary via-[#00B4D8] to-primary p-[1.5px] shadow-[0_0_24px_rgba(0,229,255,0.4)] active:scale-[0.98] transition-all duration-150" id="compressCtaBtn" onclick="triggerCompressionAnimation()" type="button">
+<div class="relative w-full py-4 px-6 rounded-[10px] bg-surface flex items-center justify-center gap-2.5 transition-colors group-hover:bg-opacity-80">
+<!-- Animated highlight streak -->
+<div class="absolute inset-0 -translate-x-full group-hover:translate-x-full transition-transform duration-1000 bg-gradient-to-r from-transparent via-primary/20 to-transparent"></div>
+<span class="material-symbols-outlined text-primary text-[22px] group-hover:rotate-12 transition-transform duration-200" style="font-variation-settings: 'FILL' 1;">
+            bolt
+          </span>
+<span class="font-headline font-bold text-sm tracking-wider uppercase text-on-surface group-hover:text-primary transition-colors">
+            Compress PDF Now
+          </span>
+<span class="font-label text-xs font-semibold text-primary/80 bg-primary-container/40 px-2 py-0.5 rounded-full border border-primary/20">
+            ~1.4s
+          </span>
+</div>
+</button>
+</div>
+<!-- 5. SECURITY & PRIVACY FOOTER DISCLAIMER -->
+<div class="pt-1 pb-4">
+<div class="flex items-center justify-center gap-2 py-2 px-3 rounded-lg bg-surface-container/40 border border-outline-variant/30 text-center">
+<span class="material-symbols-outlined text-emerald-400 text-[16px] shrink-0" style="font-variation-settings: 'FILL' 1;">
+          lock
+        </span>
+<p class="font-label text-[11px] text-on-surface-variant font-medium">
+<strong class="text-on-surface font-semibold">100% On-Device Processing</strong> • Your file never leaves your phone
+        </p>
+</div>
+</div>
+</main>
+<!-- ================= BOTTOM NAVIGATION BAR (Shared Anchor) ================= -->
+<!-- Active state: 'Compress' is index 0 based on user's primary task -->
+<nav class="fixed bottom-0 left-0 w-full z-50 flex justify-around items-center px-4 py-2 bg-surface-container/95 backdrop-blur-md border-t border-outline-variant/20 shadow-lg">
+<!-- Tab 1: Compress (ACTIVE) -->
+<a class="flex flex-col items-center justify-center text-primary font-medium p-1 hover:text-primary transition-colors active:scale-95 duration-150" href="#compress">
+<span class="material-symbols-outlined text-[20px]" style="font-variation-settings: 'FILL' 1;">compress</span>
+<span class="font-label text-[10px] font-medium tracking-wide mt-0.5">Compress</span>
+</a>
+<!-- Tab 2: Convert -->
+<a class="flex flex-col items-center justify-center text-on-surface-variant p-1 hover:text-primary transition-colors active:scale-95 duration-150" href="#convert">
+<span class="material-symbols-outlined text-[20px]">sync_alt</span>
+<span class="font-label text-[10px] font-medium tracking-wide mt-0.5">Convert</span>
+</a>
+<!-- Tab 3: Tools -->
+<a class="flex flex-col items-center justify-center text-on-surface-variant p-1 hover:text-primary transition-colors active:scale-95 duration-150" href="#tools">
+<span class="material-symbols-outlined text-[20px]">grid_view</span>
+<span class="font-label text-[10px] font-medium tracking-wide mt-0.5">Tools</span>
+</a>
+<!-- Tab 4: Settings -->
+<a class="flex flex-col items-center justify-center text-on-surface-variant p-1 hover:text-primary transition-colors active:scale-95 duration-150" href="#settings">
+<span class="material-symbols-outlined text-[20px]">settings</span>
+<span class="font-label text-[10px] font-medium tracking-wide mt-0.5">Settings</span>
+</a>
+</nav>
+<!-- ================= SCRIPT LOGIC ================= -->
+<script>
+    const presets = [
+      {
+        name: "High Fidelity (Print)",
+        badge: "Hi-Fi (~40%)",
+        reduction: "-42% (Saved 7.7 MB)",
+        projected: "10.7 MB",
+        dpi: "300 DPI",
+        desc: "<strong>High Fidelity (Print):</strong> Preservation of all fine line vectors, vector fonts, and high-res raster bitmaps suitable for physical offset printing.",
+        fill: "0%"
+      },
+      {
+        name: "Recommended (Balanced)",
+        badge: "Recommended (~88%)",
+        reduction: "-88% (Saved 16.3 MB)",
+        projected: "2.1 MB",
+        dpi: "150 DPI",
+        desc: "<strong>Recommended (Balanced):</strong> Perceptual lossless compression with optimal subsetting. Razor sharp text on Retina displays with massive size reduction.",
+        fill: "50%"
+      },
+      {
+        name: "Extreme (Web & Email)",
+        badge: "Extreme (~95%)",
+        reduction: "-95% (Saved 17.5 MB)",
+        projected: "0.9 MB",
+        dpi: "72 DPI",
+        desc: "<strong>Extreme (Web & Email):</strong> Aggressive raster downsampling and maximal stream deflating. Optimized strictly to fit low-bandwidth email attachment limits.",
+        fill: "100%"
+      }
+    ];
+
+    let currentPreset = 1;
+
+    function applyPresetUI(idx) {
+      currentPreset = idx;
+      const data = presets[idx];
+
+      // Update Slider value & Fill
+      const slider = document.getElementById("compressionSlider");
+      if (slider) slider.value = idx;
+      
+      const fill = document.getElementById("sliderFill");
+      if (fill) fill.style.width = idx === 0 ? "10%" : (idx === 1 ? "50%" : "100%");
+
+      // Update Badge & Telemetry
+      const badge = document.getElementById("activePresetBadge");
+      if (badge) badge.innerText = data.badge;
+
+      const savingsPct = document.getElementById("savingsPct");
+      if (savingsPct) savingsPct.innerText = data.reduction;
+
+      const projectedSize = document.getElementById("projectedSize");
+      if (projectedSize) projectedSize.innerText = data.projected;
+
+      const dpiMetric = document.getElementById("dpiMetric");
+      if (dpiMetric) dpiMetric.innerText = data.dpi;
+
+      const descText = document.getElementById("presetDescText");
+      if (descText) descText.innerHTML = data.desc;
+
+      // Update preset buttons styling
+      for (let i = 0; i < 3; i++) {
+        const btn = document.getElementById(`presetBtn${i}`);
+        if (!btn) continue;
+        if (i === idx) {
+          btn.className = "preset-card relative p-2.5 rounded-lg border-2 border-primary bg-primary-container/20 text-left transition-all shadow-[0_0_12px_rgba(0,229,255,0.15)]";
+          btn.querySelectorAll(".font-headline")[0].classList.add("text-primary");
+          btn.querySelectorAll(".font-headline")[0].classList.remove("text-on-surface");
+        } else {
+          btn.className = "preset-card relative p-2.5 rounded-lg border border-outline-variant/40 bg-surface-container/60 hover:bg-surface-container transition-all text-left";
+          btn.querySelectorAll(".font-headline")[0].classList.remove("text-primary");
+          btn.querySelectorAll(".font-headline")[0].classList.add("text-on-surface");
+        }
+      }
+    }
+
+    function setPreset(idx) {
+      applyPresetUI(idx);
+    }
+
+    function handleSliderChange(val) {
+      applyPresetUI(parseInt(val, 10));
+    }
+
+    function resetPreset() {
+      applyPresetUI(1);
+    }
+
+    function triggerCompressionAnimation() {
+      const btn = document.getElementById("compressCtaBtn");
+      if (!btn) return;
+
+      const originalHTML = btn.innerHTML;
+      btn.innerHTML = `
+        <div class="relative w-full py-4 px-6 rounded-[10px] bg-primary flex items-center justify-center gap-3">
+          <span class="material-symbols-outlined text-on-primary animate-spin text-[22px]">progress_activity</span>
+          <span class="font-headline font-bold text-sm tracking-wider uppercase text-on-primary">
+            Compressing On-Device...
+          </span>
+        </div>
+      `;
+
+      setTimeout(() => {
+        btn.innerHTML = `
+          <div class="relative w-full py-4 px-6 rounded-[10px] bg-emerald-500 flex items-center justify-center gap-2">
+            <span class="material-symbols-outlined text-on-primary text-[22px]" style="font-variation-settings: 'FILL' 1;">check_circle</span>
+            <span class="font-headline font-bold text-sm tracking-wider uppercase text-on-primary">
+              Ready! Saved 16.3 MB
+            </span>
+          </div>
+        `;
+        setTimeout(() => {
+          btn.innerHTML = originalHTML;
+        }, 2500);
+      }, 1200);
+    }
+
+    // Initialize default UI state
+    document.addEventListener("DOMContentLoaded", () => {
+      applyPresetUI(1);
+    });
+  </script>
+</body></html>

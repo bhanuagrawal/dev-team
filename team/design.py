@@ -367,13 +367,16 @@ def curate_stitch_manifest(project: Path, screens_inventory: list[dict[str, Any]
 
         is_scratch = any(st in t_low for st in scratch_tokens)
         is_atmosphere_2 = "atmosphere 2.0" in t_low
+        is_obsidian_studio = "obsidian" in t_low
         is_canonical_core = any(tok in t_low for tok in [
             "icon", "banner", "scoreboard", "summary", "setup", "design.md",
             "feature graphic", "storefront", "app drawer", "digital wellbeing",
-            "screen time", "premium paywall"
+            "screen time", "premium paywall", "pdf", "compress", "merge",
+            "split", "convert", "rearrange", "workbench", "workstation",
+            "document", "toolbox", "page studio"
         ]) and not is_scratch
 
-        if (is_atmosphere_2 or is_canonical_core) and not is_scratch:
+        if (is_atmosphere_2 or is_obsidian_studio or is_canonical_core) and not is_scratch:
             canonical_screens.append({
                 "id": screen_id,
                 "title": title,
@@ -423,13 +426,96 @@ def compile_stitch_screen_prompt(
 
     st = screen_type.lower().strip()
 
+    is_pdf = "pdf" in name.lower() or "pdf" in vision.lower() or "document" in vision.lower()
+    is_court_sports = "pickleball" in vision.lower() or "scoreboard" in vision.lower() or "tennis" in vision.lower() or "court" in vision.lower()
+
     if spec:
         screen_title = spec.get("title", f"{name} Screen")
         context_desc = spec.get("context", vision)
         layout_zones = spec.get("zones", [])
         ctas = spec.get("ctas", [])
         telemetry = spec.get("telemetry", {})
-    elif st in ("score", "scoreboard", "main", "core"):
+        aesthetic = spec.get("aesthetic", f"High-precision dark-first {name} UI")
+    elif is_pdf:
+        aesthetic = "High-precision OLED dark-first PDF workstation studio UI with glowing neon accents"
+        if st in ("main", "home", "hub", "core"):
+            screen_title = f"{name} - Precision PDF Workstation (Home)"
+            context_desc = f"Primary central workstation for {name}. High-contrast OLED dark mode with glowing accents, tactile cards, and zero bloat."
+            layout_zones = [
+                f"1. Top Context Header: Wordmark 'PDF KIT' in {tokens['headline_font']}, glowing trust pill '100% OFFLINE • PRIVATE' with green status dot, and settings gear button.",
+                f"2. Primary Featured Hero Card: 'Smart Lossless Compress' featured card with electric cyan ({tokens['primary_accent']}) border glow, 'Reduce up to 88% • Zero Quality Loss' tag, and instant 'SELECT PDF' CTA button.",
+                f"3. 2x2 Core Tools Grid: Elevated slate cards ({tokens['surface_elevated']}) with rounded corners and glowing glyphs:",
+                f"   - Merge PDFs: Badge '2+ files', combines multiple documents into one.",
+                f"   - Split PDF: Visual page range cutter icon with extract preview.",
+                f"   - Convert: Dual toggle pill ('PDF ⇄ Images') with format selector.",
+                f"   - Rearrange: Tactile drag-and-drop icon with page reorder overview.",
+                f"4. Recent Documents Shelf: Clean technical document rows showing filename, page count ('24 pages'), file size ('3.8 MB'), timestamp ('Edited 2h ago'), and quick action dots.",
+                f"5. Grounded Dock Bar: Fixed glassmorphic bottom bar with Tools, Compress, Recents, and Settings.",
+            ]
+            ctas = [
+                "Select PDF Document (Primary hero CTA -> Launches file picker)",
+                "Merge PDFs (Combines multiple documents into one)",
+                "Split PDF (Visual page range cutter)",
+                "Convert (Format selector)",
+                "Rearrange (Tactile drag-and-drop page reorder)",
+            ]
+            telemetry = {
+                "Engine": "Smart Lossless Compress",
+                "Reduction": "-88%",
+            }
+        elif st in ("compress", "shrink", "optimize"):
+            screen_title = f"{name} - Smart Lossless Compress"
+            context_desc = f"On-device PDF compression studio with interactive reduction slider and live telemetry."
+            layout_zones = [
+                f"1. Top Navigation Bar: Back button, title 'Smart Compress', engine badge 'ENGINE V4.2 • LOSSLESS HYBRID', reset button.",
+                f"2. File Inspection Card: Document thumbnail, title 'Annual_Report_2026.pdf', size '18.4 MB', 48 pages, vector data indicator.",
+                f"3. Tactile Compression Slider: 3 segmented levels ('Print Hi-Fi ~40%', 'Recommended Balanced ~88%', 'Extreme ~95%') with active cyan ({tokens['primary_accent']}) slider rail.",
+                f"4. Live Telemetry & Projected Output Card: Output projection '18.4 MB → 2.1 MB', glowing neon emerald savings badge '-88% (Saved 16.3 MB)'.",
+                f"5. Primary Action CTA: 'COMPRESS PDF NOW' button with electric cyan glow and estimated time '~1.4s'.",
+                f"6. Privacy & Security Footer: '100% On-Device Processing • Your file never leaves your phone'.",
+            ]
+            ctas = [
+                "Back Button (Returns to Home)",
+                "Compression Level Slider (Adjusts reduction target)",
+                "Compress PDF Now (Primary CTA -> Executes lossless compression)",
+            ]
+            telemetry = {
+                "Original Size": "18.4 MB (48 Pages)",
+                "Projected Size": "2.1 MB (-88%)",
+                "Engine": "Lossless Vector & Raster Downsampling",
+            }
+        elif st in ("merge", "rearrange", "canvas", "organize"):
+            screen_title = f"{name} - Visual Page Canvas & Reorder"
+            context_desc = f"Tactile multi-page document organizer, page rearranger, and combiner."
+            layout_zones = [
+                f"1. Top Navigation Bar: Back button, screen title 'PAGE STUDIO', page selection count '8 of 24 Selected'.",
+                f"2. Canvas Action Bar: 'Rotate 90°', 'Select All', 'Invert Selection', 'Delete Pages'.",
+                f"3. Visual Multi-Page Grid: 3-column thumbnail grid with drag handles, page numbers, and cyan ({tokens['primary_accent']}) selection borders.",
+                f"4. Floating Action Deck: 'EXTRACT & MERGE SELECTED' button in solid {tokens['primary_accent']} with glow shadow.",
+            ]
+            ctas = [
+                "Page Thumbnail (Toggles page selection)",
+                "Rotate 90 Button (Rotates selected pages)",
+                "Extract & Merge Button (Primary CTA -> Combines/exports selected pages)",
+            ]
+            telemetry = {
+                "Document": "Portfolio_Draft_v3.pdf",
+                "Selected Pages": "8 of 24",
+                "Canvas Mode": "Visual Reorder & Extraction",
+            }
+        else:
+            screen_title = f"{name} - Split & Convert Studio"
+            context_desc = f"Extract specific page ranges or convert between PDF and high-res image sets."
+            layout_zones = [
+                f"1. Top Navigation Bar: Back button, title 'CONVERT & SPLIT'.",
+                f"2. Conversion Direction Toggle: Segmented control for 'PDF → IMAGES' vs 'IMAGES → PDF'.",
+                f"3. DPI & Quality Presets: High-contrast selector for 150 DPI (Web), 300 DPI (Print), and Custom.",
+                f"4. Primary Action Button: 'CONVERT NOW' with high-contrast accent styling.",
+            ]
+            ctas = ["Direction Toggle", "DPI Selector", "Convert Now Button"]
+            telemetry = {"Mode": "PDF to Images", "DPI": "300 DPI"}
+    elif is_court_sports and st in ("score", "scoreboard", "main", "core"):
+        aesthetic = "High-adrenaline dark-first sports-tech UI"
         screen_title = f"{name} - Active Court Scoreboard"
         context_desc = f"Primary active scoring surface for {name}. Engineered for rapid, sweaty-palm court-side glanceability under bright outdoor sunlight or indoor floodlights."
         layout_zones = [
@@ -457,7 +543,8 @@ def compile_stitch_screen_prompt(
             "Target Condition": "Play to 11, Win by 2",
             "Current Audio Call": "7 - 4 - 2",
         }
-    elif st in ("summary", "history", "stats", "recap"):
+    elif is_court_sports and st in ("summary", "history", "stats", "recap"):
+        aesthetic = "High-adrenaline dark-first sports-tech UI"
         screen_title = f"{name} - Post-Match Victory Summary & Performance Statistics"
         context_desc = f"Post-game victory celebration and detailed match telemetry breakdown for {name}."
         layout_zones = [
@@ -485,7 +572,8 @@ def compile_stitch_screen_prompt(
             "Side-Outs": "4",
             "Serve Efficiency": "Team 1: 68% vs Team 2: 48%",
         }
-    elif st in ("setup", "config", "new"):
+    elif is_court_sports and st in ("setup", "config", "new"):
+        aesthetic = "High-adrenaline dark-first sports-tech UI"
         screen_title = f"{name} - New Match Configuration"
         context_desc = f"Pre-match ruleset and player configuration screen for {name}."
         layout_zones = [
@@ -513,6 +601,7 @@ def compile_stitch_screen_prompt(
             "Audio Scorekeeper": "Enabled",
         }
     else:
+        aesthetic = f"Modern high-contrast dark-first {name} UI"
         screen_title = f"{name} - {screen_type.capitalize()} Screen"
         context_desc = f"User interface surface for {name}: {vision}"
         layout_zones = [
@@ -529,7 +618,7 @@ def compile_stitch_screen_prompt(
 
     return f"""Title: {screen_title}
 Device: Mobile (390px viewport width, portrait)
-Platform Aesthetic: High-adrenaline dark-first sports-tech UI
+Platform Aesthetic: {aesthetic}
 
 === SECTION 1: PRODUCT INTENT & CONTEXT ===
 {context_desc}
@@ -546,14 +635,14 @@ Render these exact real-world values into the layout:
 {zones_text}
 
 === SECTION 5: STRICT ANTI-GENERIC VISUAL CRAFT MANDATE ===
-- Canvas Base: True obsidian background ({tokens['surface_base']}) with subtle domain texture (e.g. textured court lines, net cues).
+- Canvas Base: True obsidian background ({tokens['surface_base']}) with subtle atmospheric lighting.
 - Card Containers: Elevated dark slate ({tokens['surface_elevated']}) with crisp structural borders ({tokens.get('surface_highlight', '#202B3C')}).
-- Active Radiant Aura: The currently active or serving state MUST feature a glowing neon emerald aura ({tokens['primary_accent']}) so users recognize the state instantly from across a court without reading words.
-- Secondary Accent: Use vibrant coral ({tokens['secondary_accent']}) exclusively for turnovers, faults, and side-out transitions.
-- Warning / Metric Accent: Use warm amber ({tokens['warning_accent']}) for configuration chips and duration telemetries.
+- Active Radiant Aura: The currently active action state MUST feature a glowing radiant aura ({tokens['primary_accent']}) so users recognize interactive focus instantly.
+- Secondary Accent: Use secondary accent ({tokens['secondary_accent']}) for badges, progress fills, and status transitions.
+- Warning / Metric Accent: Use warm accent ({tokens['warning_accent']}) for alert confirmations, limits, and telemetry.
 - Typography Scale:
-  * Numbers & Metric Heroes: Massive {tokens['headline_font']} numerals with tabular spacing.
-  * Headings & Team Names: Condensed high-energy {tokens['body_font']}.
+  * Numbers & Metric Heroes: Bold {tokens['headline_font']} numerals with tabular spacing.
+  * Headings & Section Titles: Modern technical {tokens['body_font']}.
   * Status Badges & Pills: Monospaced {tokens['label_font']} with uppercase letter-spacing.
 - ANTI-PATTERNS (STRICTLY FORBIDDEN):
   * NO generic white card templates or muddy grey backgrounds.

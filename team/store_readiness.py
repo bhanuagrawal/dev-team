@@ -1017,27 +1017,29 @@ def generate_store_readiness_pack(project: Path, log: RunLog | None = None) -> d
         full_file.write_text(full_text[:PLAY_FULL_DESC_MAX_CHARS])
         generated.append(str(full_file.relative_to(project)))
 
-    # Starter 512x512 icon
+    # 4. Synthesize high-conversion visual assets (icon, feature graphic, screenshots)
+    try:
+        from .marketing_asset_generator import generate_all_marketing_templates, render_storefront_assets
+        generate_all_marketing_templates(project)
+        render_res = render_storefront_assets(project, log=log)
+        if render_res.get("status") == "OK":
+            for r in render_res.get("rendered", []):
+                generated.append(r["file"])
+    except Exception as e:
+        if log:
+            log(f"  warning: marketing storefront asset generation failed: {e}")
+
+    # Fallback starter 512x512 icon if rendering was not possible
     icon_file = img_dir / "icon.png"
     if not icon_file.is_file():
         icon_file.write_bytes(_make_solid_png(512, 512, 10, 14, 20, border_rgb=(0, 230, 118)))
         generated.append(str(icon_file.relative_to(project)))
-        orchestrator_requests.append({
-            "tool": "StitchMCP / image-generator",
-            "action": "Elevate starter 512x512 icon to branded graphic",
-            "target": str(icon_file.relative_to(project))
-        })
 
-    # Starter 1024x500 feature graphic
+    # Fallback starter 1024x500 feature graphic if rendering was not possible
     fg_file = img_dir / "featureGraphic.png"
     if not fg_file.is_file():
         fg_file.write_bytes(_make_solid_png(1024, 500, 16, 31, 46, border_rgb=(0, 230, 118)))
         generated.append(str(fg_file.relative_to(project)))
-        orchestrator_requests.append({
-            "tool": "StitchMCP / image-generator",
-            "action": "Elevate starter 1024x500 banner to branded feature graphic",
-            "target": str(fg_file.relative_to(project))
-        })
 
     return {
         "generated": generated,
