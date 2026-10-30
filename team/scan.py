@@ -10,7 +10,7 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-from .core import now_iso, profile_of, state_of
+from .core import now_iso, profile_of, state_of, target_items
 
 from . import goals
 
@@ -156,8 +156,14 @@ def _queue_task(q: dict, seq: int) -> dict:
               + f"-{seq:03d}",
         "type": q["type"],
         "surface": {"label": q["label"],
-                    "targets": (q["target"] if isinstance(q["target"], list)
-                                else [q["target"]])},
+                    # A queue target may be one path or several comma-separated
+                    # ones (the plan prompt asks for exactly that allow-list form
+                    # for feature/bugfix entries). Keep them as SEPARATE items:
+                    # a comma-joined string is one bogus path to the developer
+                    # prompt's "Edit ONLY files under" list, so the scope gate
+                    # then rejects every real edit and the whole run is wasted
+                    # (lesson 2026-10-30).
+                    "targets": target_items(q["target"])},
         "risk": q.get("risk", "safe"),
         # The expected size of THIS session travels with the task: the developer
         # prompt shows it (the whole spec is dumped for the agent), so a task is

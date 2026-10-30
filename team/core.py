@@ -75,17 +75,65 @@ def today() -> str:
     return datetime.now().strftime("%Y-%m-%d")
 
 
+def _onboarded_hint(name: str) -> list[Path]:
+    """Onboarded projects (they carry .pipeline/profile.json) whose folder name
+    looks like the one asked for. Used only to explain a miss, never to pick."""
+    needle = name.lower()
+    found: list[Path] = []
+    for base in PROJECTS_BASES:
+        try:
+            entries = list(base.iterdir())
+        except OSError:
+            continue
+        for cand in entries:
+            try:
+                if not (cand / ".git").exists():
+                    continue
+                if not (cand / ".pipeline" / "profile.json").exists():
+                    continue
+            except OSError:
+                continue
+            if needle in cand.name.lower():
+                found.append(cand)
+    return found
+
+
 def resolve_project(name_or_path: str) -> Path:
-    """Accept a project name (searched in PROJECTS_BASES) or an absolute path."""
+    """Accept a project name (searched in PROJECTS_BASES) or an absolute path.
+
+    A name search prefers a candidate that is actually ONBOARDED (.pipeline/
+    profile.json). Filesystems on macOS are case-insensitive, so a bare name can
+    match a different repository that merely shares the spelling: 'pdfkit'
+    landed on an un-onboarded sibling checkout while the project the team runs
+    is named differently, and the run died at `adapt` with 'no profile above
+    <wrong dir>' — a message that reads like the project was never onboarded.
+    So: keep searching for an onboarded match, and when only a non-onboarded one
+    exists, say exactly that and point at the onboarded projects nearby
+    (lesson 2026-10-30).
+    """
     p = Path(name_or_path).expanduser()
     if p.is_absolute() and (p / ".git").exists():
         return p
+    bare: Path | None = None
     for base in PROJECTS_BASES:
         cand = base / name_or_path
         if (cand / ".git").exists():
-            return cand
+            if (cand / ".pipeline" / "profile.json").exists():
+                return cand
+            bare = bare or cand
+    if bare is not None:
+        hint = _onboarded_hint(Path(name_or_path).name)
+        nearby = ("; onboarded projects that look similar: "
+                  + ", ".join(str(h) for h in hint)) if hint else ""
+        raise SystemExit(
+            f"found {bare} — it is a git repo but not an ONBOARDED dev-team project "
+            f"(no .pipeline/profile.json){nearby}. Pass the onboarded project's path "
+            "or run from its folder")
+    hint = _onboarded_hint(Path(name_or_path).name)
+    nearby = ("; onboarded projects that look similar: "
+              + ", ".join(str(h) for h in hint)) if hint else ""
     raise SystemExit(
-        f"not found: {name_or_path} — tried {', '.join(str(b) for b in PROJECTS_BASES)}; "
+        f"not found: {name_or_path} — tried {', '.join(str(b) for b in PROJECTS_BASES)}{nearby}; "
         "pass an absolute path or run from the project's folder")
 
 
