@@ -1,0 +1,274 @@
+<html class="dark" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>MindfulLauncher - Settings</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@300;400;500;600;700&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script id="tailwind-config">
+    tailwind.config = {
+      darkMode: "class",
+      theme: {
+        extend: {
+          "colors": {
+            "on-surface-variant": "#8BAAA5",
+            "primary-fixed": "#62fae3",
+            "surface-variant": "#2f3634",
+            "surface-container-lowest": "#09100e",
+            "on-surface": "#dde4e1",
+            "on-tertiary-fixed": "#2d1600",
+            "surface-bright": "#333b39",
+            "secondary-container": "#10a293",
+            "secondary-fixed-dim": "#61dac9",
+            "on-tertiary": "#4b2800",
+            "primary": "#57f1db",
+            "background": "#0A1628",
+            "outline-variant": "#1A3050",
+            "on-secondary": "#003731",
+            "surface-high": "#162640",
+            "inverse-primary": "#006b5f",
+            "tertiary-fixed": "#ffdcc0",
+            "surface-container-high": "#242b2a",
+            "surface-highest": "#1D3050",
+            "surface": "#0F1E38",
+            "on-primary": "#003731",
+            "on-secondary-container": "#00302b",
+            "tertiary-container": "#ffac5a",
+            "on-primary-fixed-variant": "#005047",
+            "secondary": "#61dac9",
+            "tertiary": "#ffd1aa",
+            "surface-dim": "#0e1513",
+            "on-tertiary-container": "#744000",
+            "on-secondary-fixed": "#00201c",
+            "secondary-fixed": "#80f6e5",
+            "error-container": "#93000a",
+            "primary-fixed-dim": "#3cddc7",
+            "on-accent": "#001A16",
+            "primary-container": "#2dd4bf",
+            "on-primary-container": "#00574d",
+            "inverse-surface": "#dde4e1",
+            "error": "#ffb4ab",
+            "on-primary-fixed": "#00201c",
+            "on-secondary-fixed-variant": "#005048",
+            "outline": "#859490",
+            "on-error-container": "#ffdad6",
+            "surface-container-low": "#161d1b",
+            "surface-tint": "#3cddc7",
+            "surface-container-highest": "#2f3634",
+            "inverse-on-surface": "#2b3230",
+            "on-background": "#dde4e1",
+            "tertiary-fixed-dim": "#ffb875",
+            "on-tertiary-fixed-variant": "#6b3b00",
+            "on-error": "#690005",
+            "surface-container": "#1a211f"
+          },
+          "borderRadius": {
+            "DEFAULT": "0.25rem",
+            "lg": "0.5rem",
+            "xl": "0.75rem",
+            "2xl": "1.25rem",
+            "full": "9999px"
+          },
+          "spacing": {
+            "space-xs": "8px",
+            "space-lg": "20px",
+            "space-xl": "28px",
+            "space-sm": "12px",
+            "margin": "20px",
+            "gutter": "16px",
+            "space-md": "16px"
+          },
+          "fontFamily": {
+            "dock-label": ["Manrope", "sans-serif"],
+            "stat-display": ["Manrope", "sans-serif"],
+            "section-label": ["Manrope", "sans-serif"],
+            "screen-title": ["Manrope", "sans-serif"],
+            "cta-button": ["Manrope", "sans-serif"],
+            "row-label": ["Manrope", "sans-serif"],
+            "clock-display": ["Manrope", "sans-serif"],
+            "row-subtitle": ["Manrope", "sans-serif"]
+          },
+          "fontSize": {
+            "dock-label": ["10px", { "lineHeight": "1.4", "fontWeight": "500" }],
+            "stat-display": ["56px", { "lineHeight": "1.1", "fontWeight": "600" }],
+            "section-label": ["10px", { "lineHeight": "1.4", "letterSpacing": "0.2em", "fontWeight": "600" }],
+            "screen-title": ["20px", { "lineHeight": "1.4", "fontWeight": "600" }],
+            "cta-button": ["15px", { "lineHeight": "1.4", "fontWeight": "600" }],
+            "row-label": ["15px", { "lineHeight": "1.4", "fontWeight": "400" }],
+            "clock-display": ["80px", { "lineHeight": "1", "fontWeight": "700" }],
+            "row-subtitle": ["12px", { "lineHeight": "1.4", "fontWeight": "300" }]
+          }
+        }
+      }
+    }
+  </script>
+<style>
+    body {
+      font-family: 'Manrope', sans-serif;
+      background-color: #0A1628;
+      color: #dde4e1;
+    }
+    .card-custom {
+      background-color: #0F1E38;
+      border-radius: 20px;
+      border: 1px solid rgba(45, 212, 191, 0.12);
+    }
+  </style>
+<style>
+    body {
+      min-height: max(884px, 100dvh);
+    }
+  </style>
+  </head>
+<body class="bg-background text-on-background min-h-screen flex flex-col pb-24 selection:bg-primary-container selection:text-on-primary-container">
+<!-- TopAppBar Component -->
+<header class="bg-surface dark:bg-surface flex justify-between items-center w-full px-4 py-3 sticky top-0 z-40">
+<div class="flex items-center space-x-3">
+<button aria-label="Back" class="text-primary dark:text-primary hover:bg-surface-container dark:hover:bg-surface-container p-2 rounded-full transition-all duration-200 active:scale-98">
+<span class="material-symbols-outlined">arrow_back</span>
+</button>
+<h1 class="font-screen-title text-screen-title text-on-surface dark:text-on-surface">Settings</h1>
+</div>
+<button aria-label="Search" class="text-primary dark:text-primary hover:bg-surface-container dark:hover:bg-surface-container p-2 rounded-full transition-all duration-200 active:scale-98">
+<span class="material-symbols-outlined">search</span>
+</button>
+</header>
+<!-- Main Content Canvas -->
+<main class="flex-1 w-full max-w-lg mx-auto px-4 py-6 space-y-6">
+<!-- GENERAL Section -->
+<section class="space-y-3">
+<h2 class="font-section-label text-section-label text-primary-container px-1">GENERAL</h2>
+<div class="card-custom p-2 divide-y divide-outline-variant/30">
+<!-- Mindful Pause Row -->
+<div class="flex items-center justify-between p-3 hover:bg-surface-high/50 rounded-xl transition-colors cursor-pointer">
+<div class="flex items-center space-x-3">
+<div class="w-10 h-10 rounded-xl bg-surface-high flex items-center justify-center text-primary-container">
+<span class="material-symbols-outlined">self_improvement</span>
+</div>
+<div>
+<div class="font-row-label text-row-label text-on-surface">Mindful Pause</div>
+<div class="font-row-subtitle text-row-subtitle text-on-surface-variant">Configure breathing delays on open apps</div>
+</div>
+</div>
+<span class="material-symbols-outlined text-on-surface-variant">chevron_right</span>
+</div>
+<!-- Default Launcher Settings -->
+<div class="flex items-center justify-between p-3 hover:bg-surface-high/50 rounded-xl transition-colors">
+<div class="flex items-center space-x-3">
+<div class="w-10 h-10 rounded-xl bg-surface-high flex items-center justify-center text-primary-container">
+<span class="material-symbols-outlined">dashboard</span>
+</div>
+<div>
+<div class="font-row-label text-row-label text-on-surface">Set as Default Launcher</div>
+<div class="font-row-subtitle text-row-subtitle text-on-surface-variant">Use MindfulLauncher as your home screen</div>
+</div>
+</div>
+<!-- Custom Toggle -->
+<label class="relative inline-flex items-center cursor-pointer">
+<input checked="" class="sr-only peer" type="checkbox" value=""/>
+<div class="w-11 h-6 bg-surface-high peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-primary-container"></div>
+</label>
+</div>
+</div>
+</section>
+<!-- WELLBEING Section -->
+<section class="space-y-3">
+<h2 class="font-section-label text-section-label text-primary-container px-1">WELLBEING</h2>
+<div class="card-custom p-2 divide-y divide-outline-variant/30">
+<!-- Daily Limits Row -->
+<div class="flex items-center justify-between p-3 hover:bg-surface-high/50 rounded-xl transition-colors cursor-pointer">
+<div class="flex items-center space-x-3">
+<div class="w-10 h-10 rounded-xl bg-surface-high flex items-center justify-center text-primary-container">
+<span class="material-symbols-outlined">hourglass_top</span>
+</div>
+<div>
+<div class="font-row-label text-row-label text-on-surface">Daily Limits</div>
+<div class="font-row-subtitle text-row-subtitle text-on-surface-variant">Manage time allowances for distracting apps</div>
+</div>
+</div>
+<span class="material-symbols-outlined text-on-surface-variant">chevron_right</span>
+</div>
+<!-- Gentle Reminders Row -->
+<div class="flex items-center justify-between p-3 hover:bg-surface-high/50 rounded-xl transition-colors">
+<div class="flex items-center space-x-3">
+<div class="w-10 h-10 rounded-xl bg-surface-high flex items-center justify-center text-primary-container">
+<span class="material-symbols-outlined">notifications_active</span>
+</div>
+<div>
+<div class="font-row-label text-row-label text-on-surface">Gentle Reminders</div>
+<div class="font-row-subtitle text-row-subtitle text-on-surface-variant">Hourly mindful check-ins and stats</div>
+</div>
+</div>
+<label class="relative inline-flex items-center cursor-pointer">
+<input checked="" class="sr-only peer" type="checkbox" value=""/>
+<div class="w-11 h-6 bg-surface-high peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-primary-container"></div>
+</label>
+</div>
+</div>
+</section>
+<!-- APPEARANCE Section -->
+<section class="space-y-3">
+<h2 class="font-section-label text-section-label text-primary-container px-1">APPEARANCE</h2>
+<div class="card-custom p-2 divide-y divide-outline-variant/30">
+<!-- Theme Row -->
+<div class="flex items-center justify-between p-3 hover:bg-surface-high/50 rounded-xl transition-colors cursor-pointer">
+<div class="flex items-center space-x-3">
+<div class="w-10 h-10 rounded-xl bg-surface-high flex items-center justify-center text-primary-container">
+<span class="material-symbols-outlined">palette</span>
+</div>
+<div>
+<div class="font-row-label text-row-label text-on-surface">Theme</div>
+<div class="font-row-subtitle text-row-subtitle text-on-surface-variant">Atmosphere 2.0 Dark Navy &amp; Teal</div>
+</div>
+</div>
+<span class="material-symbols-outlined text-on-surface-variant">chevron_right</span>
+</div>
+<!-- Icon Pack Row -->
+<div class="flex items-center justify-between p-3 hover:bg-surface-high/50 rounded-xl transition-colors cursor-pointer">
+<div class="flex items-center space-x-3">
+<div class="w-10 h-10 rounded-xl bg-surface-high flex items-center justify-center text-primary-container">
+<span class="material-symbols-outlined">grid_view</span>
+</div>
+<div>
+<div class="font-row-label text-row-label text-on-surface">Icon Pack</div>
+<div class="font-row-subtitle text-row-subtitle text-on-surface-variant">Minimalist monochrome setup</div>
+</div>
+</div>
+<span class="material-symbols-outlined text-on-surface-variant">chevron_right</span>
+</div>
+<!-- Font Size Row -->
+<div class="flex items-center justify-between p-3 hover:bg-surface-high/50 rounded-xl transition-colors cursor-pointer">
+<div class="flex items-center space-x-3">
+<div class="w-10 h-10 rounded-xl bg-surface-high flex items-center justify-center text-primary-container">
+<span class="material-symbols-outlined">text_fields</span>
+</div>
+<div>
+<div class="font-row-label text-row-label text-on-surface">Font Size</div>
+<div class="font-row-subtitle text-row-subtitle text-on-surface-variant">Comfortable readability scaling</div>
+</div>
+</div>
+<span class="material-symbols-outlined text-on-surface-variant">chevron_right</span>
+</div>
+</div>
+</section>
+</main>
+<!-- BottomNavBar Component -->
+<nav aria-label="Bottom Navigation" class="fixed bottom-0 left-0 w-full z-50 flex justify-around items-center py-2 bg-surface/90 backdrop-blur-md">
+<!-- Home (Inactive) -->
+<a class="flex flex-col items-center justify-center text-on-surface-variant px-4 py-1.5 hover:text-on-surface transition-all duration-200 active:scale-98" href="#">
+<span class="material-symbols-outlined">home</span>
+<span class="font-dock-label text-dock-label mt-1">Home</span>
+</a>
+<!-- Launcher (Inactive) -->
+<a class="flex flex-col items-center justify-center text-on-surface-variant px-4 py-1.5 hover:text-on-surface transition-all duration-200 active:scale-98" href="#">
+<span class="material-symbols-outlined">apps</span>
+<span class="font-dock-label text-dock-label mt-1">Pause</span>
+</a>
+<!-- Settings (Active) -->
+<a class="flex flex-col items-center justify-center bg-secondary-container text-on-secondary-container rounded-full px-4 py-1.5 transition-all duration-200 active:scale-98" href="#">
+<span class="material-symbols-outlined" style="font-variation-settings: 'FILL' 1;">settings</span>
+<span class="font-dock-label text-dock-label mt-1">Settings</span>
+</a>
+</nav>
+</body></html>

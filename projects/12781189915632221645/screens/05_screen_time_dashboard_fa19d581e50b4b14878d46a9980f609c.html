@@ -1,0 +1,290 @@
+<!DOCTYPE html>
+
+<html class="dark" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>Usage &amp; Screen Time Dashboard</title>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com" rel="preconnect"/>
+<link crossorigin="" href="https://fonts.gstatic.com" rel="preconnect"/>
+<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@300;400;500;600;700&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<script id="tailwind-config">
+    tailwind.config = {
+      darkMode: "class",
+      theme: {
+        extend: {
+          "colors": {
+            "surface-bright": "#333b39",
+            "on-primary-container": "#00574d",
+            "on-secondary": "#003731",
+            "surface-container-lowest": "#09100e",
+            "on-secondary-fixed-variant": "#005048",
+            "surface-variant": "#2f3634",
+            "on-surface-variant": "#bacac5",
+            "outline": "#859490",
+            "error": "#ffb4ab",
+            "surface-highest": "#1D3050",
+            "surface-container-high": "#242b2a",
+            "surface-container": "#1a211f",
+            "on-tertiary-container": "#744000",
+            "inverse-on-surface": "#2b3230",
+            "tertiary-container": "#ffac5a",
+            "on-tertiary": "#4b2800",
+            "tertiary-fixed-dim": "#ffb875",
+            "tertiary-fixed": "#ffdcc0",
+            "surface": "#0F1E38",
+            "primary-container": "#2dd4bf",
+            "primary": "#57f1db",
+            "background": "#0A1628",
+            "secondary": "#61dac9",
+            "tertiary": "#ffd1aa",
+            "outline-variant": "#3c4a46",
+            "on-error-container": "#ffdad6",
+            "primary-fixed-dim": "#3cddc7",
+            "surface-tint": "#3cddc7",
+            "inverse-surface": "#dde4e1",
+            "on-background": "#dde4e1",
+            "secondary-fixed": "#80f6e5",
+            "on-error": "#690005",
+            "surface-container-highest": "#2f3634",
+            "on-accent": "#001A16",
+            "surface-dim": "#0e1513",
+            "on-primary": "#003731",
+            "on-surface": "#dde4e1",
+            "error-container": "#93000a",
+            "secondary-fixed-dim": "#61dac9",
+            "surface-container-low": "#161d1b",
+            "on-secondary-fixed": "#00201c",
+            "on-primary-fixed-variant": "#005047",
+            "surface-high": "#162640",
+            "inverse-primary": "#006b5f",
+            "on-tertiary-fixed-variant": "#6b3b00",
+            "on-secondary-container": "#00302b",
+            "primary-fixed": "#62fae3",
+            "on-tertiary-fixed": "#2d1600",
+            "on-primary-fixed": "#00201c"
+          },
+          "borderRadius": {
+            "DEFAULT": "0.25rem",
+            "lg": "0.5rem",
+            "xl": "0.75rem",
+            "2xl": "1.25rem",
+            "full": "9999px"
+          },
+          "spacing": {
+            "gutter": "16px",
+            "space-md": "16px",
+            "margin": "20px",
+            "space-xs": "8px",
+            "space-xl": "28px",
+            "space-lg": "20px",
+            "space-sm": "12px"
+          },
+          "fontFamily": {
+            "stat-display": ["Manrope"],
+            "screen-title": ["Manrope"],
+            "row-label": ["Manrope"],
+            "dock-label": ["Manrope"],
+            "section-label": ["Manrope"],
+            "row-subtitle": ["Manrope"],
+            "cta-button": ["Manrope"],
+            "clock-display": ["Manrope"]
+          },
+          "fontSize": {
+            "stat-display": ["56px", { "lineHeight": "1.1", "fontWeight": "600" }],
+            "screen-title": ["20px", { "lineHeight": "1.4", "fontWeight": "600" }],
+            "row-label": ["15px", { "lineHeight": "1.4", "fontWeight": "400" }],
+            "dock-label": ["10px", { "lineHeight": "1.4", "fontWeight": "500" }],
+            "section-label": ["10px", { "lineHeight": "1.4", "letterSpacing": "0.2em", "fontWeight": "600" }],
+            "row-subtitle": ["12px", { "lineHeight": "1.4", "fontWeight": "300" }],
+            "cta-button": ["15px", { "lineHeight": "1.4", "fontWeight": "600" }],
+            "clock-display": ["80px", { "lineHeight": "1", "fontWeight": "700" }]
+          }
+        }
+      }
+    }
+  </script>
+<style>
+    body {
+      min-height: max(884px, 100dvh);
+    }
+  </style>
+  </head>
+<body class="bg-background text-on-background font-row-label min-h-screen flex flex-col antialiased selection:bg-primary-container selection:text-on-primary-container">
+<!-- TopAppBar -->
+<header class="bg-surface dark:bg-surface w-full px-4 py-3 flex justify-between items-center sticky top-0 z-40">
+<button aria-label="Back" class="text-primary dark:text-primary p-2 -ml-2 rounded-full hover:bg-surface-container dark:hover:bg-surface-container transition-all duration-200 active:scale-98">
+<span class="material-symbols-outlined">arrow_back</span>
+</button>
+<h1 class="font-screen-title text-screen-title text-on-surface dark:text-on-surface">Digital Wellbeing</h1>
+<button aria-label="Search" class="text-primary dark:text-primary p-2 -mr-2 rounded-full hover:bg-surface-container dark:hover:bg-surface-container transition-all duration-200 active:scale-98">
+<span class="material-symbols-outlined">search</span>
+</button>
+</header>
+<!-- Main Content Canvas -->
+<main class="flex-1 w-full max-w-md mx-auto px-5 pt-6 pb-28 flex flex-col gap-6">
+<!-- Hero Metric Section -->
+<section class="flex flex-col items-center text-center py-4">
+<span class="font-section-title text-section-title text-outline mb-2">TODAY'S SCREEN TIME</span>
+<div class="font-stat-display text-stat-display text-on-surface tracking-tight mb-1">2h 14m</div>
+<div class="font-row-subtitle text-row-subtitle text-primary flex items-center gap-1.5">
+<span class="material-symbols-outlined text-[16px]" style="font-variation-settings: 'FILL' 1;">trending_down</span>
+<span>42m less than yesterday</span>
+</div>
+</section>
+<!-- Weekly Chart Card -->
+<div class="bg-surface rounded-2xl p-5 border border-[#2DD4BF]/20 flex flex-col gap-4 shadow-lg shadow-black/20">
+<div class="flex justify-between items-center">
+<span class="font-section-title text-section-title text-outline">WEEKLY OVERVIEW</span>
+<span class="font-row-subtitle text-row-subtitle text-on-surface-variant">Avg: 2h 45m/day</span>
+</div>
+<!-- Bar Chart -->
+<div class="flex items-end justify-between h-36 pt-6 px-2">
+<!-- Mon -->
+<div class="flex flex-col items-center gap-2 flex-1">
+<div class="w-full max-w-[24px] bg-surface-highest rounded-t-lg h-[60%]"></div>
+<span class="font-row-subtitle text-[11px] text-on-surface-variant">M</span>
+</div>
+<!-- Tue -->
+<div class="flex flex-col items-center gap-2 flex-1">
+<div class="w-full max-w-[24px] bg-surface-highest rounded-t-lg h-[75%]"></div>
+<span class="font-row-subtitle text-[11px] text-on-surface-variant">T</span>
+</div>
+<!-- Wed (Active/Glowing) -->
+<div class="flex flex-col items-center gap-2 flex-1">
+<div class="w-full max-w-[24px] bg-primary-container rounded-t-lg h-[50%] shadow-[0_0_15px_rgba(45,212,191,0.4)]"></div>
+<span class="font-row-subtitle text-[11px] font-bold text-primary">W</span>
+</div>
+<!-- Thu -->
+<div class="flex flex-col items-center gap-2 flex-1">
+<div class="w-full max-w-[24px] bg-surface-highest rounded-t-lg h-[85%]"></div>
+<span class="font-row-subtitle text-[11px] text-on-surface-variant">T</span>
+</div>
+<!-- Fri -->
+<div class="flex flex-col items-center gap-2 flex-1">
+<div class="w-full max-w-[24px] bg-surface-highest rounded-t-lg h-[95%]"></div>
+<span class="font-row-subtitle text-[11px] text-on-surface-variant">F</span>
+</div>
+<!-- Sat -->
+<div class="flex flex-col items-center gap-2 flex-1">
+<div class="w-full max-w-[24px] bg-surface-highest rounded-t-lg h-[65%]"></div>
+<span class="font-row-subtitle text-[11px] text-on-surface-variant">S</span>
+</div>
+<!-- Sun -->
+<div class="flex flex-col items-center gap-2 flex-1">
+<div class="w-full max-w-[24px] bg-surface-highest rounded-t-lg h-[40%]"></div>
+<span class="font-row-subtitle text-[11px] text-on-surface-variant">S</span>
+</div>
+</div>
+</div>
+<!-- Top Apps Card -->
+<div class="bg-surface rounded-2xl p-5 border border-[#2DD4BF]/20 flex flex-col gap-5 shadow-lg shadow-black/20">
+<div class="flex justify-between items-center">
+<span class="font-section-title text-section-title text-primary">TOP APPS</span>
+<span class="font-row-subtitle text-row-subtitle text-on-surface-variant">3 restricted</span>
+</div>
+<!-- App Item 1: Instagram -->
+<div class="flex flex-col gap-2.5">
+<div class="flex items-center justify-between">
+<div class="flex items-center gap-3">
+<div class="w-10 h-10 rounded-xl bg-surface-highest flex items-center justify-center text-primary-container">
+<span class="material-symbols-outlined" style="font-variation-settings: 'FILL' 1;">photo_camera</span>
+</div>
+<div>
+<div class="font-row-label font-medium text-on-surface">Instagram</div>
+<div class="font-row-subtitle text-on-surface-variant">12 pickups today</div>
+</div>
+</div>
+<div class="flex items-center gap-3">
+<span class="font-row-label text-on-surface font-semibold">1h 12m</span>
+<span class="bg-primary-container/10 text-primary border border-primary-container/30 px-2.5 py-0.5 rounded-full text-[10px] font-semibold flex items-center gap-1">
+<span class="material-symbols-outlined text-[12px]" style="font-variation-settings: 'FILL' 1;">pause</span>
+              Pause
+            </span>
+</div>
+</div>
+<!-- 4dp progress bar -->
+<div class="w-full bg-surface-highest h-1 rounded-full overflow-hidden">
+<div class="bg-primary-container h-full rounded-full" style="width: 70%;"></div>
+</div>
+</div>
+<!-- App Item 2: YouTube -->
+<div class="flex flex-col gap-2.5 pt-1">
+<div class="flex items-center justify-between">
+<div class="flex items-center gap-3">
+<div class="w-10 h-10 rounded-xl bg-surface-highest flex items-center justify-center text-primary-container">
+<span class="material-symbols-outlined" style="font-variation-settings: 'FILL' 1;">play_circle</span>
+</div>
+<div>
+<div class="font-row-label font-medium text-on-surface">YouTube</div>
+<div class="font-row-subtitle text-on-surface-variant">4 pickups today</div>
+</div>
+</div>
+<div class="flex items-center gap-3">
+<span class="font-row-label text-on-surface font-semibold">48m</span>
+<span class="bg-primary-container/10 text-primary border border-primary-container/30 px-2.5 py-0.5 rounded-full text-[10px] font-semibold flex items-center gap-1">
+<span class="material-symbols-outlined text-[12px]" style="font-variation-settings: 'FILL' 1;">pause</span>
+              Pause
+            </span>
+</div>
+</div>
+<!-- 4dp progress bar -->
+<div class="w-full bg-surface-highest h-1 rounded-full overflow-hidden">
+<div class="bg-primary-container h-full rounded-full" style="width: 45%;"></div>
+</div>
+</div>
+<!-- App Item 3: X -->
+<div class="flex flex-col gap-2.5 pt-1">
+<div class="flex items-center justify-between">
+<div class="flex items-center gap-3">
+<div class="w-10 h-10 rounded-xl bg-surface-highest flex items-center justify-center text-primary-container">
+<span class="material-symbols-outlined" style="font-variation-settings: 'FILL' 1;">flutter</span>
+</div>
+<div>
+<div class="font-row-label font-medium text-on-surface">X</div>
+<div class="font-row-subtitle text-on-surface-variant">8 pickups today</div>
+</div>
+</div>
+<div class="flex items-center gap-3">
+<span class="font-row-label text-on-surface font-semibold">22m</span>
+<span class="bg-primary-container/10 text-primary border border-primary-container/30 px-2.5 py-0.5 rounded-full text-[10px] font-semibold flex items-center gap-1">
+<span class="material-symbols-outlined text-[12px]" style="font-variation-settings: 'FILL' 1;">pause</span>
+              Pause
+            </span>
+</div>
+</div>
+<!-- 4dp progress bar -->
+<div class="w-full bg-surface-highest h-1 rounded-full overflow-hidden">
+<div class="bg-primary-container h-full rounded-full" style="width: 20%;"></div>
+</div>
+</div>
+</div>
+<!-- CTA Button -->
+<div class="pt-2">
+<button class="w-full bg-primary-container text-on-accent font-cta-button text-cta-button py-4 rounded-xl flex items-center justify-center gap-2 shadow-lg shadow-primary-container/20 active:scale-98 transition-all duration-200">
+<span class="material-symbols-outlined text-[20px]">timer</span>
+<span>Set Daily Limit</span>
+</button>
+</div>
+</main>
+<!-- BottomNavBar -->
+<nav class="fixed bottom-0 left-0 w-full z-50 flex justify-around items-center py-2 bg-surface/90 backdrop-blur-md border-t border-outline-variant">
+<!-- Inactive Item: Home -->
+<a class="flex flex-col items-center justify-center text-on-surface-variant px-4 py-1.5 hover:text-on-surface active:scale-98 transition-all duration-200" href="#">
+<span class="material-symbols-outlined text-[24px]">home</span>
+<span class="font-dock-label text-dock-label mt-1">Home</span>
+</a>
+<!-- Inactive Item: Launcher -->
+<a class="flex flex-col items-center justify-center text-on-surface-variant px-4 py-1.5 hover:text-on-surface active:scale-98 transition-all duration-200" href="#">
+<span class="material-symbols-outlined text-[24px]">apps</span>
+<span class="font-dock-label text-dock-label mt-1">Launcher</span>
+</a>
+<!-- Active Item: Settings -->
+<a class="flex flex-col items-center justify-center bg-secondary-container text-on-secondary-container rounded-full px-4 py-1.5 active:scale-98 transition-all duration-200" href="#">
+<span class="material-symbols-outlined text-[24px]" style="font-variation-settings: 'FILL' 1;">settings</span>
+<span class="font-dock-label text-dock-label mt-1 font-bold">Settings</span>
+</a>
+</nav>
+</body></html>

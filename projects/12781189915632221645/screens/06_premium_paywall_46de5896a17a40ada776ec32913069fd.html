@@ -1,0 +1,223 @@
+<!DOCTYPE html>
+
+<html class="dark" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>MindfulLauncher Premium Paywall &amp; Trial Sheet</title>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@300;400;500;600;700&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<script id="tailwind-config">
+    tailwind.config = {
+      darkMode: "class",
+      theme: {
+        extend: {
+          "colors": {
+            "background": "#0A1628",
+            "outline-variant": "#1A3050",
+            "outline": "#859490",
+            "on-surface-variant": "#bacac5",
+            "on-error-container": "#ffdad6",
+            "surface": "#0F1E38",
+            "on-secondary-fixed": "#00201c",
+            "surface-high": "#162640",
+            "on-accent": "#001A16",
+            "on-secondary": "#003731",
+            "on-primary-fixed-variant": "#005047",
+            "on-secondary-fixed-variant": "#005048",
+            "inverse-on-surface": "#2b3230",
+            "inverse-surface": "#dde4e1",
+            "on-background": "#dde4e1",
+            "tertiary": "#ffd1aa",
+            "on-surface": "#dde4e1",
+            "primary-fixed-dim": "#3cddc7",
+            "tertiary-fixed": "#ffdcc0",
+            "secondary-container": "#10a293",
+            "on-tertiary-container": "#744000",
+            "on-secondary-container": "#00302b",
+            "on-primary-container": "#00574d",
+            "primary": "#57f1db",
+            "secondary-fixed": "#80f6e5",
+            "surface-container-low": "#161d1b",
+            "surface-container-high": "#242b2a",
+            "on-error": "#690005",
+            "on-tertiary-fixed-variant": "#6b3b00",
+            "tertiary-container": "#ffac5a",
+            "surface-container-lowest": "#09100e",
+            "tertiary-fixed-dim": "#ffb875",
+            "primary-fixed": "#62fae3",
+            "surface-highest": "#1D3050",
+            "surface-dim": "#0e1513",
+            "surface-container": "#1a211f",
+            "on-primary": "#003731",
+            "inverse-primary": "#006b5f",
+            "on-tertiary": "#4b2800",
+            "error": "#ffb4ab",
+            "surface-container-highest": "#2f3634",
+            "secondary-fixed-dim": "#61dac9",
+            "error-container": "#93000a",
+            "secondary": "#61dac9",
+            "primary-container": "#2dd4bf",
+            "on-tertiary-fixed": "#2d1600",
+            "surface-bright": "#333b39",
+            "surface-variant": "#2f3634",
+            "surface-tint": "#3cddc7",
+            "on-primary-fixed": "#00201c"
+          },
+          "borderRadius": {
+            "DEFAULT": "0.25rem",
+            "lg": "0.5rem",
+            "xl": "0.75rem",
+            "full": "9999px"
+          },
+          "spacing": {
+            "space-xs": "8px",
+            "space-sm": "12px",
+            "margin": "20px",
+            "space-xl": "28px",
+            "gutter": "16px",
+            "space-lg": "20px",
+            "space-md": "16px"
+          },
+          "fontFamily": {
+            "row-label": ["Manrope"],
+            "clock-display": ["Manrope"],
+            "screen-title": ["Manrope"],
+            "row-subtitle": ["Manrope"],
+            "dock-label": ["Manrope"],
+            "section-label": ["Manrope"],
+            "stat-display": ["Manrope"],
+            "cta-button": ["Manrope"]
+          },
+          "fontSize": {
+            "row-label": ["15px", { "lineHeight": "1.4", "fontWeight": "400" }],
+            "clock-display": ["80px", { "lineHeight": "1", "fontWeight": "700" }],
+            "screen-title": ["20px", { "lineHeight": "1.4", "fontWeight": "600" }],
+            "row-subtitle": ["12px", { "lineHeight": "1.4", "fontWeight": "300" }],
+            "dock-label": ["10px", { "lineHeight": "1.4", "fontWeight": "500" }],
+            "section-label": ["10px", { "lineHeight": "1.4", "letterSpacing": "0.2em", "fontWeight": "600" }],
+            "stat-display": ["56px", { "lineHeight": "1.1", "fontWeight": "600" }],
+            "cta-button": ["15px", { "lineHeight": "1.4", "fontWeight": "600" }]
+          }
+        }
+      }
+    }
+  </script>
+<style>
+    body {
+      min-height: max(884px, 100dvh);
+    }
+  </style>
+  </head>
+<body class="bg-background text-on-background font-row-label antialiased min-h-screen flex items-center justify-center p-0 md:p-4">
+<!-- Mobile Screen Container -->
+<div class="w-full max-w-md min-h-screen md:min-h-[844px] md:rounded-[40px] bg-background flex flex-col justify-between overflow-hidden relative shadow-2xl border border-outline-variant/20">
+<!-- Top App Bar -->
+<header class="flex justify-between items-center w-full px-space-md py-space-sm bg-background">
+<button aria-label="Close" class="text-primary hover:opacity-80 transition-opacity p-2 -ml-2 rounded-full">
+<span class="material-symbols-outlined">close</span>
+</button>
+<div class="bg-surface-highest/60 border border-primary-container/30 px-3 py-1 rounded-full flex items-center gap-1.5 backdrop-blur-md">
+<span class="material-symbols-outlined text-primary text-sm" style="font-variation-settings: 'FILL' 1;">arrow_back_ios_new</span>
+<span class="text-primary font-screen-title text-xs tracking-wider">MINDFUL PRO</span>
+</div>
+<div class="w-8"></div> <!-- Spacer for centering -->
+</header>
+<!-- Main Content Area -->
+<main class="flex-1 px-margin py-space-sm flex flex-col justify-start gap-space-lg overflow-y-auto">
+<!-- Hero Section -->
+<div class="text-center space-y-2 mt-2">
+<h1 class="font-screen-title text-[24px] font-bold text-on-surface leading-tight">Reclaim Your Time &amp; Attention</h1>
+<p class="font-row-subtitle text-on-surface-variant text-sm px-4">Unlock the complete suite of minimalist focus tools and build healthier digital habits effortlessly.</p>
+</div>
+<!-- Feature Checklist Card -->
+<div class="bg-surface rounded-[20px] p-space-lg border border-primary-container/30 shadow-lg space-y-4">
+<div class="flex items-center gap-3">
+<div class="w-7 h-7 rounded-full bg-primary-container/15 flex items-center justify-center flex-shrink-0">
+<span class="material-symbols-outlined text-primary text-lg" style="font-variation-settings: 'FILL' 1;">check</span>
+</div>
+<span class="font-row-label text-on-surface">Unlimited Mindful Pauses</span>
+</div>
+<div class="flex items-center gap-3">
+<div class="w-7 h-7 rounded-full bg-primary-container/15 flex items-center justify-center flex-shrink-0">
+<span class="material-symbols-outlined text-primary text-lg" style="font-variation-settings: 'FILL' 1;">check</span>
+</div>
+<span class="font-row-label text-on-surface">Custom Daily Limits &amp; App Blocking</span>
+</div>
+<div class="flex items-center gap-3">
+<div class="w-7 h-7 rounded-full bg-primary-container/15 flex items-center justify-center flex-shrink-0">
+<span class="material-symbols-outlined text-primary text-lg" style="font-variation-settings: 'FILL' 1;">check</span>
+</div>
+<span class="font-row-label text-on-surface">In-depth Screen Time Analytics</span>
+</div>
+<div class="flex items-center gap-3">
+<div class="w-7 h-7 rounded-full bg-primary-container/15 flex items-center justify-center flex-shrink-0">
+<span class="material-symbols-outlined text-primary text-lg" style="font-variation-settings: 'FILL' 1;">check</span>
+</div>
+<span class="font-row-label text-on-surface">Clean Atmosphere 2.0 Minimalist Theme</span>
+</div>
+</div>
+<!-- Pricing Options Container -->
+<div class="space-y-3">
+<!-- Card 1 (Selected) -->
+<div class="pricing-card relative bg-surface-high rounded-[20px] p-4 border-2 border-primary-container shadow-[0_0_20px_rgba(45,212,191,0.15)] cursor-pointer transition-all" onclick="selectPlan(this)">
+<div class="absolute -top-3 right-4 bg-primary-container text-on-primary-container text-[10px] font-bold px-2.5 py-0.5 rounded-full uppercase tracking-wider">Most Popular</div>
+<div class="flex justify-between items-center">
+<div>
+<div class="font-row-label font-bold text-on-surface text-base">Annual - $19.99/yr</div>
+<div class="font-row-subtitle text-primary text-xs mt-0.5">($1.66/mo, 7-day free trial)</div>
+</div>
+<div class="w-6 h-6 rounded-full bg-primary-container flex items-center justify-center text-on-primary-container">
+<span class="material-symbols-outlined text-sm font-bold">check</span>
+</div>
+</div>
+</div>
+<!-- Card 2 -->
+<div class="pricing-card relative bg-surface rounded-[20px] p-4 border border-outline-variant/60 cursor-pointer transition-all hover:border-primary-container/50" onclick="selectPlan(this)">
+<div class="flex justify-between items-center">
+<div>
+<div class="font-row-label text-on-surface text-base">Lifetime - $39.99 one-time</div>
+<div class="font-row-subtitle text-on-surface-variant text-xs mt-0.5">Full permanent access, no subscriptions</div>
+</div>
+<div class="w-6 h-6 rounded-full border border-outline-variant flex items-center justify-center text-transparent">
+<span class="material-symbols-outlined text-sm">check</span>
+</div>
+</div>
+</div>
+</div>
+</main>
+<!-- Bottom Section -->
+<footer class="px-margin pb-space-xl pt-space-sm bg-background flex flex-col gap-space-xs text-center">
+<button class="w-full bg-primary-container text-on-primary-container font-cta-button py-4 rounded-[14px] shadow-lg hover:opacity-95 transition-all flex items-center justify-center gap-2">
+<span>Start 7-Day Free Trial</span>
+<span class="material-symbols-outlined text-sm">arrow_forward</span>
+</button>
+<p class="font-row-subtitle text-on-surface-variant/80 text-[11px]">Cancel anytime. No charge during trial.</p>
+</footer>
+</div>
+<script>
+    function selectPlan(selectedElement) {
+      const cards = document.querySelectorAll('.pricing-card');
+      cards.forEach(card => {
+        card.classList.remove('bg-surface-high', 'border-2', 'border-primary-container', 'shadow-[0_0_20px_rgba(45,212,191,0.15)]');
+        card.classList.add('bg-surface', 'border', 'border-outline-variant/60');
+        const badge = card.querySelector('div.absolute');
+        if(badge) badge.style.display = 'none';
+        
+        const checkCircle = card.querySelector('.w-6');
+        checkCircle.className = 'w-6 h-6 rounded-full border border-outline-variant flex items-center justify-center text-transparent';
+        checkCircle.innerHTML = '<span class="material-symbols-outlined text-sm">check</span>';
+      });
+
+      selectedElement.classList.remove('bg-surface', 'border', 'border-outline-variant/60');
+      selectedElement.classList.add('bg-surface-high', 'border-2', 'border-primary-container', 'shadow-[0_0_20px_rgba(45,212,191,0.15)]');
+      const badge = selectedElement.querySelector('div.absolute');
+      if(badge) badge.style.display = 'block';
+
+      const selectedCheck = selectedElement.querySelector('.w-6');
+      selectedCheck.className = 'w-6 h-6 rounded-full bg-primary-container flex items-center justify-center text-on-primary-container';
+      selectedCheck.innerHTML = '<span class="material-symbols-outlined text-sm font-bold">check</span>';
+    }
+  </script>
+</body></html>

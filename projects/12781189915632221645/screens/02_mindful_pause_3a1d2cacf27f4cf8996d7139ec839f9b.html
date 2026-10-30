@@ -1,0 +1,195 @@
+<!DOCTYPE html>
+
+<html class="dark" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>MindfulPause - MindfulLauncher</title>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@300;400;500;600;700&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<script id="tailwind-config">
+    tailwind.config = {
+      darkMode: "class",
+      theme: {
+        extend: {
+          "colors": {
+            "surface-container": "#1a211f",
+            "surface-dim": "#0e1513",
+            "primary-fixed-dim": "#3cddc7",
+            "primary": "#57f1db",
+            "surface-container-high": "#242b2a",
+            "on-primary": "#003731",
+            "on-accent": "#001A16",
+            "error": "#ffb4ab",
+            "on-primary-fixed": "#00201c",
+            "on-primary-fixed-variant": "#005047",
+            "tertiary-fixed-dim": "#ffb875",
+            "primary-container": "#2dd4bf",
+            "secondary-fixed": "#80f6e5",
+            "surface-tint": "#3cddc7",
+            "on-surface": "#dde4e1",
+            "on-error": "#690005",
+            "on-tertiary": "#4b2800",
+            "tertiary": "#ffd1aa",
+            "on-surface-variant": "#bacac5",
+            "secondary-container": "#10a293",
+            "surface-container-lowest": "#09100e",
+            "surface-container-highest": "#2f3634",
+            "secondary": "#61dac9",
+            "on-error-container": "#ffdad6",
+            "on-secondary-fixed": "#00201c",
+            "on-secondary": "#003731",
+            "inverse-on-surface": "#2b3230",
+            "outline-variant": "#3c4a46",
+            "on-background": "#dde4e1",
+            "tertiary-container": "#ffac5a",
+            "on-tertiary-fixed-variant": "#6b3b00",
+            "inverse-primary": "#006b5f",
+            "surface": "#0F1E38",
+            "outline": "#859490",
+            "error-container": "#93000a",
+            "primary-fixed": "#62fae3",
+            "surface-container-low": "#161d1b",
+            "tertiary-fixed": "#ffdcc0",
+            "inverse-surface": "#dde4e1",
+            "surface-bright": "#333b39",
+            "on-tertiary-fixed": "#2d1600",
+            "surface-highest": "#1D3050",
+            "on-primary-container": "#00574d",
+            "surface-high": "#162640",
+            "on-secondary-fixed-variant": "#005048",
+            "surface-variant": "#2f3634",
+            "on-tertiary-container": "#744000",
+            "secondary-fixed-dim": "#61dac9",
+            "on-secondary-container": "#00302b",
+            "background": "#0A1628"
+          },
+          "borderRadius": {
+            "DEFAULT": "0.25rem",
+            "lg": "0.5rem",
+            "xl": "0.75rem",
+            "full": "9999px"
+          },
+          "spacing": {
+            "space-xl": "28px",
+            "gutter": "16px",
+            "space-md": "16px",
+            "space-sm": "12px",
+            "space-xs": "8px",
+            "margin": "20px",
+            "space-lg": "20px"
+          },
+          "fontFamily": {
+            "row-label": ["Manrope"],
+            "section-label": ["Manrope"],
+            "cta-button": ["Manrope"],
+            "row-subtitle": ["Manrope"],
+            "clock-display": ["Manrope"],
+            "stat-display": ["Manrope"],
+            "dock-label": ["Manrope"],
+            "screen-title": ["Manrope"]
+          },
+          "fontSize": {
+            "row-label": ["15px", {"lineHeight": "1.4", "fontWeight": "400"}],
+            "section-label": ["10px", {"lineHeight": "1.4", "letterSpacing": "0.2em", "fontWeight": "600"}],
+            "cta-button": ["15px", {"lineHeight": "1.4", "fontWeight": "600"}],
+            "row-subtitle": ["12px", {"lineHeight": "1.4", "fontWeight": "300"}],
+            "clock-display": ["80px", {"lineHeight": "1", "fontWeight": "700"}],
+            "stat-display": ["56px", {"lineHeight": "1.1", "fontWeight": "600"}],
+            "dock-label": ["10px", {"lineHeight": "1.4", "fontWeight": "500"}],
+            "screen-title": ["20px", {"lineHeight": "1.4", "fontWeight": "600"}]
+          }
+        }
+      }
+    }
+  </script>
+<style>
+    @keyframes breathe {
+      0%, 100% {
+        transform: scale(0.7);
+        opacity: 0.4;
+      }
+      50% {
+        transform: scale(1.1);
+        opacity: 0.9;
+      }
+    }
+    .animate-breathe {
+      animation: breathe 6s ease-in-out infinite;
+    }
+  </style>
+<style>
+    body {
+      min-height: max(884px, 100dvh);
+    }
+  </style>
+  </head>
+<body class="bg-background text-on-background font-row-label min-h-screen flex flex-col justify-between selection:bg-primary-container selection:text-on-primary-container">
+<!-- TopAppBar -->
+<header class="bg-surface dark:bg-surface-dim flex justify-between items-center w-full px-gutter py-space-sm z-50">
+<div class="flex items-center gap-2">
+<span class="material-symbols-outlined text-primary dark:text-primary-fixed-dim text-[24px]">spa</span>
+<h1 class="font-screen-title text-screen-title font-bold text-primary dark:text-primary-fixed-dim">MindfulLauncher</h1>
+</div>
+<div class="font-row-subtitle text-row-subtitle text-on-surface-variant">Mindful Pause</div>
+</header>
+<!-- Main Content Canvas -->
+<main class="flex-1 flex flex-col items-center justify-center px-gutter text-center relative overflow-hidden my-auto">
+<!-- Ambient Glow Background Element -->
+<div class="absolute w-72 h-72 rounded-full bg-primary-container/10 blur-3xl pointer-events-none animate-breathe"></div>
+<!-- App Name Subtitle -->
+<div class="font-row-subtitle text-row-subtitle text-on-surface-variant tracking-widest uppercase mb-space-sm opacity-80">
+      Instagram
+    </div>
+<!-- Instruction text -->
+<h2 class="font-screen-title text-screen-title text-on-surface mb-space-xl font-normal">
+      Take a breath before you continue
+    </h2>
+<!-- Centered Breathing Circle & Countdown -->
+<div class="relative w-64 h-64 md:w-80 md:h-80 flex items-center justify-center my-space-lg">
+<!-- Outer expanding ring -->
+<div class="absolute inset-0 rounded-full border-2 border-primary-container/30 animate-breathe"></div>
+<!-- Inner glowing ring -->
+<div class="absolute inset-4 rounded-full border border-primary/50 shadow-[0_0_30px_rgba(45,212,191,0.15)]"></div>
+<!-- Countdown numeral -->
+<div class="font-clock-display text-clock-display text-primary z-10 select-none" id="countdown">
+        05
+      </div>
+</div>
+<!-- Intent prompt -->
+<p class="font-row-label text-row-label text-on-surface-variant max-w-xs mt-space-md">
+      Notice how you feel. Is this action aligned with your current intention?
+    </p>
+</main>
+<!-- Footer / Close Action Area -->
+<footer class="w-full px-gutter py-space-xl flex flex-col items-center justify-center z-50">
+<button class="opacity-40 cursor-not-allowed transition-all duration-300 bg-surface-highest text-on-surface-variant px-space-xl py-space-sm rounded-xl font-cta-button text-cta-button flex items-center gap-2" disabled="" id="close-btn">
+<span class="material-symbols-outlined text-[18px]">lock</span>
+      Pause in progress...
+    </button>
+</footer>
+<script>
+    let timeLeft = 5;
+    const countdownEl = document.getElementById('countdown');
+    const closeBtn = document.getElementById('close-btn');
+
+    const timer = setInterval(() => {
+      timeLeft--;
+      if (timeLeft > 0) {
+        countdownEl.textContent = timeLeft < 10 ? '0' + timeLeft : timeLeft;
+      } else {
+        clearInterval(timer);
+        countdownEl.textContent = '00';
+        closeBtn.disabled = false;
+        closeBtn.classList.remove('opacity-40', 'cursor-not-allowed', 'bg-surface-highest', 'text-on-surface-variant');
+        closeBtn.classList.add('bg-primary-container', 'text-on-primary-container', 'hover:opacity-90', 'cursor-pointer');
+        closeBtn.innerHTML = '<span class="material-symbols-outlined text-[18px]">arrow_forward</span> Continue to App';
+        
+        closeBtn.addEventListener('click', () => {
+          window.location.reload();
+        });
+      }
+    }, 1000);
+  </script>
+</body></html>

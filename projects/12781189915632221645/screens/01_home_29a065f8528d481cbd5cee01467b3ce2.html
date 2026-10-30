@@ -1,0 +1,197 @@
+<!DOCTYPE html>
+
+<html class="dark" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>MindfulLauncher Home</title>
+<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@300;400;500;600;700&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<script id="tailwind-config">
+    tailwind.config = {
+      darkMode: "class",
+      theme: {
+        extend: {
+          "colors": {
+            "surface-container": "#1a211f",
+            "surface-dim": "#0e1513",
+            "primary-fixed-dim": "#3cddc7",
+            "primary": "#57f1db",
+            "surface-container-high": "#242b2a",
+            "on-primary": "#003731",
+            "on-accent": "#001A16",
+            "error": "#ffb4ab",
+            "on-primary-fixed": "#00201c",
+            "on-primary-fixed-variant": "#005047",
+            "tertiary-fixed-dim": "#ffb875",
+            "primary-container": "#2dd4bf",
+            "secondary-fixed": "#80f6e5",
+            "surface-tint": "#3cddc7",
+            "on-surface": "#dde4e1",
+            "on-error": "#690005",
+            "on-tertiary": "#4b2800",
+            "tertiary": "#ffd1aa",
+            "on-surface-variant": "#bacac5",
+            "secondary-container": "#10a293",
+            "surface-container-lowest": "#09100e",
+            "surface-container-highest": "#2f3634",
+            "secondary": "#61dac9",
+            "on-error-container": "#ffdad6",
+            "on-secondary-fixed": "#00201c",
+            "on-secondary": "#003731",
+            "inverse-on-surface": "#2b3230",
+            "outline-variant": "#3c4a46",
+            "on-background": "#dde4e1",
+            "tertiary-container": "#ffac5a",
+            "on-tertiary-fixed-variant": "#6b3b00",
+            "inverse-primary": "#006b5f",
+            "surface": "#0F1E38",
+            "outline": "#859490",
+            "error-container": "#93000a",
+            "primary-fixed": "#62fae3",
+            "surface-container-low": "#161d1b",
+            "tertiary-fixed": "#ffdcc0",
+            "inverse-surface": "#dde4e1",
+            "surface-bright": "#333b39",
+            "on-tertiary-fixed": "#2d1600",
+            "surface-highest": "#1D3050",
+            "on-primary-container": "#00574d",
+            "surface-high": "#162640",
+            "on-secondary-fixed-variant": "#005048",
+            "surface-variant": "#2f3634",
+            "on-tertiary-container": "#744000",
+            "secondary-fixed-dim": "#61dac9",
+            "on-secondary-container": "#00302b",
+            "background": "#0A1628"
+          },
+          "borderRadius": {
+            "DEFAULT": "0.25rem",
+            "lg": "0.5rem",
+            "xl": "0.75rem",
+            "full": "9999px"
+          },
+          "spacing": {
+            "space-xl": "28px",
+            "gutter": "16px",
+            "space-md": "16px",
+            "space-sm": "12px",
+            "space-xs": "8px",
+            "margin": "20px",
+            "space-lg": "20px"
+          },
+          "fontFamily": {
+            "row-label": ["Manrope"],
+            "section-label": ["Manrope"],
+            "cta-button": ["Manrope"],
+            "row-subtitle": ["Manrope"],
+            "clock-display": ["Manrope"],
+            "stat-display": ["Manrope"],
+            "dock-label": ["Manrope"],
+            "screen-title": ["Manrope"]
+          },
+          "fontSize": {
+            "row-label": ["15px", {"lineHeight": "1.4", "fontWeight": "400"}],
+            "section-label": ["10px", {"lineHeight": "1.4", "letterSpacing": "0.2em", "fontWeight": "600"}],
+            "cta-button": ["15px", {"lineHeight": "1.4", "fontWeight": "600"}],
+            "row-subtitle": ["12px", {"lineHeight": "1.4", "fontWeight": "300"}],
+            "clock-display": ["80px", {"lineHeight": "1", "fontWeight": "700"}],
+            "stat-display": ["56px", {"lineHeight": "1.1", "fontWeight": "600"}],
+            "dock-label": ["10px", {"lineHeight": "1.4", "fontWeight": "500"}],
+            "screen-title": ["20px", {"lineHeight": "1.4", "fontWeight": "600"}]
+          }
+        }
+      }
+    }
+  </script>
+<style>
+    body {
+      min-height: max(884px, 100dvh);
+    }
+  </style>
+  </head>
+<body class="bg-background text-on-background font-row-label min-h-screen flex flex-col justify-between selection:bg-primary-container selection:text-on-primary-container">
+<!-- TopAppBar -->
+<header class="bg-surface dark:bg-surface-dim flex justify-between items-center w-full px-gutter py-space-sm z-40">
+<div class="flex items-center gap-space-sm">
+<span class="material-symbols-outlined text-primary dark:text-primary-fixed-dim" style="font-variation-settings: 'FILL' 1;">spa</span>
+<h1 class="font-screen-title text-screen-title font-bold text-primary dark:text-primary-fixed-dim">MindfulLauncher</h1>
+</div>
+<div class="flex items-center gap-space-md">
+<button aria-label="Stats" class="text-on-surface-variant hover:text-primary transition-colors flex items-center justify-center p-space-xs">
+<span class="material-symbols-outlined">bar_chart</span>
+</button>
+<button aria-label="Settings" class="text-on-surface-variant hover:text-primary transition-colors flex items-center justify-center p-space-xs">
+<span class="material-symbols-outlined">settings</span>
+</button>
+</div>
+</header>
+<!-- Main Content Canvas -->
+<main class="flex-1 flex flex-col items-center justify-center px-gutter py-space-xl max-w-md mx-auto w-full relative">
+<!-- Ambient Glow Background for Clock -->
+<div class="absolute w-[350px] h-[350px] rounded-full bg-primary/5 blur-[80px] pointer-events-none -z-10"></div>
+<!-- Large Clock & Date Section -->
+<div class="flex flex-col items-center mb-space-xl text-center">
+<div class="font-clock-display text-clock-display text-white tracking-tight drop-shadow-[0_0_35px_rgba(45,212,191,0.25)]">
+        10:42
+      </div>
+<div class="font-section-label text-section-label text-primary mt-space-sm">
+        TUESDAY, OCT 24
+      </div>
+</div>
+<!-- Bento Grid Cards Section -->
+<div class="grid grid-cols-1 gap-space-md w-full">
+<!-- Weather Card -->
+<div class="bg-surface rounded-[20px] p-space-lg border border-[rgba(45,212,191,0.12)] flex items-center justify-between shadow-lg">
+<div class="flex flex-col">
+<span class="font-section-label text-section-label text-outline mb-1">WEATHER</span>
+<span class="font-row-label text-row-label text-on-surface font-medium">San Francisco</span>
+<span class="font-row-subtitle text-row-subtitle text-on-surface-variant">Partly Cloudy</span>
+</div>
+<div class="flex items-center gap-space-md">
+<div class="text-right">
+<div class="font-stat-display text-[36px] font-semibold text-white leading-none">72°F</div>
+</div>
+<span class="material-symbols-outlined text-primary text-[36px]" style="font-variation-settings: 'FILL' 1;">wb_cloudy</span>
+</div>
+</div>
+<!-- Focus Timer Card -->
+<div class="bg-surface rounded-[20px] p-space-lg border border-[rgba(45,212,191,0.12)] flex items-center justify-between shadow-lg">
+<div class="flex flex-col">
+<span class="font-section-label text-section-label text-outline mb-1">FOCUS SESSION</span>
+<span class="font-row-label text-row-label text-on-surface font-medium">Deep Work</span>
+<span class="font-row-subtitle text-row-subtitle text-on-surface-variant">Tap to pause</span>
+</div>
+<div class="flex items-center gap-space-md">
+<div class="text-right">
+<div class="font-stat-display text-[32px] font-semibold text-primary-fixed-dim leading-none">25:00</div>
+</div>
+<button aria-label="Play Focus Timer" class="w-10 h-10 rounded-full bg-primary-container/20 flex items-center justify-center text-primary hover:bg-primary-container/30 transition-colors">
+<span class="material-symbols-outlined" style="font-variation-settings: 'FILL' 1;">play_arrow</span>
+</button>
+</div>
+</div>
+</div>
+</main>
+<!-- Floating Dock -->
+<nav class="fixed bottom-margin left-1/2 -translate-x-1/2 z-50 flex items-center gap-space-md px-space-lg py-space-sm rounded-[28px] bg-[rgba(10,22,40,0.90)] backdrop-blur-md border border-primary-container shadow-2xl">
+<!-- Gmail App -->
+<a aria-label="Gmail" class="w-[52px] h-[52px] rounded-[16px] bg-[rgba(255,255,255,0.07)] flex items-center justify-center text-on-surface hover:text-primary transition-all hover:scale-105 active:scale-95" href="#">
+<span class="material-symbols-outlined text-[24px]">mail</span>
+</a>
+<!-- Maps App -->
+<a aria-label="Maps" class="w-[52px] h-[52px] rounded-[16px] bg-[rgba(255,255,255,0.07)] flex items-center justify-center text-on-surface hover:text-primary transition-all hover:scale-105 active:scale-95" data-location="San Francisco" href="#">
+<span class="material-symbols-outlined text-[24px]">map</span>
+</a>
+<!-- Events App -->
+<a aria-label="Events" class="w-[52px] h-[52px] rounded-[16px] bg-[rgba(255,255,255,0.07)] flex items-center justify-center text-on-surface hover:text-primary transition-all hover:scale-105 active:scale-95" href="#">
+<span class="material-symbols-outlined text-[24px]">calendar_today</span>
+</a>
+<!-- Phone App -->
+<a aria-label="Phone" class="w-[52px] h-[52px] rounded-[16px] bg-[rgba(255,255,255,0.07)] flex items-center justify-center text-on-surface hover:text-primary transition-all hover:scale-105 active:scale-95" href="#">
+<span class="material-symbols-outlined text-[24px]">call</span>
+</a>
+</nav>
+<!-- BottomNavBar (Hidden on Mobile home, using Floating Dock per spec, but compliant shell included if needed or handled responsively) -->
+<div class="h-20"></div>
+</body></html>

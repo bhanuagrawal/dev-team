@@ -1,0 +1,267 @@
+<html class="dark" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>MindfulLauncher - App Drawer</title>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@300;400;500;600;700&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<script id="tailwind-config">
+    tailwind.config = {
+      darkMode: "class",
+      theme: {
+        extend: {
+          "colors": {
+            "on-surface": "#E8F4F1",
+            "outline": "#859490",
+            "on-accent": "#001A16",
+            "surface-variant": "#2f3634",
+            "outline-variant": "#1A3050",
+            "on-secondary-fixed-variant": "#005048",
+            "tertiary": "#ffd1aa",
+            "surface-high": "#162640",
+            "secondary-container": "#10a293",
+            "primary": "#57f1db",
+            "surface-container-highest": "#2f3634",
+            "on-surface-variant": "#8BAAA5",
+            "inverse-surface": "#dde4e1",
+            "on-error": "#690005",
+            "surface-highest": "#1D3050",
+            "surface-container-low": "#161d1b",
+            "error-container": "#93000a",
+            "tertiary-container": "#ffac5a",
+            "on-tertiary-container": "#744000",
+            "primary-fixed-dim": "#3cddc7",
+            "surface-bright": "#333b39",
+            "on-primary-fixed": "#00201c",
+            "surface-container-lowest": "#09100e",
+            "surface-tint": "#3cddc7",
+            "on-secondary": "#003731",
+            "primary-fixed": "#62fae3",
+            "on-tertiary-fixed": "#2d1600",
+            "surface-container-high": "#242b2a",
+            "inverse-primary": "#006b5f",
+            "on-secondary-fixed": "#00201c",
+            "on-error-container": "#ffdad6",
+            "primary-container": "#2dd4bf",
+            "on-tertiary-fixed-variant": "#6b3b00",
+            "secondary": "#61dac9",
+            "secondary-fixed": "#80f6e5",
+            "on-tertiary": "#4b2800",
+            "surface-dim": "#0e1513",
+            "surface-container": "#1a211f",
+            "on-background": "#dde4e1",
+            "on-primary-container": "#00574d",
+            "inverse-on-surface": "#2b3230",
+            "background": "#0A1628",
+            "on-primary": "#003731",
+            "tertiary-fixed-dim": "#ffb875",
+            "secondary-fixed-dim": "#61dac9",
+            "on-primary-fixed-variant": "#005047",
+            "tertiary-fixed": "#ffdcc0",
+            "surface": "#0F1E38",
+            "on-secondary-container": "#00302b",
+            "error": "#ffb4ab"
+          },
+          "borderRadius": {
+            "DEFAULT": "0.25rem",
+            "lg": "0.5rem",
+            "xl": "0.75rem",
+            "full": "9999px"
+          },
+          "spacing": {
+            "space-lg": "20px",
+            "margin": "20px",
+            "space-sm": "12px",
+            "gutter": "16px",
+            "space-xl": "28px",
+            "space-xs": "8px",
+            "space-md": "16px"
+          },
+          "fontFamily": {
+            "row-subtitle": ["Manrope"],
+            "section-label": ["Manrope"],
+            "clock-display": ["Manrope"],
+            "screen-title": ["Manrope"],
+            "cta-button": ["Manrope"],
+            "stat-display": ["Manrope"],
+            "row-label": ["Manrope"],
+            "dock-label": ["Manrope"]
+          },
+          "fontSize": {
+            "row-subtitle": ["12px", { "lineHeight": "1.4", "fontWeight": "300" }],
+            "section-label": ["10px", { "lineHeight": "1.4", "letterSpacing": "0.2em", "fontWeight": "600" }],
+            "clock-display": ["80px", { "lineHeight": "1", "fontWeight": "700" }],
+            "screen-title": ["20px", { "lineHeight": "1.4", "fontWeight": "600" }],
+            "cta-button": ["15px", { "lineHeight": "1.4", "fontWeight": "600" }],
+            "stat-display": ["56px", { "lineHeight": "1.1", "fontWeight": "600" }],
+            "row-label": ["15px", { "lineHeight": "1.4", "fontWeight": "400" }],
+            "dock-label": ["10px", { "lineHeight": "1.4", "fontWeight": "500" }]
+          }
+        }
+      }
+    }
+  </script>
+<style>
+    body {
+      min-height: max(884px, 100dvh);
+    }
+  </style>
+  </head>
+<body class="bg-background text-on-background font-row-label min-h-screen flex flex-col antialiased selection:bg-primary-container selection:text-on-primary-container">
+<!-- Top App Bar -->
+<header class="bg-surface dark:bg-surface-dim text-primary dark:text-primary-fixed-dim font-screen-title text-screen-title docked full-width top flex justify-between items-center w-full px-gutter py-space-sm z-40">
+<div class="flex items-center gap-space-sm">
+<span class="material-symbols-outlined text-primary" data-icon="spa" style="font-variation-settings: 'FILL' 1;">spa</span>
+<span class="font-screen-title text-screen-title font-bold text-primary dark:text-primary-fixed-dim">MindfulLauncher</span>
+</div>
+<div class="flex items-center gap-space-sm">
+<span class="material-symbols-outlined text-on-surface-variant hover:text-primary transition-colors cursor-pointer" data-icon="search">search</span>
+</div>
+</header>
+<!-- Main Content Canvas -->
+<main class="flex-1 w-full max-w-md mx-auto px-gutter pb-28 pt-space-md flex flex-col gap-space-lg">
+<!-- Search Bar -->
+<div class="relative w-full">
+<div class="absolute inset-y-0 left-0 pl-space-md flex items-center pointer-events-none text-primary">
+<span class="material-symbols-outlined" data-icon="search">search</span>
+</div>
+<input class="w-full bg-surface/80 backdrop-blur-md text-on-surface placeholder-on-surface-variant text-row-label rounded-xl pl-12 pr-space-md py-space-sm border border-primary-container/40 focus:border-primary focus:ring-1 focus:ring-primary outline-none transition-all" placeholder="Search applications..." type="text"/>
+</div>
+<!-- Results Section (Simulated Active Search/Filtered) -->
+<div class="flex flex-col gap-space-xs">
+<h2 class="font-section-label text-section-label text-primary px-space-xs tracking-widest">RESULTS</h2>
+<div class="flex flex-col gap-space-xs">
+<div class="flex items-center justify-between p-space-sm rounded-xl bg-surface hover:bg-surface-high transition-colors cursor-pointer border border-outline-variant/30">
+<div class="flex items-center gap-space-md">
+<div class="w-10 h-10 rounded-xl flex items-center justify-center text-primary" style="background-color: rgba(255,255,255,0.07);">
+<span class="material-symbols-outlined" data-icon="self_improvement">self_improvement</span>
+</div>
+<div>
+<p class="font-row-label text-row-label text-on-surface font-medium">Headspace</p>
+<p class="font-row-subtitle text-row-subtitle text-on-surface-variant">Meditation &amp; Sleep</p>
+</div>
+</div>
+<span class="material-symbols-outlined text-outline text-sm" data-icon="chevron_right">chevron_right</span>
+</div>
+<div class="flex items-center justify-between p-space-sm rounded-xl bg-surface hover:bg-surface-high transition-colors cursor-pointer border border-outline-variant/30">
+<div class="flex items-center gap-space-md">
+<div class="w-10 h-10 rounded-xl flex items-center justify-center text-primary" style="background-color: rgba(255,255,255,0.07);">
+<span class="material-symbols-outlined" data-icon="forest">forest</span>
+</div>
+<div>
+<p class="font-row-label text-row-label text-on-surface font-medium">Forest</p>
+<p class="font-row-subtitle text-row-subtitle text-on-surface-variant">Stay focused, be present</p>
+</div>
+</div>
+<span class="material-symbols-outlined text-outline text-sm" data-icon="chevron_right">chevron_right</span>
+</div>
+</div>
+</div>
+<!-- Library Section -->
+<div class="flex flex-col gap-space-xs">
+<h2 class="font-section-label text-section-label text-primary px-space-xs tracking-widest">LIBRARY</h2>
+<div class="flex flex-col gap-space-xs">
+<div class="flex items-center justify-between p-space-sm rounded-xl bg-surface hover:bg-surface-high transition-colors cursor-pointer border border-outline-variant/30">
+<div class="flex items-center gap-space-md">
+<div class="w-10 h-10 rounded-xl flex items-center justify-center text-primary" style="background-color: rgba(255,255,255,0.07);">
+<span class="material-symbols-outlined" data-icon="book">book</span>
+</div>
+<div>
+<p class="font-row-label text-row-label text-on-surface font-medium">Audible</p>
+<p class="font-row-subtitle text-row-subtitle text-on-surface-variant">Audiobooks &amp; podcasts</p>
+</div>
+</div>
+<span class="material-symbols-outlined text-outline text-sm" data-icon="chevron_right">chevron_right</span>
+</div>
+<div class="flex items-center justify-between p-space-sm rounded-xl bg-surface hover:bg-surface-high transition-colors cursor-pointer border border-outline-variant/30">
+<div class="flex items-center gap-space-md">
+<div class="w-10 h-10 rounded-xl flex items-center justify-center text-primary" style="background-color: rgba(255,255,255,0.07);">
+<span class="material-symbols-outlined" data-icon="calendar_today">calendar_today</span>
+</div>
+<div>
+<p class="font-row-label text-row-label text-on-surface font-medium">Calendar</p>
+<p class="font-row-subtitle text-row-subtitle text-on-surface-variant">Time management</p>
+</div>
+</div>
+<span class="material-symbols-outlined text-outline text-sm" data-icon="chevron_right">chevron_right</span>
+</div>
+<div class="flex items-center justify-between p-space-sm rounded-xl bg-surface hover:bg-surface-high transition-colors cursor-pointer border border-outline-variant/30">
+<div class="flex items-center gap-space-md">
+<div class="w-10 h-10 rounded-xl flex items-center justify-center text-primary" style="background-color: rgba(255,255,255,0.07);">
+<span class="material-symbols-outlined" data-icon="camera">camera</span>
+</div>
+<div>
+<p class="font-row-label text-row-label text-on-surface font-medium">Camera</p>
+<p class="font-row-subtitle text-row-subtitle text-on-surface-variant">Capture moments</p>
+</div>
+</div>
+<span class="material-symbols-outlined text-outline text-sm" data-icon="chevron_right">chevron_right</span>
+</div>
+<div class="flex items-center justify-between p-space-sm rounded-xl bg-surface hover:bg-surface-high transition-colors cursor-pointer border border-outline-variant/30">
+<div class="flex items-center gap-space-md">
+<div class="w-10 h-10 rounded-xl flex items-center justify-center text-primary" style="background-color: rgba(255,255,255,0.07);">
+<span class="material-symbols-outlined" data-icon="mail">mail</span>
+</div>
+<div>
+<p class="font-row-label text-row-label text-on-surface font-medium">Email</p>
+<p class="font-row-subtitle text-row-subtitle text-on-surface-variant">Synchronized messages</p>
+</div>
+</div>
+<span class="material-symbols-outlined text-outline text-sm" data-icon="chevron_right">chevron_right</span>
+</div>
+<div class="flex items-center justify-between p-space-sm rounded-xl bg-surface hover:bg-surface-high transition-colors cursor-pointer border border-outline-variant/30">
+<div class="flex items-center gap-space-md">
+<div class="w-10 h-10 rounded-xl flex items-center justify-center text-primary" style="background-color: rgba(255,255,255,0.07);">
+<span class="material-symbols-outlined" data-icon="map">map</span>
+</div>
+<div>
+<p class="font-row-label text-row-label text-on-surface font-medium">Maps</p>
+<p class="font-row-subtitle text-row-subtitle text-on-surface-variant">Navigation tools</p>
+</div>
+</div>
+<span class="material-symbols-outlined text-outline text-sm" data-icon="chevron_right">chevron_right</span>
+</div>
+<div class="flex items-center justify-between p-space-sm rounded-xl bg-surface hover:bg-surface-high transition-colors cursor-pointer border border-outline-variant/30">
+<div class="flex items-center gap-space-md">
+<div class="w-10 h-10 rounded-xl flex items-center justify-center text-primary" style="background-color: rgba(255,255,255,0.07);">
+<span class="material-symbols-outlined" data-icon="music_note">music_note</span>
+</div>
+<div>
+<p class="font-row-label text-row-label text-on-surface font-medium">Music</p>
+<p class="font-row-subtitle text-row-subtitle text-on-surface-variant">Ambient soundscapes</p>
+</div>
+</div>
+<span class="material-symbols-outlined text-outline text-sm" data-icon="chevron_right">chevron_right</span>
+</div>
+<div class="flex items-center justify-between p-space-sm rounded-xl bg-surface hover:bg-surface-high transition-colors cursor-pointer border border-outline-variant/30">
+<div class="flex items-center gap-space-md">
+<div class="w-10 h-10 rounded-xl flex items-center justify-center text-primary" style="background-color: rgba(255,255,255,0.07);">
+<span class="material-symbols-outlined" data-icon="settings">settings</span>
+</div>
+<div>
+<p class="font-row-label text-row-label text-on-surface font-medium">Settings</p>
+<p class="font-row-subtitle text-row-subtitle text-on-surface-variant">Launcher configuration</p>
+</div>
+</div>
+<span class="material-symbols-outlined text-outline text-sm" data-icon="chevron_right">chevron_right</span>
+</div>
+</div>
+</div>
+</main>
+<!-- Bottom Navigation Bar -->
+<nav class="fixed bottom-0 left-0 w-full z-50 flex justify-around items-center px-gutter py-space-xs bg-surface-container/90 dark:bg-surface-container-lowest/90 backdrop-blur-md rounded-t-3xl shadow-lg">
+<a class="flex flex-col items-center justify-center text-on-surface-variant px-space-md py-space-xs hover:text-primary transition-colors active:scale-95 duration-200" href="#">
+<span class="material-symbols-outlined" data-icon="home">home</span>
+<span class="font-dock-label text-dock-label mt-1">Home</span>
+</a>
+<a class="flex flex-col items-center justify-center bg-primary-container/20 text-primary rounded-full px-space-md py-space-xs hover:text-primary transition-colors active:scale-95 duration-200" href="#">
+<span class="material-symbols-outlined" data-icon="self_improvement" style="font-variation-settings: 'FILL' 1;">self_improvement</span>
+<span class="font-dock-label text-dock-label mt-1">Pause</span>
+</a>
+<a class="flex flex-col items-center justify-center text-on-surface-variant px-space-md py-space-xs hover:text-primary transition-colors active:scale-95 duration-200" href="#">
+<span class="material-symbols-outlined" data-icon="settings">settings</span>
+<span class="font-dock-label text-dock-label mt-1">Settings</span>
+</a>
+</nav>
+</body></html>
