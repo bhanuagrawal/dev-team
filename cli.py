@@ -341,89 +341,147 @@ def _prev_shipped_entry(state: dict, version: str) -> dict | None:
     return None
 
 
-def print_release_handover(project: Path, task: dict, version: str,
-                           commit: str = "") -> None:
-    """Hand the owner the shipped build: its release note, what to test by hand,
-    and the release-candidate call. Printed by code on every shipped `record` —
-    the run banner quotes this block verbatim.
+def _handover_text(project: Path, task: dict, version: str, commit: str = "") -> str:
+    """The owner-facing handover for a shipped build — one block, two audiences kept apart.
 
-    WHY these three and nothing else: the pipeline's gates prove the build
-    compiles, passes its tests and installs; they cannot feel the app. This run's
-    sibling lessons are the proof — a device gate passed while a success screen
-    printed a MediaStore id, and a hand walk found seven defects the crawler's
-    "0 blocked taps" had hidden. So the run reports WHAT a user will read, WHAT
-    to walk by hand, and the release-candidate call.
+    THE SPLIT MATTERS. `what's new` is the ONLY part a user sees: it is public, it is
+    length-capped by the store (`whatsnew_max_chars`), and it must never carry internal
+    vocabulary (file paths, "release candidate", pipeline labels). The checklist and the
+    release-candidate call are for the OWNER and are not shipped anywhere, so they are
+    not squeezed into that cap — a store note that tried to be a test plan would either
+    overflow the limit or leak internals to users (both have already happened here).
 
-    The CALL IS NOT COMPUTED HERE (owner directive 2026-10-24, second pass:
-    *"let llm decide this, ask this to llm only which made the changes, that's
-    it, no eval nothing"*): nothing in this codebase rules on whether a build
-    stands on its own — that judgment is the LLM's, and the one to ask is the LLM
-    THAT MADE THE CHANGE. So when no call is recorded we print the question and
-    the one command that records the answer, and leave it. Nothing acts on the
-    verdict either: promoting beyond internal testing stays the owner's manual
-    step in Play Console."""
+    The CALL IS NOT COMPUTED HERE (owner directive 2026-10-24: *"let llm decide this,
+    ask this to llm only which made the changes, that's it, no eval nothing"*): when no
+    call is recorded the block asks the question and prints the one command that records
+    the answer. Nothing acts on the verdict — promotion stays the owner's manual step.
+    """
     profile = profile_of(project)
     state = state_of(project)
+    out: list[str] = []
+
+    def line(text: str = "") -> None:
+        out.append(text)
+
+    line(f"--- RELEASE HANDOVER (v{version} → internal testing — quote this block) ---")
     wf_rel = profile.get("whatsnew_file")
-    print("--- RELEASE HANDOVER (v" + version + " → internal testing — "
-          "quote this block in the run banner) ---")
     if wf_rel:
         cap = shipper.whatsnew_max_chars(profile)
         note = shipper.whatsnew_read(project, commit).rstrip("\n")
         if profile.get("whatsnew_curated"):
             source = (f"owner-curated in {wf_rel} — the pipeline read it, did not "
-                      "rewrite it; update that file for the next release")
+                      "rewrite it")
         elif isinstance(task, dict) and (task.get("whatsnew") or "").strip():
-            source = (f"written into the task spec by the orchestrator, used "
-                      f"verbatim into {wf_rel}")
+            source = f"written by the orchestrator into {wf_rel}"
         else:
-            source = f"pipeline-generated from the task into {wf_rel}"
+            source = f"pipeline-generated into {wf_rel}"
+        line(f"  STORE NOTE — public, {len(note) if note else 0}/{cap} chars ({source}).")
+        line("  This is the only part users see; keep it user-facing.")
         if not note:
-            print(f"  what's new: NO note found at {wf_rel} — the store would show "
-                  "nothing for this release")
+            line(f"    NO note found at {wf_rel} — the store would show nothing for this release")
         else:
-            print(f"  what's new ({len(note)}/{cap} chars, {source}) — what Play shows the user:")
             for ln in note.splitlines():
-                print(f"    {ln}")
-            # An owner-curated note the pipeline may not rewrite can silently
-            # freeze: if it is byte-for-byte the previous release's note, Play
-            # will show the same "what's new" again and only the owner can fix
-            # it. Say so instead of printing it as if it were this release's.
+                line(f"    {ln}")
             prev = _prev_shipped_entry(state, version)
             if profile.get("whatsnew_curated") and prev:
                 prev_note = (shipper.whatsnew_read(project, prev.get("commit") or "")
                              or "").rstrip("\n")
                 if prev_note and prev_note == note:
-                    print(f"    ⚠ STALE: this note is identical to v{prev.get('version')}'s — "
-                          "the store will show the previous release's wording again. "
-                          f"It is owner-curated, so the pipeline cannot change it: edit "
-                          f"{wf_rel} before the next release.")
+                    line(f"    ⚠ STALE: identical to v{prev.get('version')}'s note — the store will "
+                         "show the previous release's wording again. Owner-curated, so only you can "
+                         f"change it: edit {wf_rel}.")
+
     areas = shipper.whatsnew_test_areas(task)
-    claim = re.split(r"(?<=[.!?])\s", (task.get("reason") or "").strip())[0]
-    if len(claim) > 180:
-        claim = claim[:180].rsplit(" ", 1)[0].rstrip(" ,;") + " …"
-    if areas or claim:
-        print("  manually test — the gates cover compile/unit/device, never the "
-              "real-device feel:")
-        for a in areas:
-            print(f"    · {a}")
-        if claim:
-            print(f"    · what this release claims to fix: {claim}")
-        print(f"    how: update the app from the internal-testing track (v{version}) and "
-              "walk it; report what you find back to the agent — a defect here becomes "
-              "the next cycle's queue head")
+    claim = ((task.get("surface", {}) or {}).get("label") or "").strip()
+    if not claim:
+        claim = re.split(r"(?<=[.!?])\s", (task.get("reason") or "").strip())[0]
+    if len(claim) > 200:
+        claim = claim[:200].rsplit(" ", 1)[0].rstrip(" ,;") + " …"
+    line("  YOUR CHECKLIST — owner only, never shipped, not bound by the store's cap.")
+    if claim:
+        line(f"    confirm: {claim}")
+    # A checklist that tells the owner to "walk" a Gradle file is noise. If every
+    # changed path is test/build plumbing, no user-facing surface moved and the
+    # honest instruction is to say so.
+    plumbing = ("test", "build.gradle", "libs.versions.toml", "gradle.properties",
+                "screenshottest", "androidunittest", "androidinstrumentedtest",
+                ".md", ".json", ".toml", "docs/", ".yml", ".yaml")
+    user_areas = [a for a in areas if not any(k in a.lower() for k in plumbing)]
+    if user_areas:
+        line("    walk: " + ", ".join(user_areas))
+    elif areas:
+        line("    no user-facing surface changed (tests/build plumbing only) — "
+             "nothing new to walk by hand")
+    if user_areas:
+        line(f"    how: update the app from internal testing (v{version}) and walk the surfaces "
+             "above; a defect you find becomes the next cycle's queue head.")
+    else:
+        line(f"    how: install v{version} from internal testing only if you want a smoke test; "
+             "nothing in this build is supposed to look different to a user.")
+    if not areas and not claim:
+        line("    (no targets or claim recorded for this run — nothing specific to walk)")
+
     verdict = rc_verdict(state, version)
     if verdict:
         who = "your override" if verdict.get("by") == "owner" else "the agent that made the change"
-        print(f"  release candidate?  {'YES ✅' if verdict.get('rc') else 'NO'} — "
-              f"{verdict.get('why') or verdict.get('note') or ''}  [{who}]")
+        line(f"  RELEASE CANDIDATE?  {'YES ✅' if verdict.get('rc') else 'NO'} — "
+             f"{verdict.get('why') or verdict.get('note') or ''}  [{who}]")
     else:
-        print("  release candidate?  NOT CALLED YET — let the LLM that made this change "
-              "decide (no rule, no scoring); record its one-line answer:")
-        print(f"    ask it: \"you made these changes — does this build stand on its own "
-              f"in front of users, yes or no?\"")
-        print(f"    then: python3 cli.py rc {project.name} --version {version} "
-              '--yes|--no --note "<its one line>"')
+        line("  RELEASE CANDIDATE?  NOT CALLED YET — the LLM that made the change decides.")
+        line('    ask it: "you made these changes — does this build stand on its own in front '
+             'of users, yes or no?"')
+        line(f"    then: python3 cli.py rc {project.name} --version {version} "
+             '--yes|--no --note "<its one line>"')
+        line("    (recording the call reprints this handover with the verdict filled in)")
+    return "\n".join(out)
+
+
+def _task_for_version(state: dict, project: Path, version: str) -> dict:
+    """The task spec behind a shipped version, so the handover can name its claim.
+
+    A spec may have been pruned or the version may predate the ledger; a missing
+    spec degrades the handover to the checklist it can still derive — it never
+    aborts the command that was asked to print it.
+    """
+    def _load(task_id: str) -> dict:
+        for cand in (Path(".pipeline/tasks") / f"{task_id}.json",
+                     project / ".pipeline/tasks" / f"{task_id}.json"):
+            try:
+                if cand.is_file():
+                    return json.loads(cand.read_text())
+            except Exception:
+                continue
+        return {}
+
+    runs = state.get("runs", [])
+    for run in reversed(runs):
+        if str(run.get("version") or "") == version and run.get("task_id"):
+            task = _load(run["task_id"])
+            if task:
+                return task
+    for run in reversed(runs):
+        if run.get("task_id"):
+            task = _load(run["task_id"])
+            if task:
+                return task
+    return {}
+
+
+def print_release_handover(project: Path, task: dict, version: str,
+                           commit: str = "") -> None:
+    """Print the handover and keep a copy beside the run log.
+
+    The chat message is ephemeral; a handover a week later is what the owner opens
+    before deciding whether to promote. Same text, so it cannot say two things.
+    """
+    text = _handover_text(project, task, version, commit)
+    print(text)
+    try:
+        out = project / ".pipeline/runs" / f"{today()}-handover-v{version}.md"
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_text(text + "\n")
+    except Exception:
+        pass
 
 
 def cmd_rc(args: argparse.Namespace) -> None:
@@ -454,6 +512,10 @@ def cmd_rc(args: argparse.Namespace) -> None:
     verdict = "a RELEASE CANDIDATE (✅)" if entry["rc"] else "NOT a release candidate"
     print(f"recorded ({by}): v{version} is {verdict}"
           + (f" — {entry['note']}" if entry["note"] else ""))
+    # Reprint the COMPLETE handover: the block `record` printed said "NOT CALLED YET",
+    # and the owner must never be handed a stale verdict beside a fresh one.
+    print()
+    print_release_handover(project, _task_for_version(state, project, version), version)
     prev = [v for v in reversed(state["release_candidates"][:-1])
             if str(v.get("version") or "") == version]
     if prev and bool(prev[-1].get("rc")) != entry["rc"]:
