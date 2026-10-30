@@ -20,7 +20,7 @@ from pathlib import Path
 from typing import Any
 
 from . import scan
-from .core import (RunLog, now_iso, pipeline_dir, profile_of, run, save_json,
+from .core import (RunLog, git, now_iso, pipeline_dir, profile_of, run, save_json,
                    save_state, state_of, target_looks_like_paths)
 from . import goals
 from . import queue as queue_mod
@@ -561,6 +561,90 @@ def _store_readiness_pull(project: Path, tree: Path | None = None) -> dict:
         return {"status": "error", "reason": str(e)[:200]}
 
 
+def _recent_commits_pull(project: Path, latest_tag: str | None = None, limit: int = 8) -> dict:
+    """Collect recent git commit history, unreleased commits, and detected intent so the
+    researcher understands recent developer/owner context and landed initiatives."""
+    def _git(cmd: list[str]) -> str:
+        r = git(cmd, cwd=project, timeout=30)
+        return r.stdout.strip() if r.returncode == 0 else ""
+
+    ref = "origin/main"
+    has_origin = bool(_git(["rev-parse", "--verify", "origin/main"]))
+    if not has_origin:
+        ref = "main" if _git(["rev-parse", "--verify", "main"]) else "HEAD"
+
+    log_raw = _git(["log", ref, f"-n{limit}", "--pretty=format:%H%x09%h%x09%an%x09%ad%x09%s", "--date=short"])
+    commits: list[dict] = []
+    for line in log_raw.split("\n"):
+        if not line.strip():
+            continue
+        parts = line.split("\t")
+        if len(parts) >= 5:
+            full_hash, short_hash, author, date, subject = parts[0], parts[1], parts[2], parts[3], parts[4]
+            files_raw = _git(["diff-tree", "--no-commit-id", "--name-only", "-r", full_hash])
+            files = [f.strip() for f in files_raw.split("\n") if f.strip()][:10]
+            commits.append({
+                "hash": short_hash,
+                "date": date,
+                "author": author,
+                "subject": subject,
+                "files": files,
+            })
+
+    unreleased: list[dict] = []
+    if latest_tag:
+        unreleased_raw = _git(["log", f"{latest_tag}..{ref}", "--pretty=format:%H%x09%h%x09%an%x09%ad%x09%s", "--date=short"])
+        for line in unreleased_raw.split("\n"):
+            if not line.strip():
+                continue
+            parts = line.split("\t")
+            if len(parts) >= 5:
+                full_hash, short_hash, author, date, subject = parts[0], parts[1], parts[2], parts[3], parts[4]
+                files_raw = _git(["diff-tree", "--no-commit-id", "--name-only", "-r", full_hash])
+                files = [f.strip() for f in files_raw.split("\n") if f.strip()][:10]
+                unreleased.append({
+                    "hash": short_hash,
+                    "date": date,
+                    "subject": subject,
+                    "files": files,
+                })
+
+    local_unpushed: list[dict] = []
+    if has_origin:
+        head_raw = _git(["log", "origin/main..HEAD", "--pretty=format:%H%x09%h%x09%an%x09%ad%x09%s", "--date=short"])
+        for line in head_raw.split("\n"):
+            if not line.strip():
+                continue
+            parts = line.split("\t")
+            if len(parts) >= 5:
+                full_hash, short_hash, author, date, subject = parts[0], parts[1], parts[2], parts[3], parts[4]
+                files_raw = _git(["diff-tree", "--no-commit-id", "--name-only", "-r", full_hash])
+                files = [f.strip() for f in files_raw.split("\n") if f.strip()][:10]
+                local_unpushed.append({
+                    "hash": short_hash,
+                    "date": date,
+                    "subject": subject,
+                    "files": files,
+                })
+
+    all_inspected = local_unpushed + commits
+    detected_intent: list[str] = []
+    for c in all_inspected:
+        sub_low = c["subject"].lower()
+        files_low = [f.lower() for f in c["files"]]
+        if any("design.md" in f or "theme" in f or "stitch" in f or "screens/" in f for f in files_low):
+            detected_intent.append(f"{c['hash']}: '{c['subject']}' established design specs/assets ({', '.join(c['files'][:2])})")
+        elif any(k in sub_low for k in ("design", "revamp", "storefront", "theme", "assets(store)")):
+            detected_intent.append(f"{c['hash']}: '{c['subject']}' indicates storefront/design revamp initiative")
+
+    return {
+        "recent_commits": commits,
+        "unreleased_commits": unreleased,
+        "local_unpushed_commits": local_unpushed,
+        "detected_intent": detected_intent[:5],
+    }
+
+
 def research_collect(project: Path, log: RunLog) -> dict:
     """All deterministic collectors → research dict (no LLM)."""
     profile = profile_of(project)
@@ -621,6 +705,7 @@ def research_collect(project: Path, log: RunLog) -> dict:
                 "queue_impact_log": state.get("queue_events", [])[-8:],
                 "insights": state.get("insights", {}),
                 "open_asks": _open_asks_pull(profile),
+                "commits": _recent_commits_pull(project, latest_tag=latest),
             },
             "stages": {
                 "ci_workflow": profile.get("ci_workflow"),
@@ -713,6 +798,16 @@ Rules:
   progress, so never judge the product from it (a review that does reviews code
   that is not deployed). Repo-relative paths in this prompt are all relative to
   that tree.
+- RECENT COMMITS & CODEBASE CONTEXT (`signals.repo.commits`):
+  Inspect `signals.repo.commits.recent_commits`, `unreleased_commits`, `local_unpushed_commits`, and `detected_intent`.
+  Recent commits indicate owner intent, landed architecture, updated design specifications
+  (e.g., `docs/design.md`, design system tokens, Stitch screens), or storefront visual updates
+  that arrived recently.
+  When recent commits establish a new visual design system, update storefront assets/mockups,
+  or introduce architectural foundations without the corresponding app implementation having
+  shipped yet, YOU MUST AUTOMATICALLY RECOGNIZE THAT INTENT and prioritize follow-up
+  implementation task(s) to realize those committed specs in product code — bridging the gap
+  between committed specs and runnable code rather than letting the queue stagnate on stale micro-polish.
 - YOU OWN THE PLAN — you are the ONLY agent that changes the goal tree or the
   queue. If the work that should happen next has no place in the tree, CHANGE
   THE TREE (`goal_changes`: add a branch, park a dead one, set-status, retire,

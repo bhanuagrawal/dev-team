@@ -734,6 +734,16 @@ CONVERTED 2026-10-16 (both lessons from earlier today, first instance of the sta
   4. Redesigned PdfKit under "Obsidian Studio" (`projects/4389758809377541972` on Stitch MCP), curating canonical screens for Home and Smart Lossless Compress, achieving 100/100 (A Grade) on `store-assets`.
 
 
+## 2026-10-30 — researcher was blind to recent git commits, missing landed owner/design context
+
+- Run: Owner request to have researcher understand recent commits and auto-pick initiatives.
+- Surprises & defects converted:
+  1. The researcher collected runtime metrics, surface scans, and `state.json` run history, but `signals.repo` carried zero git commit history (`git log`). When an owner or team member landed new design specifications (`docs/design.md`), Stitch screen assets, or unreleased storefront graphics, the researcher was blind to those commits and continued recommending stale polish tasks.
+  2. CONVERTED (generic across all projects, `team/research.py`):
+     - Added `_recent_commits_pull` to collect recent commits (`recent_commits`), unreleased commits since the latest release tag (`unreleased_commits`), local unpushed commits (`local_unpushed_commits`), and automatic pattern detection for design specs, theme tokens, and storefront revamps (`detected_intent`).
+     - Updated planner synthesis prompt doctrine to inspect `signals.repo.commits`, recognize newly committed design systems/specs, and automatically synthesize and prioritize the follow-up implementation task(s) to bridge the gap between committed specs and runnable code.
+
+
 ## 2026-10-30 (run of "run workflow for pdfkit" — nightly procedure, shipped v1.5.28; three surprises, two CONVERTED in team code)
 
 - Surprises & defects:
