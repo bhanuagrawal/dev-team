@@ -1537,7 +1537,11 @@ def cmd_store_readiness(args: argparse.Namespace) -> int:
 
 def cmd_console(args: argparse.Namespace) -> int:
     project = resolve_project(args.project)
-    from team.console import generate_console_setup_plan
+    from team.console import generate_console_setup_plan, generate_playwright_script
+    if getattr(args, "script", False):
+        print(generate_playwright_script(project))
+        return 0
+
     plan = generate_console_setup_plan(project)
     print(f"GOOGLE PLAY CONSOLE SETUP PLAN: {plan.get('project')}")
     print("=" * 60)
@@ -1695,6 +1699,7 @@ def main() -> None:
     sr.set_defaults(fn=cmd_store_readiness)
     cs = sub.add_parser("console", help="plan or drive Google Play Console setup")
     cs.add_argument("project")
+    cs.add_argument("--script", action="store_true", help="output automated Playwright JS script")
     cs.set_defaults(fn=cmd_console)
 
     args = ap.parse_args()

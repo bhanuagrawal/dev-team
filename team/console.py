@@ -1,8 +1,8 @@
 """Google Play Console Browser Automation Engine — generic across all dev-team projects.
 
 Automates the 10 mandatory Google Play Console App Content questionnaires
-(Data Safety, IARC Content Rating, App Access, Ads, Target Audience) and
-Store Listing metadata using browser automation (Playwright / Browser MCP).
+(Data Safety, IARC Content Rating, App Access, Ads, Target Audience, Health, Financial, Government)
+and Store Listing metadata using browser automation (Playwright / Browser MCP).
 
 Zero project names — generic across all Android / KMP projects.
 """
@@ -50,11 +50,10 @@ APP_CONTENT_DECLARATIONS = [
         "description": "Target audience 13+ to avoid COPPA / child-directed Families policies",
     },
     {
-        "id": "data_safety",
-        "title": "Data Safety Form",
-        "collects_data": False,
-        "shares_data": False,
-        "description": "Offline-first zero data collection (or declared analytics if GA4 connected)",
+        "id": "advertising_id",
+        "title": "Advertising ID",
+        "uses_advertising_id": False,
+        "description": "App does not use Android Advertising ID",
     },
     {
         "id": "government_apps",
@@ -67,6 +66,19 @@ APP_CONTENT_DECLARATIONS = [
         "title": "Financial Features",
         "has_financial": False,
         "description": "Does not provide financial services",
+    },
+    {
+        "id": "health",
+        "title": "Health Apps",
+        "has_health": False,
+        "description": "Does not provide health features",
+    },
+    {
+        "id": "data_safety",
+        "title": "Data Safety Form",
+        "collects_data": False,
+        "shares_data": False,
+        "description": "Offline-first zero data collection (or declared analytics if GA4 connected)",
     },
 ]
 
@@ -169,8 +181,8 @@ def generate_console_setup_plan(project: Path) -> dict[str, Any]:
                 "status": "ready",
             },
             {
-                "id": "data_safety",
-                "value": "Anonymous usage data only" if has_analytics else "No data collected or shared",
+                "id": "advertising_id",
+                "value": "No advertising ID",
                 "status": "ready",
             },
             {
@@ -183,6 +195,16 @@ def generate_console_setup_plan(project: Path) -> dict[str, Any]:
                 "value": "No financial features",
                 "status": "ready",
             },
+            {
+                "id": "health",
+                "value": "No health features",
+                "status": "ready",
+            },
+            {
+                "id": "data_safety",
+                "value": "Anonymous usage data only" if has_analytics else "No data collected or shared",
+                "status": "ready",
+            },
         ],
         "closed_testing": {
             "track": "alpha",
@@ -191,3 +213,179 @@ def generate_console_setup_plan(project: Path) -> dict[str, Any]:
         },
     }
     return plan
+
+
+def generate_playwright_script(project: Path) -> str:
+    """Generate a self-contained Playwright automation script to configure Play Console.
+
+    Encodes exact discovered DOM selectors and navigation paths for the 10 App Content
+    declarations, Store Settings, and Storefront graphic uploads.
+    """
+    profile = profile_of(project)
+    listing = store_listing_payload(project)
+    privacy_url = (profile.get("connections", {}).get("play_store", {}).get("privacy_policy_url") or
+                   profile.get("privacy_policy_url") or "")
+    developer_email = profile.get("developer_email") or profile.get("contact_email") or "bhanuagrawal001@gmail.com"
+
+    # Escape descriptions for JS string literal
+    short_desc_js = json.dumps(listing["short_description"])
+    full_desc_js = json.dumps(listing["full_description"])
+    icon_path_js = json.dumps(listing["icon_path"] or "")
+    fg_path_js = json.dumps(listing["feature_graphic_path"] or "")
+    shots_js = json.dumps(listing["screenshot_paths"])
+
+    return f"""// Auto-generated Google Play Console setup script by dev-team
+// Generic across all projects. Driven by project storefront assets and profile.
+async (page) => {{
+  const currentUrl = page.url();
+  const appMatch = currentUrl.match(/\\/developers\\/(\\d+)\\/app\\/(\\d+)/);
+  if (!appMatch) {{
+    throw new Error('Not on a valid Play Console app page: ' + currentUrl);
+  }}
+  const [_, devId, appId] = appMatch;
+  const baseUrl = `https://play.google.com/console/u/0/developers/${{devId}}/app/${{appId}}`;
+
+  const dismissNotNow = async () => {{
+    const notNow = page.getByRole('button', {{ name: 'Not now' }});
+    if (await notNow.isVisible()) {{
+      await notNow.click();
+      await page.waitForTimeout(500);
+    }}
+  }};
+
+  // 1. Privacy Policy
+  await page.goto(`${{baseUrl}}/app-content/privacy-policy`);
+  await page.waitForTimeout(2000);
+  const privacyInput = page.getByRole('textbox', {{ name: 'Privacy policy URL' }});
+  if (await privacyInput.isVisible()) {{
+    await privacyInput.fill('{privacy_url}');
+    const saveBtn = page.getByRole('button', {{ name: 'Save' }});
+    if (await saveBtn.isEnabled()) await saveBtn.click();
+    await page.waitForTimeout(1500);
+  }}
+
+  // 2. Ads Declaration
+  await page.goto(`${{baseUrl}}/app-content/ads-declaration`);
+  await page.waitForTimeout(2000);
+  await page.getByRole('radio', {{ name: /No, my app does not contain ads/i }}).click();
+  const adsSave = page.getByRole('button', {{ name: 'Save' }});
+  if (await adsSave.isEnabled()) await adsSave.click();
+  await page.waitForTimeout(1500);
+
+  // 3. App Access
+  await page.goto(`${{baseUrl}}/app-content/testing-credentials`);
+  await page.waitForTimeout(2000);
+  await page.getByRole('radio', {{ name: /^No/ }}).click();
+  const accessSave = page.getByRole('button', {{ name: 'Save' }});
+  if (await accessSave.isEnabled()) await accessSave.click();
+  await page.waitForTimeout(1500);
+
+  // 4. Advertising ID
+  await page.goto(`${{baseUrl}}/app-content/ad-id-declaration`);
+  await page.waitForTimeout(2000);
+  await page.getByRole('radio', {{ name: 'No' }}).click();
+  const adIdSave = page.getByRole('button', {{ name: 'Save' }});
+  if (await adIdSave.isEnabled()) await adIdSave.click();
+  await page.waitForTimeout(1500);
+
+  // 5. Government Apps
+  await page.goto(`${{baseUrl}}/app-content/government-apps`);
+  await page.waitForTimeout(2000);
+  await page.getByRole('radio', {{ name: 'No' }}).click();
+  const govSave = page.getByRole('button', {{ name: 'Save' }});
+  if (await govSave.isEnabled()) await govSave.click();
+  await page.waitForTimeout(1500);
+
+  // 6. Financial Features
+  await page.goto(`${{baseUrl}}/app-content/finance`);
+  await page.waitForTimeout(2000);
+  await page.getByRole('checkbox', {{ name: /doesn't provide any financial features/i }}).check();
+  const finNext = page.getByRole('button', {{ name: 'Next' }});
+  if (await finNext.isVisible() && await finNext.isEnabled()) {{
+    await finNext.click();
+    await page.waitForTimeout(1000);
+  }}
+  const finSave = page.getByRole('button', {{ name: 'Save', exact: true }});
+  if (await finSave.isVisible() && await finSave.isEnabled()) await finSave.click();
+  await page.waitForTimeout(1500);
+  await dismissNotNow();
+
+  // 7. Health Apps
+  await page.goto(`${{baseUrl}}/app-content/health`);
+  await page.waitForTimeout(2000);
+  await page.getByRole('checkbox', {{ name: /does not have any health features/i }}).check();
+  const healthNext = page.getByRole('button', {{ name: 'Next' }});
+  if (await healthNext.isVisible() && await healthNext.isEnabled()) {{
+    await healthNext.click();
+    await page.waitForTimeout(1000);
+  }}
+  const healthSave = page.getByRole('button', {{ name: 'Save', exact: true }});
+  if (await healthSave.isVisible() && await healthSave.isEnabled()) await healthSave.click();
+  await page.waitForTimeout(1500);
+  await dismissNotNow();
+
+  // 8. Target Audience
+  await page.goto(`${{baseUrl}}/app-content/target-audience-content`);
+  await page.waitForTimeout(2000);
+  await page.getByRole('checkbox', {{ name: '13-15' }}).check();
+  await page.getByRole('checkbox', {{ name: '16-17' }}).check();
+  await page.getByRole('checkbox', {{ name: '18 and over' }}).check();
+  const targetNext = page.getByRole('button', {{ name: 'Next' }});
+  if (await targetNext.isVisible() && await targetNext.isEnabled()) {{
+    await targetNext.click();
+    await page.waitForTimeout(1000);
+  }}
+  const targetSave = page.getByRole('button', {{ name: 'Save', exact: true }});
+  if (await targetSave.isVisible() && await targetSave.isEnabled()) await targetSave.click();
+  await page.waitForTimeout(1500);
+  await dismissNotNow();
+
+  // 9. Content Ratings (IARC)
+  await page.goto(`${{baseUrl}}/app-content/content-rating-overview`);
+  await page.waitForTimeout(2000);
+  const startIarc = page.getByRole('button', {{ name: /Start questionnaire/i }});
+  if (await startIarc.isVisible()) {{
+    await startIarc.click();
+    await page.waitForTimeout(2000);
+    const emailInput = page.locator('input[type="email"]');
+    if (await emailInput.isVisible()) {{
+      await emailInput.fill('{developer_email}');
+      await page.getByRole('radio', {{ name: /All Other App Types/i }}).click();
+      await page.locator('input[type="checkbox"]').check();
+      await page.getByRole('button', {{ name: 'Next' }}).click();
+      await page.waitForTimeout(2500);
+      const groups = await page.locator('material-radio-group').all();
+      for (const g of groups) {{
+        await g.locator('material-radio').nth(1).click();
+      }}
+      await page.waitForTimeout(500);
+      await page.getByRole('button', {{ name: 'Save' }}).click();
+      await page.waitForTimeout(1500);
+      await page.getByRole('button', {{ name: 'Next' }}).click();
+      await page.waitForTimeout(1500);
+      await page.getByRole('button', {{ name: 'Save', exact: true }}).click();
+      await page.waitForTimeout(2000);
+      await dismissNotNow();
+    }}
+  }}
+
+  // 10. Data Safety
+  await page.goto(`${{baseUrl}}/app-content/data-privacy-security`);
+  await page.waitForTimeout(2000);
+  const dsNext = page.getByRole('button', {{ name: 'Next' }});
+  if (await dsNext.isVisible()) {{
+    await dsNext.click();
+    await page.waitForTimeout(1500);
+    await page.getByRole('radio', {{ name: 'No' }}).click();
+    await page.waitForTimeout(500);
+    await page.getByRole('button', {{ name: 'Next' }}).click();
+    await page.waitForTimeout(1500);
+    const dsSave = page.getByRole('button', {{ name: 'Save', exact: true }});
+    if (await dsSave.isEnabled()) await dsSave.click();
+    await page.waitForTimeout(2000);
+    await dismissNotNow();
+  }}
+
+  return {{ status: 'declarations_complete' }};
+}};
+"""
