@@ -50,8 +50,16 @@ def _provenance(project: Path) -> str:
             data = json.loads(manifest.read_text())
         except Exception:
             data = {}
-        if data.get("provenance") == "compose_preview" and data.get("scenes"):
-            return "compose_preview"
+        if data.get("provenance") in ("compose_preview", "stitch") and data.get("scenes"):
+            return data.get("provenance")
+    stitch_manifest = project / ".pipeline/stitch_manifest.json"
+    if stitch_manifest.is_file():
+        try:
+            sm = json.loads(stitch_manifest.read_text())
+            if sm.get("canonical_screens"):
+                return "stitch"
+        except Exception:
+            pass
     templates = project / ".pipeline/storefront_templates"
     if templates.is_dir() and any(templates.glob("0*.html")):
         return "html_mock"

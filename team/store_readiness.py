@@ -129,7 +129,7 @@ def _sdk_number(gradle_src: str, constants_src: str, field: str, constant: str):
     """Explicit `field = 34` assignment first, then a named constant in build-logic."""
     field_kebab = re.sub(r"([A-Z])", r"-\1", field).lower()
     patterns = (
-        rf"\b(?:{field}|{field_kebab})(?:Version)?\s*(?:=\s*|\(\s*)[\"']?(\d{{2,3}})[\"']?",
+        rf"\b(?:{field}|{field_kebab})(?:Version)?\s*(?:=\s*|\(\s*|\s+)[\"']?(\d{{2,3}})[\"']?",
         rf"\b{constant}\b\s*(?::\s*Int\s*)?=\s*[\"']?(\d{{2,3}})[\"']?",
         rf"\b(?:{field}|{field_kebab})(?:Version)?\s*=\s*[A-Za-z_][\w.]*",
     )
@@ -209,15 +209,19 @@ def run_store_readiness_audit(project: Path, tree: Path | None = None) -> list[R
 
     for line in gradle_src.splitlines():
         if "versionCode" in line and not version_code:
-            m = re.search(r"versionCode\s*(?:=\s*|\(\s*)(\d+)", line)
+            m = re.search(r"versionCode\s*(?:=\s*|\(\s*|\s+)(\d+)", line)
+            if not m:
+                m = re.search(r":\s*(\d+)\s*\)", line)
             if m:
                 version_code = int(m.group(1))
         if "versionName" in line and not version_name:
-            m = re.search(r'versionName\s*(?:=\s*|\(\s*)["\']([^"\']+)["\']', line)
+            m = re.search(r'versionName\s*(?:=\s*|\(\s*|\s+)["\']([^"\']+)["\']', line)
+            if not m:
+                m = re.search(r':\s*["\']([^"\']+)["\']\s*\)', line)
             if m:
                 version_name = m.group(1)
         if "applicationId" in line and not app_id:
-            m = re.search(r'applicationId\s*(?:=\s*|\(\s*)["\']([^"\']+)["\']', line)
+            m = re.search(r'applicationId\s*(?:=\s*|\(\s*|\s+)["\']([^"\']+)["\']', line)
             if m:
                 app_id = m.group(1)
 
@@ -570,7 +574,7 @@ def run_store_readiness_audit(project: Path, tree: Path | None = None) -> list[R
 
     # ── 7. Localization Completeness ──────────────────────────────────────────
     declared_locales = profile.get("locales", [])
-    if declared_locales:
+    if isinstance(declared_locales, list) and declared_locales:
         missing_locales: list[str] = []
         for loc in declared_locales:
             loc_matches = list(src.glob(f"**/res/values-{loc}/strings.xml"))
@@ -584,6 +588,15 @@ def run_store_readiness_audit(project: Path, tree: Path | None = None) -> list[R
             severity="BLOCKER" if not passed_loc else "INFO",
             detail=f"All {len(declared_locales)} declared locale string files present" if passed_loc else f"Missing string files for locales: {', '.join(missing_locales)}",
             fix="Ensure values-<loc>/strings.xml exists for every locale declared in profile.json",
+        ))
+    elif isinstance(declared_locales, int) and declared_locales > 0:
+        val_dirs = [d for d in src.glob("**/res/values-*") if d.is_dir() and "values-v" not in d.name and "values-night" not in d.name]
+        checks.append(ReadinessCheck(
+            category="Localization",
+            name=f"Declared Locales ({declared_locales} locales)",
+            passed=len(val_dirs) >= declared_locales,
+            severity="INFO",
+            detail=f"Found {len(val_dirs)} localized resource directories (expected ~{declared_locales})",
         ))
 
     # ── 8. Release Build & Signing Configuration ──────────────────────────────
