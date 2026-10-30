@@ -269,7 +269,7 @@ def build_icon_html(project_name: str, colors: dict[str, str]) -> str:
     sec = colors.get("secondary", "#7C4DFF")
     p_low = project_name.lower()
     is_mindful = "mindful" in p_low or "launcher" in p_low
-    is_court = any(k in p_low for k in ("pickle", "score", "court", "paddle"))
+    is_court = any(k in p_low for k in ("pickle", "score", "court", "racket"))
 
     if is_mindful:
         inner_icon = f"""
@@ -407,7 +407,7 @@ def build_feature_graphic_html(project_name: str, vision: str, colors: dict[str,
     sec = colors.get("secondary", "#7C4DFF")
     p_low = project_name.lower()
     is_mindful = "mindful" in p_low or "launcher" in p_low or "mindful" in vision.lower()
-    is_court = any(k in p_low or k in vision.lower() for k in ("pickle", "score", "court", "paddle"))
+    is_court = any(k in p_low or k in vision.lower() for k in ("pickle", "score", "court", "racket"))
 
     if is_mindful:
         left_html = f"""
@@ -878,7 +878,7 @@ def generate_all_marketing_templates(project: Path) -> dict[str, str]:
         templates["04_analytics"] = str(p4)
 
     elif is_mindful_launcher:
-        # MindfulLauncher Atmosphere 2.0 4-frame high-converting narrative
+        # Launcher / focus 4-frame narrative
         # Frame 1: Minimalist Clutter-Free Home Screen
         ui1 = f"""
       <div style="text-align:center; margin: 30px 0 28px 0;">

@@ -1686,8 +1686,14 @@ def cmd_storefront_scenes(args: argparse.Namespace) -> int:
         print(f"~ storefront spec: {sp.SPEC_REL} (narrative: {spec.get('narrative')})")
         if not spec.get("theme"):
             print("  ! no theme composable detected; scenes render with default Material colours")
-        for change in sp.ensure_tooling(project, module, dry_run=getattr(args, "dry_run", False)):
-            print(f"  + wired {change}")
+        # Roborazzi renders from androidUnitTest and needs no AGP preview tooling;
+        # wiring the screenshot plugin anyway leaves a broken screenshotTest variant
+        # (KMP androidTarget) in the project for nothing.
+        if spec.get("renderer") == "roborazzi":
+            print("  = renderer roborazzi — androidUnitTest harness, no AGP preview wiring")
+        else:
+            for change in sp.ensure_tooling(project, module, dry_run=getattr(args, "dry_run", False)):
+                print(f"  + wired {change}")
         harness = sp.write_harness(project, spec, force=getattr(args, "force", False),
                                    dry_run=getattr(args, "dry_run", False))
         print(f"  + harness {harness.relative_to(project)}")
@@ -1720,7 +1726,7 @@ def cmd_storefront_scenes(args: argparse.Namespace) -> int:
         print(f"  {res.get('count', len(res.get('scenes', [])))} scene(s) rendered -> .pipeline/storefront_scenes")
 
     if do_all or getattr(args, "frame", False):
-        print("~ compositing marketing frames (1620x3600, 1080-wide opening)")
+        print("~ compositing marketing frames (1620x3200, 1080-wide opening)")
         res = sp.compose_frames(project, log=print, force=getattr(args, "force", False))
         if res.get("status") != "OK":
             print(f"  ✗ {res.get('error')}")

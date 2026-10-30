@@ -19,7 +19,7 @@ import re
 import time
 from pathlib import Path
 
-from .core import RunLog, git, profile_of, run, target_items
+from .core import read_delivery_file, RunLog, git, profile_of, run, target_items
 
 
 def _parse_version(s: str) -> tuple[int, int, int] | None:
@@ -224,6 +224,13 @@ def whatsnew_read(project: Path, commit: str = "") -> str:
         r = git(["show", f"{commit}:{rel}"], cwd=project, timeout=60)
         if r.returncode == 0:
             return r.stdout
+    # No commit given (e.g. `devteam rc` after the worktree is gone): the SHIPPED
+    # copy lives at origin/main. Reading the owner's checkout instead quotes a
+    # note from however many commits ago it was last pulled — on 2026-10-30 a
+    # shipped note was reported as the previous release's "maintenance release".
+    shipped = read_delivery_file(project, rel, fallback_to_checkout=False)
+    if shipped:
+        return shipped
     p = Path(project) / rel
     return p.read_text() if p.exists() else ""
 
