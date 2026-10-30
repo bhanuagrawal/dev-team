@@ -1517,6 +1517,20 @@ def cmd_setup(args: argparse.Namespace) -> None:
     print(f"  manual-mode alternative remains possible anytime".strip())
 
 
+def _shipped_tree_or_none(project: Path):
+    """The origin/main worktree, for audits that must judge what is SHIPPED.
+
+    The owner's checkout can lag origin/main or carry unrelated WIP; auditing it
+    reports a blocker the released app does not have. Falls back to the checkout
+    (returning None) when the worktree cannot be refreshed, e.g. offline.
+    """
+    try:
+        from team import scan
+        return scan.origin_tree(project)
+    except Exception:
+        return None
+
+
 def cmd_store_readiness(args: argparse.Namespace) -> int:
     project = resolve_project(args.project)
     from team.store_readiness import (run_store_readiness_audit, format_readiness_report,
@@ -1534,7 +1548,7 @@ def cmd_store_readiness(args: argparse.Namespace) -> int:
         crit_rep = review_store_assets(project)
         print(format_critic_report(crit_rep))
         print()
-    checks = run_store_readiness_audit(project)
+    checks = run_store_readiness_audit(project, tree=_shipped_tree_or_none(project))
     report_text, is_ready = format_readiness_report(project, checks)
     print(report_text)
     return 0 if is_ready else 1

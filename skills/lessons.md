@@ -683,3 +683,43 @@ CONVERTED 2026-10-16 (both lessons from earlier today, first instance of the sta
 
 ## 2026-10-30 — Paddle run: release timeout false negative (again)
 - First `release` invocation was killed by the 120s host timeout mid-CI-watch; origin/main had already advanced to v1.0.18 and CI later went green. Second invocation reported `bump commit failed` (clean worktree) — a false failure. Confirmed by checking origin/main HEAD + CI conclusion directly. Reinforces the existing lesson: for network-crossing steps, the remote is the source of truth, not the CLI's `delivered` flag. Consider raising the default release timeout or making `release` idempotent on an already-shipped worktree.
+
+## 2026-10-30 — auto-refill invented a milestone from generic trend copy (dropped by the planner)
+
+- Run: ZenListKMP, queue empty after four blocked nights, `plan` auto-refill fired.
+- Symptom: refill searched the web with the owner's vision as the query, got generic
+  "2026 mobile app trends" pages, and added a milestone literally titled
+  `<ProjectName> Performance Insights & Session Analytics` with three tasks
+  ("Session Analytics Engine … run efficiency tracking") — a fitness/run-tracker
+  feature set for a routine-and-goal tracker that already ships an insights feature.
+  The tasks passed every code gate (valid paths, valid sizing, valid milestone id).
+- Handled: the planner (step 2) judged each entry, parked the branch with a stated
+  reason and dropped all three; the run shipped real work instead.
+- Lesson: refill's synthesis is a PROPOSAL like any other and the planner is the
+  gate that must read it against what the product actually is. A milestone title
+  that interpolates the project name, and measures phrased in a domain the app does
+  not serve, are the cheap tells. Refill quality (grounding the query in the app's
+  own surface inventory, not only the vision sentence) is worth improving in code.
+
+## 2026-10-30 — the store-readiness audit judged a stale checkout, and parsed a comment as targetSdk
+
+- Run: ZenListKMP. `research` reported `store_readiness: blocked` ("no privacy
+  document in repo") for an app whose policy page was committed, and the planner
+  came within one keystroke of queueing compliance work for a blocker that did not
+  exist. Two independent defects, both now fixed in team code:
+  1. `run_store_readiness_audit` read the OWNER'S checkout. That checkout had
+     diverged from origin/main (an unpushed docs commit, and origin commits it
+     lacked), so the audit judged code that was not shipped. It now takes
+     `tree=` and `research` passes the origin/main worktree (`scan.origin_tree`),
+     keeping the profile from the project; `devteam store-readiness` does the same
+     with a graceful fallback when offline.
+  2. The SDK parse took the first line containing "targetSdk" and grabbed the first
+     2-3 digit number on it. A comment — "compileSdk/targetSdk … and Java 17 come
+     from the convention plugin" — became `targetSdk is 17`, a BLOCKER. Parsing now
+     strips comments, requires a real assignment, and resolves named constants
+     (TARGET_SDK / MIN_SDK) from build-logic convention sources.
+- Lesson: an audit is only as trustworthy as the tree it reads and the syntax it
+  parses. Any check that can flip the plan must read the shipped tree, and any
+  regex over build scripts must ignore prose. A project whose policy doc is called
+  `privacy-policy.html` was also being reported as having none — match conventions,
+  not one filename.

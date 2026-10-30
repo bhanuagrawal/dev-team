@@ -552,11 +552,11 @@ def _open_asks_pull(profile: dict) -> list[dict]:
         return []
 
 
-def _store_readiness_pull(project: Path) -> dict:
+def _store_readiness_pull(project: Path, tree: Path | None = None) -> dict:
     """Audit of Google Play Store readiness (targetSdk, permissions, icons, signing, privacy)."""
     try:
         from .store_readiness import store_readiness_dict
-        return store_readiness_dict(project)
+        return store_readiness_dict(project, tree=tree)
     except Exception as e:
         return {"status": "error", "reason": str(e)[:200]}
 
@@ -590,7 +590,7 @@ def research_collect(project: Path, log: RunLog) -> dict:
             "ga4": _ga4_pull(project, profile),
             "vitals": _play_vitals_pull(project, profile),
             "reviews": _play_reviews_pull(project, profile),
-            "store_readiness": _store_readiness_pull(project),
+            "store_readiness": _store_readiness_pull(project, tree=read_tree),
             "competitors": _competitors_pull(project),
             "market": _market_pull(project),
             "codebase": {

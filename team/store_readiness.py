@@ -95,6 +95,54 @@ def _make_solid_png(w: int, h: int, r: int, g: int, b: int,
             struct.pack(">I", 0) + b"IEND" + struct.pack(">I", zlib.crc32(b"IEND")))
 
 
+def _strip_code_comments(text: str) -> str:
+    """Drop // and /* */ comments so prose is never parsed as a declaration."""
+    text = re.sub(r"/\*.*?\*/", "", text, flags=re.S)
+    return re.sub(r"//[^\n]*", "", text)
+
+
+def _convention_constants(src: Path, combined_gradle: str) -> str:
+    """Declarations that live in build-logic convention plugins.
+
+    A project may set `targetSdk = MyAndroid.TARGET_SDK` and define that constant in
+    a `build-logic` Kotlin source file; the value then exists nowhere in the module
+    build script. Read those sources so the audit sees the real number instead of
+    reporting an unparseable BLOCKER.
+    """
+    chunks = [combined_gradle]
+    try:
+        for path in src.rglob("*.kt"):
+            text = str(path)
+            if "/build/" in text or "/.gradle/" in text:
+                continue
+            if "build-logic" not in text and "convention" not in text.lower():
+                continue
+            if "SDK" not in path.read_text(errors="ignore"):
+                continue
+            chunks.append(path.read_text(errors="ignore"))
+    except OSError:
+        pass
+    return _strip_code_comments("\n".join(chunks))
+
+
+def _sdk_number(gradle_src: str, constants_src: str, field: str, constant: str):
+    """Explicit `field = 34` assignment first, then a named constant in build-logic."""
+    patterns = (
+        rf"\b{field}(?:Version)?\s*(?:=\s*|\(\s*)(\d{{2,3}})\b",
+        rf"\b{constant}\b\s*(?::\s*Int\s*)?=\s*(\d{{2,3}})\b",
+        rf"\b{field}(?:Version)?\s*=\s*[A-Za-z_][\w.]*\b",
+    )
+    m = re.search(patterns[0], gradle_src) or re.search(patterns[1], constants_src)
+    if m:
+        return int(m.group(1))
+    # A named constant reference: resolve it from the convention sources.
+    if re.search(patterns[2], gradle_src):
+        m = re.search(rf"\b{constant}\b\s*(?::\s*Int\s*)?=\s*(\d{{2,3}})\b", constants_src)
+        if m:
+            return int(m.group(1))
+    return None
+
+
 def _find_gradle_files(project: Path) -> list[Path]:
     files: list[Path] = []
     for rel in ("app/build.gradle.kts", "app/build.gradle",
@@ -124,16 +172,25 @@ def _read_gradle_property(content: str, key: str) -> str | None:
     return None
 
 
-def run_store_readiness_audit(project: Path) -> list[ReadinessCheck]:
+def run_store_readiness_audit(project: Path, tree: Path | None = None) -> list[ReadinessCheck]:
+    """Audit the app's Play submission readiness.
+
+    `project` is the owner's checkout: it holds the profile (targets, connections)
+    and is where the generated pack is written. `tree` is the tree the FILES are
+    read from — the shipped one (origin/main worktree) whenever a caller knows it:
+    the owner's checkout can lag origin or carry unrelated WIP, and auditing it
+    reports a blocker that the shipped app does not have (or misses one it does).
+    """
     checks: list[ReadinessCheck] = []
     profile = profile_of(project)
+    src = tree if (tree is not None and Path(tree).is_dir()) else project
 
     # ── 1. Target & Min SDK Compliance ────────────────────────────────────────
-    gradle_files = _find_gradle_files(project)
+    gradle_files = _find_gradle_files(src)
     combined_gradle = "\n".join(f.read_text(errors="ignore") for f in gradle_files)
 
     # Check libs.versions.toml if referenced
-    toml_path = project / "gradle/libs.versions.toml"
+    toml_path = src / "gradle/libs.versions.toml"
     combined_toml = toml_path.read_text(errors="ignore") if toml_path.is_file() else ""
 
     target_sdk = None
@@ -142,16 +199,14 @@ def run_store_readiness_audit(project: Path) -> list[ReadinessCheck]:
     version_name = None
     app_id = None
 
-    # Search toml versions first
-    for line in (combined_toml + "\n" + combined_gradle).splitlines():
-        if "targetSdk" in line and not target_sdk:
-            m = re.search(r"(\d{2,3})", line)
-            if m:
-                target_sdk = int(m.group(1))
-        if "minSdk" in line and not min_sdk:
-            m = re.search(r"(\d{2,3})", line)
-            if m:
-                min_sdk = int(m.group(1))
+    # Comments are prose, not declarations: a comment like "compileSdk/targetSdk ...
+    # and Java 17 come from the convention plugin" used to be read as targetSdk=17,
+    # i.e. a red BLOCKER on a Play-compliant app. Strip them before parsing, and
+    # read only real assignments.
+    gradle_src = _strip_code_comments(combined_toml + "\n" + combined_gradle)
+    constants_src = _convention_constants(src, combined_gradle)
+
+    for line in gradle_src.splitlines():
         if "versionCode" in line and not version_code:
             m = re.search(r"versionCode\s*(?:=\s*|\(\s*)(\d+)", line)
             if m:
@@ -164,6 +219,9 @@ def run_store_readiness_audit(project: Path) -> list[ReadinessCheck]:
             m = re.search(r'applicationId\s*(?:=\s*|\(\s*)["\']([^"\']+)["\']', line)
             if m:
                 app_id = m.group(1)
+
+    target_sdk = _sdk_number(gradle_src, constants_src, "targetSdk", "TARGET_SDK")
+    min_sdk = _sdk_number(gradle_src, constants_src, "minSdk", "MIN_SDK")
 
     if target_sdk is not None:
         passed = target_sdk >= MIN_ACCEPTABLE_TARGET_SDK
@@ -254,7 +312,7 @@ def run_store_readiness_audit(project: Path) -> list[ReadinessCheck]:
         ))
 
     # ── 3. Manifest & Permissions Audit ───────────────────────────────────────
-    manifests = _find_manifest_files(project)
+    manifests = _find_manifest_files(src)
     if not manifests:
         checks.append(ReadinessCheck(
             category="Manifest & Security",
@@ -322,9 +380,9 @@ def run_store_readiness_audit(project: Path) -> list[ReadinessCheck]:
         ))
 
     # ── 4. Visual Launcher & Adaptive Icons ───────────────────────────────────
-    has_adaptive_icon = any(project.glob("**/res/mipmap-anydpi-v26/ic_launcher.xml"))
-    has_launcher_png = any(project.glob("**/res/mipmap-*/ic_launcher.png"))
-    has_round_icon = any(project.glob("**/res/mipmap-*/ic_launcher_round.png")) or any(project.glob("**/res/mipmap-anydpi-v26/ic_launcher_round.xml"))
+    has_adaptive_icon = any(src.glob("**/res/mipmap-anydpi-v26/ic_launcher.xml"))
+    has_launcher_png = any(src.glob("**/res/mipmap-*/ic_launcher.png"))
+    has_round_icon = any(src.glob("**/res/mipmap-*/ic_launcher_round.png")) or any(src.glob("**/res/mipmap-anydpi-v26/ic_launcher_round.xml"))
 
     checks.append(ReadinessCheck(
         category="Store Visual Assets",
@@ -346,7 +404,7 @@ def run_store_readiness_audit(project: Path) -> list[ReadinessCheck]:
 
     # Check if launcher icon still uses the default Android Studio starter purple
     is_starter_template = False
-    for bf in project.glob("**/res/drawable*/ic_launcher_background.xml"):
+    for bf in src.glob("**/res/drawable*/ic_launcher_background.xml"):
         if "build/" in str(bf) or ".gradle" in str(bf) or ".pipeline" in str(bf):
             continue
         text = bf.read_text(errors="ignore")
@@ -363,7 +421,7 @@ def run_store_readiness_audit(project: Path) -> list[ReadinessCheck]:
     ))
 
     # ── 5. Storefront Listing Copy ────────────────────────────────────────────
-    listing_dir = _find_listing_dir(project)
+    listing_dir = _find_listing_dir(src)
     if not listing_dir:
         checks.append(ReadinessCheck(
             category="Storefront Listing Copy",
@@ -496,7 +554,7 @@ def run_store_readiness_audit(project: Path) -> list[ReadinessCheck]:
 
         # Visual Asset Quality & ASO Conversion Score
         from .asset_critic import review_store_assets
-        critic_rep = review_store_assets(project)
+        critic_rep = review_store_assets(src)
         score = critic_rep.get("score", 0)
         grade = critic_rep.get("grade", "F")
         passed_quality = score >= 75
@@ -514,7 +572,7 @@ def run_store_readiness_audit(project: Path) -> list[ReadinessCheck]:
     if declared_locales:
         missing_locales: list[str] = []
         for loc in declared_locales:
-            loc_matches = list(project.glob(f"**/res/values-{loc}/strings.xml"))
+            loc_matches = list(src.glob(f"**/res/values-{loc}/strings.xml"))
             if not loc_matches:
                 missing_locales.append(loc)
         passed_loc = len(missing_locales) == 0
@@ -544,7 +602,13 @@ def run_store_readiness_audit(project: Path) -> list[ReadinessCheck]:
     privacy_url = (conns.get("play_store", {}).get("privacy_policy_url") or
                    profile.get("privacy_policy_url") or
                    "")
-    has_privacy_doc = (project / "PRIVACY.md").is_file() or (project / "docs/privacy.md").is_file() or (project / "docs/privacy.html").is_file()
+    # Accept any of the conventional names: refusing a document that IS in the
+    # repo because it is called privacy-policy.html (not privacy.html) reported a
+    # BLOCKER for an app whose policy was committed and published.
+    privacy_candidates = [src / "PRIVACY.md"]
+    for pattern in ("PRIVACY*.md", "docs/privacy*.md", "docs/PRIVACY*.md", "docs/privacy*.html"):
+        privacy_candidates.extend(sorted(src.glob(pattern)))
+    has_privacy_doc = any(p.is_file() for p in privacy_candidates)
     checks.append(ReadinessCheck(
         category="Privacy & Policy",
         name="Privacy Policy Document",
@@ -644,9 +708,9 @@ def format_readiness_report(project: Path, checks: list[ReadinessCheck]) -> tupl
     return "\n".join(lines), is_ready
 
 
-def store_readiness_dict(project: Path) -> dict:
+def store_readiness_dict(project: Path, tree: Path | None = None) -> dict:
     """Return a structured, JSON-serializable dictionary of store readiness audit for researcher / pipeline."""
-    checks = run_store_readiness_audit(project)
+    checks = run_store_readiness_audit(project, tree=tree)
     blockers = [
         {"category": c.category, "name": c.name, "detail": c.detail, "fix": c.fix}
         for c in checks if not c.passed and c.severity == "BLOCKER"
