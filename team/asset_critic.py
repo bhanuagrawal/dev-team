@@ -60,6 +60,8 @@ def _provenance(project: Path) -> str:
                 return "stitch"
         except Exception:
             pass
+    if (project / "docs/designs").is_dir() or (project / "docs/design.md").is_file():
+        return "stitch"
     templates = project / ".pipeline/storefront_templates"
     if templates.is_dir() and any(templates.glob("0*.html")):
         return "html_mock"
