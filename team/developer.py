@@ -107,7 +107,9 @@ def execute(project: Path, task: dict, log: RunLog, max_attempts: int = 2) -> di
     task_paths = task["surface"].get("targets") or []
     prompt = build_prompt(project, profile, task, task_paths)
     cfg = _role_cfg("developer")
-    timeout = cfg.get("timeout_s", 3600)
+    base_timeout = int(cfg.get("timeout_s", 3600))
+    effort = int(task.get("effort_min") or task.get("surface", {}).get("effort_min") or 0)
+    timeout = max(base_timeout, effort * 20) if effort > 180 else base_timeout
 
     attempts: list[dict] = []
     files: list[str] = []

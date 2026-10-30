@@ -976,9 +976,18 @@ def _validate(result: dict, research: dict | None = None) -> str | None:
                         "'supersedes') or bundle sibling changes into ONE coherent "
                         f"entry of ~{TARGET_EFFORT_MIN} minutes — several screens "
                         "that share a theme are one entry, not one each")
-            if eff > MAX_EFFORT_MIN and not delivery_fix:
+            max_ceiling = (research.get("max_effort") if research else None) or MAX_EFFORT_MIN
+            # Owner request to give task more time / revamp in one go authorizes extended effort up to 480 min
+            is_extended = bool(
+                q.get("extended_effort") or
+                any(k in str(q.get("reason", "")).lower() for k in (
+                    "more time", "in one go", "revamp in one go", "extended effort", "revamp planned in one go"
+                ))
+            )
+            effective_max = max(max_ceiling, 480) if is_extended else max_ceiling
+            if eff > effective_max and not delivery_fix:
                 return (f"queue entry '{q.get('label')}' is sized {eff} min — above "
-                        f"the {MAX_EFFORT_MIN}-minute ceiling: SPLIT it into "
+                        f"the {effective_max}-minute ceiling: SPLIT it into "
                         "sequential entries that each stand alone and each still "
                         "deliver something verifiable in one session")
         if q.get("type") in ("feature", "bugfix") and not target_looks_like_paths(q.get("target")):
@@ -1297,7 +1306,7 @@ apply, and the long-term VISION is still the owner's.
 
 
 def render_prompt(project: Path, research: dict, log: RunLog | None = None,
-                  focus: str | None = None) -> str:
+                  focus: str | None = None, max_effort: int | None = None) -> str:
     """The exact synthesis prompt (goals + research + rules). Exported by
     --no-llm so a host tool that has no subprocess command can hand it to its
     OWN native agent verbatim, then apply the returned JSON with
@@ -1312,22 +1321,29 @@ def render_prompt(project: Path, research: dict, log: RunLog | None = None,
         act = goals.active_milestone(profile, state)
         log(f"goal: active milestone = {act['id'] if act else 'none'} "
             f"({(profile.get('goals') or {}).get('vision','')[:80]})")
+    focus_str = (focus or "").strip()
+    is_extended = bool(max_effort or any(k in focus_str.lower() for k in ("more time", "in one go", "revamp in one go", "extended effort", "revamp planned in one go")))
+    eff_max = max_effort or (480 if is_extended else MAX_EFFORT_MIN)
+    eff_target = 300 if is_extended else TARGET_EFFORT_MIN
+    research["max_effort"] = eff_max
     prompt = PROMPT_TMPL.format(project=research["project"],
                                 goals=goals.prompt_block(profile, state),
                                 research=json.dumps(research, indent=2),
-                                target_effort=TARGET_EFFORT_MIN,
+                                target_effort=eff_target,
                                 min_effort=MIN_EFFORT_MIN,
-                                max_effort=MAX_EFFORT_MIN,
+                                max_effort=eff_max,
                                 max_queue=MAX_QUEUE)
-    focus = (focus or "").strip()
-    if focus:
+    if focus_str:
+        extra_note = ""
+        if is_extended:
+            extra_note = f"\n\nNOTE: Extended developer time authorized by owner (up to {eff_max} min). Sizing may scale up to {eff_max} min to plan this revamp in ONE GO (one workflow run) as queue[0] rather than fragmenting it across multiple runs.\n"
         # Injected by replace (not .format) so owner text cannot break the
         # template with stray braces.
         prompt = prompt.replace(
             "\nRESPOND WITH JSON ONLY.",
-            FOCUS_TMPL.format(focus=focus) + "\nRESPOND WITH JSON ONLY.")
+            FOCUS_TMPL.format(focus=focus_str + extra_note) + "\nRESPOND WITH JSON ONLY.")
         if log:
-            log(f"planner: owner focus this cycle → {focus[:120]}")
+            log(f"planner: owner focus this cycle → {focus_str[:120]}")
     return prompt
 
 
@@ -1603,7 +1619,7 @@ def research_apply_file(project: Path, result_path: Path, log: RunLog) -> None:
 
 
 def research_run(project: Path, log: RunLog, use_llm: bool = True,
-                 focus: str | None = None) -> bool:
+                 focus: str | None = None, max_effort: int | None = None) -> bool:
     """Collect (always), then synthesize + apply (unless --no-llm). Returns True
     when a plan was actually applied, False when the prompt was only written out
     for the host tool's own agent.
@@ -1620,11 +1636,11 @@ def research_run(project: Path, log: RunLog, use_llm: bool = True,
         # proposes, code validates and applies", and the host tool may be the
         # only thing that can spawn an agent (no roles.*.command configured).
         p = project / ".pipeline" / "research-prompt.txt"
-        p.write_text(render_prompt(project, research, log, focus=focus))
+        p.write_text(render_prompt(project, research, log, focus=focus, max_effort=max_effort))
         log(f"research: --no-llm stop; prompt → {p.name} "
             "(apply the agent's JSON with `research <project> --apply-result <file>`)")
         return False
-    prompt = render_prompt(project, research, log, focus=focus)
+    prompt = render_prompt(project, research, log, focus=focus, max_effort=max_effort)
     result, err = None, ""
     for attempt in (1, 2):
         raw = _llm(prompt, log)

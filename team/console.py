@@ -444,11 +444,27 @@ async (page) => {{
     }}
     await page.waitForTimeout(1000);
 
-    // Click Next to step 2 (AI asset declaration & review)
+    // Click Next to step 2 (AI asset declaration & Graphics review)
     const nextBtn = page.getByRole('button', {{ name: 'Next' }});
     if (await nextBtn.isVisible().catch(() => false) && await nextBtn.isEnabled()) {{
       await nextBtn.click();
       await page.waitForTimeout(2000);
+    }}
+
+    // Upload visual storefront assets (Icon, Feature Graphic, Phone Screenshots)
+    const fileInputs = page.locator('input[type="file"]');
+    const fileCount = await fileInputs.count();
+    if ({icon_path_js} && fileCount > 0) {{
+      await fileInputs.nth(0).setInputFiles({icon_path_js});
+      await page.waitForTimeout(2000);
+    }}
+    if ({fg_path_js} && fileCount > 1) {{
+      await fileInputs.nth(1).setInputFiles({fg_path_js});
+      await page.waitForTimeout(2000);
+    }}
+    if ({shots_js}.length > 0 && fileCount > 2) {{
+      await fileInputs.nth(2).setInputFiles({shots_js});
+      await page.waitForTimeout(3000);
     }}
 
     // Select "Don't label assets" if prompt appears

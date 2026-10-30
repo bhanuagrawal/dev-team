@@ -1089,7 +1089,8 @@ def cmd_plan(args: argparse.Namespace) -> int:
         else:
             applied = research.research_run(project, log,
                                             use_llm=not args.no_llm and can_spawn,
-                                            focus=getattr(args, "focus", None))
+                                            focus=getattr(args, "focus", None),
+                                            max_effort=getattr(args, "max_effort", None))
     except SystemExit as e:
         code = e.code
         if code in (0, None):
@@ -1782,6 +1783,8 @@ def main() -> None:
                          "tool's own agent (then: --apply-result <json>)")
     pl.add_argument("--apply-result", help="planner JSON produced by the host tool's native agent")
     pl.add_argument("--focus", help="the owner's scoped review request for this cycle (e.g. 'review the existing UX'); injected into the prompt as a labelled block, so a focused review needs no hand-edited prompt")
+    pl.add_argument("--max-effort", type=int, default=None,
+                    help="extended effort ceiling in minutes (owner request to give a task more time / revamp in one go)")
     pl.set_defaults(fn=cmd_plan)
     do = sub.add_parser("doctor");     do.add_argument("project"); do.set_defaults(fn=cmd_doctor)
     ad = sub.add_parser("adapt");      ad.add_argument("project")
