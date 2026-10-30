@@ -1229,6 +1229,11 @@ def cmd_poll(args: argparse.Namespace) -> None:
 
 def cmd_schedules(args: argparse.Namespace) -> None:
     """Owner-visible clash map: every registered devteam schedule."""
+    if getattr(args, "remove", None):
+        project = resolve_project(args.remove)
+        scheduler.uninstall_launchd(project.name)
+        print(f"Removed nightly schedule for {project.name} (app remains in dev-team in manual mode).")
+        return
     installed = scheduler.list_installed_schedules()
     if not installed:
         print("no auto schedules registered — all projects run manually")
@@ -1492,7 +1497,8 @@ def cmd_setup(args: argparse.Namespace) -> None:
         print("onboarding first...")
         cmd_onboard(argparse.Namespace(project=str(project)))
     if args.schedule == "manual":
-        print(f"MANUAL mode installed for {project.name}: nothing scheduled.")
+        scheduler.uninstall_launchd(project.name)
+        print(f"MANUAL mode installed for {project.name}: nothing scheduled (not part of nightly workflow).")
         print("  run it whenever with: 'follow the dev-team skill — MODE A run on "
               + project.name + "' in any agent session")
         print("  to enable auto later: devteam setup --project " + str(project)
@@ -1794,7 +1800,9 @@ def main() -> None:
     st = sub.add_parser("setup");  st.add_argument("--project", required=True)
     st.add_argument("--schedule", choices=["manual", "auto"], default="manual")
     st.add_argument("--at", default=None); st.add_argument("--strict", action="store_true"); st.set_defaults(fn=cmd_setup)
-    sch = sub.add_parser("schedules"); sch.set_defaults(fn=cmd_schedules)
+    sch = sub.add_parser("schedules", help="list or manage registered nightly schedules")
+    sch.add_argument("--remove", help="remove a project's nightly schedule, keeping it in manual mode")
+    sch.set_defaults(fn=cmd_schedules)
     tt = sub.add_parser("tree"); tt.add_argument("project")
     tt.add_argument("--html", action="store_true", help="write the html view and print its path")
     tt.add_argument("--open", action="store_true", help="open the html view in the browser")

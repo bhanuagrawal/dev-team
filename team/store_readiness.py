@@ -127,17 +127,18 @@ def _convention_constants(src: Path, combined_gradle: str) -> str:
 
 def _sdk_number(gradle_src: str, constants_src: str, field: str, constant: str):
     """Explicit `field = 34` assignment first, then a named constant in build-logic."""
+    field_kebab = re.sub(r"([A-Z])", r"-\1", field).lower()
     patterns = (
-        rf"\b{field}(?:Version)?\s*(?:=\s*|\(\s*)(\d{{2,3}})\b",
-        rf"\b{constant}\b\s*(?::\s*Int\s*)?=\s*(\d{{2,3}})\b",
-        rf"\b{field}(?:Version)?\s*=\s*[A-Za-z_][\w.]*\b",
+        rf"\b(?:{field}|{field_kebab})(?:Version)?\s*(?:=\s*|\(\s*)[\"']?(\d{{2,3}})[\"']?",
+        rf"\b{constant}\b\s*(?::\s*Int\s*)?=\s*[\"']?(\d{{2,3}})[\"']?",
+        rf"\b(?:{field}|{field_kebab})(?:Version)?\s*=\s*[A-Za-z_][\w.]*",
     )
     m = re.search(patterns[0], gradle_src) or re.search(patterns[1], constants_src)
     if m:
         return int(m.group(1))
     # A named constant reference: resolve it from the convention sources.
     if re.search(patterns[2], gradle_src):
-        m = re.search(rf"\b{constant}\b\s*(?::\s*Int\s*)?=\s*(\d{{2,3}})\b", constants_src)
+        m = re.search(rf"\b{constant}\b\s*(?::\s*Int\s*)?=\s*[\"']?(\d{{2,3}})[\"']?", constants_src)
         if m:
             return int(m.group(1))
     return None
