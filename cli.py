@@ -1529,10 +1529,23 @@ def cmd_store_readiness(args: argparse.Namespace) -> int:
         for req in res.get("orchestrator_requests", []):
             print(f"  * ORCHESTRATOR REQUEST ({req.get('tool')}): {req.get('action')}")
         print()
+    if getattr(args, "score_assets", False):
+        from team.asset_critic import review_store_assets, format_critic_report
+        crit_rep = review_store_assets(project)
+        print(format_critic_report(crit_rep))
+        print()
     checks = run_store_readiness_audit(project)
     report_text, is_ready = format_readiness_report(project, checks)
     print(report_text)
     return 0 if is_ready else 1
+
+
+def cmd_store_assets(args: argparse.Namespace) -> int:
+    project = resolve_project(args.project)
+    from team.asset_critic import review_store_assets, format_critic_report
+    report = review_store_assets(project)
+    print(format_critic_report(report))
+    return 0 if report.get("score", 0) >= 80 else 1
 
 
 def cmd_console(args: argparse.Namespace) -> int:
@@ -1702,7 +1715,11 @@ def main() -> None:
     sr = sub.add_parser("store-readiness", help="audit project for Google Play Store launch readiness")
     sr.add_argument("project")
     sr.add_argument("--generate", action="store_true", help="generate missing storefront listing files, hosted privacy HTML, and starter assets")
+    sr.add_argument("--score-assets", action="store_true", help="score visual storefront assets against ASO quality criteria")
     sr.set_defaults(fn=cmd_store_readiness)
+    sa = sub.add_parser("store-assets", help="audit and score Google Play visual storefront assets (icon, feature graphic, screenshots)")
+    sa.add_argument("project")
+    sa.set_defaults(fn=cmd_store_assets)
     cs = sub.add_parser("console", help="plan or drive Google Play Console setup")
     cs.add_argument("project")
     cs.add_argument("--script", action="store_true", help="output automated Playwright JS script")

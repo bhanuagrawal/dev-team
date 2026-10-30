@@ -494,6 +494,21 @@ def run_store_readiness_audit(project: Path) -> list[ReadinessCheck]:
             fix="Provide at least 2 phone screenshots in images/phoneScreenshots/",
         ))
 
+        # Visual Asset Quality & ASO Conversion Score
+        from .asset_critic import review_store_assets
+        critic_rep = review_store_assets(project)
+        score = critic_rep.get("score", 0)
+        grade = critic_rep.get("grade", "F")
+        passed_quality = score >= 75
+        checks.append(ReadinessCheck(
+            category="Storefront Graphic Assets",
+            name="Visual Asset Quality & ASO Score",
+            passed=passed_quality,
+            severity="WARNING" if not passed_quality else "INFO",
+            detail=f"Storefront visual assets scored {score}/100 [Grade {grade}]: {critic_rep.get('status')}",
+            fix="Elevate visual assets with high-contrast marketing headlines and realistic device bezels via `devteam store-assets <project>`",
+        ))
+
     # ── 7. Localization Completeness ──────────────────────────────────────────
     declared_locales = profile.get("locales", [])
     if declared_locales:
