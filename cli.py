@@ -1560,6 +1560,40 @@ def cmd_stitch_prompt(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_stitch_curate(args: argparse.Namespace) -> int:
+    project = resolve_project(args.project)
+    from team.design import curate_stitch_manifest
+    screens = []
+    if getattr(args, "screens_json", None) and Path(args.screens_json).is_file():
+        import json
+        raw = json.loads(Path(args.screens_json).read_text())
+        screens = raw.get("screens", raw if isinstance(raw, list) else [])
+    else:
+        # Fall back to saved metadata JSON files under projects/*/screens/
+        devteam_dir = Path(__file__).resolve().parent
+        for pdir in (devteam_dir / "projects").glob("*/screens/*.json"):
+            try:
+                import json
+                meta = json.loads(pdir.read_text())
+                screens.append(meta)
+            except Exception:
+                continue
+
+    manifest = curate_stitch_manifest(project, screens)
+    print("STITCH CANVAS CURATION MANIFEST")
+    print("=" * 60)
+    print(f"PROJECT: {manifest.get('project')}")
+    print(f"CANONICAL SCREENS ({manifest.get('screen_count')}):")
+    for s in manifest.get("canonical_screens", []):
+        print(f"  ✓ {s.get('id')[:12]}: {s.get('title')}")
+    print(f"\nCANDIDATES FOR CLEANUP / OBSOLETE ({manifest.get('stale_count')}):")
+    for s in manifest.get("stale_screens", []):
+        print(f"  ✗ {s.get('id')[:12]}: {s.get('title')}")
+    print("=" * 60)
+    print(f"Saved canonical manifest to: {project}/.pipeline/stitch_manifest.json")
+    return 0
+
+
 def cmd_validate_design(args: argparse.Namespace) -> int:
     project = resolve_project(args.project)
     from team.design import compile_stitch_screen_prompt
@@ -1763,6 +1797,10 @@ def main() -> None:
     stp.add_argument("project")
     stp.add_argument("--screen", default="main", help="screen type: main, scoreboard, summary, setup")
     stp.set_defaults(fn=cmd_stitch_prompt)
+    scur = sub.add_parser("stitch-curate", help="inventory and curate Stitch canvas screens into canonical manifest vs stale candidate screens")
+    scur.add_argument("project")
+    scur.add_argument("--screens-json", help="path to raw Stitch list_screens JSON dump")
+    scur.set_defaults(fn=cmd_stitch_curate)
     vd = sub.add_parser("validate-design", help="audit Stitch-generated screens for drift against locked prompt specifications")
     vd.add_argument("project")
     vd.add_argument("--screen", default="scoreboard", help="screen type to audit (scoreboard, summary, setup)")

@@ -356,11 +356,24 @@ def curate_stitch_manifest(project: Path, screens_inventory: list[dict[str, Any]
     canonical_screens = []
     unmapped_or_stale = []
 
+    # Screens explicitly matching the current release architecture / atmosphere
+    # or core canonical assets without scratch/experimental modifiers
+    scratch_tokens = ["shader", "loading", "idle", "edit mode", "widget management", "test", "scratch", "draft", "oled minimalist"]
+
     for s in screens_inventory:
         title = s.get("title", "")
         screen_id = s.get("name", "").split("/")[-1] if "/" in s.get("name", "") else s.get("id", "")
-        # Classify canonical vs scratch
-        if any(tok in title.lower() for tok in ["icon", "banner", "scoreboard", "summary", "setup", "design.md"]):
+        t_low = title.lower()
+
+        is_scratch = any(st in t_low for st in scratch_tokens)
+        is_atmosphere_2 = "atmosphere 2.0" in t_low
+        is_canonical_core = any(tok in t_low for tok in [
+            "icon", "banner", "scoreboard", "summary", "setup", "design.md",
+            "feature graphic", "storefront", "app drawer", "digital wellbeing",
+            "screen time", "premium paywall"
+        ]) and not is_scratch
+
+        if (is_atmosphere_2 or is_canonical_core) and not is_scratch:
             canonical_screens.append({
                 "id": screen_id,
                 "title": title,
@@ -380,6 +393,7 @@ def curate_stitch_manifest(project: Path, screens_inventory: list[dict[str, Any]
         "canonical_screens": canonical_screens,
         "stale_screens": unmapped_or_stale,
         "screen_count": len(canonical_screens),
+        "stale_count": len(unmapped_or_stale),
     }
     save_json(manifest_path, manifest)
     return manifest
