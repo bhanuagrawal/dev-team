@@ -86,12 +86,20 @@ off-machine (you generate; they never generate).
    see what users do" (instrumentation), the third a retention/traction number.
    The pipeline then orders every release against these — see the dev-team
    skill's GOAL MODE section.
-   **Also write `docs/design.md` (Mandatory Design Law):** Run `python3 <team>/cli.py design <project>`
-   or research category standards via the Tavily MCP server / web research. Every new app
-   MUST have an enforced design system defining OLED high-contrast palettes, 8-point spatial grid,
-   typography hierarchy (hero numerals, tabular figures), touch target minimums (48dp), and
-   motion physics. Register `docs/design.md` in `profile.json['conventions']`. No app is ever
-   scaffolded with generic, default, or unstyled UI.
+   **Also write `docs/design.md` via Research & Stitch MCP (Mandatory Design Law):**
+   Design is never done in the dark or by guessing. The design flow is two-phase:
+   1. *Research First:* Run market & UX research (`devteam market <project>` / Tavily) to establish
+      category standards, high-contrast dark mode requirements, and competitor benchmark layouts.
+   2. *Initial Design via Stitch MCP:* Provide the research synthesis and product thesis to Stitch MCP
+      (`create_project`, `create_design_system_from_design_md`, `generate_screen_from_text`).
+      Stitch creates the initial screen mockups and authoritative design system (colors, typography,
+      radii, spacing). If a headless worker (Codex/Claude) lacks Stitch MCP access, it MUST raise an
+      orchestrator escalation request (`orchestrator_requests`) so the orchestrator executes Stitch MCP.
+   3. *Refinements Loop Back to Stitch:* Once the workflow understands the design, further screen
+      refinements or variants go back to Stitch (`generate_variants`, `edit_screens`, `apply_design_system`)
+      to keep code tokens and visual mockups aligned.
+   4. *Enforce in Code:* Register `docs/design.md` in `profile.json['conventions']`. Every Compose screen
+      must consume tokens from this design module. No app is scaffolded with default/unstyled UI.
    **Also stamp `"profile_schema": 2`** (the team's current data shape) so the
    project is born current. From then on `devteam adapt <project>` — step 0 of
    every workflow run — keeps it that way as the team itself changes; a project

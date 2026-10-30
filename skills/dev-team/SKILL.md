@@ -725,13 +725,19 @@ The owner may ask for ONE agent only, and that must work:
   (configured in `~/.gemini/config/mcp_config.json`, powered by `tavily-mcp` and `TAVILY_API_KEY`).
   Tools available: `tavily_search`, `tavily_research`, `tavily_extract`, `tavily_crawl`, `tavily_map`
   (or via code: `python3 <team>/cli.py market <project> "<topic>"`).
-  When asked to research a design system or market benchmark:
+  When asked to research and build a design system or market benchmark:
   1. Researcher queries Tavily for modern Android/Compose design standards, typography scales,
      spacing tokens, and competitor UX patterns.
-  2. Writes the design specification to `<project>/docs/design.md`.
-  3. Registers `docs/design.md` in `<project>/.pipeline/profile.json` under `conventions`.
-  4. Runs `python3 <team>/cli.py adapt <project>` to validate.
-  5. The developer agent's prompt automatically injects `docs/design.md` under
+  2. The research synthesis and product thesis are handed to **Stitch MCP** (`create_project`,
+     `create_design_system_from_design_md`, `generate_screen_from_text`) to create the initial
+     screen mockups and authoritative design tokens. If a worker lacks Stitch MCP tools, it raises
+     an `orchestrator_requests` block for the orchestrator.
+  3. Writes the design specification to `<project>/docs/design.md`.
+  4. Once the workflow understands the design, refinements loop back to Stitch (`generate_variants`,
+     `edit_screens`, `apply_design_system`) to keep code and mockups synchronized.
+  5. Registers `docs/design.md` in `<project>/.pipeline/profile.json` under `conventions`.
+  6. Runs `python3 <team>/cli.py adapt <project>` to validate.
+  7. The developer agent's prompt automatically injects `docs/design.md` under
      **CODING CONVENTIONS (MANDATORY READS — style law; must read before writing code)**
      on all future runs, strictly enforcing the design system across the entire team.
 - "store readiness" / "check store compliance" / "researcher store readiness" →
