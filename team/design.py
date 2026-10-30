@@ -296,6 +296,95 @@ def extract_design_tokens(project: Path) -> dict[str, str]:
     return tokens
 
 
+def should_invoke_stitch(task_description: str, files_affected: list[str] | None = None) -> tuple[bool, str]:
+    """Evaluate whether an incoming task requires Stitch MCP or should proceed in code/state.
+
+    RATIONALE:
+    - Invoke Stitch MCP when:
+      * Creating an entirely new screen or user flow.
+      * Major UI/UX redesign or spatial layout overhaul.
+      * Defining brand assets (App Icon, Store Banner, Brand Identity).
+      * Synthesizing high-contrast design system tokens for a greenfield app.
+    - Bypass Stitch MCP when:
+      * Bug fixes in business logic, rule engines, or state machines.
+      * Data layer, local database, or network/API persistence.
+      * Minor UI tweaks, margin/padding adjustments, copy changes.
+      * Existing screen already matches docs/design.md tokens.
+    """
+    desc = task_description.lower()
+    
+    # Strong signals to invoke Stitch
+    stitch_triggers = [
+        "new screen", "create screen", "design screen", "ui redesign", "ux overhaul",
+        "brand asset", "app icon", "feature graphic", "marketing mockup", "design system",
+        "new layout", "visual language", "stitch"
+    ]
+    for trigger in stitch_triggers:
+        if trigger in desc:
+            return True, f"Triggered by '{trigger}': Task involves substantial visual or screen architecture design."
+
+    # Strong signals to bypass Stitch
+    code_only_triggers = [
+        "bug", "fix", "crash", "state", "viewmodel", "logic", "unit test",
+        "persistence", "database", "sql", "gradle", "ci", "workflow", "publish",
+        "typo", "copy tweak", "padding", "refactor"
+    ]
+    for trigger in code_only_triggers:
+        if trigger in desc and not any(t in desc for t in ["redesign", "new screen"]):
+            return False, f"Bypassing Stitch: Task '{trigger}' is purely state, logic, or minor code maintenance."
+
+    # Check files affected if provided
+    if files_affected:
+        has_new_screen_file = any("screen" in f.lower() or "ui" in f.lower() for f in files_affected)
+        if has_new_screen_file:
+            return True, "Affected files indicate a new or major UI screen surface."
+
+    return False, "Default: Task does not explicitly require new visual architecture."
+
+
+def curate_stitch_manifest(project: Path, screens_inventory: list[dict[str, Any]]) -> dict[str, Any]:
+    """Maintain a curated, canonical manifest of Stitch screens to avoid junk accumulation.
+
+    Rules:
+    - Every screen instance on Stitch canvas must map to a canonical app surface.
+    - Throwaway variants and outdated experiments must not clutter the project canvas.
+    - Saves canonical manifest to .pipeline/stitch_manifest.json.
+    """
+    manifest_path = pipeline_dir(project) / "stitch_manifest.json"
+    manifest_path.parent.mkdir(parents=True, exist_ok=True)
+
+    canonical_screens = []
+    unmapped_or_stale = []
+
+    for s in screens_inventory:
+        title = s.get("title", "")
+        screen_id = s.get("name", "").split("/")[-1] if "/" in s.get("name", "") else s.get("id", "")
+        # Classify canonical vs scratch
+        if any(tok in title.lower() for tok in ["icon", "banner", "scoreboard", "summary", "setup", "design.md"]):
+            canonical_screens.append({
+                "id": screen_id,
+                "title": title,
+                "type": s.get("deviceType") or "CANONICAL",
+                "status": "APPROVED",
+            })
+        else:
+            unmapped_or_stale.append({
+                "id": screen_id,
+                "title": title,
+                "status": "CANDIDATE_FOR_CLEANUP",
+            })
+
+    manifest = {
+        "project": project.name,
+        "updated_at": now_iso(),
+        "canonical_screens": canonical_screens,
+        "stale_screens": unmapped_or_stale,
+        "screen_count": len(canonical_screens),
+    }
+    save_json(manifest_path, manifest)
+    return manifest
+
+
 def compile_stitch_screen_prompt(
     project: Path,
     screen_type: str = "main",
