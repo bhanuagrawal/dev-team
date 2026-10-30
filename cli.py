@@ -726,8 +726,18 @@ def cmd_verify(args: argparse.Namespace) -> int:
     log = RunLog(project, "verify-" + today())
     tree = Path(args.worktree).resolve() if args.worktree else project
     if args.worktree:
-        base = subprocess.run(["git", "rev-parse", "dt-base"], cwd=tree,
-                              capture_output=True, text=True).stdout.strip()
+        # The base the worktree was cut from, resolved UNAMBIGUOUSLY: `rev-parse
+        # dt-base` resolves a TAG called dt-base in preference to the branch of the
+        # same name, and a stale tag from an old run then diffs the worktree against
+        # a months-old commit — so a frozen file nobody touched (app/build.gradle)
+        # shows up as a violation and the run dies on a phantom. Ask for the branch
+        # first; only fall back to the loose name when no such branch exists.
+        base = ""
+        for ref in ("refs/heads/dt-base", "dt-base^{commit}"):
+            base = subprocess.run(["git", "rev-parse", "--verify", "--quiet", ref],
+                                  cwd=tree, capture_output=True, text=True).stdout.strip()
+            if base:
+                break
     else:
         base = "HEAD"
     spec = None
