@@ -1564,6 +1564,12 @@ def cmd_console(args: argparse.Namespace) -> int:
     print(f"  Track:        {ct.get('track')}")
     print(f"  Rule:         {ct.get('requirement')}")
     print(f"  Google Group: {ct.get('group_email')}")
+
+    print("\n[AUTHENTICATION & OWNER INTERVENTION]")
+    for act in plan.get("owner_actions", []):
+        print(f"  {act.get('type')}: {act.get('title')}")
+        print(f"    Trigger:     {act.get('trigger')}")
+        print(f"    Instruction: {act.get('instruction')}")
     print("=" * 60)
     return 0
 

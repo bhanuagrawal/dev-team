@@ -420,15 +420,30 @@ def run_store_readiness_audit(project: Path) -> list[ReadinessCheck]:
 
         full_file = listing_dir / "full_description.txt" if (listing_dir / "full_description.txt").is_file() else listing_dir / "full-description.txt"
         if full_file.is_file():
-            f_len = len(full_file.read_text(errors="ignore").strip())
-            passed = 0 < f_len <= PLAY_FULL_DESC_MAX_CHARS
+            full_text = full_file.read_text(errors="ignore").strip()
+            f_len = len(full_text)
+            has_min_len = f_len >= 250
+            has_structure = any(kw in full_text.upper() for kw in ("FEATURES", "HOW IT WORKS", "ABOUT", "•", "- "))
+            passed = (0 < f_len <= PLAY_FULL_DESC_MAX_CHARS) and has_min_len and has_structure
+            if not has_min_len:
+                detail = f"Full description is too brief ({f_len} chars); Play policy requires clear feature descriptions (min 250 chars) to prevent rejection"
+                severity = "WARNING"
+            elif not has_structure:
+                detail = f"Full description lacks structured feature sections or bullet points ({f_len} chars)"
+                severity = "WARNING"
+            elif f_len > PLAY_FULL_DESC_MAX_CHARS:
+                detail = f"Full description exceeds limit ({f_len}/{PLAY_FULL_DESC_MAX_CHARS} chars)"
+                severity = "BLOCKER"
+            else:
+                detail = f"Full description length: {f_len}/{PLAY_FULL_DESC_MAX_CHARS} chars (structured)"
+                severity = "INFO"
             checks.append(ReadinessCheck(
                 category="Storefront Listing Copy",
                 name="Full Description",
                 passed=passed,
-                severity="WARNING" if not passed else "INFO",
-                detail=f"Full description length: {f_len}/{PLAY_FULL_DESC_MAX_CHARS} chars" if passed else f"Full description exceeds limit ({f_len}/{PLAY_FULL_DESC_MAX_CHARS} chars)",
-                fix=f"Ensure full description is <= {PLAY_FULL_DESC_MAX_CHARS} chars",
+                severity=severity,
+                detail=detail,
+                fix=f"Provide a structured description with feature bullets (>= 250 and <= {PLAY_FULL_DESC_MAX_CHARS} chars)",
             ))
         else:
             checks.append(ReadinessCheck(
@@ -525,14 +540,47 @@ def run_store_readiness_audit(project: Path) -> list[ReadinessCheck]:
     ))
 
     is_https = str(privacy_url).strip().startswith("https://")
-    checks.append(ReadinessCheck(
-        category="Privacy & Policy",
-        name="Public HTTPS Privacy Hosting",
-        passed=is_https,
-        severity="WARNING" if not is_https else "INFO",
-        detail=f"Public HTTPS URL configured: {privacy_url}" if is_https else "No public https:// privacy policy URL declared in profile.json",
-        fix="Run `devteam store-readiness <project> --generate` to host docs/privacy.html via GitHub Pages",
-    ))
+    url_live = False
+    http_error_msg = ""
+    if is_https:
+        try:
+            import urllib.request
+            req = urllib.request.Request(
+                privacy_url,
+                headers={"User-Agent": "Mozilla/5.0 (compatible; dev-team/store-readiness)"},
+            )
+            with urllib.request.urlopen(req, timeout=5) as resp:
+                if resp.getcode() == 200:
+                    url_live = True
+        except Exception as e:
+            http_error_msg = str(e)
+
+    if not is_https:
+        checks.append(ReadinessCheck(
+            category="Privacy & Policy",
+            name="Public HTTPS Privacy Hosting",
+            passed=False,
+            severity="WARNING",
+            detail="No public https:// privacy policy URL declared in profile.json",
+            fix="Run `devteam store-readiness <project> --generate` to host docs/privacy.html via GitHub Pages",
+        ))
+    elif not url_live:
+        checks.append(ReadinessCheck(
+            category="Privacy & Policy",
+            name="Public HTTPS Privacy Hosting",
+            passed=False,
+            severity="BLOCKER",
+            detail=f"Privacy policy URL returned error or is unreachable: {privacy_url} ({http_error_msg})",
+            fix="Ensure GitHub Pages is enabled on the repository or host docs/privacy.html",
+        ))
+    else:
+        checks.append(ReadinessCheck(
+            category="Privacy & Policy",
+            name="Public HTTPS Privacy Hosting",
+            passed=True,
+            severity="INFO",
+            detail=f"Public HTTPS URL verified live (HTTP 200): {privacy_url}",
+        ))
 
     return checks
 
@@ -706,6 +754,92 @@ def _compile_privacy_html(project: Path, title: str) -> Path:
     return out_file
 
 
+def _compile_landing_html(project: Path, title: str, vision: str) -> Path:
+    repo_slug = profile_of(project).get("repo_slug", "")
+    html = f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{title}</title>
+  <style>
+    :root {{
+      --bg: #0A0E14;
+      --card: #161F2E;
+      --text: #FFFFFF;
+      --muted: #8B949E;
+      --accent: #00E676;
+    }}
+    body {{
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.6;
+      margin: 0;
+      padding: 32px 16px;
+      display: flex;
+      justify-content: center;
+    }}
+    .container {{
+      max-width: 680px;
+      width: 100%;
+      background: var(--card);
+      padding: 36px;
+      border-radius: 16px;
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+    }}
+    h1 {{ color: var(--accent); margin-top: 0; font-size: 32px; }}
+    p.lead {{ font-size: 18px; color: #dfe2eb; margin-bottom: 24px; }}
+    ul {{ list-style: none; padding-left: 0; }}
+    li {{ margin-bottom: 12px; padding-left: 28px; position: relative; color: #dfe2eb; font-size: 15px; }}
+    li::before {{ content: "✓"; position: absolute; left: 0; color: var(--accent); font-weight: bold; }}
+    .actions {{ margin-top: 32px; display: flex; gap: 16px; flex-wrap: wrap; }}
+    a.btn {{
+      display: inline-block;
+      background: var(--accent);
+      color: #000;
+      font-weight: 600;
+      padding: 12px 24px;
+      border-radius: 8px;
+      text-decoration: none;
+    }}
+    a.secondary {{
+      display: inline-block;
+      color: var(--muted);
+      padding: 12px 16px;
+      text-decoration: underline;
+    }}
+    .footer {{ margin-top: 40px; font-size: 13px; color: var(--muted); border-top: 1px solid rgba(255, 255, 255, 0.08); padding-top: 16px; }}
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>{title}</h1>
+    <p class="lead">{vision or f"A modern, focused mobile utility engineered for speed, reliability, and privacy."}</p>
+    <ul>
+      <li><strong>Focused Utility:</strong> Purpose-built for quick interactions and glanceable clarity.</li>
+      <li><strong>100% Offline-First:</strong> All data remains securely stored on your local device.</li>
+      <li><strong>Private & Ad-Free:</strong> Zero account requirements, no tracking, and zero advertisements.</li>
+    </ul>
+    <div class="actions">
+      <a class="btn" href="privacy.html">Read Privacy Policy</a>
+      {"<a class='secondary' href='https://github.com/" + repo_slug + "'>GitHub Repository</a>" if repo_slug else ""}
+    </div>
+    <div class="footer">
+      Generated automatically by dev-team Play Store Readiness engine.
+    </div>
+  </div>
+</body>
+</html>
+"""
+    out_dir = project / "docs"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    out_file = out_dir / "index.html"
+    out_file.write_text(html)
+    return out_file
+
+
 def generate_store_readiness_pack(project: Path, log: RunLog | None = None) -> dict:
     """Deterministically generate storefront listing files, hosted privacy HTML,
     and starter visual assets. Zero project names — generic across all apps.
@@ -720,11 +854,14 @@ def generate_store_readiness_pack(project: Path, log: RunLog | None = None) -> d
     generated: list[str] = []
     orchestrator_requests: list[dict] = []
 
-    # 1. Compile docs/privacy.html
+    # 1. Compile docs/privacy.html and docs/index.html
     html_path = _compile_privacy_html(project, name)
     generated.append(str(html_path.relative_to(project)))
 
-    # 2. Wire public HTTPS URL if repo_slug exists
+    index_path = _compile_landing_html(project, name, vision)
+    generated.append(str(index_path.relative_to(project)))
+
+    # 2. Wire public HTTPS URL if repo_slug exists and enable GitHub Pages
     repo_slug = profile.get("repo_slug")
     if repo_slug and "/" in repo_slug:
         owner, repo = repo_slug.split("/", 1)
@@ -735,6 +872,28 @@ def generate_store_readiness_pack(project: Path, log: RunLog | None = None) -> d
             play_cfg["privacy_policy_url"] = public_url
             save_json(project / ".pipeline/profile.json", profile)
             generated.append(".pipeline/profile.json (privacy_policy_url)")
+
+        # Attempt to auto-enable GitHub Pages via gh CLI if available
+        try:
+            import subprocess
+            p_check = subprocess.run(
+                ["gh", "api", f"repos/{repo_slug}/pages"],
+                capture_output=True,
+                text=True,
+                timeout=10,
+            )
+            if p_check.returncode != 0:
+                payload = json.dumps({"source": {"branch": "main", "path": "/docs"}})
+                subprocess.run(
+                    ["gh", "api", "--method", "POST", f"repos/{repo_slug}/pages",
+                     "-H", "Accept: application/vnd.github+json", "--input", "-"],
+                    input=payload,
+                    capture_output=True,
+                    text=True,
+                    timeout=10,
+                )
+        except Exception:
+            pass
 
     # 3. Create distribution/listing/en-US
     listing_dir = project / "distribution/listing/en-US"
@@ -759,18 +918,22 @@ def generate_store_readiness_pack(project: Path, log: RunLog | None = None) -> d
         short_file.write_text(desc + "\n")
         generated.append(str(short_file.relative_to(project)))
 
-    # full_description.txt (<= 4000 chars)
+    # full_description.txt (structured, >= 250 and <= 4000 chars)
     full_file = listing_dir / "full_description.txt"
     if not full_file.is_file():
         full_text = (
-            f"{name} is engineered for speed, focus, and reliability.\n\n"
+            f"{name} is a dedicated mobile utility engineered for speed, focus, and reliability.\n\n"
+            f"HOW IT WORKS:\n"
+            f"1. Launch and interact immediately with high-contrast, glanceable surfaces.\n"
+            f"2. Fast one-tap controls designed for quick actions without unnecessary navigation.\n"
+            f"3. Instant history and state preservation on your local device.\n\n"
             f"KEY FEATURES:\n"
-            f"• High-contrast visual identity optimized for clarity\n"
-            f"• 100% offline-first architecture — all data stays on your device\n"
-            f"• Zero account registration, zero analytics tracking, zero ads\n"
-            f"• Fluid gestures and responsive feedback\n\n"
+            f"• Purpose-Built Experience: Clean visual layout designed for quick glances and direct touch controls.\n"
+            f"• 100% Offline-First: All data remains securely stored on your device with no cloud requirement.\n"
+            f"• Zero Distractions: No account registration, no third-party analytics tracking, and zero ads.\n"
+            f"• Fluid & Responsive: Fast interactions with native device feedback.\n\n"
             f"PRIVACY:\n"
-            f"{name} does not collect, store, or sell any personal data.\n"
+            f"{name} does not collect, store, or sell any personal data. All activity is strictly private to your device.\n"
         )
         full_file.write_text(full_text[:PLAY_FULL_DESC_MAX_CHARS])
         generated.append(str(full_file.relative_to(project)))
