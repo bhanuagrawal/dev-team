@@ -19,6 +19,7 @@ verify gates green, run by team code.
 from __future__ import annotations
 
 import json
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -30,6 +31,26 @@ from .core import (
 )
 
 RUN_BASE = ".pipeline/worktrees"
+
+# Machine-local build inputs a fresh worktree does not inherit: a git checkout
+# only materializes tracked files, so a worktree has no local.properties (gradle
+# then dies with "SDK location not found") and no signing material. They are
+# copied from the owner's checkout — but ONLY when the repo gitignores them, so
+# the copy can never be staged into a commit by the release step.
+MACHINE_LOCAL_INPUTS = ("local.properties", "keystore.properties")
+
+
+def _copy_machine_local_inputs(project: Path, worktree: Path, log: RunLog) -> None:
+    for name in MACHINE_LOCAL_INPUTS:
+        src, dst = project / name, worktree / name
+        if not src.exists() or dst.exists():
+            continue
+        ignored = git(["check-ignore", "-q", name], cwd=project)
+        if ignored.returncode != 0:
+            log(f"worktree: not copying {name} — not gitignored, it would be committable")
+            continue
+        shutil.copy2(src, dst)
+        log(f"worktree: copied gitignored build input {name} from the checkout")
 
 # A profile `conventions` entry is a path the developer is told to read before
 # writing code ("MANDATORY READS"). Paths go stale (a team/skill dir moves), and
@@ -91,6 +112,7 @@ def prepare_worktree(project: Path, task_id: str, log: RunLog) -> tuple[Path, st
         log("FATAL: worktree add failed: " + (r.stdout + r.stderr)[-800:])
         return None
     git(["branch", "-f", "dt-base", base], cwd=project, timeout=60)
+    _copy_machine_local_inputs(project, wt, log)
     return wt, base
 
 

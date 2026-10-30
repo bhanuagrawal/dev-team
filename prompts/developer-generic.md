@@ -33,6 +33,11 @@ HARD RULES:
      or unstyled low-contrast text. Use cohesive design tokens (high-contrast palette, tabular display typography,
      modern squircles 16-24dp, tactile press feedback). Cover all lifecycle states (empty guidance, active interaction,
      frictionless undo recovery, and repeat/rematch loops).
+   - A MOCKUP'S COPY IS NOT DATA. When a screen is built or redesigned from a design
+     mock, every number, percentage, rank, badge, ID or venue name in that mock is
+     placeholder. Render only values the app actually holds (state/models), or drop the
+     element. Shipping a mock's invented stat as if the app had recorded it is a truth
+     defect, not styling — and it is the one thing a design pass must never add.
    - For every UI feature, screen, or component added/modified, WRITE automated UI tests
      (e.g. in commonTest/androidTest) verifying layout math, interaction states, and user flows.
    - Run automated UI hierarchy assertions to ensure no sibling view bounds overlap and all text
