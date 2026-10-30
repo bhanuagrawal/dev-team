@@ -496,6 +496,21 @@ def print_page(project: Path, note: str = "", file=None,
 # orchestrator-facing deterministic commands
 # --------------------------------------------------------------------------- #
 
+def cmd_worktree_prune(args: argparse.Namespace) -> None:
+    project = resolve_project(args.project)
+    from team import worktrees
+    res = worktrees.prune(project, apply=getattr(args, "yes", False),
+                          force=getattr(args, "force", False), log=print)
+    verb = "removed" if res["applied"] else "removable"
+    print(f"\nWORKTREES — {len(res['removable'])} {verb} · {res['reclaimable_mb']} MB · "
+          f"{len(res['kept'])} kept")
+    for k in res["kept"]:
+        print(f"  = {k['task']}: {k['reason']}")
+    if not res["applied"] and res["removable"]:
+        print("  (dry run — re-run with --yes to remove)")
+    print_page(project, "shows the queue", file=sys.stderr)
+
+
 def cmd_worktree_start(args: argparse.Namespace) -> None:
     project = resolve_project(args.project)
     if not args.task_id:
@@ -783,6 +798,20 @@ def cmd_record(args: argparse.Namespace) -> None:
     from team import publish as publish_mod
     published = publish_mod.publish(project)
     print_page(project, "refreshed by this record", published=published)
+    # Housekeeping: a shipped run leaves its worktree merged into origin/main, and
+    # nothing else ever removed those. Warn-only, and it only ever touches trees
+    # whose commits landed (see team/worktrees.py).
+    if args.result == "shipped":
+        try:
+            from team import worktrees
+            pruned = worktrees.prune(project, apply=True)
+            if pruned["removed"]:
+                print(f"worktrees: removed {len(pruned['removed'])} merged tree(s), "
+                      f"~{pruned['reclaimable_mb']} MB reclaimed")
+            for k in pruned["kept"]:
+                print(f"worktrees: kept {k['task']} — {k['reason']}")
+        except Exception as e:  # cleanup must never fail a run
+            print(f"worktrees: prune skipped ({e})")
 
 
 def cmd_pick(args: argparse.Namespace) -> int:
@@ -1815,6 +1844,11 @@ def main() -> None:
     rh = sub.add_parser("run-headless"); rh.add_argument("project"); rh.add_argument("--task-spec", required=True); rh.add_argument("--supervised", action="store_true"); rh.set_defaults(fn=cmd_run_headless)
     ro = sub.add_parser("run-orchestrator"); ro.add_argument("project"); ro.add_argument("--prompt"); ro.add_argument("--timeout", type=int, default=5400); ro.set_defaults(fn=cmd_run_orchestrator)
     v = sub.add_parser("verify");      v.add_argument("project"); v.add_argument("--worktree"); v.add_argument("--task-spec"); v.add_argument("--skip-gradle", action="store_true"); v.set_defaults(fn=cmd_verify)
+    wp = sub.add_parser("worktree-prune", help="remove task worktrees whose work already landed (dry run unless --yes)")
+    wp.add_argument("project")
+    wp.add_argument("--yes", action="store_true", help="actually remove merged worktrees and their dt/ branches")
+    wp.add_argument("--force", action="store_true", help="also remove merged worktrees that still have uncommitted work")
+    wp.set_defaults(fn=cmd_worktree_prune)
     em = sub.add_parser("emulators");  em.add_argument("project"); em.add_argument("--record", action="store_true"); em.add_argument("--reset", action="store_true"); em.set_defaults(fn=cmd_emulators)
     r = sub.add_parser("release");     r.add_argument("project"); r.add_argument("--worktree", required=True); r.add_argument("--task-spec", required=True); r.set_defaults(fn=cmd_release)
     rec = sub.add_parser("record"); rec.add_argument("project")
