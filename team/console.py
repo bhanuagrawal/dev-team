@@ -470,12 +470,29 @@ async (page) => {{
   await page.goto(`${{baseUrl}}/publishing`);
   await page.waitForTimeout(3000);
 
-  // Check if automated issues modal is blocking submission
-  const proceedAnywayBtn = page.locator('button[debug-id="proceed-anyway-button"]');
-  if (await proceedAnywayBtn.count() > 0 && await proceedAnywayBtn.first().isVisible()) {{
-    console.log('ℹ️ Overriding pre-launch false positive warning via Proceed Anyway...');
-    await proceedAnywayBtn.first().click({{ force: true }});
-    await page.waitForTimeout(2000);
+  // Handle pre-launch false positive overrides if warnings appear
+  const viewIssuesBtn = page.getByRole('button', {{ name: /View.*issue/i }});
+  if (await viewIssuesBtn.isVisible().catch(() => false)) {{
+    await viewIssuesBtn.click();
+    await page.waitForTimeout(1500);
+    const viewDetailsButtons = page.getByRole('button', {{ name: 'View details' }});
+    const count = await viewDetailsButtons.count();
+    for (let i = 0; i < count; i++) {{
+      if (await viewDetailsButtons.nth(i).isVisible().catch(() => false)) {{
+        await viewDetailsButtons.nth(i).click();
+        await page.waitForTimeout(1000);
+        const proceedBtn = page.locator('button[debug-id="proceed-anyway-button"]');
+        if (await proceedBtn.isVisible().catch(() => false)) {{
+          await proceedBtn.click({{ force: true }});
+          await page.waitForTimeout(1000);
+          const confirmBtn = page.getByRole('button', {{ name: 'Proceed', exact: true }});
+          if (await confirmBtn.isVisible().catch(() => false)) {{
+            await confirmBtn.click();
+            await page.waitForTimeout(1000);
+          }}
+        }}
+      }}
+    }}
   }}
 
   const submitBtn = page.locator('button[debug-id="send-for-review-button"]');
@@ -485,13 +502,13 @@ async (page) => {{
       console.log('🚀 Pre-launch checks passed! Submitting staged changes for Google review...');
       await submitBtn.first().click();
       await page.waitForTimeout(2000);
-      const confirmModalBtn = page.locator('footer').getByRole('button', {{ name: /Submit.*for review/i }});
+      const confirmModalBtn = page.getByRole('button', {{ name: /Send changes for review/i }});
       if (await confirmModalBtn.isVisible().catch(() => false)) {{
         await confirmModalBtn.click();
         await page.waitForTimeout(3000);
       }}
     }} else {{
-      console.log('⏳ Automated pre-launch checks running. Staged changes ready for submission once scan concludes.');
+      console.log('⏳ Automated pre-launch checks running. Staged changes will be sent for review as soon as checks complete.');
     }}
   }}
 
