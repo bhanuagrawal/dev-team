@@ -1535,6 +1535,35 @@ def cmd_store_readiness(args: argparse.Namespace) -> int:
     return 0 if is_ready else 1
 
 
+def cmd_console(args: argparse.Namespace) -> int:
+    project = resolve_project(args.project)
+    from team.console import generate_console_setup_plan
+    plan = generate_console_setup_plan(project)
+    print(f"GOOGLE PLAY CONSOLE SETUP PLAN: {plan.get('project')}")
+    print("=" * 60)
+    print("\n[STORE LISTING PAYLOAD]")
+    sl = plan.get("store_listing", {})
+    print(f"  Title:              {sl.get('title') or '(not set)'}")
+    print(f"  Short description:  {sl.get('short_description') or '(not set)'}")
+    print(f"  Full description:   {sl.get('full_description_length', 0)} chars")
+    print(f"  Icon (512x512):     {'✓ Present' if sl.get('icon_present') else '✗ Missing'}")
+    print(f"  Banner (1024x500):  {'✓ Present' if sl.get('feature_graphic_present') else '✗ Missing'}")
+    print(f"  Screenshots:        {sl.get('screenshots_count', 0)} present")
+
+    print("\n[MANDATORY APP CONTENT DECLARATIONS]")
+    for dec in plan.get("declarations", []):
+        mark = "✓" if dec.get("status") == "ready" else "!"
+        print(f"  {mark} {dec.get('id'):<22}: {dec.get('value')}")
+
+    print("\n[CLOSED TESTING REQUIREMENT]")
+    ct = plan.get("closed_testing", {})
+    print(f"  Track:        {ct.get('track')}")
+    print(f"  Rule:         {ct.get('requirement')}")
+    print(f"  Google Group: {ct.get('group_email')}")
+    print("=" * 60)
+    return 0
+
+
 def main() -> None:
     ap = argparse.ArgumentParser(prog="devteam")
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -1664,6 +1693,9 @@ def main() -> None:
     sr.add_argument("project")
     sr.add_argument("--generate", action="store_true", help="generate missing storefront listing files, hosted privacy HTML, and starter assets")
     sr.set_defaults(fn=cmd_store_readiness)
+    cs = sub.add_parser("console", help="plan or drive Google Play Console setup")
+    cs.add_argument("project")
+    cs.set_defaults(fn=cmd_console)
 
     args = ap.parse_args()
     sys.exit(args.fn(args) or 0)
