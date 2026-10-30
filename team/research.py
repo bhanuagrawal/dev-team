@@ -1600,7 +1600,11 @@ def plan_report(project: Path, applied: bool = True) -> str:
     act = goals.active_milestone(profile, state) if goals_block else None
     queue = state.get("queue") or []
     lv = state.get("plan_review") or {}
-    head = str(lv.get("head") or (queue[0].get("label") if queue else ""))
+    # The handover must be the LIVE head. Reading the last review's recorded head
+    # first told the owner "THIS RUN BUILDS <yesterday's task>" while the queue
+    # had already moved (an auto-refill appended three entries underneath it) —
+    # the block contradicted the queue it was printing.
+    head = str(queue[0].get("label") or "") if queue else str(lv.get("head") or "")
     L = ["PLAN REVIEW — where this is going, and what the run does next"]
     if vision:
         L.append(f"  heading for:      {vision}")

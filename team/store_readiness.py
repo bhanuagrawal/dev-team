@@ -207,6 +207,17 @@ def run_store_readiness_audit(project: Path, tree: Path | None = None) -> list[R
     gradle_src = _strip_code_comments(combined_toml + "\n" + combined_gradle)
     constants_src = _convention_constants(src, combined_gradle)
 
+    # A version is often not a literal: it is read at build time
+    # (`System.getenv("VERSION_CODE")?.toIntOrNull() ?: 5`) so CI can bump it
+    # without editing the file. Reading only literals reported such an app as
+    # BLOCKED on Play ("versionCode is missing") while it was shipping on every
+    # release — the gate cried wolf and the real blockers hid behind it. When no
+    # literal is found, the expression's own numeric/string DEFAULT is the value
+    # the build resolves to, so that is what is checked; an expression with no
+    # default is left unresolved (still a real gap to report).
+    version_code_from_default = False
+    version_name_from_default = False
+
     for line in gradle_src.splitlines():
         if "versionCode" in line and not version_code:
             m = re.search(r"versionCode\s*(?:=\s*|\(\s*|\s+)(\d+)", line)
@@ -214,12 +225,22 @@ def run_store_readiness_audit(project: Path, tree: Path | None = None) -> list[R
                 m = re.search(r":\s*(\d+)\s*\)", line)
             if m:
                 version_code = int(m.group(1))
+            else:
+                m = re.search(r"\?\:\s*\(?\s*(\d+)\s*\)?\s*$", line)
+                if m:
+                    version_code = int(m.group(1))
+                    version_code_from_default = True
         if "versionName" in line and not version_name:
             m = re.search(r'versionName\s*(?:=\s*|\(\s*|\s+)["\']([^"\']+)["\']', line)
             if not m:
                 m = re.search(r':\s*["\']([^"\']+)["\']\s*\)', line)
             if m:
                 version_name = m.group(1)
+            else:
+                m = re.search(r'\?\:\s*["\']([^"\']+)["\']\s*\)?\s*$', line)
+                if m:
+                    version_name = m.group(1)
+                    version_name_from_default = True
         if "applicationId" in line and not app_id:
             m = re.search(r'applicationId\s*(?:=\s*|\(\s*|\s+)["\']([^"\']+)["\']', line)
             if m:
@@ -286,7 +307,9 @@ def run_store_readiness_audit(project: Path, tree: Path | None = None) -> list[R
             name="Version Code",
             passed=True,
             severity="INFO",
-            detail=f"versionCode: {version_code}",
+            detail=(f"versionCode: {version_code}"
+                    + (" (build-time default — the release step supplies the "
+                       "real number)" if version_code_from_default else "")),
         ))
     else:
         checks.append(ReadinessCheck(
@@ -304,7 +327,9 @@ def run_store_readiness_audit(project: Path, tree: Path | None = None) -> list[R
             name="Version Name",
             passed=True,
             severity="INFO",
-            detail=f"versionName: '{version_name}'",
+            detail=(f"versionName: '{version_name}'"
+                    + (" (build-time default — the release step supplies the "
+                       "real name)" if version_name_from_default else "")),
         ))
     else:
         checks.append(ReadinessCheck(
