@@ -1560,6 +1560,29 @@ def cmd_stitch_prompt(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_validate_design(args: argparse.Namespace) -> int:
+    project = resolve_project(args.project)
+    from team.design import compile_stitch_screen_prompt
+    from team.design_validator import audit_design_drift, format_drift_report
+    screen_type = getattr(args, "screen", "main")
+    prompt = compile_stitch_screen_prompt(project, screen_type=screen_type)
+
+    content = ""
+    target_file = getattr(args, "file", None)
+    if target_file and Path(target_file).is_file():
+        content = Path(target_file).read_text(errors="ignore")
+    else:
+        t_dir = project / ".pipeline/storefront_templates"
+        for candidate in (t_dir / f"{screen_type}.html", t_dir / "01_hero.html", project / "docs/design.md"):
+            if candidate.is_file():
+                content = candidate.read_text(errors="ignore")
+                break
+
+    report = audit_design_drift(project, prompt_text=prompt, generated_content=content, screen_name=screen_type)
+    print(format_drift_report(report))
+    return 0 if report.get("verdict") in ("PASS", "WARNING") else 1
+
+
 def cmd_console(args: argparse.Namespace) -> int:
     project = resolve_project(args.project)
     from team.console import generate_console_setup_plan, generate_playwright_script
@@ -1740,6 +1763,11 @@ def main() -> None:
     stp.add_argument("project")
     stp.add_argument("--screen", default="main", help="screen type: main, scoreboard, summary, setup")
     stp.set_defaults(fn=cmd_stitch_prompt)
+    vd = sub.add_parser("validate-design", help="audit Stitch-generated screens for drift against locked prompt specifications")
+    vd.add_argument("project")
+    vd.add_argument("--screen", default="scoreboard", help="screen type to audit (scoreboard, summary, setup)")
+    vd.add_argument("--file", help="path to generated screen HTML, DOM, or text file")
+    vd.set_defaults(fn=cmd_validate_design)
 
     args = ap.parse_args()
     sys.exit(args.fn(args) or 0)
