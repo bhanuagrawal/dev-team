@@ -60,6 +60,22 @@ def _provenance(project: Path) -> str:
                 return "stitch"
         except Exception:
             pass
+    # The render harness is a COMMITTED deliverable, so it is durable evidence the
+    # frames came from the app's own composables — the machine-local manifest above
+    # lives in .pipeline/ and never ships, which left every shipped listing capped
+    # at 70 as "unknown" no matter how good the screenshots were.
+    spec_file = project / "docs/storefront.json"
+    if spec_file.is_file():
+        try:
+            spec = json.loads(spec_file.read_text())
+        except Exception:
+            spec = {}
+        bound = [s for s in (spec.get("scenes") or [])
+                 if isinstance(s, dict) and str(s.get("composable") or "").strip()]
+        harness = list(project.glob("**/storefront/StorefrontScenes.kt")) + \
+            list(project.glob("**/storefront/StorefrontScreenshotsTest.kt"))
+        if len(bound) >= 2 and harness:
+            return "compose_preview"
     if (project / "docs/designs").is_dir() or (project / "docs/design.md").is_file():
         return "stitch"
     templates = project / ".pipeline/storefront_templates"
