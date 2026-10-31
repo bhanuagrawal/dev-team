@@ -2128,6 +2128,9 @@ def cmd_docs_audit(args: argparse.Namespace) -> int:
         # that survives besides them is a removal this tool refused to make — it
         # must still be reported, or "none" would be a lie.
         groups = docaudit.audit(root)
+    if getattr(args, "rules", False):
+        print(docaudit.format_rules(root))
+        return 0
     if getattr(args, "update_baseline", False):
         path = docaudit.save_baseline(root, docaudit.audit(root))
         print(f"~ baseline -> {path.relative_to(root)} ({len(docaudit.audit(root))} known overlap(s))")
@@ -2498,6 +2501,8 @@ def main() -> None:
     da.add_argument("--file", action="append",
                     help="scope to a doc (repeatable); a duplicate only counts when both copies are in scope")
     da.add_argument("--json", action="store_true", help="machine-readable report")
+    da.add_argument("--rules", action="store_true",
+                    help="rule coverage: which rules are code, which are still only prose, and what would retire each")
     da.add_argument("--new-only", action="store_true",
                     help="only overlaps this commit introduces (what the pre-commit hook blocks on)")
     da.add_argument("--update-baseline", action="store_true",

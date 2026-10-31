@@ -420,3 +420,51 @@ def new_overlaps(project: Path, groups: list[Group], staged: Iterable[str]) -> l
     touched = set(staged)
     return [g for g in groups
             if signature(g) not in known and any(m.file in touched for m in g.members)]
+
+
+# --------------------------------------------------------------------------- #
+# rule coverage: which rules are code, and which are still only prose
+# --------------------------------------------------------------------------- #
+RULES_REL = "scripts/rules.json"
+KINDS = ("code", "enforcible", "judgment", "reference")
+
+
+def load_rules(project: Path) -> list[dict[str, Any]]:
+    import json
+
+    path = project / RULES_REL
+    if not path.is_file():
+        return []
+    return (json.loads(path.read_text()) or {}).get("rules") or []
+
+
+def format_rules(project: Path) -> str:
+    """The conversion backlog: what is already code, and what could be.
+
+    This is the answer to "which prose should become code?" as data rather than an
+    opinion — every rule the team enforces gets a kind, and the `enforcible` ones
+    carry the proposal that would retire their prose.
+    """
+    rules = load_rules(project)
+    if not rules:
+        return f"RULE COVERAGE: no {RULES_REL}"
+    counts = {k: sum(1 for r in rules if r.get("kind") == k) for k in KINDS}
+    lines = [f"RULE COVERAGE: {len(rules)} rules — " +
+             ", ".join(f"{counts[k]} {k}" for k in KINDS if counts[k])]
+    lines.append("")
+    for kind in KINDS:
+        group = [r for r in rules if r.get("kind") == kind]
+        if not group:
+            continue
+        lines.append(f"  [{kind.upper()}]")
+        for r in group:
+            tail = r.get("enforced_by") or r.get("proposal") or r.get("note") or ""
+            lines.append(f"    {r['id']:<34} {r.get('doc', ''):<22} {tail}")
+        lines.append("")
+    todo = [r for r in rules if r.get("kind") == "enforcible"]
+    if todo:
+        lines.append(f"TO CONVERT: {len(todo)} prose rule(s) a command could enforce")
+        for r in todo:
+            lines.append(f"  • {r['rule']}")
+            lines.append(f"    → {r.get('proposal')}")
+    return "\n".join(lines).rstrip()

@@ -294,6 +294,35 @@ def run_doctor(project: Path, log) -> dict:
             "checks_passed": sum(1 for _, ok, _ in generic_checks if ok),
         }
 
+    # The project's CI is GENERATED from the team template (AGENTS.md #4). A copy
+    # that disagrees with its generator is a workflow nobody reviewed, and the next
+    # `ci --write` silently rewrites it — so the drift is invisible without this.
+    try:
+        from . import ci as ci_mod
+        target = project / ci_mod.WORKFLOW_REL
+        if not target.is_file():
+            checks = [("the canonical workflow exists", False,
+                       f"run: devteam ci {project.name} --write")]
+        else:
+            same = target.read_text() == ci_mod.render(project)
+            checks = [("the workflow matches the team template", same,
+                       f"run: devteam ci {project.name} --write (the project copy is generated, "
+                       f"never hand-edited)")]
+        bad = [(r, fix) for r, ok, fix in checks if not ok]
+        report["ci"] = {
+            "status": "ready" if not bad else "blocked",
+            "blocked": [{"requirement": r, "fix": fix} for r, fix in bad],
+            "checks_passed": len(checks) - len(bad),
+        }
+        for r, fix in bad:
+            log(f"doctor ci: BLOCKED — {r} ({fix})")
+        if not bad:
+            log("doctor ci: ready (workflow is the rendered template)")
+    except SystemExit as exc:  # profile cannot render CI at all
+        report["ci"] = {"status": "blocked", "blocked": [{"requirement": "ci renders", "fix": str(exc)}],
+                        "checks_passed": 0}
+        log(f"doctor ci: BLOCKED — {exc}")
+
     # Nothing may exist only on this disk (AGENTS.md). `status` reports the same
     # set: it is the detection half of the rule — the writer commits or parks
     # its own work, the team never commits the owner's WIP for them.
