@@ -909,6 +909,9 @@ def render_storefront_assets(
             "--headless",
             "--disable-gpu",
             "--hide-scrollbars",
+            # Screenshot after virtual time, so a webfont still loading is not
+            # silently swapped for the browser's default face.
+            "--virtual-time-budget=8000",
             f"--window-size={width},{height}",
             f"--screenshot={str(target_png.resolve())}",
             f"file://{str(src_file.resolve())}",

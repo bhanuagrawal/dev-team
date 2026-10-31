@@ -944,7 +944,12 @@ def compose_frames(project: Path, log: Any = None, force: bool = False) -> dict[
         try:
             subprocess.run(
                 [chrome, "--headless", "--disable-gpu", "--hide-scrollbars",
-                 "--force-device-scale-factor=1", f"--window-size={FRAME_W},{FRAME_H}",
+                 "--force-device-scale-factor=1",
+                 # Play the document in virtual time before capturing: without this
+                 # Chrome screenshots on `load`, and a Google Font that is still in
+                 # flight is replaced by the browser default (seen: a serif headline).
+                 "--virtual-time-budget=8000",
+                 f"--window-size={FRAME_W},{FRAME_H}",
                  f"--screenshot={out_png.resolve()}", html_file.resolve().as_uri()],
                 capture_output=True, text=True, timeout=60,
             )

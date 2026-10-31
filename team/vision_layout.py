@@ -316,6 +316,25 @@ def backdrop_css(backdrop: Path | None) -> str:
             "url(data:image/png;base64," + data + ") center/cover no-repeat;")
 
 
+def _font_stack(name: str, kind: str) -> str:
+    """A webfont WITH a fallback that keeps the poster's voice.
+
+    Chrome captures the frame when the document loads, and a Google Font that has
+    not arrived by then is silently replaced by the browser's default — observed as
+    a serif hero headline beside two sans-serif ones in the same listing, from a
+    single failed font fetch. The fallback is a similar face, never `serif`.
+    """
+    name = (name or "").strip().strip("'\"")
+    if not name:
+        return {"mono": "ui-monospace, SFMono-Regular, monospace",
+                "display": "'Arial Narrow', Impact, Haettenschweiler, sans-serif",
+                "body": "system-ui, -apple-system, Arial, sans-serif"}[kind]
+    tail = {"mono": "ui-monospace, SFMono-Regular, monospace",
+            "display": "'Arial Narrow', Impact, Haettenschweiler, sans-serif",
+            "body": "-apple-system, system-ui, Arial, sans-serif"}[kind]
+    return f"'{name}', {tail}"
+
+
 def render_html(project: Path, scene: dict[str, Any], screen_png: Path,
                 layout: dict[str, Any], backdrop: Path | None = None) -> str:
     from .design import extract_design_tokens
@@ -324,9 +343,12 @@ def render_html(project: Path, scene: dict[str, Any], screen_png: Path,
     L = _stack_text(L, scene)
     p = L["palette"]
     ph = L["phone"]
+    label_font = _font_stack(tokens.get("label_font", ""), "mono")
+    body_font = _font_stack(tokens.get("body_font", ""), "body")
+    head_font = _font_stack(tokens.get("headline_font", ""), "display")
     chips = "".join(
         f'<span data-slot="chip" style="position:absolute;left:{c["x"]}px;top:{c["y"]}px;'
-        f'font-family:{tokens.get("label_font", "monospace")};font-size:20px;'
+        f'font-family:{label_font};font-size:20px;'
         f'letter-spacing:.14em;text-transform:uppercase;color:{p["accent"]};'
         f'border:1px solid {p["accent"]}55;padding:8px 14px;border-radius:6px">'
         f'{c.get("text", "")}</span>'
@@ -348,7 +370,7 @@ def render_html(project: Path, scene: dict[str, Any], screen_png: Path,
   html, body {{ width: {CANVAS_W}px; height: {CANVAS_H}px; overflow: hidden; }}
   .poster-canvas {{ position: relative; width: {CANVAS_W}px; height: {CANVAS_H}px;
     background: {p["background"]}; color: {p["text"]};
-    font-family: {tokens.get("body_font", "sans-serif")}; }}
+    font-family: {body_font}; }}
   .aura {{ position: absolute; left: {ph["x"] - 260}px; top: {ph["y"] - 260}px;
     width: {SCREEN_W + 520}px; height: {SCREEN_H + 520}px; border-radius: 50%;
     background: radial-gradient(circle, {p["accent"]}22 0%, transparent 62%); }}
@@ -361,9 +383,9 @@ def render_html(project: Path, scene: dict[str, Any], screen_png: Path,
 </style></head>
 <body><div class="poster-canvas">
   {('<div class="plate" style="' + backdrop_css(backdrop) + '"></div>') if backdrop else '<div class="aura"></div>'}
-  {block("badge", "span", 700, tokens.get("label_font", "monospace"), "letter-spacing:.16em;text-transform:uppercase;")}
-  {block("headline", "h1", 700, tokens.get("headline_font", "sans-serif"))}
-  {block("sub", "p", 400, tokens.get("body_font", "sans-serif"))}
+  {block("badge", "span", 700, label_font, "letter-spacing:.16em;text-transform:uppercase;")}
+  {block("headline", "h1", 700, head_font)}
+  {block("sub", "p", 400, body_font)}
   {chips}
   <div class="bezel"><img id="{SCREEN_ID}" width="{SCREEN_W}" height="{SCREEN_H}"
     src="data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='{SCREEN_W}' height='{SCREEN_H}'><rect width='{SCREEN_W}' height='{SCREEN_H}' fill='%23101010'/></svg>"
