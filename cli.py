@@ -1781,6 +1781,7 @@ def cmd_storefront_scenes(args: argparse.Namespace) -> int:
                 getattr(args, "frame", False), getattr(args, "status", False),
                 getattr(args, "review", False), getattr(args, "frames", False),
                 getattr(args, "design_frame", None), getattr(args, "adopt_frame", None),
+                getattr(args, "vision_frame", None),
                 getattr(args, "assign", None)]):
         do_all = True
 
@@ -1922,6 +1923,50 @@ def cmd_storefront_scenes(args: argparse.Namespace) -> int:
             print("    check each one: a poster may not advertise a feature the app does not have")
         print(f"  assign it: devteam storefront-scenes {args.project} --assign <scene>={args.adopt_frame}")
 
+    if getattr(args, "vision_frame", None):
+        from team import storefront_frames as sfr
+        from team import vision_layout as vl
+        spec = sp.load_spec(project, create=False)
+        scenes = spec.get("scenes") or []
+        want = getattr(args, "frame_scene", None)
+        scene = next((s for s in scenes if str(s.get("id")) == str(want)), None) if want else None
+        if scene is None and not want and scenes:
+            scene = scenes[0]
+        if scene is None:
+            print(f"  ✗ no scene {want!r} in {sp.SPEC_REL}")
+            return 1
+        png = project / ".pipeline/storefront_scenes" / f"{scene.get('id')}.png"
+        if not png.is_file():
+            print(f"  ✗ no render at {png.relative_to(project)} — run --render first")
+            return 1
+        layout_file = getattr(args, "layout", None)
+        if layout_file:
+            layout = json.loads(Path(layout_file).read_text())
+            print(f"~ layout from {layout_file}")
+        else:
+            print(f"~ asking the vision model to compose around {png.name}")
+            layout = vl.propose(project, scene, png, brief=getattr(args, "brief", "") or "",
+                                log=print)
+        staged = project / ".pipeline/storefront_frames" / f"vision-{args.vision_frame}.html"
+        vl.render_to(project, scene, png, layout, staged)
+        res = sfr.adopt(project, args.vision_frame, staged.read_text(),
+                        source=f"vision:{vl.config()['model']}", force=getattr(args, "force", False))
+        if res.get("status") != "OK":
+            print(f"VISION FRAME: {res.get('status')}")
+            for issue in res.get("issues") or []:
+                print(f"  ✗ {issue}")
+            if res.get("error"):
+                print(f"  ✗ {res['error']}")
+            return 1
+        m = res.get("measured") or {}
+        slot = m.get("slot") or [0, 0, 0, 0]
+        print(f"VISION FRAME: OK — {res['file']}")
+        print(f"  slot {slot[2]}x{slot[3]} at {slot[0]},{slot[1]} · object-fit {m.get('fit')}")
+        for problem in res.get("invented") or []:
+            print(f"  ⚑ {problem}")
+        print(f"  layout JSON: re-run with --layout <file> to hand-tune and re-adopt")
+        print(f"  assign it: devteam storefront-scenes {args.project} --assign {scene.get('id')}={args.vision_frame}")
+
     if getattr(args, "frames", False):
         from team import storefront_frames as sfr
         print(sfr.format_status(sfr.status(project)))
@@ -1953,7 +1998,8 @@ def cmd_storefront_scenes(args: argparse.Namespace) -> int:
     # origin-anchored worktree, so the owner's unrelated WIP is never swept in.
     wrote = any([do_all, getattr(args, "scaffold", False), getattr(args, "render", False),
                  getattr(args, "frame", False), getattr(args, "adopt_frame", None),
-                 getattr(args, "assign", None), getattr(args, "review", False)])
+                 getattr(args, "assign", None), getattr(args, "review", False),
+                 getattr(args, "vision_frame", None)])
     if wrote:
         from team import storefront_frames as sfr
         from team.publish import commit_paths
@@ -2306,6 +2352,10 @@ def main() -> None:
                      help="compile the Stitch prompt for a new frame composition (writes .pipeline/storefront-frame-prompt-NAME.txt)")
     sfp.add_argument("--brief", metavar="TEXT", help="with --design-frame: the composition brief (layout idea, focal point, mood)")
     sfp.add_argument("--frame-scene", metavar="ID", help="with --design-frame: author the frame around this scene's copy (default: first scene)")
+    sfp.add_argument("--vision-frame", metavar="NAME",
+                     help="let the configured VISION LLM read the render and compose the layout, then verify + adopt it as a frame")
+    sfp.add_argument("--layout", metavar="PATH",
+                     help="with --vision-frame: render from a hand-edited layout JSON instead of asking the model")
     sfp.add_argument("--adopt-frame", metavar="NAME",
                      help="verify a Stitch-authored HTML poster and commit it as docs/frames/NAME.html")
     sfp.add_argument("--frame-html", metavar="PATH", help="with --adopt-frame: the saved Stitch HTML file")

@@ -363,10 +363,21 @@ def _set_screen_src(html: str, uri: str) -> str:
         return html
     start, end = span
     tag = html[start:end]
-    if re.search(r"\bsrc\s*=\s*[\"'][^\"']*[\"']", tag):
-        tag = re.sub(r"(\bsrc\s*=\s*)[\"'][^\"']*[\"']", lambda m: f'{m.group(1)}"{uri}"', tag, count=1)
-    else:
+    # Find the END of the src value by matching its quote, not by a character class:
+    # a `data:image/svg+xml;utf8,<svg ...>` placeholder contains both quote styles,
+    # so `[^"']*` stops inside the value and leaves the tail of the tag as garbage.
+    m = re.search(r"\bsrc\s*=\s*", tag)
+    if not m:
         tag = tag[:-1].rstrip() + f' src="{uri}">'
+    else:
+        i = m.end()
+        quote = tag[i] if i < len(tag) and tag[i] in "\"'" else '"'
+        i = i + 1 if i < len(tag) and tag[i] in "\"'" else i
+        j = tag.find(quote, i)
+        if j < 0:
+            tag = tag[:-1].rstrip() + f' src="{uri}">'
+        else:
+            tag = tag[:i] + uri + tag[j:]
     return html[:start] + tag + html[end:]
 
 
