@@ -140,7 +140,6 @@ agentconfig.env`) — without it `doctor` correctly reports the agents blocked
   (model choices) and project `profile.json` `targets` stay owner-approved —
   do not change either for them; propose instead. When in doubt whether a fix
   is generic enough, keep it out of team code and put it in the skill prose.
-- Never hand-edit `.pipeline/state.json` — write via `devteam record`.
 - The ONLY delivery goal is CI → Play **internal testing** (the version-bump
   push triggers the project's CI). Production promotion is human-only: no path
   in this team, and never an owner ask or a filed issue — the owner promotes
@@ -753,7 +752,11 @@ The owner may ask for ONE agent only, and that must work:
 - "store readiness" / "check store compliance" / "researcher store readiness" →
   The researcher automatically ingests full Play Store compliance data under `signals.store_readiness` in `.pipeline/research.json` and `.pipeline/research-prompt.txt`. If blockers exist, the researcher prioritizes compliance tasks before discretionary features, and capability upgrades flag outstanding policy items. Standalone audit: `python3 <team>/cli.py store-readiness <project>`.
 - "replace the store screenshots" / "store assets" / "the listing shows X" →
-  Four steps, in this order, and none of them is optional:
+  **Run `devteam storefront-build <project>` — the whole pass, in the only order that
+  works.** It renders the app's own composables from origin/main, refuses to continue
+  without the editorial review, composes the poster (Gemini plate → vision/Stitch
+  layout), composites the reviewed order, gates on the critic, and prints the upload
+  command. Run the steps individually only to debug one of them:
   1. **Render** from the app's own composables: `python3 <team>/cli.py storefront-scenes <project> --render`
      (never hand-drawn HTML; the scene spec is the project's `docs/storefront.json`).
   2. **Editorial review — an LLM decides, not the filenames.**
@@ -763,9 +766,14 @@ The owner may ask for ONE agent only, and that must work:
      it is committed as `docs/storefront-review.json`. Two policy rules override any model:
      **a monetization surface (paywall/purchase/subscription/upgrade/price) never ships**, and every
      kept frame must be ranked (an unranked scene is cut, never silently shipped).
-  3. **Frame in ranked order**: `--frame` writes `01_<slug>.png` … and removes pipeline-owned
-     frames the review cut. The critic (`store-assets`) fails a listing that still carries a
-     monetization frame, `icon = null`/flat placeholder tiles, or an order that disagrees with the review.
+  3. **Compose, then frame in ranked order**: the poster is a DESIGNED deliverable. The plate
+     comes from Gemini in the browser (`--gemini`, or `--gemini-brief` by hand); the composition
+     comes from the vision model (`--vision-frame`/`--layout`) or Stitch (`--design-frame` →
+     `--adopt-frame`). `--frame` then writes `01_<slug>.png` … and removes pipeline-owned frames
+     the review cut. `--builtin` ships the plain template and must be passed DELIBERATELY — it is
+     never the fallback, and `storefront-build` refuses rather than default to it. The critic
+     (`store-assets`) fails a listing that still carries a monetization frame, `icon = null`/flat
+     placeholder tiles, or an order that disagrees with the review.
   4. **Publish — API for the upload, BROWSER for the publish.** `devteam store-publish <project>`
      (dry run) / `--yes` uploads icon + feature graphic + screenshots in the editorial order,
      commits the edit, and reads the bytes back through a fresh edit. That is where the API

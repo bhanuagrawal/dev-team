@@ -1,0 +1,37 @@
+#!/bin/sh
+# The team's procedure is written in three documents, and a duplicate is how a
+# step gets skipped: the older copy survives, an agent follows it, and the newer
+# rule never runs. (Observed: a storefront frame shipped from the builtin template
+# while the contract and the lessons both required a composed one.)
+#
+# Newest text is the source of truth, so on every commit that touches a doc:
+#   1. remove the OLDER copy of an overlap that is provably a pure restatement
+#      (safe only where the line is a whole statement — never mid-sentence),
+#   2. BLOCK when this commit introduces a NEW overlap.
+# Overlaps that already existed are recorded in scripts/docs_overlap_baseline.json;
+# they cannot be deleted mechanically without breaking the prose around them, so
+# they are listed by `devteam docs-audit` for a human to resolve, one at a time.
+set -e
+
+cd "$(git rev-parse --show-toplevel)"
+
+DOCS="AGENTS.md README.md skills/dev-team/SKILL.md"
+if [ -z "$(git diff --cached --name-only -- $DOCS)" ]; then
+    exit 0
+fi
+
+LOG="$(mktemp)"
+if python3 cli.py docs-audit --fix >"$LOG" 2>&1; then :; fi
+if ! git diff --quiet -- $DOCS; then
+    cat "$LOG"
+    git add $DOCS 2>/dev/null || true
+fi
+rm -f "$LOG"
+
+if ! python3 cli.py docs-audit --check --new-only; then
+    echo "" >&2
+    echo "pre-commit: this commit introduces a NEW overlap in the team docs." >&2
+    echo "Two documents now state the same requirement, so one of them will drift." >&2
+    echo "Delete the older copy (newest text wins) and commit again." >&2
+    exit 1
+fi

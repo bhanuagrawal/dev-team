@@ -431,12 +431,15 @@ def gemini_backdrop_prompt(project: Path, scene: dict[str, Any] | None = None,
     base = tokens.get("surface_base", "#0D0D0D")
     accent = tokens.get("primary_accent", "#E8442A")
     focus = brief.strip() or "lower right"
+    # The glow is the BRAND's glow. It used to be the literal words "deep-red",
+    # which was one project's palette baked into a generic prompt: every other app
+    # got a red halo under its teal/purple/blue accent (observed on a teal app).
     return (
         f"Create a plain vertical BACKGROUND PLATE, 9:16 portrait, for a Google Play "
         f"store screenshot of {product_name(project)}. Fill the whole frame with a "
-        f"near-black background ({base}), one subtle deep-red radial glow towards the "
-        f"{focus}, soft diagonal light streaks from the opposite corner, very fine film "
-        f"grain and a faint vignette. The accent colour is {accent}.\n\n"
+        f"near-black background ({base}), one subtle radial glow in the brand accent "
+        f"({accent}) towards the {focus}, soft diagonal light streaks from the opposite "
+        f"corner, very fine film grain and a faint vignette. The accent colour is {accent}.\n\n"
         "It must be completely empty: NO text, NO letters, NO phone, NO app interface, "
         "NO icons, NO logos, NO sparkles, NO products. Just an abstract dark backdrop. "
         "Keep the bottom-right corner plain and dark.\n\n"

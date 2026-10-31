@@ -2048,6 +2048,84 @@ def cmd_storefront_scenes(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_storefront_build(args: argparse.Namespace) -> int:
+    """One command, one order, no skippable steps — see team/storefront_build.py."""
+    project = resolve_project(args.project)
+    from team.core import delivery_notice
+    from team import storefront_build as sb
+
+    print(delivery_notice(project))
+    res = sb.build(
+        project, frame=args.frame, plate=args.plate, gemini=args.gemini,
+        layout=args.layout, frame_html=args.frame_html, stitch_source=args.stitch_source,
+        brief=args.brief, builtin=args.builtin, force=args.force,
+        publish=args.publish, log=print,
+    )
+    if res.get("status") != "OK":
+        print(f"STOREFRONT BUILD: {res.get('status')}")
+        print(f"  ✗ {res.get('error')}")
+        if res.get("hint"):
+            print(f"  → {res['hint']}")
+        return 1
+    print(f"STOREFRONT BUILD: OK — composition {res.get('frame')}, critic {res.get('score')}/100")
+    print(f"  order: {', '.join(res.get('order') or [])}")
+    if res.get("publish") is not None:
+        pub = res["publish"]
+        print(f"  publish: {pub.get('status')} {pub.get('error') or ''}".rstrip())
+    else:
+        print(f"  next: devteam store-publish {args.project} --yes   (upload + commit the listing)")
+    return 0
+
+
+def cmd_docs_audit(args: argparse.Namespace) -> int:
+    """The team's procedure documents must not state the same rule twice.
+
+    `--fix` deletes the OLDER copy (git-blame order), because the newest commit is
+    the source of truth; a contradiction is never auto-removed — the two sentences
+    disagree, so somebody has to decide which one is right.
+    """
+    import json as _json
+
+    from team import docaudit
+
+    root = Path(__file__).resolve().parent
+    scoped = getattr(args, "file", None)
+    groups = docaudit.audit(root, files=scoped)
+    if getattr(args, "new_only", False):
+        from team.core import run as _run
+
+        staged = [ln[3:] for ln in (_run(["git", "diff", "--cached", "--name-only"],
+                                         root, timeout=60).stdout or "").splitlines() if ln]
+        groups = docaudit.new_overlaps(root, groups, staged)
+    exited = 0
+    if getattr(args, "fix", False):
+        doomed = docaudit.plan_removals(root, groups)
+        removed = docaudit.apply_removals(root, doomed) if doomed else []
+        for r in removed:
+            print(f"  − {r['file']}:{r['line']}  {r['text']}")
+        if removed:
+            print(f"  removed {len(removed)} superseded statement(s); newest text kept")
+        # Re-audit after removal. Contradictions always survive a fix, and anything
+        # that survives besides them is a removal this tool refused to make — it
+        # must still be reported, or "none" would be a lie.
+        groups = docaudit.audit(root)
+    if getattr(args, "update_baseline", False):
+        path = docaudit.save_baseline(root, docaudit.audit(root))
+        print(f"~ baseline -> {path.relative_to(root)} ({len(docaudit.audit(root))} known overlap(s))")
+        return 0
+    if getattr(args, "json", False):
+        print(_json.dumps([
+            {"kind": g.kind, "subject": g.subject,
+             "keep": {"file": g.newest.file, "line": g.newest.line, "text": g.newest.text},
+             "older": [{"file": m.file, "line": m.line, "text": m.text} for m in g.older]}
+            for g in groups], indent=2))
+    else:
+        print(docaudit.format_report(root, groups))
+    if groups and (getattr(args, "check", False) or not getattr(args, "fix", False)):
+        exited = 1
+    return exited
+
+
 def cmd_store_assets(args: argparse.Namespace) -> int:
     project = resolve_project(args.project)
     from team.core import delivery_notice
@@ -2373,6 +2451,34 @@ def main() -> None:
     sa.add_argument("--generate", action="store_true", help="synthesize marketing HTML templates and render PNG assets to distribution/listing/en-US/images")
     sa.add_argument("--render-only", action="store_true", help="render existing HTML templates to PNGs without regenerating templates")
     sa.set_defaults(fn=cmd_store_assets)
+    sb = sub.add_parser("storefront-build",
+                        help="THE storefront asset pass: render, compose the designed frame, composite, gate, publish — in one deterministic order")
+    sb.add_argument("project")
+    sb.add_argument("--frame", default="hero", help="name of the frame composition to adopt (default: hero)")
+    sb.add_argument("--plate", help="backdrop plate PNG painted by Gemini (browser) or another image model")
+    sb.add_argument("--gemini", action="store_true", help="paint the plate in Gemini through the owner's Chrome (browser-control)")
+    sb.add_argument("--layout", help="layout JSON from a previous run (re-run deterministically instead of asking the model)")
+    sb.add_argument("--frame-html", help="Stitch-authored frame HTML to adopt instead of composing with the vision model")
+    sb.add_argument("--stitch-source", default="", help="with --frame-html: the Stitch screen it came from")
+    sb.add_argument("--brief", default="", help="composition brief handed to the vision model / plate prompt")
+    sb.add_argument("--builtin", action="store_true", help="ship the plain builtin template DELIBERATELY (never a fallback)")
+    sb.add_argument("--publish", action="store_true", help="upload + commit the listing after the gates pass")
+    sb.add_argument("--force", action="store_true", help="replace an existing composition")
+    sb.set_defaults(fn=cmd_storefront_build)
+    da = sub.add_parser("docs-audit",
+                        help="find the team's own docs stating the same requirement twice; newest wins, older copy removed")
+    da.add_argument("--fix", action="store_true",
+                    help="remove the older copy of every overlap (contradictions are reported, never removed)")
+    da.add_argument("--check", action="store_true",
+                    help="exit non-zero when any overlap exists (the pre-commit hook's mode)")
+    da.add_argument("--file", action="append",
+                    help="scope to a doc (repeatable); a duplicate only counts when both copies are in scope")
+    da.add_argument("--json", action="store_true", help="machine-readable report")
+    da.add_argument("--new-only", action="store_true",
+                    help="only overlaps this commit introduces (what the pre-commit hook blocks on)")
+    da.add_argument("--update-baseline", action="store_true",
+                    help="record the current overlaps as known (after resolving one)")
+    da.set_defaults(fn=cmd_docs_audit)
     sfp = sub.add_parser("storefront-scenes",
                          help="render REAL app composables to Play screenshots via Compose preview (no emulator)")
     sfp.add_argument("project")
