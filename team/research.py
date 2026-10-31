@@ -715,16 +715,6 @@ def research_collect(project: Path, log: RunLog) -> dict:
             "ci": _ci_pull(project, profile),
         },
         "constraints": {
-            "frozen_paths_count": len(profile.get("frozen_paths", [])),
-            # The freeze must be DATA the planner can check a target against —
-            # a count tells it how many paths exist but not which, so an entry
-            # whose target sits under an un-lifted frozen path looks buildable
-            # right up to the developer's scope gate, which then blocks the run.
-            "frozen_paths": profile.get("frozen_paths", []),
-            "lifted_paths": sorted({
-                p for lift in (profile.get("constraint_lifts") or [])
-                for p in (lift.get("paths") or [])
-            }),
             "max_queue": MAX_QUEUE,
             "standing_decisions": profile.get("standing_decisions", []),
             "policy": ("respect the freeze: no new domain features without owner "
@@ -885,15 +875,7 @@ Rules:
   store's own billing, which still charges its commission), and does this app
   need what the layer adds yet? Project-internal modules (`project(":design")`)
   are not dependencies in this sense and need no declaration.
-- THE FREEZE IS DATA, NOT A COUNT: `constraints.frozen_paths` lists the paths an
-  agent may NOT change and `constraints.lifted_paths` lists the ones the owner has
-  already exempted. Check every entry's `target` against them BEFORE you queue it.
-  An entry whose target sits under an un-lifted frozen path is NOT buildable — the
-  developer's scope gate rejects it and the run ends blocked, not shipped. Do not
-  queue it: file an `issues_to_file` asking the owner for the lift (name the exact
-  path, why the work needs it, and the cost of not acting) and queue the best
-  freeze-clean step toward the SAME milestone instead. Never invent a lift — only
-  the owner records one in the profile.
+
 - Buildability bias: the pipeline must be able to END EVERY RUN IN A BUILD.
   Queue executable work (motion/bugfix/feature) first; investigations are
   capped at 2 entries and each MUST, in its "reason", name the owner decision
@@ -984,33 +966,6 @@ def _extract_json(text: str) -> dict:
     return json.loads(raw[start:end + 1])
 
 
-def _frozen_target_hit(target: str, frozen: list[str], lifted: list[str]) -> str | None:
-    """(frozen pattern hit, or None). Plan-time guard for the freeze.
-
-    The planner prompt TELLS the agent never to queue work under an un-lifted
-    frozen path, but nothing enforced it: a bogus entry sat in the queue and the
-    developer's scope gate only rejected it a whole run later, so a release ended
-    BLOCKED instead of shipped. Targets are allow-list globs, not real files, so
-    this is deliberately conservative — it catches the concrete, common case of a
-    target that IS a frozen path or sits directly under one (including a
-    './'-prefixed top-level spelling, which slips past a naive string compare),
-    and leaves the general "could this glob expand onto a frozen file?" question
-    to the scope gate at verify time, where the real changed-file list exists.
-    """
-    import fnmatch
-    for item in str(target or "").split(","):
-        norm = item.strip()
-        if norm.startswith("./"):
-            norm = norm[2:]
-        if not norm:
-            continue
-        for pat in frozen:
-            if (fnmatch.fnmatch(norm, pat) or norm == pat) \
-                    and not any(fnmatch.fnmatch(norm, lp) for lp in lifted):
-                return pat
-    return None
-
-
 def _validate(result: dict, research: dict | None = None) -> str | None:
     if "queue" not in result or not isinstance(result["queue"], list):
         return "missing list 'queue'"
@@ -1098,8 +1053,7 @@ def _validate(result: dict, research: dict | None = None) -> str | None:
             )
         # The freeze is DATA the planner is told to respect — now enforced in code
         # too, so a frozen target fails the PLAN instead of riding in the queue to
-        # block a whole later run at the developer's scope gate.
-        if research is not None and q.get("type") in ("feature", "bugfix"):
+        # block a whole later run at the developer's scope gate.        if research is not None and q.get("type") in ("feature", "bugfix"):
             cons = research.get("constraints") or {}
             hit = _frozen_target_hit(q.get("target") or "",
                                      cons.get("frozen_paths") or [],

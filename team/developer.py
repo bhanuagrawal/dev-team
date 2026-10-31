@@ -258,28 +258,6 @@ def build_prompt(project: Path, profile: dict, task: dict, task_paths: list[str]
         research_ctx = goal_txt + ("\n" + research_ctx if research_ctx else "")
     n_locales = profile.get("locales") or \
         "the skill set of locale strings.xml files shipped by this project"
-    # Owner-recorded scope widening (profile['constraint_lifts']). The ENGINE
-    # exempts these paths from the frozen gate (verify.scope_check), so the
-    # PROMPT must say so too — otherwise the developer is told that a file the
-    # task must edit is "hard-blocked and will be REJECTED", and a compliant
-    # agent stops. Same source of truth as the gate: the profile.
-    lifted, decisions = [], []
-    for lift in profile.get("constraint_lifts", []) or []:
-        lifted += [str(p) for p in lift.get("paths", [])]
-        if lift.get("decided_by"):
-            decisions.append(str(lift["decided_by"]))
-    frozen_txt = "\n  - ".join(profile["frozen_paths"])
-    if lifted:
-        frozen_txt += (
-            "\n  OWNER-APPROVED LIFT for THIS task — the paths below are NOT blocked "
-            "here; move/edit them as the task requires (verify already exempts "
-            "them):\n  - " + "\n  - ".join(lifted)
-            + ("\n  (decided_by: " + "; ".join(decisions) + ")" if decisions else "")
-            + "\n  The lift is PERMISSION, not instruction: touch a lifted path ONLY "
-              "if this task genuinely needs it. A lifted file in the diff that this "
-              "task did not require (a pin/wrapper/dependency bump for an unrelated "
-              "reason) fails the run."
-        )
     conventions = [_annotate_path(str(p)) for p in profile.get("conventions", [])]
     missing = [c for c in conventions if _MISSING_MARK in c]
     if missing:
@@ -294,7 +272,7 @@ def build_prompt(project: Path, profile: dict, task: dict, task_paths: list[str]
         theme=profile["theme_dir"],
         target_area="\n  - ".join(task_paths),
         allowed_paths="\n  - ".join(profile["allowed_paths"]),
-        frozen_paths=frozen_txt,
+        frozen_paths="",
         compile_cmd=v["compile"],
         test_cmd=v.get("test", "(skip; profile defines no test gate)"),
         conventions="\n  - ".join(conventions),

@@ -156,8 +156,11 @@ agentconfig.env`) — without it `doctor` correctly reports the agents blocked
   READS that file and reports it, and must never rewrite it (a curated note was
   silently replaced by generated boilerplate on 2026-10-23).
 - Never push with red gates. `devteam verify` must PASS before `devteam release`.
-- Frozen paths from the project profile are absolute — if a task seems to
-  require them, stop and mark the task blocked instead.
+- **File freezes are RETIRED (owner directive 2026-10-31).** There is no
+  `frozen_paths` gate: scope is the task's allow-list, the release knobs
+  (version/signing/SDK) are checked value-by-value, and a new dependency must be
+  declared in the spec. If a real incident later needs a freeze, define a narrow
+  rule then — do not reintroduce whole-file freezes pre-emptively.
 - **Emulators are torn down, never abandoned.** A run that needs an AVD records
   a start-of-run baseline (`cli.py emulators <project> --record --reset`;
   `run-headless`/`run-orchestrator` do this automatically) and checks it at run
@@ -195,7 +198,7 @@ agentconfig.env`) — without it `doctor` correctly reports the agents blocked
 - team code/scripts:  `<this skill's dir>/../..`  (the dev-team repo)
 - project state:      `<project>/.pipeline/state.json`   (source of truth)
 - project profile:    `<project>/.pipeline/profile.json` (project facts incl.
-                      frozen paths, verify commands, reference screen/pickers)
+                      verify commands, reference screen/pickers)
 - run logs:           `<project>/.pipeline/runs/<run_id>.log`
 - task specs:         `<project>/.pipeline/tasks/<task_id>.json`
 
@@ -478,7 +481,7 @@ never silently blocking.
        - Read mandatory style/design docs (`docs/design.md`, `profile.conventions`, official Google skills).
        - Edit ONLY files under the task's allow-list (`surface.targets`). NEVER edit on `main` directly.
        - UI/UX Excellence & Hierarchy Assertions: design for the real-world physical context of use (glanceability from 15ft, outdoor glare, one-handed reachability). Never ship raw wireframe/canvas prototypes or flat unstyled low-contrast text. Use cohesive design tokens (high-contrast palette, tabular display typography, modern squircles 16-24dp, tactile press feedback) and complete lifecycle states (empty guidance, active interaction, frictionless undo recovery, repeat/rematch loops). Whenever adding or modifying UI screens, components, or interactive flows, write automated UI tests (in the project's test set, e.g. `commonTest` or `androidTest`) verifying layout math, interaction states, and user flows. Run automated UI hierarchy assertions to ensure no sibling view bounds overlap and all text container dimensions fully enclose their measured text bounds.
-       - Never touch frozen paths or release knobs (versionName, versionCode, signing, targetSdk).
+       - Never touch release knobs (versionName, versionCode, signing, targetSdk).
        - Test incrementally inside the worktree using the project's verify commands (e.g. `gradle compileDebugKotlinAndroid testDebugUnitTest`). Failure to run an on-device runner (no AVD/emulator) is non-blocking (warn-only), but any failure of the test assertions themselves is a hard blocker.
        - If you encounter a build or test error, diagnose and resolve it directly in the worktree.
    (B) SUBAGENT DELEGATION (Optional fallback when supported and conserving orchestrator context):
@@ -743,7 +746,7 @@ The owner may ask for ONE agent only, and that must work:
 - "store readiness" / "check store compliance" / "researcher store readiness" →
   The researcher automatically ingests full Play Store compliance data under `signals.store_readiness` in `.pipeline/research.json` and `.pipeline/research-prompt.txt`. If blockers exist, the researcher prioritizes compliance tasks before discretionary features, and capability upgrades flag outstanding policy items. Standalone audit: `python3 <team>/cli.py store-readiness <project>`.
 Rule: honor the narrower scope exactly — no pipeline chaining — except the
-non-negotiables (never commit on red gates; never touch frozen paths; never
+non-negotiables (never commit on red gates; never touch release knobs; never
 hand-edit state.json; MODE-B gates still asked). State a one-line report of
 what you did and did not chain.
 

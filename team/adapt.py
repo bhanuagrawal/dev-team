@@ -63,10 +63,9 @@ DEFAULTS = {
     "conventions": [],
     "targets": [],
     "goals": {"vision": "", "milestones": []},
-    "constraint_lifts": [],
     "connections": {},
 }
-CRITICAL = ("repo_slug", "main_branch", "verify", "allowed_paths", "frozen_paths")
+CRITICAL = ("repo_slug", "main_branch", "verify", "allowed_paths")
 
 
 def _state_defaults(state: dict) -> list[str]:

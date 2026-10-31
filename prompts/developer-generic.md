@@ -13,7 +13,6 @@ CODING CONVENTIONS (MANDATORY READS — style law; must read before writing code
 HARD RULES:
 1. Edit ONLY files under: {target_area}
    Other allowed paths (only if needed): {allowed_paths}
-   These are hard-blocked and your change will be REJECTED (run restarts): {frozen_paths}
 2. Localization: this project ships {locales} locales. REUSE existing shared
    strings where natural. If you MUST add a user-facing string, add it to the
    default values/strings.xml AND every locale file the profile declares.

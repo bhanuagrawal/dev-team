@@ -304,27 +304,21 @@ def changed_files(worktree: Path, base: str) -> list[str]:
 
 
 def scope_check(profile: dict, files: list[str]) -> tuple[bool, str]:
-    """(ok, message). Hard rule: nothing under frozen_paths may appear —
-    except paths covered by an owner-approved constraint_lift recorded in the
-    profile ({"paths": [...], "decided_by": "..."} — engine reads the profile,
-    the OWNER records the decision; orchestrator cannot invent a lift)."""
-    import fnmatch
-    lifted = []
-    for lift in profile.get("constraint_lifts", []) or []:
-        lifted += lift.get("paths", [])
-    frozen = []
-    for f in files:
-        for pat in profile["frozen_paths"]:
-            if not fnmatch.fnmatch(f, pat):
-                continue
-            if any(fnmatch.fnmatch(f, lp) for lp in lifted):
-                continue
-            frozen.append(f"{f}  (matches {pat})")
-    if frozen:
-        return False, "FROZEN PATH VIOLATION:\n  " + "\n  ".join(frozen)
+    """(ok, message). Scope is the task's own allow-list, not a file freeze.
+
+    FROZEN PATHS WERE RETIRED (owner directive 2026-10-31). They were meant to cap
+    blast radius per task, but a worktree already isolates the edit and two other
+    gates cover the same risk at the right granularity: `release_knobs_check`
+    compares the actual version/signing/SDK values, and `dependency_check` forces
+    every new library to be a declared decision. Freezing whole files on top of
+    that added no safety and blocked legitimate work — a store-screenshot task was
+    stopped by `app/build.gradle` for adding test-only dependencies. The owner's
+    instruction is to run without the freeze and reintroduce a narrower rule only
+    if a real incident justifies it.
+    """
     if not files:
         return False, "no code changes at all"
-    return True, f"{len(files)} files changed, none frozen"
+    return True, f"{len(files)} files changed"
 
 
 def localization_check(project_root: Path, files: list[str]) -> tuple[bool, str]:

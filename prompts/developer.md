@@ -23,7 +23,6 @@ CODING CONVENTIONS (MANDATORY READS — style law; must read before writing code
 HARD RULES:
 1. Edit ONLY files under: {target_area}
    Other allowed paths (only if needed): {allowed_paths}
-   These are hard-blocked and your change will be REJECTED (run restarts): {frozen_paths}
 2. Localization: this app ships 15 locales. REUSE existing shared strings where
    natural. If you MUST add a user-facing string, add it to values/strings.xml AND
    every locale dir (values-ar, values-de, values-es, values-fr, values-hi, values-in,
@@ -55,7 +54,7 @@ WHAT TO BUILD (motion that communicates state — purposeful, not decorative):
   they already matched Spacing in reference files.
 
 SCOPE BOUNDARY: implement exactly the task above. If the task cannot be done
-without touching a frozen path, STOP: write your blocker to the file
+STOP: write your blocker to the file
 PIPELINE_BLOCKER.md in the worktree root and exit without edits.
 
 Finish silently. No summary prose at the end is needed.
