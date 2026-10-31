@@ -7,6 +7,7 @@ the orchestrator layer is deterministic.
 from __future__ import annotations
 
 import json
+import fnmatch
 import os
 import re
 import shlex
@@ -50,6 +51,33 @@ def target_items(target: Any) -> list[str]:
     else:
         raw = re.split(r"[,\n]", str(target or ""))
     return [p.strip() for p in raw if p.strip()]
+
+
+def target_matches(path: str, targets: Any) -> bool:
+    """Is `path` inside the task's allow-list (`surface.targets`)?
+
+    ONE definition of the allow-list match, so code that reasons about "the
+    files this task was allowed to touch" (the release-time untracked-file check)
+    agrees with the developer prompt instead of guessing. An item may be a file,
+    a directory, a `dir/**` subtree or a glob; a bare top-level name never
+    matches, which is why the prompt insists on a path separator."""
+    p = str(path or "").strip().lstrip("./")
+    if not p:
+        return False
+    for item in target_items(targets):
+        t = item.strip().lstrip("./").rstrip("/")
+        if not t:
+            continue
+        if t.endswith("/**"):
+            root = t[:-3]
+            if p == root or p.startswith(root + "/"):
+                return True
+        elif any(ch in t for ch in "*?["):
+            if fnmatch.fnmatch(p, t):
+                return True
+        elif p == t or p.startswith(t + "/"):
+            return True
+    return False
 
 
 def target_looks_like_paths(target: Any) -> bool:

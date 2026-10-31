@@ -19,7 +19,7 @@ import re
 import time
 from pathlib import Path
 
-from .core import read_delivery_file, RunLog, git, profile_of, run, target_items
+from .core import read_delivery_file, RunLog, git, profile_of, run, target_items, target_matches
 
 
 def _parse_version(s: str) -> tuple[int, int, int] | None:
@@ -344,18 +344,26 @@ def push_and_deliver(project: Path, worktree: Path, task: dict, new_version: str
             bump_version_file(worktree, next_ver, log)
 
         # An untracked file in the worktree is staged by `git add -A` and rides
-        # into the release commit even though it is part of no task. A crashed or
-        # interrupted developer session can leave scratch files behind (a stray
-        # `.diskprobe` was found this way), and scope_check cannot catch them:
-        # it blocks FROZEN paths, and a stray file is under no path at all.
-        # Not a gate (generated artifacts are sometimes legitimate) — just loud.
+        # into the release commit. A crashed or interrupted developer session can
+        # leave scratch files behind (a stray `.diskprobe` was found this way), and
+        # scope_check cannot catch them: it blocks FROZEN paths, and a stray file is
+        # under no path at all. A file INSIDE the task's allow-list is the task's own
+        # new source (a new test, a new composable) and is expected — warning about
+        # those drowned the real signal: a run whose whole deliverable was seven new
+        # files warned that all seven "belong to no task". So classify first, and be
+        # loud only about what is outside the allow-list.
         untracked = [f for f in git(["ls-files", "--others", "--exclude-standard"],
                                     cwd=worktree).stdout.splitlines() if f.strip()]
-        if untracked:
-            shown = ", ".join(untracked[:8]) + (" …" if len(untracked) > 8 else "")
-            log(f"WARNING: {len(untracked)} untracked file(s) will be committed with this "
-                f"change and belong to no task — check they are not scratch left by a "
+        targets = (task.get("surface", {}) or {}).get("targets")
+        outside = [f for f in untracked if not target_matches(f, targets)]
+        inside = [f for f in untracked if target_matches(f, targets)]
+        if outside:
+            shown = ", ".join(outside[:8]) + (" …" if len(outside) > 8 else "")
+            log(f"WARNING: {len(outside)} untracked file(s) OUTSIDE the task's allow-list "
+                f"will be committed with this change — check they are not scratch left by a "
                 f"crashed session: {shown}")
+        if inside:
+            log(f"  {len(inside)} new file(s) inside the task's allow-list → committed with the change")
 
         git(["add", "-A"], cwd=worktree)
         rc = git(["commit", "-m", bump_subject(task, new_version)], cwd=worktree)
