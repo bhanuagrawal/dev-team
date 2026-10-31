@@ -51,7 +51,12 @@ checklist + release-candidate call) and the two page URLs `record` prints.
 5. **Store assets are deliverables.** Screenshots come from the app's own
    composables (`devteam storefront-scenes`), never from hand-drawn HTML. A
    generated artefact a user reads (store note, screenshots, release text) needs
-   the consumer's constraints and an owner who can overwrite it.
+   the consumer's constraints and an owner who can overwrite it. The poster around
+   the screenshot is composed either by Stitch (`--design-frame`/`--adopt-frame`)
+   or by the vision model (`--vision-frame`), and an **image model may only paint
+   the backdrop plate** (`--gemini-brief` → Gemini in the browser → `--backdrop`):
+   every image model repaints app UI, so a generated picture is a plate, never the
+   screen, and `adopt` refuses any frame whose slot is not the real render at 1:1.
 6. **Cleanup is part of the run.** `devteam pick` and `record` prune
    automatically; `devteam worktree-prune <project>` is the manual form (dry run
    by default). A tree is removed when its work is safe **somewhere else**: its

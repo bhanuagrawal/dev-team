@@ -286,8 +286,24 @@ def _stack_text(L: dict[str, Any], scene: dict[str, Any]) -> dict[str, Any]:
     return L
 
 
+def backdrop_css(backdrop: Path | None) -> str:
+    """A generated backdrop as a full-bleed plate.
+
+    This is where an image model is allowed to contribute: it paints a texture
+    nothing has to be true about. It is never allowed near the screenshot, because
+    every image model repaints app UI (observed: a Gemini poster whose cards,
+    spacing and supporting line all differed from the render it was given).
+    """
+    if backdrop is None or not backdrop.is_file():
+        return ""
+    import base64 as _b64
+    data = _b64.b64encode(backdrop.read_bytes()).decode()
+    return ("position:absolute;inset:0;background:"
+            "url(data:image/png;base64," + data + ") center/cover no-repeat;")
+
+
 def render_html(project: Path, scene: dict[str, Any], screen_png: Path,
-                layout: dict[str, Any]) -> str:
+                layout: dict[str, Any], backdrop: Path | None = None) -> str:
     from .design import extract_design_tokens
     tokens = extract_design_tokens(project)
     L = normalize(layout, tokens)
@@ -330,7 +346,7 @@ def render_html(project: Path, scene: dict[str, Any], screen_png: Path,
     object-fit: none; border-radius: 56px; }}
 </style></head>
 <body><div class="poster-canvas">
-  <div class="aura"></div>
+  {('<div class="plate" style="' + backdrop_css(backdrop) + '"></div>') if backdrop else '<div class="aura"></div>'}
   {block("badge", "span", 700, tokens.get("label_font", "monospace"), "letter-spacing:.16em;text-transform:uppercase;")}
   {block("headline", "h1", 700, tokens.get("headline_font", "sans-serif"))}
   {block("sub", "p", 400, tokens.get("body_font", "sans-serif"))}
@@ -363,10 +379,46 @@ def propose(project: Path, scene: dict[str, Any], screen_png: Path,
 
 
 def render_to(project: Path, scene: dict[str, Any], screen_png: Path,
-              layout: dict[str, Any], out_html: Path) -> Path:
+              layout: dict[str, Any], out_html: Path,
+              backdrop: Path | None = None) -> Path:
     from .storefront_frames import _set_screen_src, guard_slot
-    html = guard_slot(_set_screen_src(render_html(project, scene, screen_png, layout),
-                                      screen_png.resolve().as_uri()))
+    html = guard_slot(_set_screen_src(
+        render_html(project, scene, screen_png, layout, backdrop),
+        screen_png.resolve().as_uri()))
     out_html.parent.mkdir(parents=True, exist_ok=True)
     out_html.write_text(html)
     return out_html
+
+
+# --------------------------------------------------------------------------- #
+# the browser step: Gemini paints a plate, never the screen
+# --------------------------------------------------------------------------- #
+def gemini_backdrop_prompt(project: Path, scene: dict[str, Any] | None = None,
+                           brief: str = "") -> str:
+    """The exact text to paste into Gemini (browser) for a backdrop plate.
+
+    Gemini in the browser is the only image model this machine can reach for free,
+    and it is genuinely good at one job: an atmospheric plate. It is not allowed
+    the screen — it repaints app UI, and its output is 572x1024, which is a
+    background at 2.8x upscale, not a screenshot.
+
+    The plate is soft light and glow, so upscaling costs nothing visible; the
+    phone, the copy and the screenshot are all drawn by the renderer at full size.
+    """
+    from .design import extract_design_tokens
+    tokens = extract_design_tokens(project)
+    base = tokens.get("surface_base", "#0D0D0D")
+    accent = tokens.get("primary_accent", "#E8442A")
+    focus = brief.strip() or "lower right"
+    return (
+        f"Create a plain vertical BACKGROUND PLATE, 9:16 portrait, for a Google Play "
+        f"store screenshot of {product_name(project)}. Fill the whole frame with a "
+        f"near-black background ({base}), one subtle deep-red radial glow towards the "
+        f"{focus}, soft diagonal light streaks from the opposite corner, very fine film "
+        f"grain and a faint vignette. The accent colour is {accent}.\n\n"
+        "It must be completely empty: NO text, NO letters, NO phone, NO app interface, "
+        "NO icons, NO logos, NO sparkles, NO products. Just an abstract dark backdrop. "
+        "Keep the bottom-right corner plain and dark.\n\n"
+        "The output is used as a plate behind a phone mockup drawn by code, so it only "
+        "needs to read as light and texture — it never contains the app."
+    )

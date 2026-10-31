@@ -1781,7 +1781,7 @@ def cmd_storefront_scenes(args: argparse.Namespace) -> int:
                 getattr(args, "frame", False), getattr(args, "status", False),
                 getattr(args, "review", False), getattr(args, "frames", False),
                 getattr(args, "design_frame", None), getattr(args, "adopt_frame", None),
-                getattr(args, "vision_frame", None),
+                getattr(args, "vision_frame", None), getattr(args, "gemini_brief", False),
                 getattr(args, "assign", None)]):
         do_all = True
 
@@ -1948,7 +1948,14 @@ def cmd_storefront_scenes(args: argparse.Namespace) -> int:
             layout = vl.propose(project, scene, png, brief=getattr(args, "brief", "") or "",
                                 log=print)
         staged = project / ".pipeline/storefront_frames" / f"vision-{args.vision_frame}.html"
-        vl.render_to(project, scene, png, layout, staged)
+        backdrop = Path(args.backdrop).expanduser() if getattr(args, "backdrop", None) else None
+        if backdrop and not backdrop.is_file():
+            print(f"  ✗ no backdrop image at {backdrop}")
+            return 1
+        if backdrop:
+            print(f"  backdrop: {backdrop.name} ({backdrop.stat().st_size // 1024} KB) — plate only, "
+                  "the screenshot stays the real render")
+        vl.render_to(project, scene, png, layout, staged, backdrop=backdrop)
         res = sfr.adopt(project, args.vision_frame, staged.read_text(),
                         source=f"vision:{vl.config()['model']}", force=getattr(args, "force", False))
         if res.get("status") != "OK":
@@ -1966,6 +1973,26 @@ def cmd_storefront_scenes(args: argparse.Namespace) -> int:
             print(f"  ⚑ {problem}")
         print(f"  layout JSON: re-run with --layout <file> to hand-tune and re-adopt")
         print(f"  assign it: devteam storefront-scenes {args.project} --assign {scene.get('id')}={args.vision_frame}")
+
+    if getattr(args, "gemini_brief", False):
+        from team import vision_layout as vl
+        spec = sp.load_spec(project, create=False)
+        scenes = spec.get("scenes") or []
+        want = getattr(args, "frame_scene", None)
+        scene = next((s for s in scenes if str(s.get("id")) == str(want)), None) if want else None
+        text = vl.gemini_backdrop_prompt(project, scene, brief=getattr(args, "brief", "") or "")
+        out = project / ".pipeline" / "gemini-backdrop-prompt.txt"
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_text(text)
+        print("GEMINI (browser) BACKDROP PROMPT — paste this into a Gemini chat:")
+        print("=" * 66)
+        print(text)
+        print("=" * 66)
+        print(f"~ saved -> {out.relative_to(project)}")
+        print("  then save the generated image and run:")
+        print(f"  devteam storefront-scenes {args.project} --vision-frame <name> "
+              f"--backdrop <saved.png> [--layout <layout.json>]")
+        return 0
 
     if getattr(args, "frames", False):
         from team import storefront_frames as sfr
@@ -2354,6 +2381,10 @@ def main() -> None:
     sfp.add_argument("--frame-scene", metavar="ID", help="with --design-frame: author the frame around this scene's copy (default: first scene)")
     sfp.add_argument("--vision-frame", metavar="NAME",
                      help="let the configured VISION LLM read the render and compose the layout, then verify + adopt it as a frame")
+    sfp.add_argument("--backdrop", metavar="PNG",
+                     help="with --vision-frame: a backdrop plate painted by Gemini (browser) or another image model, used behind the phone")
+    sfp.add_argument("--gemini-brief", action="store_true",
+                     help="print the paste-ready Gemini (browser) prompt for a backdrop plate, then stop")
     sfp.add_argument("--layout", metavar="PATH",
                      help="with --vision-frame: render from a hand-edited layout JSON instead of asking the model")
     sfp.add_argument("--adopt-frame", metavar="NAME",
