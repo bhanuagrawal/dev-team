@@ -378,16 +378,37 @@ def propose(project: Path, scene: dict[str, Any], screen_png: Path,
     return layout
 
 
+def prepare_backdrop(backdrop: Path) -> dict[str, Any]:
+    """Every image model stamps its mark somewhere. Strip it before it can ship.
+
+    Not optional and not a warning: a vendor watermark on a store listing is an
+    advert on the owner's product. `plate_clean` heals the corner and proves the
+    mark is gone; a plate it cannot clean is refused rather than shipped.
+    """
+    from .plate_clean import clean
+    info = clean(backdrop)
+    if info.get("status") == "REJECTED":
+        raise SystemExit(f"backdrop refused: {info.get('error')}")
+    if info.get("status") != "OK":
+        raise SystemExit(f"backdrop could not be checked: {info.get('error')}")
+    info["source"] = str(backdrop)
+    return info
+
+
 def render_to(project: Path, scene: dict[str, Any], screen_png: Path,
               layout: dict[str, Any], out_html: Path,
-              backdrop: Path | None = None) -> Path:
+              backdrop: Path | None = None) -> tuple[Path, dict[str, Any] | None]:
     from .storefront_frames import _set_screen_src, guard_slot
+    plate = None
+    if backdrop is not None:
+        plate = prepare_backdrop(backdrop)
+        backdrop = Path(plate["file"])
     html = guard_slot(_set_screen_src(
         render_html(project, scene, screen_png, layout, backdrop),
         screen_png.resolve().as_uri()))
     out_html.parent.mkdir(parents=True, exist_ok=True)
     out_html.write_text(html)
-    return out_html
+    return out_html, plate
 
 
 # --------------------------------------------------------------------------- #

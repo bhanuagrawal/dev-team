@@ -1955,7 +1955,12 @@ def cmd_storefront_scenes(args: argparse.Namespace) -> int:
         if backdrop:
             print(f"  backdrop: {backdrop.name} ({backdrop.stat().st_size // 1024} KB) — plate only, "
                   "the screenshot stays the real render")
-        vl.render_to(project, scene, png, layout, staged, backdrop=backdrop)
+        staged_path, plate = vl.render_to(project, scene, png, layout, staged, backdrop=backdrop)
+        if plate and plate.get("removed"):
+            box = plate.get("box") or [0, 0, 0, 0]
+            print(f"  watermark removed at {box[0]},{box[1]} ({plate['boxSize'][0]}x{plate['boxSize'][1]} patch)")
+        elif plate:
+            print("  backdrop: no watermark detected")
         res = sfr.adopt(project, args.vision_frame, staged.read_text(),
                         source=f"vision:{vl.config()['model']}", force=getattr(args, "force", False))
         if res.get("status") != "OK":
