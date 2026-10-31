@@ -5,16 +5,24 @@
       "kind": "multi-home",
       "subject": "devteam tree",
       "where": [
-        "README.md:328",
-        "skills/dev-team/SKILL.md:304"
+        "README.md:329",
+        "skills/dev-team/SKILL.md:303"
       ]
     },
     "0321867a0009ed42": {
       "kind": "multi-home",
       "subject": "devteam goal",
       "where": [
-        "README.md:308",
-        "skills/dev-team/SKILL.md:334"
+        "README.md:309",
+        "skills/dev-team/SKILL.md:333"
+      ]
+    },
+    "05da37b5ba1df60d": {
+      "kind": "multi-home",
+      "subject": "devteam storefront-build",
+      "where": [
+        "README.md:210",
+        "skills/dev-team/SKILL.md:755"
       ]
     },
     "06eade94cc670fbe": {
@@ -22,7 +30,7 @@
       "subject": "devteam store-readiness",
       "where": [
         "README.md:207",
-        "skills/dev-team/SKILL.md:516"
+        "skills/dev-team/SKILL.md:515"
       ]
     },
     "0b3d0ed33641ea12": {
@@ -30,7 +38,7 @@
       "subject": "devteam developer-prompt",
       "where": [
         "README.md:169",
-        "skills/dev-team/SKILL.md:452"
+        "skills/dev-team/SKILL.md:451"
       ]
     },
     "3319754b4615772a": {
@@ -38,39 +46,31 @@
       "subject": "devteam research",
       "where": [
         "README.md:140",
-        "skills/dev-team/SKILL.md:421"
-      ]
-    },
-    "540347ffb82a7fab": {
-      "kind": "near-duplicate",
-      "subject": "., .pipeline, devteam, hand-edit",
-      "where": [
-        "AGENTS.md:46",
-        "skills/dev-team/SKILL.md:143"
+        "skills/dev-team/SKILL.md:420"
       ]
     },
     "576fe35787409976": {
       "kind": "near-duplicate",
       "subject": "add, devteam, goal, mutates",
       "where": [
-        "README.md:308",
-        "skills/dev-team/SKILL.md:334"
+        "README.md:309",
+        "skills/dev-team/SKILL.md:333"
       ]
     },
     "69963db5faf8cebf": {
       "kind": "multi-home",
       "subject": "devteam align",
       "where": [
-        "README.md:319",
-        "skills/dev-team/SKILL.md:345"
+        "README.md:320",
+        "skills/dev-team/SKILL.md:344"
       ]
     },
     "a0a034646a01968b": {
       "kind": "multi-home",
       "subject": "devteam publish",
       "where": [
-        "README.md:337",
-        "skills/dev-team/SKILL.md:316"
+        "README.md:338",
+        "skills/dev-team/SKILL.md:315"
       ]
     },
     "b3d621f3fbbcae6f": {
@@ -78,7 +78,7 @@
       "subject": "devteam adapt",
       "where": [
         "README.md:59",
-        "skills/dev-team/SKILL.md:358"
+        "skills/dev-team/SKILL.md:357"
       ]
     },
     "d280ed1813f9d9f5": {
@@ -86,31 +86,31 @@
       "subject": "devteam worktree-start",
       "where": [
         "README.md:162",
-        "skills/dev-team/SKILL.md:466"
+        "skills/dev-team/SKILL.md:465"
       ]
     },
     "eafe47736667d684": {
       "kind": "near-duplicate",
       "subject": "., 2, agent, every",
       "where": [
-        "README.md:300",
-        "skills/dev-team/SKILL.md:269"
+        "README.md:301",
+        "skills/dev-team/SKILL.md:268"
       ]
     },
     "fe8e4d9baae7b9fa": {
       "kind": "multi-home",
       "subject": "--apply",
       "where": [
-        "README.md:321",
-        "skills/dev-team/SKILL.md:347"
+        "README.md:322",
+        "skills/dev-team/SKILL.md:346"
       ]
     },
     "ff6d014634eed887": {
       "kind": "near-duplicate",
       "subject": "-, build, bump, ci",
       "where": [
-        "README.md:357",
-        "skills/dev-team/SKILL.md:208"
+        "README.md:358",
+        "skills/dev-team/SKILL.md:207"
       ]
     }
   }
