@@ -16,6 +16,15 @@ from .core import git, profile_of, run
 JAVA_HOME = "/Applications/Android Studio.app/Contents/jbr/Contents/Home"
 GRADLE_ENV = {"JAVA_HOME": JAVA_HOME, "TERM": "dumb", "CI": "true"}
 
+# On-device test source sets, Android (`androidTest`) and KMP
+# (`androidInstrumentedTest`) conventions, plus the fallback task when the
+# project has more than one test-bearing module. These vanished when the
+# release-knob block was deleted (2026-10-31): the device gate then crashed with
+# NameError on every project that ships instrumented tests, so no release could
+# be verified. Keep them next to the gate that reads them.
+INSTRUMENTED_DIRS = ("androidInstrumentedTest", "androidTest")
+INSTRUMENTED_TASK_DEFAULT = ":composeApp:connectedDebugAndroidTest"
+
 # --------------------------------------------------------------------------- #
 # release knobs — protect the FIELDS, not the file
 # --------------------------------------------------------------------------- #
@@ -57,9 +66,37 @@ def android_sdk_env(start: Path | None = None) -> dict:
     return {}
 
 
+def tool_path(start: Path | None = None) -> str:
+    """A PATH that can find the CLIs a gate shells out to.
+
+    The gates run from whatever process drives the pipeline, not from an
+    interactive login shell: a GUI or agent launcher can hand us
+    `/usr/bin:/bin` and nothing else, so `with-emulator`'s `android` lookup
+    fails even though the tool is installed (observed 2026-10-31: verify
+    reported the device TEST as failed because the emulator CLI was not on
+    PATH). Generic tool locations first, then the caller's PATH.
+    """
+    sdk = android_sdk_env(start).get("ANDROID_HOME") or str(
+        Path.home() / "Library/Android/sdk")
+    dirs = [
+        str(Path.home() / ".local/bin"),
+        "/usr/local/bin", "/opt/homebrew/bin",
+        f"{sdk}/platform-tools", f"{sdk}/emulator", f"{sdk}/cmdline-tools/latest/bin",
+    ]
+    cur = os.environ.get("PATH") or ""
+    dirs += [d for d in cur.split(os.pathsep) if d]
+    seen, out = set(), []
+    for d in dirs:
+        if d and d not in seen:
+            seen.add(d)
+            out.append(d)
+    return os.pathsep.join(out)
+
+
 def gradle_env(worktree: Path | None = None) -> dict:
-    """The environment gradle tasks run with (JAVA_HOME + the Android SDK)."""
-    return {**GRADLE_ENV, **android_sdk_env(worktree)}
+    """The environment gradle tasks run with (JAVA_HOME + the Android SDK + a
+    PATH that reaches the Android CLIs and the emulator wrapper)."""
+    return {**GRADLE_ENV, **android_sdk_env(worktree), "PATH": tool_path(worktree)}
 
 
 def changed_files(worktree: Path, base: str) -> list[str]:
@@ -198,6 +235,7 @@ def _is_test_runner_infra_failure(output: str) -> bool:
         "running multiple emulators with the same avd",
         "showing crashdialog to get consent",
         "not available",
+        "command not found",
         "missing",
     )
     return any(sig in low for sig in infra_signatures)

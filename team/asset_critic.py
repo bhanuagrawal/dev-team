@@ -84,6 +84,93 @@ def _provenance(project: Path) -> str:
     return "unknown"
 
 
+def _spec(project: Path) -> dict[str, Any]:
+    f = project / "docs/storefront.json"
+    if not f.is_file():
+        return {}
+    try:
+        return json.loads(f.read_text())
+    except Exception:
+        return {}
+
+
+def _scene_for_shot(stem: str, scenes: list[dict[str, Any]]) -> dict[str, Any] | None:
+    """Which scene does a listing file describe? `01_home`/`home` -> the scene
+    whose id (or numeric-stripped slug) matches."""
+    from .storefront_review import _slug
+    for s in scenes:
+        sid = str(s.get("id") or "")
+        if stem == sid or stem == _slug(sid):
+            return s
+    for s in scenes:
+        if _slug(str(s.get("id") or "")) == _slug(stem):
+            return s
+    return None
+
+
+def _editorial(project: Path, spec: dict[str, Any],
+               screenshots: list[Path]) -> dict[str, Any]:
+    """The judgment a renderer cannot make: did the listing ship the RIGHT
+    frames, in the RIGHT order?
+
+    This is where a paywall screenshot should have died before upload: the
+    reviewer's own recorded decision (storefront review) is checked against the
+    files, and the monetization policy is re-applied to the spec so a listing
+    can never outrun a stale or absent review.
+    """
+    from . import storefront_review as sr
+    scenes = [s for s in (spec.get("scenes") or []) if s.get("id")]
+    issues: list[str] = []
+    hard_fail = False
+    shipped: list[dict[str, Any]] = []
+
+    for shot in screenshots:
+        scene = _scene_for_shot(shot.stem, scenes)
+        sid = str(scene.get("id")) if scene else shot.stem
+        why = sr.monetization_reason(scene) if scene else None
+        if not why and any(t in shot.stem.lower() for t in sr.MONETIZATION_TOKENS):
+            why = "the filename names a monetization surface"
+        if why:
+            hard_fail = True
+            issues.append(f"REJECTED {shot.name}: {why}")
+        shipped.append({"file": shot.name, "scene": sid, "monetization": bool(why)})
+
+    # Placeholder app icons: a launcher/home frame with blank tiles shows a phone
+    # that looks broken, which is the opposite of the product promise.
+    fixtures = str(spec.get("fixtures") or "")
+    if re.search(r"icon\s*=\s*null", fixtures):
+        issues.append("app fixtures pass `icon = null` — launcher frames render empty "
+                      "icon boxes instead of arranged app icons")
+    elif "GradientDrawable" in fixtures and "drawText(" not in fixtures:
+        issues.append("app fixtures use flat colour tiles with no glyph — the home "
+                      "grid reads as blank boxes; draw a monogram/label on each tile")
+
+    review = sr.load_review(project, spec)
+    order_ok = True
+    if review:
+        expected = [sr._slug(sid) for sid in review.get("order") or []]
+        actual = [sr._slug(shot.stem) for shot in screenshots]
+        order_ok = expected == actual
+        if not order_ok:
+            issues.append("listing order does not match the editorial review: "
+                          f"expected {expected or '(none)'}, found {actual}")
+        cut = sr.rejected_ids(review)
+        shipped_ids = {s["scene"] for s in shipped}
+        leaked = sorted(cut & shipped_ids)
+        if leaked:
+            hard_fail = True
+            issues.append("editorial review cut these scenes but the listing still "
+                          f"ships them: {', '.join(leaked)}")
+    else:
+        issues.append("no editorial review for this spec — which frames ship and in "
+                      "what order is undecided (run storefront-scenes --review)")
+
+    return {"reviewed": bool(review), "order_ok": order_ok,
+            "hard_fail": hard_fail, "issues": issues,
+            "shipped": shipped,
+            "expected_order": (review or {}).get("order") or []}
+
+
 def _find_listing_dir(project: Path) -> Path | None:
     for rel in ("distribution/listing/en-US", "distribution/listing",
                 "fastlane/metadata/android/en-US", "src/main/play/listings/en-US"):
@@ -123,6 +210,11 @@ def review_store_assets(project: Path) -> dict[str, Any]:
     screenshots: list[Path] = []
     if shots_dir.is_dir():
         screenshots = sorted(list(shots_dir.glob("*.png")) + list(shots_dir.glob("*.jpg")))
+
+    spec = _spec(project)
+    editorial = _editorial(project, spec, screenshots)
+    report["editorial"] = editorial
+    report["critiques"].extend(editorial["issues"])
 
     # ── Dimension 1: Technical & Anti-Corruption Checks (Max 20 pts) ──────────
     tech_score = 0
@@ -286,8 +378,28 @@ def review_store_assets(project: Path) -> dict[str, Any]:
         report["dimensions"]["technical_compliance"]["issues"] = tech_issues
         total_score = cap
 
+    # ── Editorial gate: a beautiful frame the wrong screen still fails ────────
+    # Technical and visual scores measure the pixels; they cannot say "this is
+    # the paywall, and it should never have been published". That judgment is the
+    # review's, so it is scored here and can hard-fail the listing.
+    if not editorial["reviewed"]:
+        total_score = max(0, total_score - 5)
+    if any("icon = null" in i or "flat colour tiles" in i for i in editorial["issues"]):
+        total_score = max(0, total_score - 10)
+    if editorial["reviewed"] and not editorial["order_ok"]:
+        total_score = max(0, total_score - 5)
+
     # ── Total Score & Rating ──────────────────────────────────────────────────
     report["score"] = total_score
+
+    if editorial["hard_fail"]:
+        report["score"] = min(total_score, 39)
+        report["grade"] = "F"
+        report["status"] = "FAIL"
+        report["remediations"].append(
+            "REMOVE monetization screens (paywall/purchase/upgrade) from the listing "
+            "before uploading: they are in-app surfaces, not the product promise.")
+        return report
 
     if total_score >= 90:
         grade = "A"
@@ -335,6 +447,17 @@ def format_critic_report(report: dict[str, Any]) -> str:
         lines.append(f"  {title:<30} {score:>2}/{max_score:<2} [{bar}]")
         for note in dim.get("notes", []) + dim.get("issues", []):
             lines.append(f"    • {note}")
+
+    ed = report.get("editorial") or {}
+    if ed:
+        lines.append("\n[EDITORIAL SELECTION]")
+        if ed.get("reviewed"):
+            lines.append(f"  reviewed: YES   order: {' -> '.join(ed.get('expected_order') or []) or '(none)'}"
+                         f"   order_ok: {'YES' if ed.get('order_ok') else 'NO'}")
+        else:
+            lines.append("  reviewed: NO — nothing decided which frames ship or in what order")
+        for issue in ed.get("issues") or []:
+            lines.append(f"    • {issue}")
 
     lines.append("\n[ASSET INVENTORY]")
     for asset_name, asset in report.get("assets", {}).items():

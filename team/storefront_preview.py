@@ -390,6 +390,22 @@ def _module_name(project: Path) -> str:
         return "composeApp"
 
 
+def _dedupe_imports(text: str) -> str:
+    """Collapse duplicate import lines. A spec may name a class the harness
+    already imports (e.g. android.graphics.Bitmap) — the generated file must not
+    import it twice, or Kotlin fails with "Conflicting import" before any scene
+    renders."""
+    seen: set[str] = set()
+    out: list[str] = []
+    for line in text.splitlines():
+        if line.startswith("import "):
+            if line in seen:
+                continue
+            seen.add(line)
+        out.append(line)
+    return "\n".join(out)
+
+
 def roborazzi_source(spec: dict[str, Any]) -> str:
     """A JUnit test that renders each scene to PNG — the renderer-agnostic path."""
     pkg = spec.get("package") or "storefront"
@@ -459,7 +475,7 @@ def roborazzi_source(spec: dict[str, Any]) -> str:
             "",
         ]
     out.append("}")
-    return "\n".join(out)
+    return _dedupe_imports("\n".join(out))
 
 
 def robolectric_source(spec: dict[str, Any]) -> str:
@@ -531,7 +547,7 @@ def robolectric_source(spec: dict[str, Any]) -> str:
             "",
         ]
     out.append("}")
-    return "\n".join(out)
+    return _dedupe_imports("\n".join(out))
 
 
 def harness_source(spec: dict[str, Any], ns: str | None = None) -> str:
@@ -575,7 +591,7 @@ def harness_source(spec: dict[str, Any], ns: str | None = None) -> str:
             "}",
             "",
         ]
-    return "\n".join(out)
+    return _dedupe_imports("\n".join(out))
 
 
 def write_harness(project: Path, spec: dict[str, Any], force: bool = False, dry_run: bool = False) -> Path:
@@ -867,21 +883,54 @@ def compose_frames(project: Path, log: Any = None, force: bool = False) -> dict[
     frames_dir = project / ".pipeline/storefront_frames"
     frames_dir.mkdir(parents=True, exist_ok=True)
 
-    copy_by_id = {s["id"]: s for s in spec.get("scenes", [])}
-    keep = {f"{s['id']}.png" for s in spec.get("scenes", [])}
+    from . import storefront_review as sr
+    review = sr.load_review(project, spec)
+    if review:
+        ordered = sr.ordered_scenes(spec, review)
+        cut = sr.rejected_ids(review)
+        if log:
+            log("  editorial review: " + ", ".join(s["id"] for s in ordered)
+                + (f"  (cut: {', '.join(sorted(cut))})" if cut else ""))
+    else:
+        ordered = sr.ordered_scenes(spec, None)
+        cut = set()
+        if log:
+            log("  ! no editorial review for this spec — shipping spec order. "
+                "Run `devteam storefront-scenes <project> --review` first.")
+
+    # Filenames carry the SHIPPING RANK (01_, 02_ ...), so the Play upload order
+    # is visible in the repo instead of being implied by scene ids.
+    plan: list[tuple[int, str, dict[str, Any], Path]] = []
+    for rank, scene in enumerate(ordered, 1):
+        sid = str(scene["id"])
+        src = scenes_dir / f"{sid}.png"
+        plan.append((rank, f"{rank:02d}_{sr._slug(sid)}.png", scene, src))
+    keep = {name for _, name, _, _ in plan}
+
+    # Owned frames that this review/spec no longer ships (a cut scene, a stale
+    # rank) are OURS to remove: they were generated from the spec, and leaving
+    # them is how a rejected paywall screenshot stayed in the listing. A file
+    # whose name matches no scene at all still belongs to the owner and is kept.
+    owned_slugs = {sr._slug(str(s["id"])) for s in spec.get("scenes") or []}
+    owned_slugs |= {sr._slug(sid) for sid in cut}   # retired scenes' old frames too
+    removed = _remove_owned_frames(listing, keep, owned_slugs)
+    if log:
+        for name in removed:
+            log(f"  − removed {name} (cut by the editorial review)")
     stale = _stale_screenshots(listing, keep)
     if log:
         for name in stale:
             log(f"  ! {name} is not owned by any scene — left in place; remove it if it is an old mock")
     written: list[dict[str, Any]] = []
-    for png in sorted(scenes_dir.glob("*.png")):
-        sid = png.stem
-        scene = copy_by_id.get(sid, {"id": sid, "badge": "", "headline": "", "sub": ""})
-        html_file = frames_dir / f"{png.stem}.html"
-        out_png = listing / f"{sid}.png"
-        if out_png.is_file() and not force:
-            written.append({"id": sid, "file": str(out_png.relative_to(project)), "status": "SKIPPED (exists)"})
+    for rank, name, scene, png in plan:
+        sid = str(scene["id"])
+        if not png.is_file():
+            written.append({"id": sid, "status": f"SKIPPED (no render for {png.name})"})
+            if log:
+                log(f"  ! {sid} has no rendered scene — run --render")
             continue
+        html_file = frames_dir / f"{name}.html"
+        out_png = listing / name
         html_file.write_text(_frame_html(scene, png.resolve().as_uri(), colors))
         try:
             subprocess.run(
@@ -904,7 +953,24 @@ def compose_frames(project: Path, log: Any = None, force: bool = False) -> dict[
                 log(f"  ✓ frame {out_png.name} ({round(out_png.stat().st_size / 1024, 1)} KB)")
     return {"status": "OK", "frames": written,
             "count": len([w for w in written if w.get("status") == "OK"]),
-            "stale": stale}
+            "removed": removed, "stale": stale}
+
+
+def _remove_owned_frames(listing: Path, keep: set[str], owned_slugs: set[str]) -> list[str]:
+    """Delete listing PNGs the pipeline generated for a scene this run no longer
+    ships. Ownership is name-based and narrow: `NN_<slug>.png` or `<scene id>.png`
+    where `<slug>` belongs to a scene in the spec. Anything else is the owner's
+    file and is never touched (surfaced as `stale` instead)."""
+    removed: list[str] = []
+    for p in sorted(listing.glob("*.png")):
+        if p.name in keep:
+            continue
+        m = re.match(r"^\d{2,}[-_](.+)$", p.stem) or re.match(r"^(?:\d+[-_])?(.+)$", p.stem)
+        slug = (m.group(1) if m else p.stem).strip()
+        if slug in owned_slugs:
+            p.unlink()
+            removed.append(p.name)
+    return removed
 
 
 def _png_dims(path: Path) -> tuple[int, int] | None:
@@ -937,6 +1003,8 @@ def preview_status(project: Path) -> dict[str, Any]:
     spec = load_spec(project)
     manifest = project / ".pipeline/storefront_scenes/manifest.json"
     data = json.loads(manifest.read_text()) if manifest.is_file() else {}
+    from . import storefront_review as sr
+    review = sr.load_review(project, spec)
     return {
         "configured": True,
         "narrative": spec.get("narrative"),
@@ -944,4 +1012,7 @@ def preview_status(project: Path) -> dict[str, Any]:
         "unbound": unbound_scenes(spec),
         "provenance": data.get("provenance"),
         "rendered": len(data.get("scenes", [])),
+        "reviewed": bool(review),
+        "review_order": (review or {}).get("order") or [],
+        "review_cut": sorted(sr.rejected_ids(review)),
     }

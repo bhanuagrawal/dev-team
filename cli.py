@@ -806,7 +806,14 @@ def cmd_release(args: argparse.Namespace) -> int:
                       capture_output=True, text=True).stdout.strip()
     main_tree = _sp.run(["git", "rev-parse", "origin/" + profile_of(project)["main_branch"] + "^{tree}"],
                         cwd=project, capture_output=True, text=True).stdout.strip()
-    if wt_tree and wt_tree == main_tree:
+    # A HEAD tree only describes COMMITTED work. The developer (or the
+    # orchestrator) may still hold the change uncommitted in the worktree, and
+    # `git add -A` is what turns it into the release commit — comparing HEAD
+    # alone called that "already shipped" and exited without releasing anything
+    # (2026-10-31). Only a CLEAN worktree on the same tree is a no-op.
+    wt_dirty = _sp.run(["git", "status", "--porcelain"], cwd=worktree,
+                       capture_output=True, text=True).stdout.strip()
+    if wt_tree and wt_tree == main_tree and not wt_dirty:
         print(json.dumps({"delivered": True, "already_shipped": True,
                           "version": ".".join(map(str, latest)),
                           "note": "worktree tree already equals origin/main — nothing to ship"}, indent=2))
@@ -1712,7 +1719,8 @@ def cmd_storefront_scenes(args: argparse.Namespace) -> int:
 
     do_all = getattr(args, "all", False)
     if not any([do_all, getattr(args, "scaffold", False), getattr(args, "render", False),
-                getattr(args, "frame", False), getattr(args, "status", False)]):
+                getattr(args, "frame", False), getattr(args, "status", False),
+                getattr(args, "review", False)]):
         do_all = True
 
     if do_all or getattr(args, "scaffold", False):
@@ -1747,6 +1755,32 @@ def cmd_storefront_scenes(args: argparse.Namespace) -> int:
         if not spec_file_before:
             print(f"  ~ {sp.SPEC_REL} was created — edit the copy and fixtures, then re-run")
 
+    if getattr(args, "review", False):
+        from team import storefront_review as sr
+        spec = sp.load_spec(project, create=False)
+        if getattr(args, "apply", None):
+            raw = json.loads(Path(args.apply).read_text())
+            try:
+                review = sr.normalize_review(spec, raw, source="orchestrator",
+                                             model="orchestrator-authored")
+            except ValueError as exc:
+                print(f"  ✗ review rejected: {exc}")
+                return 1
+        elif getattr(args, "llm", False):
+            review = sr.llm_review(project, spec)
+        else:
+            prompt_file = project / ".pipeline/storefront-review-prompt.txt"
+            prompt_file.parent.mkdir(parents=True, exist_ok=True)
+            prompt_file.write_text(sr.build_prompt(project, spec))
+            print(f"~ editorial review prompt -> {prompt_file.relative_to(project)}")
+            print("  the ORCHESTRATING LLM answers it, then applies the decision:")
+            print(f"  devteam storefront-scenes {args.project} --review --apply <review.json>")
+            print("  (or re-run with --llm when a reviewer model is configured)")
+            return 0
+        path = sr.save_review(project, review)
+        print(sr.format_review(review))
+        print(f"  saved -> {path.relative_to(project)}")
+
     if do_all or getattr(args, "render", False):
         print("~ rendering composables off-device (AGP layoutlib)")
         tree = None
@@ -1779,6 +1813,12 @@ def cmd_storefront_scenes(args: argparse.Namespace) -> int:
         print(f"  rendered: {st.get('rendered', 0)}")
         if st.get("unbound"):
             print(f"  unbound:  {', '.join(st['unbound'])}")
+        if st.get("reviewed"):
+            print(f"  review:   {' -> '.join(st.get('review_order') or [])}")
+            if st.get("review_cut"):
+                print(f"  cut:      {', '.join(st['review_cut'])}")
+        else:
+            print("  review:   NONE — run --review (an LLM decides what ships and in what order)")
     return 0
 
 
@@ -1803,6 +1843,30 @@ def cmd_store_assets(args: argparse.Namespace) -> int:
     report = review_store_assets(project)
     print(format_critic_report(report))
     return 0 if report.get("score", 0) >= 80 else 1
+
+
+def cmd_store_publish(args: argparse.Namespace) -> int:
+    project = resolve_project(args.project)
+    from team.core import delivery_notice
+    from team.play_listing import publish_listing_assets
+    print(delivery_notice(project))
+    res = publish_listing_assets(project, dry_run=not getattr(args, "yes", False), log=print)
+    status = res.get("status")
+    if status in ("BLOCKED", "ERROR"):
+        print(f"STOREFRONT PUBLISH: {status}")
+        for b in res.get("blockers") or []:
+            print(f"  ✗ {b}")
+        if res.get("error"):
+            print(f"  ✗ {res['error']}")
+        if res.get("hint"):
+            print(f"  → {res['hint']}")
+        return 1
+    print(f"STOREFRONT PUBLISH: {status} — {res.get('package')} ({res.get('locale')})")
+    print(f"  order: {', '.join(res.get('order') or [])}")
+    print(f"  score: {res.get('score')}")
+    if status == "DRY-RUN":
+        print("  nothing was written; re-run with --yes to upload and commit")
+    return 0
 
 
 def cmd_stitch_prompt(args: argparse.Namespace) -> int:
@@ -2089,6 +2153,12 @@ def main() -> None:
     sfp.add_argument("--scaffold", action="store_true", help="create docs/storefront.json + Kotlin preview harness and wire the Gradle plugin")
     sfp.add_argument("--render", action="store_true", help="render the harness off-device into .pipeline/storefront_scenes")
     sfp.add_argument("--frame", action="store_true", help="composite marketing frames into distribution/listing/en-US/images/phoneScreenshots")
+    sfp.add_argument("--review", action="store_true",
+                     help="editorial pass: an LLM decides which scenes ship and in what order "
+                          "(paywall/purchase surfaces are always cut); written to docs/storefront-review.json")
+    sfp.add_argument("--llm", action="store_true", help="with --review: call the configured reviewer model")
+    sfp.add_argument("--apply", metavar="JSON",
+                     help="with --review: apply an orchestrator-authored review JSON instead of calling a model")
     sfp.add_argument("--all", action="store_true", help="scaffold, render and frame in one pass (default)")
     sfp.add_argument("--status", action="store_true", help="show scene bindings and provenance")
     sfp.add_argument("--force", action="store_true", help="overwrite the harness and existing framed screenshots")
@@ -2096,6 +2166,11 @@ def main() -> None:
     sfp.add_argument("--from-checkout", action="store_true",
                      help="render the local checkout instead of origin/main (screenshots then describe unshipped code)")
     sfp.set_defaults(fn=cmd_storefront_scenes)
+    spb = sub.add_parser("store-publish",
+                         help="upload the reviewed listing assets to Play in editorial order (dry run unless --yes)")
+    spb.add_argument("project")
+    spb.add_argument("--yes", action="store_true", help="actually upload and commit the listing edit")
+    spb.set_defaults(fn=cmd_store_publish)
     cs = sub.add_parser("console", help="plan or drive Google Play Console setup")
     cs.add_argument("project")
     cs.add_argument("--script", action="store_true", help="output automated Playwright JS script")

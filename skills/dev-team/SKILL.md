@@ -746,6 +746,26 @@ The owner may ask for ONE agent only, and that must work:
      on all future runs, strictly enforcing the design system across the entire team.
 - "store readiness" / "check store compliance" / "researcher store readiness" →
   The researcher automatically ingests full Play Store compliance data under `signals.store_readiness` in `.pipeline/research.json` and `.pipeline/research-prompt.txt`. If blockers exist, the researcher prioritizes compliance tasks before discretionary features, and capability upgrades flag outstanding policy items. Standalone audit: `python3 <team>/cli.py store-readiness <project>`.
+- "replace the store screenshots" / "store assets" / "the listing shows X" →
+  Four steps, in this order, and none of them is optional:
+  1. **Render** from the app's own composables: `python3 <team>/cli.py storefront-scenes <project> --render`
+     (never hand-drawn HTML; the scene spec is the project's `docs/storefront.json`).
+  2. **Editorial review — an LLM decides, not the filenames.**
+     `devteam storefront-scenes <project> --review` writes the prompt for the orchestrating LLM,
+     `--review --llm` calls the configured reviewer model, `--review --apply <json>` records the
+     orchestrator's answer. The review names the shipping order, the cuts and the reason for each;
+     it is committed as `docs/storefront-review.json`. Two policy rules override any model:
+     **a monetization surface (paywall/purchase/subscription/upgrade/price) never ships**, and every
+     kept frame must be ranked (an unranked scene is cut, never silently shipped).
+  3. **Frame in ranked order**: `--frame` writes `01_<slug>.png` … and removes pipeline-owned
+     frames the review cut. The critic (`store-assets`) fails a listing that still carries a
+     monetization frame, `icon = null`/flat placeholder tiles, or an order that disagrees with the review.
+  4. **Publish, then verify**: `devteam store-publish <project>` (dry run) / `--yes` uploads
+     icon + feature graphic + screenshots in order through the Play API and verifies the committed
+     state. `PERMISSION_DENIED` on commit means the service account lacks publishing rights — finish
+     in Play Console; if the app has **Managed publishing** on, the approved change still needs the
+     owner's Publish click in Publishing overview. Never report "republished" from a successful
+     upload alone: a 403 commit used to read as success and left the paywall frame live.
 Rule: honor the narrower scope exactly — no pipeline chaining — except the
 non-negotiables (never commit on red gates; never
 hand-edit state.json; MODE-B gates still asked). State a one-line report of
