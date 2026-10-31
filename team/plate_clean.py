@@ -38,14 +38,15 @@ QUADRANT = (0.70, 0.70)      # scan from 70% across / 70% down
 # dark-red glow peaks near L~60. A fixed 150 threshold found nothing, so the cut is
 # RELATIVE to the brightest pixel in the corner — which is the mark by definition.
 MIN_LUMA = 60                # ignore corners that are uniformly dark
-DELTA = 18                   # how far above the corner's own background the mark sits
+MIN_CONTRAST = 22            # how far a pixel must sit above its own neighbourhood to be a mark
+DELTA = 18                   # how far the mark's pixels sit above the mark's own faintest part
 MAX_AREA = 0.25              # a big bright region is content, not a watermark
 PAD = 8                      # grow the found box before healing
 
 _PAGE = """<!DOCTYPE html><html><body style="margin:0">
 <img id="plate" src="%(src)s" style="display:none">
 <script>
-const LO = %(lo)s, MIN_LUMA = %(minluma)s, DELTA = %(delta)s, PAD = %(pad)s, MAX_AREA = %(maxarea)s;
+const LO = %(lo)s, MIN_LUMA = %(minluma)s, MIN_CONTRAST = %(mincontrast)s, DELTA = %(delta)s, PAD = %(pad)s, MAX_AREA = %(maxarea)s;
 window.addEventListener('load', () => {
   const img = document.getElementById('plate');
   const w = img.naturalWidth, h = img.naturalHeight;
@@ -54,25 +55,52 @@ window.addEventListener('load', () => {
   const g = c.getContext('2d', { willReadFrequently: true });
   g.drawImage(img, 0, 0);
 
+  // The mark is a SHARP glyph; the plate's own art is a smooth glow. Absolute
+  // brightness cannot tell them apart — on a plate whose glow peaks inside the
+  // scan quadrant, the glow wins the "brightest pixel" test and the mark is never
+  // boxed (observed: a shipped Play poster carrying Gemini's sparkle, with a patch
+  // healed out of the middle of the glow instead). So the detector works on local
+  // contrast: a heavily downscaled-and-upscaled copy is the low pass, and a pixel
+  // that sits far above its own neighbourhood is the mark.
+  function lowPass() {
+    const f = Math.max(2, Math.round(Math.min(w, h) / 96));
+    const small = document.createElement('canvas');
+    small.width = Math.max(1, Math.round(w / f));
+    small.height = Math.max(1, Math.round(h / f));
+    small.getContext('2d', { willReadFrequently: true }).drawImage(img, 0, 0, small.width, small.height);
+    const blurred = document.createElement('canvas');
+    blurred.width = w; blurred.height = h;
+    const bg = blurred.getContext('2d', { willReadFrequently: true });
+    bg.imageSmoothingEnabled = true;
+    bg.drawImage(small, 0, 0, small.width, small.height, 0, 0, w, h);
+    return bg.getImageData(0, 0, w, h).data;
+  }
+
   function scan() {
     const d = g.getImageData(0, 0, w, h).data;
+    const blur = lowPass();
     const xs = Math.floor(w * LO), ys = Math.floor(h * LO);
-    let peak = 0;
+    let peak = 0, top = 0;
     for (let y = ys; y < h; y++) {
       for (let x = xs; x < w; x++) {
         const i = (y * w + x) * 4;
         const l = 0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2];
+        const b = 0.299 * blur[i] + 0.587 * blur[i + 1] + 0.114 * blur[i + 2];
+        const contrast = l - b;
         if (l > peak) peak = l;
+        if (contrast > top) top = contrast;
       }
     }
-    if (peak < MIN_LUMA) return null;
-    const cut = Math.max(MIN_LUMA, peak - DELTA);
+    // Nothing stands out of its surroundings: the plate is clean.
+    if (peak < MIN_LUMA || top < MIN_CONTRAST) return null;
+    const cut = Math.max(MIN_CONTRAST, top - DELTA);
     let x0 = w, y0 = h, x1 = -1, y1 = -1, n = 0;
     for (let y = ys; y < h; y++) {
       for (let x = xs; x < w; x++) {
         const i = (y * w + x) * 4;
         const l = 0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2];
-        if (l > cut) {
+        const b = 0.299 * blur[i] + 0.587 * blur[i + 1] + 0.114 * blur[i + 2];
+        if (l - b > cut && l > MIN_LUMA) {
           n++;
           if (x < x0) x0 = x; if (x > x1) x1 = x;
           if (y < y0) y0 = y; if (y > y1) y1 = y;
@@ -189,6 +217,7 @@ def clean(plate: Path, out: Path | None = None, chrome: str | None = None,
     # toDataURL both throw; a data: URI is same-origin and stays readable.
     data_uri = "data:image/png;base64," + base64.b64encode(plate.read_bytes()).decode()
     page.write_text(_PAGE % {"src": data_uri, "lo": QUADRANT[0], "minluma": MIN_LUMA,
+                             "mincontrast": MIN_CONTRAST,
                              "delta": DELTA, "pad": PAD, "maxarea": MAX_AREA})
     try:
         res = subprocess.run(
