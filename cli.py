@@ -2052,6 +2052,63 @@ def cmd_storefront_scenes(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_storefront_direction(args: argparse.Namespace) -> int:
+    """Layer 1 of the asset pass: decide what the listing says, as a committed file."""
+    import json as _json
+
+    project = resolve_project(args.project)
+    from team import storefront_direction as sd, storefront_preview as sp
+
+    spec = sp.load_spec(project, create=False)
+
+    if getattr(args, "seed", False):
+        draft = sd.seed(project, spec)
+        if getattr(args, "from_research", False):
+            draft["evidence"] = sd.evidence_from_research(project)
+        text = _json.dumps(draft, indent=2) + "\n"
+        if getattr(args, "print", False):
+            print(text)
+            return 0
+        if (project / sd.DIRECTION_REL).is_file():
+            print(f"  ✗ {sd.DIRECTION_REL} already exists — edit it, or --apply a new one")
+            return 1
+        path = sd.save(project, draft)
+        print(f"  + seeded {path.relative_to(project)}")
+        print("  every judgement is blank on purpose: fill concept, audience, copy_angle, "
+              "palette.emphasis, evidence, then --apply")
+        return 0
+
+    if getattr(args, "apply", None):
+        raw = _json.loads(Path(args.apply).read_text())
+        issues = sd.validate(raw, spec)
+        if issues:
+            print("DIRECTION: REJECTED")
+            for issue in issues:
+                print(f"  ✗ {issue}")
+            return 1
+        path = sd.save(project, raw)
+        print(f"DIRECTION: LOCKED — {path.relative_to(project)} (concept: {raw.get('concept')})")
+        return 0
+
+    current = sd.load_raw(project)
+    if current is None:
+        print("DIRECTION: none — no " + sd.DIRECTION_REL)
+        print(f"  → devteam storefront-direction {project.name} --seed")
+        return 1
+    issues = sd.validate(current, spec)
+    if getattr(args, "json", False):
+        print(_json.dumps({"ok": not issues, "issues": issues, "concept": current.get("concept")}, indent=2))
+    else:
+        print("DIRECTION: locked" if not issues else "DIRECTION: cannot drive a run")
+        print(f"  concept: {current.get('concept') or '(empty)'}")
+        print(f"  angles:  {len(current.get('copy_angle') or {})} scene(s), "
+              f"evidence: {len(current.get('evidence') or [])}, "
+              f"locked_by: {current.get('locked_by') or '(empty)'}")
+        for issue in issues:
+            print(f"  ✗ {issue}")
+    return 1 if issues else 0
+
+
 def cmd_takeover(args: argparse.Namespace) -> int:
     """The state join: what is true now, and what the next run must do."""
     import json as _json
@@ -2487,6 +2544,18 @@ def main() -> None:
     sb.add_argument("--publish", action="store_true", help="upload + commit the listing after the gates pass")
     sb.add_argument("--force", action="store_true", help="replace an existing composition")
     sb.set_defaults(fn=cmd_storefront_build)
+    sd = sub.add_parser("storefront-direction",
+                        help="the direction layer: what the listing is trying to say, decided before anything is drawn")
+    sd.add_argument("project")
+    sd.add_argument("--seed", action="store_true",
+                    help="write a valid skeleton from the spec + brand tokens (judgements deliberately empty)")
+    sd.add_argument("--apply", metavar="JSON", help="validate an authored direction and save it")
+    sd.add_argument("--check", action="store_true", help="validate the current file (exit 1 when it cannot drive a run)")
+    sd.add_argument("--from-research", action="store_true",
+                    help="with --seed: carry evidence pointers from .pipeline/research.json")
+    sd.add_argument("--print", action="store_true", help="with --seed: print the skeleton instead of writing it")
+    sd.add_argument("--json", action="store_true")
+    sd.set_defaults(fn=cmd_storefront_direction)
     tk = sub.add_parser("takeover",
                         help="where this project stands, from state alone — and the ONE next command")
     tk.add_argument("project")

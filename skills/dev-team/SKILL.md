@@ -752,7 +752,12 @@ The owner may ask for ONE agent only, and that must work:
 - "store readiness" / "check store compliance" / "researcher store readiness" →
   The researcher automatically ingests full Play Store compliance data under `signals.store_readiness` in `.pipeline/research.json` and `.pipeline/research-prompt.txt`. If blockers exist, the researcher prioritizes compliance tasks before discretionary features, and capability upgrades flag outstanding policy items. Standalone audit: `python3 <team>/cli.py store-readiness <project>`.
 - "replace the store screenshots" / "store assets" / "the listing shows X" →
-  **Run `devteam storefront-build <project>` — the whole pass, in the only order that
+  **First decide what the listing says** (`devteam storefront-direction <project> --seed` →
+  fill concept / audience / copy_angle / palette.emphasis / evidence → `--apply`): one locked
+  idea plus the argument each frame makes, committed as `docs/storefront-direction.json` and read
+  by the plate prompt and the layout brief. A direction can waste a poster; it can never touch the
+  screen, which stays the real render.
+  **Then run `devteam storefront-build <project>` — the whole pass, in the only order that
   works.** It renders the app's own composables from origin/main, refuses to continue
   without the editorial review, composes the poster (Gemini plate → vision/Stitch
   layout), composites the reviewed order, gates on the critic, and prints the upload

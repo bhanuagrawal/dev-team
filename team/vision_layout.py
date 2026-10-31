@@ -415,7 +415,7 @@ def render_to(project: Path, scene: dict[str, Any], screen_png: Path,
 # the browser step: Gemini paints a plate, never the screen
 # --------------------------------------------------------------------------- #
 def gemini_backdrop_prompt(project: Path, scene: dict[str, Any] | None = None,
-                           brief: str = "") -> str:
+                           brief: str = "", direction: str = "") -> str:
     """The exact text to paste into Gemini (browser) for a backdrop plate.
 
     Gemini in the browser is the only image model this machine can reach for free,
@@ -445,4 +445,5 @@ def gemini_backdrop_prompt(project: Path, scene: dict[str, Any] | None = None,
         "Keep the bottom-right corner plain and dark.\n\n"
         "The output is used as a plate behind a phone mockup drawn by code, so it only "
         "needs to read as light and texture — it never contains the app."
+        + (f"\n\nDIRECTION (from docs/storefront-direction.json): {direction}" if direction.strip() else "")
     )

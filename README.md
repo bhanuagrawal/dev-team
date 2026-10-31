@@ -207,6 +207,7 @@ FAIL → The orchestrator fixes the failure in the worktree (or re-prompts the s
 `cli.py store-readiness <project>` audits Google Play Store launch compliance (targetSdk >= 34, restricted permissions, adaptive launcher icons, component exports, localization, release signing).
 
 `cli.py storefront-scenes <project> --all` renders the **app's own composables** to Play phone screenshots — no emulator, no mock: it wires AGP's preview-screenshot plugin, generates a `@Preview` harness from `docs/storefront.json` (project-owned copy + fixtures + composable bindings), renders at exactly 1080x2400, then composites a 1620x3600 marketing frame around each shot with a 1080-wide device opening and zero resampling. `asset_critic` records provenance, so screenshots that are an HTML *impression* of the UI are capped at 70 while composable-rendered ones are not.
+`cli.py storefront-direction <project>` decides what the listing says — one concept, the argument each frame makes, the palette emphasis and the evidence — and commits it as `docs/storefront-direction.json`, which the plate prompt and the layout brief read.
 `cli.py storefront-build <project>` is that whole pass as one command (render → review → composed frame → composite → critic → upload prompt); it refuses rather than fall back to the builtin template. `devteam storefront-scenes` remains for debugging a single step.
 `cli.py store-publish <project> [--yes]` puts that listing on Play: it uploads icon + feature
 graphic + screenshots in the editorial order through the Play API, commits the edit and reads the

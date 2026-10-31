@@ -123,8 +123,8 @@ def build(project: Path, *, frame: str = "hero", plate: str | None = None,
           frame_html: str | None = None, stitch_source: str = "",
           brief: str = "", builtin: bool = False, force: bool = False,
           publish: bool = False, log=None) -> dict[str, Any]:
-    from . import asset_critic, storefront_frames as sfr, storefront_preview as sp
-    from . import storefront_review as sr, vision_layout as vl
+    from . import asset_critic, storefront_direction as sd, storefront_frames as sfr
+    from . import storefront_preview as sp, storefront_review as sr, vision_layout as vl
 
     # 1 — the spec is the project's, and it must exist before anything renders.
     spec_file = project / sp.SPEC_REL
@@ -139,6 +139,21 @@ def build(project: Path, *, frame: str = "hero", plate: str | None = None,
     if not review:
         return _fail("BLOCKED", "no editorial review",
                      f"devteam storefront-scenes {project.name} --review --apply <review.json>")
+
+    # 2b — the DIRECTION: what the listing is trying to say. Without it the poster
+    # is undirected (a generic plate plus whatever the model proposes first), and
+    # there is nothing to review the result against.
+    direction = sd.load(project, spec)
+    if direction is None:
+        raw = sd.load_raw(project)
+        if raw is None:
+            return _fail("BLOCKED", "no listing direction",
+                         f"devteam storefront-direction {project.name} --seed, fill the judgements "
+                         f"(concept, audience, copy_angle, palette.emphasis, evidence), then "
+                         f"--apply <file>")
+        return _fail("BLOCKED", "the listing direction cannot drive a run",
+                     "; ".join(sd.validate(raw, spec)[:3]))
+    _say(log, f"~ direction: {direction.get('concept')}")
 
     # 3 — render the app's own composables (from origin/main, never a mock).
     _say(log, "~ render: the app's own composables (origin/main)")
@@ -168,7 +183,8 @@ def build(project: Path, *, frame: str = "hero", plate: str | None = None,
         if plate_path and not plate_path.is_file():
             return _fail("BLOCKED", f"no plate at {plate_path}")
         if not plate_path and gemini:
-            prompt = vl.gemini_backdrop_prompt(project, hero, brief=brief)
+            prompt = vl.gemini_backdrop_prompt(
+                project, hero, brief=brief, direction=sd.plate_brief(direction, hero))
             plate_path = gemini_plate(project, frame, prompt, log=log)
             if not plate_path:
                 return _fail("BLOCKED", "Gemini (browser) produced no usable plate",
@@ -191,7 +207,10 @@ def build(project: Path, *, frame: str = "hero", plate: str | None = None,
             _say(log, f"~ layout: reusing {layout_path.name} (deterministic re-run)")
         else:
             _say(log, "~ layout: asking the vision model to compose (numbers, not pixels)")
-            payload = vl.propose(project, hero, png, brief=brief, log=log)
+            framed_brief = sd.layout_brief(direction, hero)
+            if brief.strip():
+                framed_brief += "\nExtra brief: " + brief.strip()
+            payload = vl.propose(project, hero, png, brief=framed_brief, log=log)
             layout_path.parent.mkdir(parents=True, exist_ok=True)
             layout_path.write_text(json.dumps(payload, indent=2) + "\n")
             _say(log, f"  layout saved -> {layout_path.relative_to(project)} (hand-editable)")
@@ -223,6 +242,7 @@ def build(project: Path, *, frame: str = "hero", plate: str | None = None,
                      "; ".join(report.get("issues") or [])[:400])
 
     out = {"status": "OK", "score": score, "frame": "builtin" if builtin else frame,
+           "concept": direction.get("concept"),
            "order": [s["id"] for s in sr.ordered_scenes(spec, review)]}
     if publish:
         from .play_listing import publish_listing_assets

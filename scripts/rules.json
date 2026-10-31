@@ -38,6 +38,13 @@
       "enforced_by": "devteam storefront-build (refuses without a plate/layout; --builtin must be deliberate) + asset_critic provenance"
     },
     {
+      "id": "storefront-direction",
+      "rule": "what the listing says is decided and committed before anything is drawn",
+      "doc": "AGENTS.md#5",
+      "kind": "code",
+      "enforced_by": "devteam storefront-build (refuses without a locked direction) / storefront-direction --apply"
+    },
+    {
       "id": "listing-publish-ends-in-browser",
       "rule": "the API uploads and commits a listing edit; permissions and Managed publishing are console-only, so the publish is finished in Play Console",
       "doc": "AGENTS.md#5",

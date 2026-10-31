@@ -57,6 +57,8 @@ checklist + release-candidate call) and the two page URLs `record` prints.
    the backdrop plate** (`--gemini-brief` → Gemini in the browser → `--backdrop`):
    every image model repaints app UI, so a generated picture is a plate, never the
    screen, and `adopt` refuses any frame whose slot is not the real render at 1:1.
+   What the listing SAYS is decided before anything is drawn, in
+   `docs/storefront-direction.json` (concept, per-frame argument, palette emphasis, evidence).
    Publishing a listing is a **browser** step, not an API call: the Play API uploads and
    commits an edit, but permissions ("Manage store presence") and **Managed publishing** are
    console-only, so `store-publish` ends in Play Console through `browser-control` and nothing
