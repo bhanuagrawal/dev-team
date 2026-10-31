@@ -88,6 +88,29 @@ def _branch(tree: Path) -> str | None:
     return name if name and name != "HEAD" else None
 
 
+def _worktree_root(tree: Path) -> Path | None:
+    """The repository root git actually resolves from `tree`, or None.
+
+    A leftover directory inside `.pipeline/worktrees` that is no longer a
+    registered worktree has no `.git` of its own, so git walks UP to the
+    project checkout and answers for it: `_branch()` then says "main" and
+    `_head()` says the owner's HEAD. Pruning such a directory tried to commit
+    and push `main` from the checkout (seen 2026-11-01: "could not push main:
+    ... tip of your current branch is behind"). Nothing may be judged from a
+    path that is not its own worktree root.
+    """
+    r = git(["rev-parse", "--show-toplevel"], cwd=tree, timeout=30)
+    out = (r.stdout or "").strip()
+    return Path(out).resolve() if r.returncode == 0 and out else None
+
+
+def _file_count(path: Path) -> int:
+    try:
+        return sum(1 for p in path.rglob("*") if p.is_file())
+    except OSError:
+        return 1  # unreadable: assume something is there and keep it
+
+
 def _contains(project: Path, ancestor: str, ref: str) -> bool:
     """Is `ancestor` already inside `ref`? (i.e. nothing would be lost)"""
     if not ancestor:
@@ -176,6 +199,12 @@ def park(project: Path, tree: Path, branch: str, log=None) -> dict[str, Any]:
     tree must not be deleted unless the push succeeded.
     """
     say = log or (lambda *_: None)
+    if not branch.startswith("dt/"):
+        return {"ok": False,
+                "why": f"refusing to park onto '{branch or '(no branch)'}': only dt/* holds an attempt"}
+    if _worktree_root(tree) != tree.resolve():
+        return {"ok": False,
+                "why": f"{tree.name} is not a worktree root — git would answer for the checkout"}
     ok, why = _commit_all(tree, f"wip({branch}): attempt parked when the run "
                                 f"ended without a release")
     if not ok:
@@ -200,6 +229,25 @@ def inventory(project: Path) -> list[dict[str, Any]]:
     out: list[dict[str, Any]] = []
     for entry in sorted(root.iterdir()):
         if not entry.is_dir() or entry.name in KEEP_DIRS:
+            continue
+        if _worktree_root(entry) != entry.resolve():
+            # A leftover directory that is no longer a registered worktree has
+            # no git state of its own; git answers for the project checkout from
+            # inside it. It can hold no tracked work, so the only question is
+            # whether loose files exist — never park or push from here.
+            files = _file_count(entry)
+            out.append({
+                "task": entry.name, "path": str(entry), "branch": None, "sha": "",
+                "merged": False, "dirty": files > 0, "pushed": False, "locked": False,
+                "idle_min": int(max(0, now - _last_activity(entry)) // 60),
+                "decision": "remove" if files == 0 else "keep",
+                "reason": ("stale directory, no git metadata and no files — safe to drop"
+                           if files == 0 else
+                           f"not a worktree root (git resolves above it) and holds "
+                           f"{files} loose file(s) — left for a human"),
+                "keep_branch": False, "size_kb": _size_kb(entry),
+                "unregistered": True,
+            })
             continue
         sha = _head(entry)
         branch = _branch(entry)
@@ -318,6 +366,12 @@ def prune(project: Path, apply: bool = False, force: bool = False, log=None) -> 
                 parked.append(t["task"])
             if t.get("locked"):
                 git(["worktree", "unlock", str(path)], cwd=project, timeout=60)
+            if t.get("unregistered"):
+                # Not a worktree any more: nothing to unregister, nothing tracked
+                # inside, so the directory itself is the only thing to drop.
+                shutil.rmtree(path, ignore_errors=True)
+                removed.append(t["task"])
+                continue
             r = git(["worktree", "remove", "--force", str(path)], cwd=project, timeout=300)
             if r.returncode != 0:
                 # A wedged directory is not worth failing a run over: report it.
