@@ -51,6 +51,13 @@ def _fail(status: str, error: str, hint: str = "") -> dict[str, Any]:
     return {"status": status, "error": error, "hint": hint}
 
 
+def rank_prefixed(name: str) -> bool:
+    """True for a file this pipeline names (`01_hero.png`), never for a hand-added one."""
+    import re
+
+    return bool(re.match(r"^\d{2,}_[A-Za-z0-9_-]+\.(png|jpg|jpeg)$", name))
+
+
 def _saved(project: Path, name: str, suffix: str) -> Path:
     return project / ".pipeline/storefront_frames" / f"{suffix}-{name}.json"
 
@@ -304,6 +311,17 @@ def build(project: Path, *, frame: str = "auto", plate: str | None = None,
             if log:
                 log(f"  ✓ {name} (Gemini {sized.get('upscaled_from')} -> Play {sized.get('size')})")
             written.append(name)
+        # A frame the review no longer ships must LEAVE the listing. The code-composed
+        # path does this; the poster path used to append, so a re-ordered review left
+        # the old rank+slug files behind and they were uploaded as extra screenshots
+        # (observed: six frames on Play for a four-frame review, and the critic still
+        # said 95/100 because it only checks order, not extras).
+        stale = [p for p in listing.glob("*.png")
+                 if p.name not in written and rank_prefixed(p.name)]
+        for p in stale:
+            p.unlink()
+        if stale and log:
+            log("  − removed superseded frame(s): " + ", ".join(sorted(p.name for p in stale)))
         report = asset_critic.review_store_assets(project)
         score = report.get("score", 0)
         _say(log, f"  critic: {score}/100")
