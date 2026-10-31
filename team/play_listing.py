@@ -31,6 +31,23 @@ DEFAULT_LOCALE = "en-US"
 IMAGE_TYPES = ("phoneScreenshots", "icon", "featureGraphic")
 
 
+def _assets_root(project: Path) -> tuple[Path, str]:
+    """Where the assets come from: the checkout when it matches origin/main,
+    otherwise a delivery tree at origin/main.
+
+    A store upload is a claim about what users receive. Reading the checkout is
+    only safe while it equals the delivery ref; a stale checkout published the
+    old paywall frames once already.
+    """
+    from .core import git_ref_state
+    state = git_ref_state(project)
+    if state.get("behind") or state.get("stale") or state.get("diverged") or not state.get("head"):
+        from .scan import origin_tree
+        tree = origin_tree(project)
+        return tree, "origin/main"
+    return project, "checkout"
+
+
 def _listing_dir(project: Path) -> Path | None:
     for rel in ("distribution/listing/en-US", "distribution/listing",
                 "fastlane/metadata/android/en-US", "src/main/play/listings/en-US"):
@@ -122,11 +139,7 @@ def _upload(file: Path, package: str, edit: str, token: str, locale: str,
              "-H", "Content-Type: image/png",
              "--data-binary", f"@{file}",
              url], project, timeout=180)
-    try:
-        out = json.loads(r.stdout or "{}")
-    except Exception:
-        out = {"_error": (r.stdout or r.stderr or "non-JSON response")[:400]}
-    return out if isinstance(out, dict) else {"_error": "unexpected upload payload"}
+    return _payload(r.stdout)
 
 
 def _discard(package: str, edit: str, token: str, project: Path) -> None:
@@ -149,14 +162,16 @@ def publish_listing_assets(project: Path, dry_run: bool = True, log: Any = None)
     store can never receive a frame the reviewer rejected.
     """
     say = log or (lambda *_: None)
-    assets = _assets(project)
+    root, source = _assets_root(project)
+    say(f"~ listing assets from {source}")
+    assets = _assets(root)
     if assets.get("error"):
         return {"status": "ERROR", "error": assets["error"]}
     if assets["missing"]:
         return {"status": "ERROR", "error": "missing assets: " + ", ".join(assets["missing"])}
 
     from .asset_critic import review_store_assets
-    report = review_store_assets(project)
+    report = review_store_assets(root)
     ed = report.get("editorial") or {}
     blockers = []
     if not ed.get("reviewed"):
@@ -174,6 +189,7 @@ def publish_listing_assets(project: Path, dry_run: bool = True, log: Any = None)
     plan = {
         "status": "DRY-RUN" if dry_run else "UPLOADING",
         "package": "",
+        "source": source,
         "locale": assets["locale"],
         "order": [p.name for p in shots],
         "score": report.get("score"),
