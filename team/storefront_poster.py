@@ -37,8 +37,16 @@ def _app_name(project: Path) -> str:
 
     Team code carries zero project names (the first team law, enforced by
     `devteam verify`): a prompt template that names one app ships a poster for
-    that app in every other project's listing.
+    that app in every other project's listing. The listing title wins over the
+    repo name, because that is the name a store visitor reads.
     """
+    listing = project / "distribution/listing/en-US/title.txt"
+    try:
+        title = listing.read_text(errors="ignore").strip()
+    except Exception:
+        title = ""
+    if title:
+        return title
     try:
         profile = json.loads((project / ".pipeline/profile.json").read_text())
     except Exception:
@@ -59,7 +67,7 @@ def poster_prompt(project: Path, scene: dict[str, Any], direction: dict[str, Any
     """
     parts = [
         "Create a vertical 9:16 Google Play Store marketing screenshot for my Android app "
-        "MindfulLauncher.",
+        f"{_app_name(project)}.",
         "The attached image is the app's real screen: show that screen in the image as the "
         "app screen, and do not invent or replace the app's interface.",
         "Print exactly these words, and no other text:",
