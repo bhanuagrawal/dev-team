@@ -581,8 +581,13 @@ def cmd_worktree_prune(args: argparse.Namespace) -> None:
           f"{len(res['kept'])} kept")
     for k in res["kept"]:
         print(f"  = {k['task']}: {k['reason']}")
+    for t in res["parked"]:
+        print(f"  ⏸ {t}: attempt preserved at origin (branch kept, tree dropped)")
+    for f in res["failed"]:
+        print(f"  ! {f['task']}: kept — {f['why']}")
     if not res["applied"] and res["removable"]:
-        print("  (dry run — re-run with --yes to remove)")
+        print("  (dry run — re-run with --yes to remove; unmerged work is parked "
+              "to its branch first, never discarded)")
     print_page(project, "shows the queue", file=sys.stderr)
 
 
@@ -906,20 +911,26 @@ def cmd_record(args: argparse.Namespace) -> None:
     from team import publish as publish_mod
     published = publish_mod.publish(project)
     print_page(project, "refreshed by this record", published=published)
-    # Housekeeping: a shipped run leaves its worktree merged into origin/main, and
-    # nothing else ever removed those. Warn-only, and it only ever touches trees
-    # whose commits landed (see team/worktrees.py).
-    if args.result == "shipped":
-        try:
-            from team import worktrees
-            pruned = worktrees.prune(project, apply=True)
-            if pruned["removed"]:
-                print(f"worktrees: removed {len(pruned['removed'])} merged tree(s), "
-                      f"~{pruned['reclaimable_mb']} MB reclaimed")
-            for k in pruned["kept"]:
-                print(f"worktrees: kept {k['task']} — {k['reason']}")
-        except Exception as e:  # cleanup must never fail a run
-            print(f"worktrees: prune skipped ({e})")
+    # Housekeeping: a run's tree is a CACHE, never the record. `record` is the
+    # moment a run ends, so it is the moment to reclaim the tree: merge what
+    # landed, park what did not (commit + push its branch) and delete only what
+    # is safe somewhere else. Applies to failed/blocked runs too — those are the
+    # ones that used to leave a 230 MB tree nobody could ever delete.
+    try:
+        from team import worktrees
+        pruned = worktrees.prune(project, apply=True)
+        if pruned["removed"]:
+            print(f"worktrees: removed {len(pruned['removed'])} tree(s), "
+                  f"~{pruned['reclaimable_mb']} MB reclaimed")
+        if pruned["parked"]:
+            print(f"worktrees: parked {', '.join(pruned['parked'])} at origin — "
+                  f"the attempt survives without the tree")
+        for f in pruned["failed"]:
+            print(f"worktrees: kept {f['task']} — {f['why']}")
+        for k in pruned["kept"]:
+            print(f"worktrees: kept {k['task']} — {k['reason']}")
+    except Exception as e:  # cleanup must never fail a run
+        print(f"worktrees: prune skipped ({e})")
 
 
 def cmd_pick(args: argparse.Namespace) -> int:
@@ -927,6 +938,20 @@ def cmd_pick(args: argparse.Namespace) -> int:
     profile = profile_of(project)
     state = state_of(project)
     seq = len(state.get("runs", [])) + 1
+    # A dead session's leftovers are reclaimed by the NEXT run, not by the owner
+    # remembering (`worktree-prune` is the manual form). Safe by construction:
+    # a tree is only removed once its branch is at origin or its work landed.
+    # stderr, because `pick` prints machine-readable JSON on stdout.
+    try:
+        from team import worktrees as worktrees_mod
+        swept = worktrees_mod.prune(project, apply=True)
+        if swept["removed"] or swept["parked"]:
+            extra = (" · parked " + ", ".join(swept["parked"])) if swept["parked"] else ""
+            print(f"worktrees: reclaimed {len(swept['removed'])} tree(s) "
+                  f"(~{swept['reclaimable_mb']} MB){extra}",
+                  file=sys.stderr, flush=True)
+    except Exception as e:  # cleanup must never block a pick
+        print(f"worktrees: prune skipped ({e})", file=sys.stderr, flush=True)
     # GOAL GATE — owner directive 2026-10-18 ("I should have been prompted to
     # provide long term goals. There should not be no goal-less mode"). A project
     # with no vision gets NO work picked: the run's terminal state is the OWNER
@@ -1345,6 +1370,24 @@ def cmd_status(args: argparse.Namespace) -> None:
     r = subprocess.run(["git", "log", "--oneline", "-1"], cwd=project,
                        capture_output=True, text=True)
     print(f"local HEAD: {r.stdout.strip()}")
+    # Trees on disk are a cache; a stopped attempt is a BRANCH. Report both, so
+    # a session that died mid-run is visible to the next agent instead of living
+    # only as a 230 MB directory nobody lists.
+    try:
+        from team import worktrees as worktrees_mod
+        wsum = worktrees_mod.summary(project)
+        if wsum["count"] or wsum["parked"]:
+            line = f"worktrees:  {wsum['count']} dev tree(s), {wsum['mb']} MB"
+            if wsum["over_cap"]:
+                line += (f"  ⚠ over the cap of {worktrees_mod.TREE_CAP} — "
+                         f"`devteam worktree-prune {project.name} --yes`")
+            print(line)
+            for p in wsum["parked"]:
+                where = "at origin" if p["at_origin"] else "LOCAL ONLY"
+                print(f"  ⏸ parked  {p['branch']} @ {p['sha']} ({p['age_days']}d, "
+                      f"{where}) — an attempt that never shipped")
+    except Exception:
+        pass
     # Read-only: status never migrates, but the owner must know the project is
     # behind the team (the workflow's own step 0 fixes it).
     try:
@@ -1615,6 +1658,22 @@ def cmd_doctor(args: argparse.Namespace) -> int:
         pass   # not onboarded at all — the doctor report below says so
     from team import doctor
     report = doctor.run_doctor(project, log)
+    # Disk hygiene is readiness: an unattended pipeline that cannot reclaim its
+    # own trees fills the machine, and truncated probes look like app failures.
+    try:
+        from team import worktrees as worktrees_mod
+        wsum = worktrees_mod.summary(project)
+        if wsum["count"]:
+            note = f"doctor worktrees: {wsum['count']} dev tree(s), {wsum['mb']} MB"
+            if wsum["over_cap"]:
+                note += (f" — OVER CAP ({worktrees_mod.TREE_CAP}); run `devteam "
+                         f"worktree-prune {project.name} --yes`")
+            print(note)
+        for p in wsum["parked"]:
+            print(f"doctor parked: {p['branch']} @ {p['sha']} ({p['age_days']}d, "
+                  f"{'at origin' if p['at_origin'] else 'LOCAL ONLY'})")
+    except Exception:
+        pass
     blocked = {a: r for a, r in report.items() if r["status"] == "blocked"}
     if blocked:
         for agent, r in blocked.items():

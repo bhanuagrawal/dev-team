@@ -526,6 +526,12 @@ never silently blocking.
    `python3 <team>/cli.py record <project> --result shipped|failed|blocked
      [--task-spec .pipeline/tasks/<id>.json] [--version <ver>] [--commit <sha>]
      --note "<one line>"`
+   `record` also reclaims the run's tree: merged work is dropped, unfinished
+   work is committed + pushed to `dt/<task-id>` and the tree is dropped. That is
+   the record of the attempt — `status` lists it as `⏸ parked dt/<id> @ <sha>`,
+   never as a stray directory. On `blocked`, put the actual question in
+   `--note` and name the branch; `main` is for what passed, so a paused attempt
+   is never merged forward to "save" it.
 10. `python3 <team>/cli.py alarm <project>` — staleness/CI reconciliation;
     may file a GitHub Issue. Then report the OUTCOME BANNER to the user/feed,
     one of the three contract states — e.g. `✅ SHIPPED vX → internal testing`

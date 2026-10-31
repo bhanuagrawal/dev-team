@@ -31,20 +31,38 @@ DEFAULT_LOCALE = "en-US"
 IMAGE_TYPES = ("phoneScreenshots", "icon", "featureGraphic")
 
 
-def _assets_root(project: Path) -> tuple[Path, str]:
-    """Where the assets come from: the checkout when it matches origin/main,
-    otherwise a delivery tree at origin/main.
+def _assets_root(project: Path) -> tuple[Path | None, str]:
+    """Where the assets come from: the checkout when it CLEANLY matches
+    origin/main, otherwise a delivery tree at origin/main.
 
     A store upload is a claim about what users receive. Reading the checkout is
     only safe while it equals the delivery ref; a stale checkout published the
-    old paywall frames once already.
+    old paywall frames once already — and a DIRTY checkout is the same defect
+    one step earlier: `storefront-scenes` writes regenerated PNGs straight into
+    `distribution/listing/` as uncommitted changes, so publishing from there put
+    frames on Play that existed in no commit (observed 2026-10-31). A dirty
+    asset tree is therefore refused, not quietly replaced: the fix is to commit
+    the assets first, and the error says so.
     """
-    from .core import git_ref_state
+    from .core import git, git_ref_state
     state = git_ref_state(project)
+    # Only ASSET paths matter: the owner's unrelated WIP (a plan edit, a scratch
+    # note) must not block a store upload, and the plan mirror is written by the
+    # pipeline itself.
+    watched = ("distribution/listing", "fastlane/metadata", "src/main/play",
+               "docs/storefront.json")
+    st = git(["status", "--porcelain", "--", *watched], cwd=project, timeout=60)
+    dirty = [l[3:] for l in (st.stdout or "").splitlines() if l.strip()]
     if state.get("behind") or state.get("stale") or state.get("diverged") or not state.get("head"):
         from .scan import origin_tree
         tree = origin_tree(project)
-        return tree, "origin/main"
+        note = f" (checkout also has {len(dirty)} uncommitted asset change(s), ignored)"
+        return tree, "origin/main" + (note if dirty else "")
+    if dirty:
+        shown = ", ".join(dirty[:6]) + (" …" if len(dirty) > 6 else "")
+        return None, (f"listing assets have {len(dirty)} uncommitted change(s) ({shown}) — "
+                      f"a store upload must describe a COMMIT, not a working tree; "
+                      f"commit them (and re-run) or discard them")
     return project, "checkout"
 
 
@@ -164,6 +182,9 @@ def publish_listing_assets(project: Path, dry_run: bool = True, log: Any = None)
     say = log or (lambda *_: None)
     root, source = _assets_root(project)
     say(f"~ listing assets from {source}")
+    if root is None:
+        return {"status": "BLOCKED", "blockers": [source],
+                "hint": "commit the asset changes so the upload describes a commit"}
     assets = _assets(root)
     if assets.get("error"):
         return {"status": "ERROR", "error": assets["error"]}

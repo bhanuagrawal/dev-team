@@ -24,7 +24,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-from . import goals, verify
+from . import goals, verify, worktrees
 from .core import (
     RunLog, agent_argv, git, now_iso, profile_of, role_cfg as _role_cfg,
     run, state_of, target_looks_like_paths,
@@ -104,6 +104,7 @@ def prepare_worktree(project: Path, task_id: str, log: RunLog) -> tuple[Path, st
     base = r.stdout.strip()
     wt = project / RUN_BASE / task_id
     if wt.exists():
+        git(["worktree", "unlock", str(wt)], cwd=project, timeout=60)
         git(["worktree", "remove", "--force", str(wt)], cwd=project)
     for ref in (f"dt/{task_id}", "dt-base"):
         git(["branch", "-D", ref], cwd=project, timeout=60)
@@ -113,6 +114,15 @@ def prepare_worktree(project: Path, task_id: str, log: RunLog) -> tuple[Path, st
         return None
     git(["branch", "-f", "dt-base", base], cwd=project, timeout=60)
     _copy_machine_local_inputs(project, wt, log)
+    # A previous attempt on this task id may still be the only copy of its work
+    # (a blocked session that never reached release). Preserve it as
+    # dt/parked/<task>-<sha> before this run owns the branch name again.
+    rescue = worktrees.resolve_attempt(project, task_id, base, log)
+    if rescue:
+        log(f"worktree: ! {rescue} — NOT pushing this attempt yet")
+        return wt, base
+    # Durability at creation: after this, the tree is a cache, not the record.
+    worktrees.start_attempt(project, wt, task_id, log)
     return wt, base
 
 

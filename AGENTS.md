@@ -37,7 +37,9 @@ checklist + release-candidate call) and the two page URLs `record` prints.
 
 1. **Never edit project code on `main`.** Every task runs in
    `.pipeline/worktrees/<task-id>` on branch `dt/<task-id>`, cut from
-   `origin/main`. `release` pushes that branch onto `main`.
+   `origin/main`. `release` pushes that branch onto `main`. The branch is pushed
+   to origin **at creation** (`worktree-start`), not at release — from that
+   moment the tree is a cache and any run may delete it without losing work.
 2. **Read project code from the delivery ref, not the checkout.** `origin/main`
    is what CI ships; the checkout drifts (seen: 68 commits behind, twice producing
    a confident wrong answer). `devteam status` prints `DELIVERY:` on every run.
@@ -50,19 +52,60 @@ checklist + release-candidate call) and the two page URLs `record` prints.
    composables (`devteam storefront-scenes`), never from hand-drawn HTML. A
    generated artefact a user reads (store note, screenshots, release text) needs
    the consumer's constraints and an owner who can overwrite it.
-6. **Cleanup is part of the run.** `record --result shipped` prunes merged
-   worktrees automatically; `devteam worktree-prune <project>` is the manual form
-   (dry run by default). A tree is removed only when its HEAD is an ancestor of
-   `origin/main` **and** it is clean; unmerged or dirty trees are kept and named.
-   After a run, a repo should hold `main` + `.pipeline/scan` + `.pipeline/publish`
-   worktrees only — no `dt/*` branches.
-7. **No automatic guards beyond compile/tests.** Frozen paths, release-knob
+6. **Cleanup is part of the run.** `devteam pick` and `record` prune
+   automatically; `devteam worktree-prune <project>` is the manual form (dry run
+   by default). A tree is removed when its work is safe **somewhere else**: its
+   commits landed on `origin/main`, or (for an unfinished attempt) they were
+   committed and pushed to `dt/<task-id>` first — the branch is kept, the tree
+   goes. Uncommitted work is parked, never discarded; `--force` is the only way
+   to drop it and is never implied. After a run, a repo should hold `main` +
+   `.pipeline/scan` + `.pipeline/publish` worktrees only. A tree locked by a run
+   (`worktree-start` locks it) is left alone while it looks live — locked and
+   touched inside the settle window (`DEVTEAM_WORKTREE_SETTLE_MIN`, 30 min) — so
+   a dead session is reclaimed by the next `pick`, not by the owner's memory.
+7. **A worktree is never the record of anything.** Work is closed when `main`
+   contains it or `origin` holds its branch. An unfinished attempt lives as a
+   parked branch (`dt/<task-id>`, or `dt/parked/<task-id>-<sha>` when a re-run
+   needs the name back), is listed by `devteam status` as `⏸ parked`, and is
+   resumed by checking that branch out into a worktree — never by hoping a
+   directory survived. `record --result blocked` before any owner ask: the ask
+   names the branch.
+8. **No automatic guards beyond compile/tests.** Frozen paths, release-knob
    diffing and dependency declaration were retired by the owner (2026-10-31).
    `verify` runs: team-generic, localization, compile, unit tests, instrumented
    tests. Version/signing/SDK changes and new libraries are the reviewer's diff to
    catch — say so in the handover when a task touches them.
-8. **Ask the owner only what no agent can decide** (freeze-worthy incidents,
+9. **Ask the owner only what no agent can decide** (freeze-worthy incidents,
    discard-vs-keep on their WIP, direction). Never ask about promotion.
+
+## What lands where — and what the owner is never asked to hold
+
+The trigger for `main` is **the gates passed**, not "a human is about to look".
+
+| state of the work | where it goes | human needed? |
+|---|---|---|
+| finished, `verify` PASS | `main` (project) / a commit on `main` (this repo) | no |
+| stopped mid-flight (verify FAIL, blocker) | committed + pushed to `dt/<task-id>`, tree pruned, attempt listed as `⏸ parked` | no |
+| stopped for an owner ask | same as above, **plus** `record --result blocked --note "<the question>"` | yes — the ask itself |
+
+Nothing about a finished change needs a human in the loop; the human only enters
+for promotion (never agent-run), a `risk: supervised` task, a missing direction,
+or a blocker. Never leave a run paused with a dirty worktree: commit, push, then
+ask. A differential that only exists on this disk is not work, it is a rumour.
+
+**A command that writes inside a project must end with a commit on a pushed ref.**
+That includes ad-hoc commands (asset regeneration, harness scaffolding, listing
+edits), not just the release loop — they are the ones that used to leave tracked
+files modified in the checkout with no commit behind them. A store upload must
+describe a commit: `store-publish` refuses a dirty asset tree rather than putting
+frames on Play that exist in no revision.
+
+**Cross-repo changes land in dependency order.** A change that touches both this
+repo and a project: (1) commit and push the team-general fix here, (2) regenerate
+the project's CI from the template (`devteam ci <project> --write`), (3) release
+the project. The project's `release.yml` is generated by the template, so landing
+the project side first ships CI that no longer matches its generator — and the
+next `ci --write` silently rewrites it.
 
 ## Self-improvement (standing duty)
 
