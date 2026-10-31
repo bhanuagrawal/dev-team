@@ -67,6 +67,12 @@ def poster_prompt(project: Path, scene: dict[str, Any], direction: dict[str, Any
         f"headline: {scene.get('headline') or ''}",
         f"subtext: {scene.get('sub') or ''}",
         "No watermark, no logos, no price, no rating badges.",
+        # Not art direction: a production constraint. The vendor stamps its mark into
+        # the bottom-right corner of every image, and the cleaner heals that corner. If
+        # the copy or the phone is there, healing would smear the owner's own text — the
+        # run refused exactly that. So the corner is asked to stay plain background.
+        "Keep the bottom-right corner free of text and of the phone: leave it plain "
+        "background.",
     ]
     angle = (direction.get("copy_angle") or {}).get(str(scene.get("id")), "")
     if angle:
@@ -152,13 +158,11 @@ def generate_all(project: Path, scenes: list[dict[str, Any]], direction: dict[st
             continue
         if not source.is_file():
             return {"status": "BLOCKED", "error": f"no render at {source.relative_to(project)}"}
-        # Every asset after the first is told to match what is already in the
-        # conversation. That is a cohesion instruction, not a creative one: it names
-        # no colour, no shape, no light — it only asks the model to keep the set it is
-        # building consistent, which is what one chat is FOR.
-        continuity = ("Match the visual style, lighting and layout language of the images "
-                      "already in this conversation, so this reads as one listing.") if jobs else ""
-        prompt = poster_prompt(project, scene, direction, extra=" ".join(x for x in (extra, continuity) if x))
+        # No continuity instruction: the owner reviewed the set painted without one and
+        # kept it. Forcing "match the previous images" changed the composition the model
+        # chose (a tilted phone, a different face) and read as art direction, which is
+        # exactly what the model is here to do. One chat is enough to keep a set together.
+        prompt = poster_prompt(project, scene, direction, extra=extra)
         jobs.append({"out": str(out), "src": str(source), "prompt": prompt})
     if not jobs:
         return {"status": "OK", "posters": posters, "chat": None, "painted": 0}
@@ -200,7 +204,7 @@ def _scene_id_for(stem: str) -> str:
     return stem
 
 
-def clean_poster(poster: Path) -> dict[str, Any]:
+def clean_poster(poster: Path, strict: bool = False) -> dict[str, Any]:
     """Strip the vendor sparkle an image model leaves in a corner.
 
     A Play listing is the owner's product page; a model's watermark on it is an
@@ -209,7 +213,7 @@ def clean_poster(poster: Path) -> dict[str, Any]:
     """
     from . import plate_clean
 
-    return plate_clean.clean(poster)
+    return plate_clean.clean(poster, strict=strict)
 
 
 def to_play_size(poster: Path, out: Path, width: int = 1080, height: int = 1920) -> dict[str, Any]:

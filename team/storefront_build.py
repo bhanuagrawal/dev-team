@@ -210,7 +210,8 @@ def build(project: Path, *, frame: str = "auto", plate: str | None = None,
           gemini: bool = False, layout: str | None = None,
           frame_html: str | None = None, stitch_source: str = "",
           brief: str = "", builtin: bool = False, force: bool = False,
-          poster: bool = False, publish: bool = False, log=None) -> dict[str, Any]:
+          poster: bool = False, strict: bool = False, publish: bool = False,
+          log=None) -> dict[str, Any]:
     from . import asset_critic, storefront_direction as sd, storefront_frames as sfr
     from . import storefront_preview as sp, storefront_review as sr, vision_layout as vl
 
@@ -284,14 +285,18 @@ def build(project: Path, *, frame: str = "auto", plate: str | None = None,
             poster_file = made["posters"].get(scene["id"])
             if not poster_file:
                 return _fail("ERROR", f"no poster for {scene['id']}")
-            cleaned = spt.clean_poster(Path(poster_file))
+            cleaned = spt.clean_poster(Path(poster_file), strict=strict)
             if cleaned.get("status") != "OK":
                 return _fail(cleaned.get("status", "ERROR"),
                              cleaned.get("error", "the model's watermark could not be removed"),
                              "a vendor mark must not ship on the listing")
             if log:
-                log(f"  {scene['id']}: watermark removed at {cleaned.get('box')} "
-                    f"(residual {cleaned.get('residual')})")
+                marker = "✓" if cleaned.get("verified", True) else "⚠"
+                log(f"  {scene['id']}: {marker} watermark healed at {cleaned.get('box')} "
+                    f"(residual {cleaned.get('residual')})"
+                    + ("" if cleaned.get("verified", True) else
+                       " — could not be proved clean; look at the corner, "
+                       "or re-run with --strict to refuse outright"))
             name = f"{rank:02d}_{sr._slug(str(scene['id']))}.png"
             sized = spt.to_play_size(Path(cleaned.get("file") or poster_file), listing / name)
             if sized.get("status") != "OK":

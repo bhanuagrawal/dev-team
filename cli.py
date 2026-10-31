@@ -2135,7 +2135,7 @@ def cmd_storefront_build(args: argparse.Namespace) -> int:
         project, frame=args.frame, plate=args.plate, gemini=args.gemini,
         layout=args.layout, frame_html=args.frame_html, stitch_source=args.stitch_source,
         brief=args.brief, builtin=args.builtin, force=args.force,
-        poster=args.poster, publish=args.publish, log=print,
+        poster=args.poster, strict=args.strict, publish=args.publish, log=print,
     )
     if res.get("status") != "OK":
         print(f"STOREFRONT BUILD: {res.get('status')}")
@@ -2535,6 +2535,9 @@ def main() -> None:
     sb.add_argument("project")
     sb.add_argument("--frame", default="auto",
                     help="frame name to adopt for every scene (default: auto — one frame per scene)")
+    sb.add_argument("--strict", action="store_true",
+                    help="refuse an asset whose watermark heal cannot be proved clean "
+                         "(default: heal best-effort, report it, and let the owner decide)")
     sb.add_argument("--poster", action="store_true",
                     help="let Gemini paint the WHOLE asset from the rendered screen, one prompt per "
                          "scene (browser), then remove its watermark and upscale to Play size")
