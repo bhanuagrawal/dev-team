@@ -2135,7 +2135,7 @@ def cmd_storefront_build(args: argparse.Namespace) -> int:
         project, frame=args.frame, plate=args.plate, gemini=args.gemini,
         layout=args.layout, frame_html=args.frame_html, stitch_source=args.stitch_source,
         brief=args.brief, builtin=args.builtin, force=args.force,
-        publish=args.publish, log=print,
+        poster=args.poster, publish=args.publish, log=print,
     )
     if res.get("status") != "OK":
         print(f"STOREFRONT BUILD: {res.get('status')}")
@@ -2533,7 +2533,11 @@ def main() -> None:
     sb = sub.add_parser("storefront-build",
                         help="THE storefront asset pass: render, compose the designed frame, composite, gate, publish — in one deterministic order")
     sb.add_argument("project")
-    sb.add_argument("--frame", default="hero", help="name of the frame composition to adopt (default: hero)")
+    sb.add_argument("--frame", default="auto",
+                    help="frame name to adopt for every scene (default: auto — one frame per scene)")
+    sb.add_argument("--poster", action="store_true",
+                    help="let Gemini paint the WHOLE asset from the rendered screen, one prompt per "
+                         "scene (browser), then remove its watermark and upscale to Play size")
     sb.add_argument("--plate", help="backdrop plate PNG painted by Gemini (browser) or another image model")
     sb.add_argument("--gemini", action="store_true", help="paint the plate in Gemini through the owner's Chrome (browser-control)")
     sb.add_argument("--layout", help="layout JSON from a previous run (re-run deterministically instead of asking the model)")

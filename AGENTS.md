@@ -51,12 +51,16 @@ checklist + release-candidate call) and the two page URLs `record` prints.
 5. **Store assets are deliverables.** Screenshots come from the app's own
    composables (`devteam storefront-scenes`), never from hand-drawn HTML. A
    generated artefact a user reads (store note, screenshots, release text) needs
-   the consumer's constraints and an owner who can overwrite it. The poster around
-   the screenshot is composed either by Stitch (`--design-frame`/`--adopt-frame`)
-   or by the vision model (`--vision-frame`), and an **image model may only paint
-   the backdrop plate** (`--gemini-brief` → Gemini in the browser → `--backdrop`):
-   every image model repaints app UI, so a generated picture is a plate, never the
-   screen, and `adopt` refuses any frame whose slot is not the real render at 1:1.
+   the consumer's constraints and an owner who can overwrite it. The real render is
+   the **input** to the marketing image: `storefront-build --poster` attaches the
+   scene's rendered screen and has **Gemini paint the whole asset in the browser,
+   one prompt per scene** (`--poster`), then strips its watermark and upscales to a
+   size Play accepts. The code-rendered poster stays for work whose type must be
+   pixel-crisp: Stitch (`--design-frame`/`--adopt-frame`), the vision model
+   (`--vision-frame`), or a Gemini backdrop plate (`--gemini`/`--backdrop`) with
+   every letter drawn by us. An image model repaints what it is shown, so a Gemini
+   poster is a **depiction** of the app, never proof of it — say so, and never let
+   a frame assert a feature or number the app does not have.
    What the listing SAYS is decided before anything is drawn, in
    `docs/storefront-direction.json` (concept, per-frame argument, palette emphasis, evidence).
    Publishing a listing is a **browser** step, not an API call: the Play API uploads and

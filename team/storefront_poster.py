@@ -50,108 +50,121 @@ def poster_prompt(project: Path, scene: dict[str, Any], direction: dict[str, Any
                   extra: str = "") -> str:
     """The prompt handed to Gemini WITH the real render attached.
 
-    Every word the poster may print comes from the scene spec, and the direction
-    supplies the concept and the avoid-list — the same inputs the code renderer
-    gets, so the two paths argue the same thing.
+    Deliberately says NOTHING about how the image should look — no palette, no glow,
+    no phone styling, no film grain. Creative direction is the model's job; the
+    owner's decision is that Gemini composes the asset. What the prompt does pin is
+    the part that must stay true: which screen to show and which words to print.
+    Everything it prints comes from the scene spec, so the poster cannot advertise
+    a feature or a number the app does not have.
     """
-    angle = (direction.get("copy_angle") or {}).get(str(scene.get("id")), "")
     parts = [
         "Create a vertical 9:16 Google Play Store marketing screenshot for my Android app "
-        f"{_app_name(project)}.",
-        "Use the attached app screenshot EXACTLY as the phone screen: keep its layout, "
-        "colours, clock, search bar and dock of five app icons. Do not redraw the app "
-        "interface, do not change its text, do not crop it.",
-        "Show that screen inside a slim black phone with rounded corners and a soft drop "
-        "shadow, centred, occupying the lower two thirds of the image.",
-        "Background: very dark navy #0A0E14 with a soft teal #00E5FF glow behind the phone, "
-        "subtle film grain, nothing else. Keep the whole bottom-right corner plain and dark — "
-        "no glow, no sparkle, no glyph there.",
-        f"Top of the image, in this order: a small uppercase teal label \"{scene.get('badge') or ''}\", "
-        f"a big bold white condensed headline \"{scene.get('headline') or ''}\", then one line of "
-        f"grey subtext \"{scene.get('sub') or ''}\".",
-        "Print no other text. No logos, no watermark, no sparkles, no price, no rating badges.",
+        "MindfulLauncher.",
+        "The attached image is the app's real screen: show that screen in the image as the "
+        "app screen, and do not invent or replace the app's interface.",
+        "Print exactly these words, and no other text:",
+        f"label: {scene.get('badge') or ''}",
+        f"headline: {scene.get('headline') or ''}",
+        f"subtext: {scene.get('sub') or ''}",
+        "No watermark, no logos, no price, no rating badges.",
     ]
+    angle = (direction.get("copy_angle") or {}).get(str(scene.get("id")), "")
     if angle:
-        parts.append(f"This frame's argument: {angle}")
-    avoid = [a for a in (direction.get("avoid") or []) if "screen" not in a.lower()]
-    if avoid:
-        parts.append("Avoid: " + "; ".join(avoid) + ".")
+        parts.append(f"What this screen is selling: {angle}")
     if extra.strip():
         parts.append(extra.strip())
-    return "\n\n".join(p for p in parts if p.strip())
+    return "\n".join(p for p in parts if p.strip())
 
 
-def _script(out: Path, source_png: Path, prompt: str) -> str:
+def _batch_script(jobs: list[dict[str, str]]) -> str:
+    """One browser session, one Gemini chat, one asset per job.
+
+    Every asset of a listing is drawn in the SAME conversation on purpose: the model
+    keeps the look it just established, so the screenshots read as one set instead of
+    three unrelated posters. Each job = {out, src, prompt}.
+    """
     return f"""
-    const out = {json.dumps(str(out))};
-    const src = {json.dumps(str(source_png))};
+    const JOBS = {json.dumps(jobs)};
     const pages = context.pages().filter(p => p.url().includes("gemini.google.com"));
     const page = pages[0] || await context.newPage();
     if (!pages.length) await page.goto("https://gemini.google.com/app", {{ waitUntil: "domcontentloaded" }});
     await page.bringToFront();
-    // Count only the MODEL's images: the uploaded screenshot shows up as a blob
-    // image too (at 460px wide), so "a new blob appeared" was satisfied by the
-    // attachment preview and the run saved it as if it were the poster.
     const gen = () => page.locator("model-response img[src^='blob:'], "
                                  + "model-response img[src^='data:image']");
-    const before = await gen().count();
-    await page.locator("[aria-label=\\"Upload & tools\\"]").first().click();
-    await page.waitForTimeout(800);
-    await page.locator("input[type=file]").first().setInputFiles(src);
-    await page.waitForTimeout(4000);
-    const composer = page.locator("rich-textarea [contenteditable=true], [contenteditable=true]").first();
-    await composer.click();
-    await composer.fill({json.dumps(prompt)});
-    await page.waitForTimeout(500);
-    await page.keyboard.press("Enter");
-    const start = Date.now();
-    let picked = null;
-    while (Date.now() - start < 300000) {{
-      const imgs = gen();
-      const n = await imgs.count();
-      if (n > before) {{
-        const last = imgs.nth(n - 1);
-        const w = await last.evaluate(el => el.naturalWidth).catch(() => 0);
-        // A generated poster is at least 500px wide; anything smaller is an icon
-        // or a preview rendered into the transcript.
-        if (w >= 500) {{ picked = await last.getAttribute("src"); break; }}
+    const results = [];
+    for (const job of JOBS) {{
+      const before = await gen().count();
+      await page.locator("[aria-label=\\"Upload & tools\\"]").first().click();
+      await page.waitForTimeout(700);
+      await page.locator("input[type=file]").first().setInputFiles(job.src);
+      await page.waitForTimeout(3500);
+      const composer = page.locator("rich-textarea [contenteditable=true], [contenteditable=true]").first();
+      await composer.click();
+      await composer.fill(job.prompt);
+      await page.waitForTimeout(400);
+      await page.keyboard.press("Enter");
+      const start = Date.now();
+      let picked = null;
+      while (Date.now() - start < 300000) {{
+        const imgs = gen();
+        const n = await imgs.count();
+        if (n > before) {{
+          const last = imgs.nth(n - 1);
+          const w = await last.evaluate(el => el.naturalWidth).catch(() => 0);
+          if (w >= 500) {{ picked = await last.getAttribute("src"); break; }}
+        }}
+        await page.waitForTimeout(3000);
       }}
-      await page.waitForTimeout(3000);
+      if (!picked) {{ results.push({{ ok: false, error: "no NEW image in the model's answer" }}); break; }}
+      const data = await page.evaluate(async (s) => {{
+        const img = new Image(); img.src = s; await img.decode();
+        const c = document.createElement("canvas");
+        c.width = img.naturalWidth; c.height = img.naturalHeight;
+        c.getContext("2d").drawImage(img, 0, 0);
+        return {{ data: c.toDataURL("image/png"), w: c.width, h: c.height }};
+      }}, picked);
+      fs.writeFileSync(job.out, Buffer.from(data.data.split(",")[1], "base64"));
+      results.push({{ ok: true, out: job.out, w: data.w, h: data.h }});
     }}
-    if (!picked) return {{ ok: false, error: "no NEW image appeared in the model's answer" }};
-    const data = await page.evaluate(async (s) => {{
-      const img = new Image(); img.src = s; await img.decode();
-      const c = document.createElement("canvas");
-      c.width = img.naturalWidth; c.height = img.naturalHeight;
-      c.getContext("2d").drawImage(img, 0, 0);
-      return {{ data: c.toDataURL("image/png"), w: c.width, h: c.height }};
-    }}, picked);
-    fs.writeFileSync(out, Buffer.from(data.data.split(",")[1], "base64"));
-    return {{ ok: true, path: out, w: data.w, h: data.h, url: page.url() }};
+    return {{ ok: results.length && results.every(r => r.ok), chat: page.url(), results }};
     """
 
 
-def generate(project: Path, scene: dict[str, Any], prompt: str, log=None) -> dict[str, Any]:
-    """Paint one full poster in Gemini (browser) from the scene's real render."""
-    name = _poster_name(scene)
-    out = project / ".pipeline/storefront_posters" / f"poster-{name}.png"
-    out.parent.mkdir(parents=True, exist_ok=True)
-    if out.is_file():
-        if log:
-            log(f"  poster: reusing {out.name} ({out.stat().st_size // 1024} KB)")
-        return {"status": "OK", "file": out, "reused": True}
-    source = project / ".pipeline/storefront_scenes" / f"{scene['id']}.png"
-    if not source.is_file():
-        return {"status": "BLOCKED", "error": f"no render at {source.relative_to(project)}"}
+def generate_all(project: Path, scenes: list[dict[str, Any]], direction: dict[str, Any],
+                 log=None, extra: str = "") -> dict[str, Any]:
+    """Paint every poster in ONE Gemini chat, one prompt per scene.
+
+    Returns {"status", "posters": {scene_id: path}, "chat"}. Reuses any poster that
+    already exists, so a re-run is deterministic and does not repaint the set.
+    """
+    out_dir = project / ".pipeline/storefront_posters"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    posters: dict[str, Path] = {}
+    jobs: list[dict[str, str]] = []
+    for scene in scenes:
+        name = _poster_name(scene)
+        out = out_dir / f"poster-{name}.png"
+        source = project / ".pipeline/storefront_scenes" / f"{scene['id']}.png"
+        if out.is_file():
+            if log:
+                log(f"  poster: reusing {out.name} ({out.stat().st_size // 1024} KB)")
+            posters[scene["id"]] = out
+            continue
+        if not source.is_file():
+            return {"status": "BLOCKED", "error": f"no render at {source.relative_to(project)}"}
+        jobs.append({"out": str(out), "src": str(source),
+                     "prompt": poster_prompt(project, scene, direction, extra=extra)})
+    if not jobs:
+        return {"status": "OK", "posters": posters, "chat": None, "painted": 0}
     if log:
-        log(f"  poster: Gemini (browser) painting {name} from {source.name}")
+        log(f"  poster: Gemini (browser) painting {len(jobs)} asset(s) in one chat")
     try:
-        res = subprocess.run(["browser-control", "execute", "--json", _script(out, source, prompt)],
-                             capture_output=True, text=True, timeout=480)
+        res = subprocess.run(["browser-control", "execute", "--json", _batch_script(jobs)],
+                             capture_output=True, text=True, timeout=900)
     except FileNotFoundError:
         return {"status": "BLOCKED", "error": "browser-control is not installed"}
     except subprocess.TimeoutExpired:
-        return {"status": "BLOCKED", "error": "Gemini did not answer within 8 minutes"}
+        return {"status": "BLOCKED", "error": "Gemini did not finish within 15 minutes"}
     if res.returncode != 0:
         return {"status": "BLOCKED", "error": (res.stderr or "browser-control failed").strip()[:300]}
     try:
@@ -159,13 +172,26 @@ def generate(project: Path, scene: dict[str, Any], prompt: str, log=None) -> dic
     except Exception:
         return {"status": "ERROR", "error": "browser-control returned no JSON"}
     value = payload.get("value") or {}
-    if not (payload.get("ok") and value.get("ok")) or not out.is_file():
-        return {"status": "BLOCKED", "error": str(value.get("error") or "no image produced")}
-    if log:
-        log(f"  poster: painted {out.name} ({value.get('w')}x{value.get('h')}, "
-            f"{out.stat().st_size // 1024} KB)")
-    return {"status": "OK", "file": out, "chat": value.get("url"),
-            "source": str(source.relative_to(project))}
+    for job, made in zip(jobs, value.get("results") or []):
+        if not made.get("ok"):
+            return {"status": "BLOCKED", "error": str(made.get("error") or "no image produced"),
+                    "chat": value.get("chat")}
+        path = Path(made["out"])
+        posters[_scene_id_for(Path(job["src"]).stem)] = path
+        if log:
+            log(f"  poster: painted {path.name} ({made.get('w')}x{made.get('h')}, "
+                f"{path.stat().st_size // 1024} KB)")
+        (project / ".pipeline" / f"gemini-poster-{path.stem.replace('poster-', '')}.txt").write_text(
+            job["prompt"])
+    if not (payload.get("ok") and value.get("ok")):
+        return {"status": "BLOCKED", "error": "one or more posters were not generated",
+                "chat": value.get("chat")}
+    return {"status": "OK", "posters": posters, "chat": value.get("chat"),
+            "painted": len(jobs)}
+
+
+def _scene_id_for(stem: str) -> str:
+    return stem
 
 
 def clean_poster(poster: Path) -> dict[str, Any]:

@@ -70,6 +70,12 @@ def gemini_plate(project: Path, name: str, prompt: str, log=None) -> Path | None
     const page = pages[0] || await context.newPage();
     if (!pages.length) await page.goto("https://gemini.google.com/app", {{ waitUntil: "domcontentloaded" }});
     await page.bringToFront();
+    // Only an image that was NOT on the page before the prompt counts as painted.
+    // The old loop took the page's LAST blob image, which a resumed conversation
+    // already had — so a chat with an earlier plate satisfied it instantly and the
+    // run reported "Gemini painted" without anything being generated.
+    const before = new Set(await page.locator("img[src^='blob:'], img[src^='data:image']")
+      .evaluateAll(els => els.map(e => e.getAttribute("src"))));
     const composer = page.locator("rich-textarea [contenteditable='true'], [contenteditable='true']").first();
     await composer.click();
     await composer.fill({json.dumps(prompt)});
@@ -78,12 +84,13 @@ def gemini_plate(project: Path, name: str, prompt: str, log=None) -> Path | None
     const start = Date.now();
     let src = null;
     while (Date.now() - start < 180000) {{
-      const imgs = page.locator("img[src^='blob:'], img[src^='data:image']");
-      const n = await imgs.count();
-      if (n) {{ src = await imgs.nth(n - 1).getAttribute("src"); if (src) break; }}
+      const srcs = await page.locator("img[src^='blob:'], img[src^='data:image']")
+        .evaluateAll(els => els.map(e => e.getAttribute("src")));
+      const fresh = srcs.filter(s => s && !before.has(s));
+      if (fresh.length) {{ src = fresh[fresh.length - 1]; break; }}
       await page.waitForTimeout(2000);
     }}
-    if (!src) return {{ ok: false, error: "no generated image appeared" }};
+    if (!src) return {{ ok: false, error: "no NEW image appeared after the prompt" }};
     const data = await page.evaluate(async (src) => {{
       const img = new Image();
       img.src = src;
@@ -118,11 +125,85 @@ def gemini_plate(project: Path, name: str, prompt: str, log=None) -> Path | None
     return None
 
 
-def build(project: Path, *, frame: str = "hero", plate: str | None = None,
+def _frame_name(scene: dict[str, Any]) -> str:
+    """The poster a scene gets when it authors its own: its id without the rank.
+
+    One frame per scene is the default because each scene argues something
+    different (direction `copy_angle`) and a plate is prompted per argument.
+    Sharing one poster across a listing was observed: three screenshots, one
+    Gemini prompt, the same backdrop behind a calm home screen, a pause and a
+    dashboard.
+    """
+    from .storefront_frames import slug
+
+    base = re.sub(r"^\d+[-_\s]+", "", str(scene.get("id") or ""))
+    return slug(base or scene.get("id") or "frame")
+
+
+def _compose_scene(project: Path, scene: dict[str, Any], name: str, *,
+                   direction, sd, sfr, sp, vl, plate: str | None, gemini: bool,
+                   layout: str | None, brief: str, force: bool, log) -> dict[str, Any]:
+    """Plate → layout → adopt for ONE scene. Returns {} on success, a refusal otherwise."""
+    png = project / ".pipeline/storefront_scenes" / f"{scene['id']}.png"
+    if not png.is_file():
+        return _fail("ERROR", f"no render at {png.relative_to(project)}")
+    plate_path = Path(plate).expanduser() if plate else None
+    if plate_path and not plate_path.is_file():
+        return _fail("BLOCKED", f"no plate at {plate_path}")
+    if not plate_path:
+        saved = project / ".pipeline/storefront_frames" / f"plate-{name}.png"
+        if saved.is_file():
+            plate_path = saved
+    if not plate_path and gemini:
+        prompt = vl.gemini_backdrop_prompt(
+            project, scene, brief=brief, direction=sd.plate_brief(direction, scene))
+        (project / ".pipeline").mkdir(parents=True, exist_ok=True)
+        (project / ".pipeline" / f"gemini-backdrop-{name}.txt").write_text(prompt)
+        plate_path = gemini_plate(project, name, prompt, log=log)
+    if not plate_path:
+        return _fail(
+            "BLOCKED", f"no backdrop plate for frame '{name}' ({scene.get('id')})",
+            f"the poster is a designed deliverable, not the builtin default: pass --gemini "
+            f"to paint one in the browser (Gemini) per scene, or "
+            f"`devteam storefront-scenes {project.name} --gemini-brief --frame-scene "
+            f"{scene.get('id')}` and save it to "
+            f".pipeline/storefront_frames/plate-{name}.png, or --builtin to ship the plain "
+            f"template deliberately")
+    _say(log, f"  {scene.get('id')}: plate {plate_path.name} "
+              f"({plate_path.stat().st_size // 1024} KB) -> frame:{name}")
+    layout_path = Path(layout) if layout else _saved(project, name, "layout")
+    if layout_path and layout_path.is_file():
+        payload = json.loads(layout_path.read_text())
+        _say(log, f"  {scene.get('id')}: layout reusing {layout_path.name} (deterministic re-run)")
+    else:
+        _say(log, f"  {scene.get('id')}: layout from the vision model")
+        framed_brief = sd.layout_brief(direction, scene)
+        if brief.strip():
+            framed_brief += "\nExtra brief: " + brief.strip()
+        payload = vl.propose(project, scene, png, brief=framed_brief, log=log)
+        layout_path = _saved(project, name, "layout")
+        layout_path.parent.mkdir(parents=True, exist_ok=True)
+        layout_path.write_text(json.dumps(payload, indent=2) + "\n")
+        _say(log, f"  layout saved -> {layout_path.relative_to(project)} (hand-editable)")
+    staged = project / ".pipeline/storefront_frames" / f"vision-{name}.html"
+    staged_path, cleaned = vl.render_to(project, scene, png, payload, staged, backdrop=plate_path)
+    if cleaned and cleaned.get("removed"):
+        box = cleaned.get("box") or [0, 0, 0, 0]
+        _say(log, f"  plate watermark healed at {box[0]},{box[1]}")
+    adopted = sfr.adopt(project, name, staged_path.read_text(),
+                        source=f"vision:{vl.config()['model']}", force=force)
+    if adopted.get("status") != "OK":
+        return _fail(adopted.get("status", "ERROR"),
+                     "; ".join(adopted.get("issues") or []) or "adopt refused")
+    sfr.assign(project, str(scene["id"]), name)
+    return {}
+
+
+def build(project: Path, *, frame: str = "auto", plate: str | None = None,
           gemini: bool = False, layout: str | None = None,
           frame_html: str | None = None, stitch_source: str = "",
           brief: str = "", builtin: bool = False, force: bool = False,
-          publish: bool = False, log=None) -> dict[str, Any]:
+          poster: bool = False, publish: bool = False, log=None) -> dict[str, Any]:
     from . import asset_critic, storefront_direction as sd, storefront_frames as sfr
     from . import storefront_preview as sp, storefront_review as sr, vision_layout as vl
 
@@ -162,7 +243,57 @@ def build(project: Path, *, frame: str = "hero", plate: str | None = None,
         return _fail(rendered.get("status", "ERROR"), rendered.get("error", "render failed"),
                      rendered.get("hint", ""))
 
-    # 4 — compose the frame. This is the step that used to be skippable.
+    # 4 — the POSTER path: Gemini paints the whole asset from the real render.
+    # This is the owner's chosen shape: the preview screen goes IN as an attachment
+    # and the marketing image comes OUT, per scene, one prompt each.
+    if poster:
+        from . import storefront_poster as spt
+        from . import storefront_review as sr
+        ordered = sr.ordered_scenes(spec, review)
+        listing = project / "distribution/listing/en-US/images/phoneScreenshots"
+        listing.mkdir(parents=True, exist_ok=True)
+        made = spt.generate_all(project, ordered, direction, log=log, extra=brief)
+        if made.get("status") != "OK":
+            return _fail(made.get("status", "ERROR"), made.get("error", "posters not generated"),
+                         "the poster is a Gemini deliverable: re-run, or drop a finished image at "
+                         ".pipeline/storefront_posters/poster-<scene>.png")
+        if log and made.get("chat"):
+            log(f"  chat: {made['chat']}")
+        written = []
+        for rank, scene in enumerate(ordered, 1):
+            poster_file = made["posters"].get(scene["id"])
+            if not poster_file:
+                return _fail("ERROR", f"no poster for {scene['id']}")
+            cleaned = spt.clean_poster(Path(poster_file))
+            if cleaned.get("status") != "OK":
+                return _fail(cleaned.get("status", "ERROR"),
+                             cleaned.get("error", "the model's watermark could not be removed"),
+                             "a vendor mark must not ship on the listing")
+            if log:
+                log(f"  {scene['id']}: watermark removed at {cleaned.get('box')} "
+                    f"(residual {cleaned.get('residual')})")
+            name = f"{rank:02d}_{sr._slug(str(scene['id']))}.png"
+            sized = spt.to_play_size(Path(cleaned.get("file") or poster_file), listing / name)
+            if sized.get("status") != "OK":
+                return _fail("ERROR", sized.get("error", "upscale failed"))
+            if log:
+                log(f"  ✓ {name} (Gemini {sized.get('upscaled_from')} -> Play {sized.get('size')})")
+            written.append(name)
+        report = asset_critic.review_store_assets(project)
+        score = report.get("score", 0)
+        _say(log, f"  critic: {score}/100")
+        if report.get("hard_fail") or score < 80:
+            return _fail("BLOCKED", f"critic {score}/100", "; ".join(report.get("issues") or [])[:400])
+        out = {"status": "OK", "score": score, "frame": "gemini-poster",
+               "concept": direction.get("concept"),
+               "order": [s["id"] for s in ordered],
+               "screenshots": written, "chat": made.get("chat")}
+        if publish:
+            from .play_listing import publish_listing_assets
+            out["publish"] = publish_listing_assets(project, dry_run=False, log=log)
+        return out
+
+    # 4b — the PLATE path: Gemini paints the backdrop, code draws phone and copy.
     if frame_html:
         _say(log, f"~ composition: adopting Stitch HTML ({Path(frame_html).name})")
         adopted = sfr.adopt(project, frame, Path(frame_html).read_text(), source=stitch_source, force=force)

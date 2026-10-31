@@ -757,11 +757,12 @@ The owner may ask for ONE agent only, and that must work:
   idea plus the argument each frame makes, committed as `docs/storefront-direction.json` and read
   by the plate prompt and the layout brief. A direction can waste a poster; it can never touch the
   screen, which stays the real render.
-  **Then run `devteam storefront-build <project>` — the whole pass, in the only order that
-  works.** It renders the app's own composables from origin/main, refuses to continue
-  without the editorial review, composes the poster (Gemini plate → vision/Stitch
-  layout), composites the reviewed order, gates on the critic, and prints the upload
-  command. Run the steps individually only to debug one of them:
+  **Then run `devteam storefront-build <project> --poster` — the whole pass, in the only order
+  that works.** It renders the app's own composables from origin/main, refuses to continue
+  without the editorial review, sends each scene's render to Gemini (browser, one prompt per
+  scene) which paints the marketing image, strips the model's watermark, upscales the result to
+  a size Play accepts, gates on the critic, and prints the upload command. Run the steps
+  individually only to debug one of them:
   1. **Render** from the app's own composables: `python3 <team>/cli.py storefront-scenes <project> --render`
      (never hand-drawn HTML; the scene spec is the project's `docs/storefront.json`).
   2. **Editorial review — an LLM decides, not the filenames.**
@@ -771,14 +772,18 @@ The owner may ask for ONE agent only, and that must work:
      it is committed as `docs/storefront-review.json`. Two policy rules override any model:
      **a monetization surface (paywall/purchase/subscription/upgrade/price) never ships**, and every
      kept frame must be ranked (an unranked scene is cut, never silently shipped).
-  3. **Compose, then frame in ranked order**: the poster is a DESIGNED deliverable. The plate
-     comes from Gemini in the browser (`--gemini`, or `--gemini-brief` by hand); the composition
-     comes from the vision model (`--vision-frame`/`--layout`) or Stitch (`--design-frame` →
-     `--adopt-frame`). `--frame` then writes `01_<slug>.png` … and removes pipeline-owned frames
-     the review cut. `--builtin` ships the plain template and must be passed DELIBERATELY — it is
-     never the fallback, and `storefront-build` refuses rather than default to it. The critic
-     (`store-assets`) fails a listing that still carries a monetization frame, `icon = null`/flat
-     placeholder tiles, or an order that disagrees with the review.
+  3. **Compose, then frame in ranked order**: the poster is a DESIGNED deliverable. Two shapes,
+     both one prompt per scene. **`--poster`** (the owner's default): the scene render is attached
+     to the Gemini prompt and the model returns the finished marketing image — it is a depiction,
+     so it is watermarked-cleaned and upscaled to Play size, never passed off as the render.
+     **`--gemini`** (pixel-crisp type): Gemini paints only the backdrop plate, and the phone,
+     layout and every letter are drawn by code — the composition comes from the vision model
+     (`--vision-frame`/`--layout`) or Stitch (`--design-frame` → `--adopt-frame`). `--frame` then
+     writes `01_<slug>.png` … and removes pipeline-owned frames the review cut. `--builtin` ships
+     the plain template and must be passed DELIBERATELY — it is never the fallback, and
+     `storefront-build` refuses rather than default to it. The critic (`store-assets`) fails a
+     listing that still carries a monetization frame, `icon = null`/flat placeholder tiles, or an
+     order that disagrees with the review.
   4. **Publish — API for the upload, BROWSER for the publish.** `devteam store-publish <project>`
      (dry run) / `--yes` uploads icon + feature graphic + screenshots in the editorial order,
      commits the edit, and reads the bytes back through a fresh edit. That is where the API

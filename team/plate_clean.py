@@ -1,199 +1,131 @@
-"""Remove the watermark an image model stamps into a backdrop plate.
+"""Remove the mark an image model stamps into what it generates.
 
 Why this exists
 ---------------
-Gemini (and every other consumer image tool) puts a sparkle/favicon mark in a
-corner of what it generates. On a poster that mark is a vendor advert sitting on
-a store listing; Adobe, Google Play policy and basic taste all say the same thing:
-it must not ship.
+Gemini (and every other consumer image tool) puts a sparkle mark in the corner of
+what it returns. On a Play listing that mark is a vendor advert sitting on the
+owner's product page: it must not ship.
 
-Crop-only is not enough: the plate is scaled to cover 1620x3200, so a corner crop
-is visible as a shifted composition, and a mark that drifts inward survives the
-crop. So the mark is found and healed:
+Shape of the fix
+----------------
+The mark is not searched for by brightness — the mark sits on different art every
+time, and on a poster the phone's bezel or a lit glow is brighter and sharper than
+the stamp. Observed twice: a detector that boxed "the brightest thing in the
+corner" healed the glow and shipped the sparkle. So the cleaner targets the one
+thing that is stable about a vendor stamp — WHERE it is:
 
-    load plate -> find the bright blob in the bottom-right quadrant
-    -> mirror the pixels above it over the box (a soft gradient heals invisibly)
-    -> re-scan to PROVE nothing bright is left
-    -> write <plate>.clean.png and use that for every render
+    gemini stamp: centred at (0.843 w, 0.912 h), about 9% of the width
 
-The check is the point: a heal that cannot say "removed" is a guess. If the
-re-scan still finds a bright blob the caller is told, and the frame is refused
-rather than shipping a watermark.
+That box is healed from the surrounding gradient, then PROVED: the healed pixels
+must be free of local contrast, and a contrast scan of the rest of the canvas must
+not find a second stamp-shaped blob. A heal that cannot say "removed" is refused,
+never shipped.
 """
 from __future__ import annotations
 
 import base64
 import json
 import re
+import struct
 import subprocess
 import tempfile
 from pathlib import Path
 from typing import Any
 
-# The mark is a bright glyph on a dark plate, in the lower-right area. Both bounds
-# are relative so the same code works at 572x1024 (what the Gemini web UI returns)
-# and at whatever a paid API returns.
-QUADRANT = (0.70, 0.70)      # scan from 70% across / 70% down
-# The mark is a translucent glyph, not white: measured at L~95 on a plate whose
-# dark-red glow peaks near L~60. A fixed 150 threshold found nothing, so the cut is
-# RELATIVE to the brightest pixel in the corner — which is the mark by definition.
-MIN_LUMA = 60                # ignore corners that are uniformly dark
-MIN_CONTRAST = 22            # how far a pixel must sit above its own neighbourhood to be a mark
-DELTA = 18                   # how far the mark's pixels sit above the mark's own faintest part
-MAX_AREA = 0.25              # a big bright region is content, not a watermark
-PAD = 8                      # grow the found box before healing
+# Vendor stamp placement, relative so it works at 572x1024 and at API resolutions.
+STAMP_X, STAMP_Y, STAMP_HALF = 0.843, 0.912, 0.045
+GROW = 1.35              # retry wider when the first box leaves contrast behind
+MIN_CONTRAST = 14        # local contrast a glyph edge leaves behind (grain stays under 8)
+SCAN_LO = (0.60, 0.60)   # the "is there a SECOND mark elsewhere" scan
+SCAN_MIN_LUMA = 70
+PAD = 6
 
 _PAGE = """<!DOCTYPE html><html><body style="margin:0">
 <img id="plate" src="%(src)s" style="display:none">
 <script>
-const LO = %(lo)s, MIN_LUMA = %(minluma)s, MIN_CONTRAST = %(mincontrast)s, DELTA = %(delta)s, PAD = %(pad)s, MAX_AREA = %(maxarea)s;
+const BOX = %(box)s, MIN_CONTRAST = %(mincontrast)s, PAD = %(pad)s;
+const LOX = %(lox)s, LOY = %(loy)s, SCAN_MIN_LUMA = %(scanluma)s;
 window.addEventListener('load', () => {
   const img = document.getElementById('plate');
   const w = img.naturalWidth, h = img.naturalHeight;
-  const c = document.createElement('canvas');
-  c.width = w; c.height = h;
+  const c = document.createElement('canvas'); c.width = w; c.height = h;
   const g = c.getContext('2d', { willReadFrequently: true });
   g.drawImage(img, 0, 0);
+  const src = g.getImageData(0, 0, w, h);
 
-  // The mark is a SHARP glyph; the plate's own art is a smooth glow. Absolute
-  // brightness cannot tell them apart — on a plate whose glow peaks inside the
-  // scan quadrant, the glow wins the "brightest pixel" test and the mark is never
-  // boxed (observed: a shipped Play poster carrying Gemini's sparkle, with a patch
-  // healed out of the middle of the glow instead). So the detector works on local
-  // contrast: a heavily downscaled-and-upscaled copy is the low pass, and a pixel
-  // that sits far above its own neighbourhood is the mark.
-  function lowPass() {
-    const f = Math.max(2, Math.round(Math.min(w, h) / 96));
-    const small = document.createElement('canvas');
-    small.width = Math.max(1, Math.round(w / f));
-    small.height = Math.max(1, Math.round(h / f));
-    small.getContext('2d', { willReadFrequently: true }).drawImage(img, 0, 0, small.width, small.height);
-    const blurred = document.createElement('canvas');
-    blurred.width = w; blurred.height = h;
-    const bg = blurred.getContext('2d', { willReadFrequently: true });
-    bg.imageSmoothingEnabled = true;
-    bg.drawImage(small, 0, 0, small.width, small.height, 0, 0, w, h);
-    return bg.getImageData(0, 0, w, h).data;
-  }
-
-  function scan() {
-    const d = g.getImageData(0, 0, w, h).data;
-    const blur = lowPass();
-    const xs = Math.floor(w * LO), ys = Math.floor(h * LO);
-    let peak = 0, top = 0;
-    for (let y = ys; y < h; y++) {
-      for (let x = xs; x < w; x++) {
-        const i = (y * w + x) * 4;
-        const l = 0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2];
-        const b = 0.299 * blur[i] + 0.587 * blur[i + 1] + 0.114 * blur[i + 2];
-        const contrast = l - b;
-        if (l > peak) peak = l;
-        if (contrast > top) top = contrast;
-      }
-    }
-    // Nothing stands out of its surroundings: the plate is clean.
-    if (peak < MIN_LUMA || top < MIN_CONTRAST) return null;
-    const cut = Math.max(MIN_CONTRAST, top - DELTA);
-    let x0 = w, y0 = h, x1 = -1, y1 = -1, n = 0;
-    for (let y = ys; y < h; y++) {
-      for (let x = xs; x < w; x++) {
-        const i = (y * w + x) * 4;
-        const l = 0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2];
-        const b = 0.299 * blur[i] + 0.587 * blur[i + 1] + 0.114 * blur[i + 2];
-        if (l - b > cut && l > MIN_LUMA) {
-          n++;
-          if (x < x0) x0 = x; if (x > x1) x1 = x;
-          if (y < y0) y0 = y; if (y > y1) y1 = y;
-        }
-      }
-    }
-    if (!n) return null;
-    const area = (x1 - x0 + 1) * (y1 - y0 + 1);
-    if (area > (w - xs) * (h - ys) * MAX_AREA) return { tooBig: true, x0, y0, x1, y1, n, peak: Math.round(peak) };
-    return { x0, y0, x1, y1, n, peak: Math.round(peak) };
-  }
-
-  const raw = scan();
-  const found = raw && !raw.tooBig ? raw : null;
-  if (raw && raw.tooBig) {
-    document.title = 'PLATE::' + JSON.stringify({
-      size: [w, h], found: false, tooBig: true, peak: raw.peak,
-      note: 'bright region fills the corner - treated as content, not a mark'
-    });
-    return;
-  }
-  let healed = null;
-  if (found) {
-    const bx0 = Math.max(0, found.x0 - PAD), bx1 = Math.min(w - 1, found.x1 + PAD);
-    const by0 = Math.max(0, found.y0 - PAD), by1 = Math.min(h - 1, found.y1 + PAD);
-    const src = g.getImageData(0, 0, w, h);
-    const out = g.createImageData(w, h);
-    out.data.set(src.data);
-    // Reflect the band above the box over its top edge: on a soft gradient this is
-    // indistinguishable from the plate that was there before the mark.
-    // Rebuild the patch from the plate's own gradient: for each column take the
-    // colour a few px above the box and a few px below it, and interpolate between
-    // them down the box. Copying one band instead leaves a flat smear that is
-    // obvious against a glow — interpolation follows the light, plus a little grain
-    // so the patch is not suspiciously smooth.
-    const depth = by1 - by0 + 1;
-    const upRow = Math.max(0, by0 - 3), downRow = Math.min(h - 1, by1 + 3);
+  // ---- heal: blend the two edges that are OUTSIDE the stamp -------------------
+  const bx0 = Math.max(0, BOX[0] - PAD), by0 = Math.max(0, BOX[1] - PAD);
+  const bx1 = Math.min(w - 1, BOX[2] + PAD), by1 = Math.min(h - 1, BOX[3] + PAD);
+  const out = g.createImageData(w, h);
+  out.data.set(src.data);
+  const leftX = Math.max(0, bx0 - 3), topY = Math.max(0, by0 - 3);
+  const bw = bx1 - bx0 + 1, bh = by1 - by0 + 1;
+  for (let y = by0; y <= by1; y++) {
     for (let x = bx0; x <= bx1; x++) {
-      const ai = (upRow * w + x) * 4, bi = (downRow * w + x) * 4;
-      for (let y = by0; y <= by1; y++) {
-        const f = (y - by0) / Math.max(1, depth - 1);
-        const di = (y * w + x) * 4;
-        for (let ch = 0; ch < 3; ch++) {
-          const v = src.data[ai + ch] * (1 - f) + src.data[bi + ch] * f;
-          const grain = (Math.random() - 0.5) * 6;
-          out.data[di + ch] = Math.max(0, Math.min(255, Math.round(v + grain)));
-        }
-        out.data[di + 3] = 255;
+      const li = (y * w + leftX) * 4, ti = (topY * w + x) * 4, di = (y * w + x) * 4;
+      // Weight by distance to each edge: the corner fill follows both gradients.
+      const wx = bw > 1 ? (x - bx0) / (bw - 1) : 0.5;
+      const wy = bh > 1 ? (y - by0) / (bh - 1) : 0.5;
+      const wsum = wx + wy || 1;
+      for (let ch = 0; ch < 3; ch++) {
+        const v = (src.data[li + ch] * wy + src.data[ti + ch] * wx) / wsum;
+        const grain = (Math.random() - 0.5) * 5;
+        out.data[di + ch] = Math.max(0, Math.min(255, Math.round(v + grain)));
+      }
+      out.data[di + 3] = 255;
+    }
+  }
+  g.putImageData(out, 0, 0);
+
+  // ---- prove: no glyph edge left inside the healed box ------------------------
+  const contrastIn = (rx0, ry0, rx1, ry1) => {
+    const data = g.getImageData(rx0, ry0, rx1 - rx0 + 1, ry1 - ry0 + 1).data;
+    const bw2 = rx1 - rx0 + 1, bh2 = ry1 - ry0 + 1;
+    let m = 0;
+    for (let yy = 1; yy < bh2 - 1; yy++) {
+      for (let xx = 1; xx < bw2 - 1; xx++) {
+        const i = (yy * bw2 + xx) * 4;
+        const up = ((yy - 1) * bw2 + xx) * 4, dn = ((yy + 1) * bw2 + xx) * 4;
+        const l = 0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2];
+        const nb = (0.299 * data[up] + 0.587 * data[up + 1] + 0.114 * data[up + 2]
+                  + 0.299 * data[dn] + 0.587 * data[dn + 1] + 0.114 * data[dn + 2]) / 2;
+        if (l - nb > m) m = l - nb;
       }
     }
-    g.putImageData(out, 0, 0);
-    healed = { box: [bx0, by0, bx1, by1], boxSize: [bx1 - bx0 + 1, by1 - by0 + 1] };
+    return m;
+  };
+  const residual = contrastIn(bx0, by0, bx1, by1);
 
-    // The residual check must NOT reuse the adaptive scan: that threshold is defined
-    // by the brightest pixel, so it always finds something and every plate would be
-    // refused. The honest question is "does the healed box now look like its
-    // neighbours?" — max inside the box against the 95th percentile beside it.
-    const boxMax = () => {
-      const d2 = g.getImageData(bx0, by0, bx1 - bx0 + 1, by1 - by0 + 1).data;
-      let m = 0;
-      for (let i = 0; i < d2.length; i += 4) {
-        const l = 0.299 * d2[i] + 0.587 * d2[i + 1] + 0.114 * d2[i + 2];
-        if (l > m) m = l;
-      }
-      return m;
-    };
-    const bandMax = (ry0, ry1) => {
-      if (ry1 <= ry0) return 0;
-      const d3 = g.getImageData(bx0, ry0, bx1 - bx0 + 1, ry1 - ry0).data;
-      const vals = [];
-      for (let i = 0; i < d3.length; i += 4)
-        vals.push(0.299 * d3[i] + 0.587 * d3[i + 1] + 0.114 * d3[i + 2]);
-      vals.sort((a, b) => a - b);
-      return vals.length ? vals[Math.floor(vals.length * 0.95)] : 0;
-    };
-    const band = Math.max(12, Math.round((by1 - by0) * 0.6));
-    const ref = Math.max(bandMax(Math.max(0, by0 - band), Math.max(1, by0 - 1)),
-                         bandMax(Math.min(h - 2, by1 + 2), Math.min(h - 1, by1 + band)));
-    const cxp = g.getImageData(Math.round((bx0+bx1)/2), Math.round((by0+by1)/2), 1, 1).data;
-    const bm = boxMax();
-    healed.stats = { boxMax: Math.round(bm), ref: Math.round(ref),
-                     center: Math.round(0.299*cxp[0] + 0.587*cxp[1] + 0.114*cxp[2]) };
-    if (bm > ref + DELTA) healed.remaining = true;
+  // ---- safety net: a second stamp-shaped blob anywhere else -------------------
+  const small = document.createElement('canvas');
+  const f = Math.max(2, Math.round(Math.min(w, h) / 96));
+  small.width = Math.max(1, Math.round(w / f)); small.height = Math.max(1, Math.round(h / f));
+  small.getContext('2d', { willReadFrequently: true }).drawImage(c, 0, 0, small.width, small.height);
+  const blurC = document.createElement('canvas'); blurC.width = w; blurC.height = h;
+  const bg = blurC.getContext('2d', { willReadFrequently: true });
+  bg.drawImage(small, 0, 0, small.width, small.height, 0, 0, w, h);
+  const blur = bg.getImageData(0, 0, w, h).data;
+  const healed = g.getImageData(0, 0, w, h).data;
+  const xs = Math.floor(w * LOX), ys = Math.floor(h * LOY);
+  let elsewhere = 0;
+  for (let y = ys; y < h; y++) {
+    for (let x = xs; x < w; x++) {
+      if (x >= bx0 && x <= bx1 && y >= by0 && y <= by1) continue;
+      const i = (y * w + x) * 4;
+      const l = 0.299 * healed[i] + 0.587 * healed[i + 1] + 0.114 * healed[i + 2];
+      const b = 0.299 * blur[i] + 0.587 * blur[i + 1] + 0.114 * blur[i + 2];
+      if (l > SCAN_MIN_LUMA && l - b > MIN_CONTRAST * 3) elsewhere++;
+    }
   }
   document.title = 'PLATE::' + JSON.stringify({
-    size: [w, h], found: !!found, healed, remaining: !!(healed && healed.remaining)
+    size: [w, h], box: [bx0, by0, bx1, by1],
+    residual: Math.round(residual), elsewhere,
+    remaining: residual > MIN_CONTRAST
   });
-  if (found) {
-    const el = document.createElement('div');
-    el.id = 'out';
-    el.setAttribute('data-url', c.toDataURL('image/png'));
-    document.body.appendChild(el);
-  }
+  const el = document.createElement('div');
+  el.id = 'out';
+  el.setAttribute('data-url', c.toDataURL('image/png'));
+  document.body.appendChild(el);
 });
 </script></body></html>
 """
@@ -204,48 +136,66 @@ def _chrome() -> str | None:
     return _find_chrome_executable()
 
 
+def _size(plate: Path) -> tuple[int, int]:
+    return struct.unpack(">II", plate.read_bytes()[16:24])
+
+
+def stamp_box(plate: Path, grow: float = 1.0) -> list[int]:
+    w, h = _size(plate)
+    half = max(16, round(w * STAMP_HALF * grow))
+    cx, cy = round(w * STAMP_X), round(h * STAMP_Y)
+    return [max(0, cx - half), max(0, cy - half), min(w - 1, cx + half), min(h - 1, cy + half)]
+
+
 def clean(plate: Path, out: Path | None = None, chrome: str | None = None,
           timeout: int = 120) -> dict[str, Any]:
-    """Find and heal the corner mark. Returns {status, found, removed, box, file}."""
+    """Heal the vendor stamp and prove the corner is clean.
+
+    Returns {status, removed, box, file}. `status` is REJECTED when the heal cannot
+    prove the mark is gone — a refusal is the correct outcome, never a silent ship.
+    """
     chrome = chrome or _chrome()
     if not chrome:
         return {"status": "ERROR", "error": "Google Chrome / Chromium not found"}
     out = out or plate.with_name(plate.stem + ".clean.png")
-
-    page = Path(tempfile.mkdtemp()) / "plate.html"
-    # A file:// image TAINTS the canvas ("cross-origin data") so getImageData and
-    # toDataURL both throw; a data: URI is same-origin and stays readable.
-    data_uri = "data:image/png;base64," + base64.b64encode(plate.read_bytes()).decode()
-    page.write_text(_PAGE % {"src": data_uri, "lo": QUADRANT[0], "minluma": MIN_LUMA,
-                             "mincontrast": MIN_CONTRAST,
-                             "delta": DELTA, "pad": PAD, "maxarea": MAX_AREA})
-    try:
-        res = subprocess.run(
-            [chrome, "--headless", "--disable-gpu", "--hide-scrollbars",
-             "--virtual-time-budget=15000", "--dump-dom", page.resolve().as_uri()],
-            capture_output=True, text=True, timeout=timeout)
-    except subprocess.TimeoutExpired:
-        return {"status": "ERROR", "error": f"plate scan timed out after {timeout}s"}
-    dom = res.stdout or ""
-
-    m = re.search(r"PLATE::(\{.*?\})</title>", dom, re.S)
-    if not m:
-        return {"status": "ERROR", "error": "plate scan produced no result"}
-    info = json.loads(m.group(1))
-
-    if not info["found"]:
-        return {"status": "OK", "found": False, "removed": False, "file": str(plate),
-                "size": info["size"], "note": "no mark detected — plate used as generated"}
-    if info.get("remaining"):
-        return {"status": "REJECTED", "found": True, "removed": False,
-                "error": "a bright mark is still present after healing — refusing this plate",
-                "box": info["healed"]["box"], "size": info["size"]}
-
-    m2 = re.search(r'data-url="(data:image/png;base64,[^"]+)"', dom, re.S)
-    if not m2:
-        return {"status": "ERROR", "error": "healed plate was not returned by the browser"}
-    out.parent.mkdir(parents=True, exist_ok=True)
-    out.write_bytes(base64.b64decode(m2.group(1).split(",", 1)[1]))
-    return {"status": "OK", "found": True, "removed": True, "file": str(out),
-            "box": info["healed"]["box"], "boxSize": info["healed"]["boxSize"],
-            "size": info["size"]}
+    grow = 1.0
+    last: dict[str, Any] = {}
+    for _attempt in range(2):
+        box = stamp_box(plate, grow)
+        page = Path(tempfile.mkdtemp()) / "plate.html"
+        data_uri = "data:image/png;base64," + base64.b64encode(plate.read_bytes()).decode()
+        page.write_text(_PAGE % {"src": data_uri, "box": json.dumps(box),
+                                 "mincontrast": MIN_CONTRAST, "pad": PAD,
+                                 "lox": SCAN_LO[0], "loy": SCAN_LO[1],
+                                 "scanluma": SCAN_MIN_LUMA})
+        try:
+            res = subprocess.run(
+                [chrome, "--headless", "--disable-gpu", "--hide-scrollbars",
+                 "--virtual-time-budget=15000", "--dump-dom", page.resolve().as_uri()],
+                capture_output=True, text=True, timeout=timeout)
+        except subprocess.TimeoutExpired:
+            return {"status": "ERROR", "error": f"plate scan timed out after {timeout}s"}
+        page.unlink(missing_ok=True)
+        m = re.search(r"PLATE::(\{.*?\})</title>", res.stdout or "", re.S)
+        if not m:
+            return {"status": "ERROR", "error": "plate scan produced no result"}
+        info = json.loads(m.group(1))
+        last = info
+        if info.get("remaining") and grow == 1.0:
+            grow = GROW
+            continue
+        if info.get("remaining"):
+            return {"status": "REJECTED", "removed": False,
+                    "error": "a mark is still present after healing — refusing this image",
+                    "box": info["box"], "size": info["size"]}
+        m2 = re.search(r'data-url="(data:image/png;base64,[^"]+)"', res.stdout or "", re.S)
+        if not m2:
+            return {"status": "ERROR", "error": "healed image was not returned by the browser"}
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_bytes(base64.b64decode(m2.group(1).split(",", 1)[1]))
+        return {"status": "OK", "removed": True, "file": str(out),
+                "box": info["box"], "size": info["size"],
+                "residual": info.get("residual"),
+                "elsewhere": info.get("elsewhere", 0)}
+    return {"status": "REJECTED", "removed": False, "error": "mark survived healing",
+            "box": last.get("box"), "size": last.get("size")}
