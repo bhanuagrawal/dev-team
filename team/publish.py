@@ -244,10 +244,23 @@ def commit_paths(project: Path, paths: list[str], message: str, log=None) -> dic
                 shutil.copy2(src, dst)
             elif dst.exists():
                 _g(["rm", "-q", "--", rel], wt, timeout=60)
-        _g(["add", "-A", "--", *keep], wt, timeout=120)
+        # A path that exists in NEITHER the checkout nor origin has nothing to
+        # stage, and `git add` treats it as a fatal pathspec error ("did not match
+        # any files") — it then adds NOTHING, the index still matches HEAD and this
+        # function reported success while the caller's deltas stayed in the
+        # checkout only. Callers legitimately pass aspirational paths (a frames
+        # dir no run has created yet), so drop the missing ones instead of failing.
+        addable = [rel for rel in keep if (wt / rel).exists()]
+        if addable:
+            a = _g(["add", "-A", "--", *addable], wt, timeout=120)
+            if a.returncode != 0:
+                tail = (a.stderr or a.stdout or "").strip().splitlines()
+                return {"pushed": False, "sha": "",
+                        "why": f"git add failed: {tail[0] if tail else 'unknown'}"}
         if _g(["diff", "--cached", "--quiet", "--", *keep], wt, timeout=60).returncode == 0:
+            say("nothing to commit — origin already carries these bytes")
             return {"pushed": True, "sha": "", "why": "already on origin"}
-        c = _g(["commit", "-m", message, "--", *keep], wt, timeout=120)
+        c = _g(["commit", "-m", message, "--", *(addable or keep)], wt, timeout=120)
         if c.returncode != 0:
             tail = (c.stderr or c.stdout or "").strip().splitlines()
             return {"pushed": False, "sha": "",
