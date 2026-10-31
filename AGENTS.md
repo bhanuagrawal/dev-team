@@ -55,7 +55,10 @@ checklist + release-candidate call) and the two page URLs `record` prints.
    the **input** to the marketing image: `storefront-build --poster` attaches the
    scene's rendered screen and has **Gemini paint the whole asset in the browser,
    one prompt per scene** (`--poster`), then strips its watermark and upscales to a
-   size Play accepts. The code-rendered poster stays for work whose type must be
+   size Play accepts. The same rule holds for the listing's two other brand
+   assets — the icon is painted from the app's real launcher icon and the feature
+   graphic from its hero screen (`storefront-brand`), and a listing whose icon or
+   banner has no recorded generative provenance is refused, not graded. The code-rendered poster stays for work whose type must be
    pixel-crisp: Stitch (`--design-frame`/`--adopt-frame`), the vision model
    (`--vision-frame`), or a Gemini backdrop plate (`--gemini`/`--backdrop`) with
    every letter drawn by us. An image model repaints what it is shown, so a Gemini

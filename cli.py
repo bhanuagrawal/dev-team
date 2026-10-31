@@ -2254,6 +2254,43 @@ def cmd_store_assets(args: argparse.Namespace) -> int:
     return 0 if report.get("score", 0) >= 80 else 1
 
 
+def cmd_storefront_brand(args: argparse.Namespace) -> int:
+    """The listing's brand assets — icon and feature graphic — painted, not templated."""
+    project = resolve_project(args.project)
+    from team.core import delivery_notice
+    from team import storefront_brand as sbf
+
+    print(delivery_notice(project))
+
+    if getattr(args, "adopt", None):
+        kind, _, path = str(args.adopt).partition("=")
+        if not kind.strip() or not path.strip():
+            print("STOREFRONT BRAND: --adopt needs kind=path, e.g. --adopt icon=/tmp/icon.png")
+            return 1
+        res = sbf.adopt(project, kind.strip(), Path(path.strip().strip('"')), note=args.note or "")
+        if res.get("status") != "OK":
+            print(f"STOREFRONT BRAND: {res.get('status')}")
+            print(f"  ✗ {res.get('error')}")
+            if res.get("hint"):
+                print(f"  → {res['hint']}")
+            return 1
+        print(f"  + recorded the owner's {res['kind']} ({res['file']})")
+
+    elif getattr(args, "generate", False):
+        res = sbf.generate(project, force=getattr(args, "force", False), log=print)
+        if res.get("status") != "OK":
+            print(f"STOREFRONT BRAND: {res.get('status')}")
+            print(f"  ✗ {res.get('error')}")
+            if res.get("hint"):
+                print(f"  → {res['hint']}")
+            return 1
+        print(f"  generated: {', '.join(res.get('generated') or []) or '(none)'}"
+              + (f"  reused: {', '.join(res.get('reused') or [])}" if res.get("reused") else ""))
+
+    print(sbf.format_status(project))
+    return 0 if not sbf.gate(project) else 1
+
+
 def cmd_store_publish(args: argparse.Namespace) -> int:
     project = resolve_project(args.project)
     from team.core import delivery_notice
@@ -2556,6 +2593,18 @@ def main() -> None:
     sa.add_argument("--generate", action="store_true", help="synthesize marketing HTML templates and render PNG assets to distribution/listing/en-US/images")
     sa.add_argument("--render-only", action="store_true", help="render existing HTML templates to PNGs without regenerating templates")
     sa.set_defaults(fn=cmd_store_assets)
+    sbr = sub.add_parser("storefront-brand",
+                         help="the listing's brand assets: the Play icon and the feature graphic, "
+                              "painted by the image model from the app's own icon and hero screen")
+    sbr.add_argument("project")
+    sbr.add_argument("--generate", action="store_true",
+                     help="paint icon + feature graphic in Gemini (browser) and record provenance")
+    sbr.add_argument("--adopt", metavar="KIND=PATH",
+                     help="record an OWNER-supplied file instead: icon=<png> | feature=<png> "
+                          "(Play's exact dimensions required)")
+    sbr.add_argument("--note", default="", help="why the owner supplied it (recorded)")
+    sbr.add_argument("--force", action="store_true", help="repaint even if an approved asset exists")
+    sbr.set_defaults(fn=cmd_storefront_brand)
     sb = sub.add_parser("storefront-build",
                         help="THE storefront asset pass: render, compose the designed frame, composite, gate, publish — in one deterministic order")
     sb.add_argument("project")

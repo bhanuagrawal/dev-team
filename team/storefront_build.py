@@ -219,7 +219,8 @@ def build(project: Path, *, frame: str = "auto", plate: str | None = None,
           brief: str = "", builtin: bool = False, force: bool = False,
           poster: bool = False, strict: bool = False, publish: bool = False,
           log=None) -> dict[str, Any]:
-    from . import asset_critic, storefront_direction as sd, storefront_frames as sfr
+    from . import asset_critic, storefront_brand as sbf
+    from . import storefront_direction as sd, storefront_frames as sfr
     from . import storefront_preview as sp, storefront_review as sr, vision_layout as vl
 
     # 1 — the spec is the project's, and it must exist before anything renders.
@@ -322,6 +323,13 @@ def build(project: Path, *, frame: str = "auto", plate: str | None = None,
             p.unlink()
         if stale and log:
             log("  − removed superseded frame(s): " + ", ".join(sorted(p.name for p in stale)))
+        # The icon and the banner are brand assets too: the image model paints them from
+        # the app's own icon and hero screen, and the gate refuses anything else.
+        brand = sbf.ensure(project, log=log)
+        if brand.get("status") != "OK":
+            return _fail(brand.get("status", "ERROR"), brand.get("error", "brand assets failed"),
+                         brand.get("hint", ""))
+
         report = asset_critic.review_store_assets(project)
         score = report.get("score", 0)
         _say(log, f"  critic: {score}/100")

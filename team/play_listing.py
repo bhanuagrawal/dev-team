@@ -203,6 +203,12 @@ def publish_listing_assets(project: Path, dry_run: bool = True, log: Any = None)
         blockers.append(f"critic score {report.get('score')} < 80")
     if not ed.get("order_ok", True):
         blockers.append("listing order does not match the editorial review")
+    try:
+        from . import storefront_brand as sbf
+
+        blockers.extend(sbf.gate(root))
+    except Exception:
+        blockers.append("brand asset provenance could not be read (docs/storefront-assets.json)")
     if blockers:
         return {"status": "BLOCKED", "blockers": blockers, "score": report.get("score")}
 
