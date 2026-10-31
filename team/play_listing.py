@@ -294,7 +294,13 @@ def publish_listing_assets(project: Path, dry_run: bool = True, log: Any = None)
         plan.update(status="OK", committed=True,
                     uploaded=len(uploads),
                     live_order=got["phoneScreenshots"])
-        say(f"  ✓ committed listing edit {edit_id} for {package} (verified live)")
+        # "Verified" here means the edit carries the uploaded bytes — the API has
+        # no way to ask whether the app uses Managed publishing, and under it a
+        # committed change still waits in Publishing overview for the owner's
+        # Publish click. Saying "live" would over-claim; name the gate instead.
+        say(f"  ✓ committed listing edit {edit_id} for {package} (verified in a fresh edit)")
+        say("    note: if Managed publishing is ON, the change now waits for the "
+            "owner's Publish click in Play Console → Publishing overview")
         return plan
     except Exception as exc:
         _discard(package, edit_id, token, project)
