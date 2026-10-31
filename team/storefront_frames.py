@@ -184,9 +184,9 @@ def invented_claims(project: Path, html: str) -> list[str]:
     problems = [f'claims "{c}", which the app does not have'
                 for c in absent if c in lower]
 
-    # The repo directory is not the product. Observed: a poster headed "PDFKITKMP"
-    # and a "ENGINE: PURE LOCAL KMP" chip, because the model carried the folder
-    # name out of its project context.
+    # The repo directory is not the product. Observed: a poster whose wordmark was
+    # the repository name plus a build suffix, and a chip naming the tech stack,
+    # because the model carried the folder name out of its project context.
     product = product_name(project).lower()
     repo = project.name.lower()
     if repo != product and repo in lower.replace(" ", ""):
@@ -216,7 +216,7 @@ def frame_for_scene(project: Path, scene_id: str) -> str | None:
 def product_name(project: Path) -> str:
     """What the app is CALLED on the shelf — never the repo directory.
 
-    A prompt seeded with "PdfKitKMP" makes Stitch draw a build artefact: the
+    A prompt seeded with the directory name makes Stitch draw a build artefact: the
     store title is the product, so the store listing wins, then the profile name
     cleaned of repo suffixes, then the directory.
     """
