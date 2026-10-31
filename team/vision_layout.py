@@ -172,6 +172,9 @@ Hard rules, checked by a program after you answer:
   beside or above it. Overlapping the screen hides the app you are advertising.
 - The headline is the hero: size 72-120, and maxWidth must be wide enough for the
   words to break at spaces (roughly 8px of width per font-size point per word).
+- Every block's x is the LEFT edge of that block's box, and x + maxWidth must stay
+  within {CANVAS_W} — copy that runs off the canvas is cropped in the store listing.
+  align only positions the text INSIDE the box; it never moves the box.
 - Use the accent from the screenshot for accents; use the project's {tokens.get("headline_font")}
   for the headline and {tokens.get("body_font")} for body copy.
 
@@ -218,12 +221,23 @@ def normalize(layout: dict[str, Any], tokens: dict[str, str]) -> dict[str, Any]:
     for key, default_size, lo, hi in (("badge", 26, 18, 40), ("headline", 92, 60, 140),
                                       ("sub", 34, 24, 44)):
         block = layout.get(key) or {}
+        mw = _num(block.get("maxWidth"), 620, 240, CANVAS_W - 40)
+        align = "center" if str(block.get("align")) == "center" else "left"
+        x = _num(block.get("x"), 80, 0, CANVAS_W - 40)
+        # The box is painted from its LEFT edge, and it must fit: a 1420px headline
+        # at x=810 ran 610px past the right edge and shipped a store screenshot whose
+        # first words were cropped, because the old clamp only bounded x, never x+width.
+        # A model (or a hand-edit) answering a CENTRED block gives that block's centre,
+        # which is the same number only when the block is as wide as the canvas — so an
+        # overflowing centred block is re-read as a centre instead of being pushed right.
+        if align == "center" and x + mw > CANVAS_W:
+            x = int(round(x - mw / 2))
         out[key] = {
-            "x": _num(block.get("x"), 80, 0, CANVAS_W - 200),
+            "x": max(0, min(x, CANVAS_W - mw)),
             "y": _num(block.get("y"), 240, 0, CANVAS_H - 120),
             "size": _num(block.get("size"), default_size, lo, hi),
-            "maxWidth": _num(block.get("maxWidth"), 620, 240, CANVAS_W - 40),
-            "align": "center" if str(block.get("align")) == "center" else "left",
+            "maxWidth": mw,
+            "align": align,
         }
     chips = []
     for chip in (layout.get("chips") or [])[:3]:
