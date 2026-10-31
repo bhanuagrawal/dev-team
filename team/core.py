@@ -152,6 +152,22 @@ def save_json(path: Path, data: Any) -> None:
     path.write_text(json.dumps(data, indent=2) + "\n")
 
 
+def profile_root(path: Path) -> Path:
+    """The directory that owns the `.pipeline/profile.json` governing `path`.
+
+    `profile_of` reads a worktree's profile by walking up to its parent project;
+    a writer must resolve the SAME directory, or `devteam ci <worktree> --write`
+    drops a bogus `<worktree>/.pipeline/profile.json` and leaves the real profile
+    untouched (seen 2026-10-31).
+    """
+    p = Path(path).resolve() if path.exists() else Path(path)
+    start = p if p.is_dir() else p.parent
+    for cur in [start, *start.parents]:
+        if (cur / ".pipeline" / "profile.json").exists():
+            return cur
+    return start
+
+
 def profile_of(path: Path) -> dict:
     """Project- or worktree-aware: walks up from `path` until it finds a
     .pipeline/profile.json — worktrees '.pipeline/worktrees/<id>' resolve to

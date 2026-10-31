@@ -13,7 +13,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from .core import profile_of, save_json
+from .core import profile_of, profile_root, save_json
 
 TEMPLATE = Path(__file__).parent / "templates/ci-release.yml"
 WORKFLOW_REL = ".github/workflows/release.yml"
@@ -95,6 +95,6 @@ def write(project: Path, dry_run: bool = False) -> dict:
         })
         profile["ci_workflow"] = "release.yml"
         profile["ci_trigger"] = "tag"
-        save_json(project / ".pipeline/profile.json", profile)
+        save_json(profile_root(project) / ".pipeline/profile.json", profile)
     return {"workflow": WORKFLOW_REL, "written": bool(changed), "retired": retired,
             "trigger": "tag", "package": ci["package_name"]}

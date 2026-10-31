@@ -51,6 +51,52 @@ def _copy_machine_local_inputs(project: Path, worktree: Path, log: RunLog) -> No
             continue
         shutil.copy2(src, dst)
         log(f"worktree: copied gitignored build input {name} from the checkout")
+        _copy_referenced_inputs(project, worktree, name, log)
+
+
+def _copy_referenced_inputs(project: Path, worktree: Path, name: str, log: RunLog) -> None:
+    """Copy the machine-local file a properties file NAMES, not just the file.
+
+    `keystore.properties` says `storeFile=upload-keystore.jks`; copying the
+    properties without the key leaves `bundleRelease` dying in the worktree with
+    "Keystore file '…/upload-keystore.jks' not found for signing config
+    'release'" — which reads like a code defect and is really a half-copied
+    environment (seen 2026-10-31). Every `*File` value is copied too, under the
+    same gitignore guard, so a copy can never become committable.
+    """
+    try:
+        text = (project / name).read_text(errors="replace")
+    except OSError:
+        return
+    for raw in text.splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        if not key.strip().endswith("File"):
+            continue
+        ref = value.strip()
+        if not ref:
+            continue
+        path = Path(ref)
+        if not path.is_absolute():
+            path = project / ref
+        if not path.is_file():
+            continue
+        try:
+            rel = path.resolve().relative_to(project.resolve())
+        except ValueError:
+            continue  # outside the project: not ours to copy
+        dst = worktree / rel
+        if dst.exists():
+            continue
+        ignored = git(["check-ignore", "-q", str(rel)], cwd=project)
+        if ignored.returncode != 0:
+            log(f"worktree: not copying {rel} — not gitignored, it would be committable")
+            continue
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(path, dst)
+        log(f"worktree: copied gitignored build input {rel} (named by {name})")
 
 # A profile `conventions` entry is a path the developer is told to read before
 # writing code ("MANDATORY READS"). Paths go stale (a team/skill dir moves), and

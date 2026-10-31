@@ -563,7 +563,11 @@ def cmd_ci(args: argparse.Namespace) -> int:
     from team import ci
     if getattr(args, "write", False):
         res = ci.write(project)
-        print(f"ci: wrote {res['workflow']} (trigger: {res['trigger']}, package: {res['package']})")
+        if res["written"]:
+            print(f"ci: wrote {res['workflow']} (trigger: {res['trigger']}, package: {res['package']})")
+        else:
+            print(f"ci: {res['workflow']} already matches the canonical template "
+                  f"(trigger: {res['trigger']}, package: {res['package']})")
         for name in res["retired"]:
             print(f"  - retired .github/workflows/{name}")
         return 0
@@ -2048,6 +2052,21 @@ def cmd_storefront_scenes(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_takeover(args: argparse.Namespace) -> int:
+    """The state join: what is true now, and what the next run must do."""
+    import json as _json
+
+    project = resolve_project(args.project)
+    from team import takeover
+
+    b = takeover.brief(project)
+    if getattr(args, "json", False):
+        print(_json.dumps(b, indent=2, default=str))
+    else:
+        print(takeover.format_brief(b))
+    return 0
+
+
 def cmd_storefront_build(args: argparse.Namespace) -> int:
     """One command, one order, no skippable steps — see team/storefront_build.py."""
     project = resolve_project(args.project)
@@ -2465,6 +2484,11 @@ def main() -> None:
     sb.add_argument("--publish", action="store_true", help="upload + commit the listing after the gates pass")
     sb.add_argument("--force", action="store_true", help="replace an existing composition")
     sb.set_defaults(fn=cmd_storefront_build)
+    tk = sub.add_parser("takeover",
+                        help="where this project stands, from state alone — and the ONE next command")
+    tk.add_argument("project")
+    tk.add_argument("--json", action="store_true", help="machine-readable brief")
+    tk.set_defaults(fn=cmd_takeover)
     da = sub.add_parser("docs-audit",
                         help="find the team's own docs stating the same requirement twice; newest wins, older copy removed")
     da.add_argument("--fix", action="store_true",
