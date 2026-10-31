@@ -117,10 +117,10 @@
     },
     {
       "id": "self-improvement-duty",
-      "rule": "append surprises to lessons.md and apply the durable fix in the same run",
+      "rule": "a surprise is closed by a change to team code in the same run; nothing is appended to a log",
       "doc": "SKILL.md#hard-rules",
       "kind": "judgment",
-      "note": "no mechanism can decide what surprised an agent"
+      "note": "no mechanism can decide what surprised an agent, but the FIX must be a commit; a fix too large for the run becomes an `enforcible` entry here"
     },
     {
       "id": "generic-team-code",

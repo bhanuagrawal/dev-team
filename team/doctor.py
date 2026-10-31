@@ -219,9 +219,8 @@ def _registered_project_names() -> set[str]:
 def _team_generic_check() -> list[tuple[str, bool, str]]:
     """INVARIANT: dev-team code/skills carry ZERO project references — a project's
     quirks live in that project's `.pipeline/profile.json`, never in team code.
-    Greps the team's own code/skills for every registered project's name.
-    `skills/lessons.md` is deliberately EXEMPT: it is the append-only surprises
-    log and the one place a project may legitimately be named."""
+    Greps the team's own code/skills for every registered project's name, with no
+    exemption: there is no log file a project may be named in either."""
     names = _registered_project_names()
     if not names:
         return []
@@ -229,7 +228,7 @@ def _team_generic_check() -> list[tuple[str, bool, str]]:
     for pat in ("team/**/*.py", "prompts/**/*.md", "scripts/**/*.sh",
                 "config/**/*.json", "skills/**/*.md"):
         files += [p for p in TEAM_ROOT.glob(pat)
-                  if p.name != "lessons.md" and "__pycache__" not in p.parts]
+                  if "__pycache__" not in p.parts]
     hits: list[str] = []
     for p in sorted(set(files)):
         try:

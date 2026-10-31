@@ -125,15 +125,18 @@ agentconfig.env`) — without it `doctor` correctly reports the agents blocked
   cases, the exact same gates (`devteam verify`), allow-lists (`surface.targets`),
   and release steps apply. Bookkeeping and `.pipeline/tasks/*.json` live in the
   main checkout.
-- **Self-improvement is a standing duty, not a leftover:** after every run,
-  append what surprised you to `dev-team/skills/lessons.md` (append-only) and,
-  whenever a lesson yields a durable fix, APPLY IT to the team's own
-  code/skills — this is the one sanctioned way the orchestrator edits
-  `dev-team/`. A valid team change is: (a) generic — zero project names, one
-  project's quirk lives in that project's `.pipeline/profile.json`, never in
-  team code (now ENFORCED, not just prose: `doctor` greps the team's code/skills
-  for every registered project's name and BLOCKS on any hit — only
-  `skills/lessons.md`, the append-only surprises log, may name a project);
+- **Self-improvement is a standing duty, not a leftover:** when a run surprises
+  you, CLOSE IT IN CODE — apply the durable fix to the team's own code/skills in
+  the same run; this is the one sanctioned way the orchestrator edits
+  `dev-team/`. A mechanism that lets the surprise happen again is the bug, and the
+  commit that removes it is the only record that counts. If the fix is too big or
+  too risky for this run, add it to `scripts/rules.json` as an `enforcible` rule
+  (`devteam docs-audit --rules` prints the backlog) instead of describing it in
+  prose. A valid team change is:
+  (a) generic — zero project names, one project's quirk lives in that project's
+  `.pipeline/profile.json`, never in team code (ENFORCED, not just prose: `doctor`
+  greps the team's code/skills for every registered project's name and BLOCKS on
+  any hit, with no exemptions);
   (b) run-derived — it traces to a concrete surprise/lesson, not
   speculation; (c) proven — `devteam doctor <project>` still passes after, and
   the changed command is exercised at least once if cheap. `config/runtimes.json`
@@ -602,8 +605,7 @@ by code (`record`) and quoted verbatim by the orchestrator:
      orchestrator writes the user-facing line into the spec before spawning the
      developer, and the handover then quotes that copy. Never "fix" this with a
      copy heuristic in team code — a judgment about storefront wording is exactly
-     the kind of approximation the owner has told the team to stop computing
-     (lessons 2026-10-24, pass 3).
+     the kind of approximation the owner has told the team to stop computing.
 2. **What to manually test.** The pipeline's gates prove the build compiles,
    passes its tests and installs — they cannot feel the app. So the handover
    lists the areas the diff touched (derived from the task's targets, never
@@ -810,13 +812,15 @@ hand-edit state.json; MODE-B gates still asked). State a one-line report of
 what you did and did not chain.
 
 ## Upkeep (every run — the team improves itself)
-At the START of every run, scan `dev-team/skills/lessons.md` for unconverted
-lessons and promote them (see Hard rules). At the END of every run, append two
-lines per surprise to <team>/skills/lessons.md: what surprised us + the
-rule/code-check that would have caught it — then, if the durable fix is small
-and generic, implement it in team code/skills the SAME RUN instead of
-suggesting it in the report; reserve "suggested only" for fixes that are
-big, risky, or need an owner decision. Report which lessons you converted.
+There is nothing to read back and nothing to append. When a run surprises you,
+the surprise is a defect in the team's code or in this contract: fix the mechanism
+in the SAME RUN — generic (no project names), traced to what actually happened,
+and proven (`devteam doctor <project>` still green, and the changed command
+exercised once if cheap). A note describing the fix is not the fix; only a commit
+counts, so "suggested only" is reserved for fixes that are big, risky, or need an
+owner decision — and those go into `scripts/rules.json` as `enforcible`, where
+`devteam docs-audit --rules` keeps them visible. Report the commit, not the
+lesson.
 
 ## MODE B pointer (do not inline — follow the dedicated skill)
 For create-a-new-app: `skills/new-project/SKILL.md` (same team dir) is the

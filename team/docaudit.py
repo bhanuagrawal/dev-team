@@ -2,17 +2,16 @@
 
 Why this exists
 ---------------
-The procedure an agent follows lives in four places that different runs edit:
-`AGENTS.md` (the contract), `skills/dev-team/SKILL.md` (how an agent works),
-`README.md` (the owner-facing map) and `skills/lessons.md` (append-only history,
-never rewritten). Nothing kept them agreeing. A rule could be added in one file
-while an older, contradicting copy survived in another — and an agent following
-the older copy silently skips a step.
+The procedure an agent follows lives in three places that different runs edit:
+`AGENTS.md` (the contract), `skills/dev-team/SKILL.md` (how an agent works) and
+`README.md` (the owner-facing map). Nothing kept them agreeing. A rule could be
+added in one file while an older, contradicting copy survived in another — and an
+agent following the older copy silently skips a step.
 
 That is not hypothetical. The store-asset workflow required the poster to be
-composed by Stitch or the vision model (contract + lessons), while the step list
-an agent actually executes said only "`--frame` writes 01_<slug>.png". Both were
-in the repo, both were "documented", and a release shipped the builtin template.
+composed by Stitch or the vision model (contract), while the step list an agent
+actually executes said only "`--frame` writes 01_<slug>.png". Both were in the
+repo, both were "documented", and a release shipped the builtin template.
 
 The rule this module enforces
 -----------------------------
@@ -40,8 +39,6 @@ from pathlib import Path
 from typing import Any, Iterable
 
 # Known procedure documents, in the order an agent is expected to read them.
-# lessons.md is deliberately absent: it is append-only history, and deleting an
-# old lesson is how a team forgets why a rule exists.
 DOC_FILES = ("AGENTS.md", "skills/dev-team/SKILL.md", "README.md")
 
 # A sentence has to be long enough that "same statement, different wording" is

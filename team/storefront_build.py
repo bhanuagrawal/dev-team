@@ -6,8 +6,8 @@ The pass used to be four prose steps an agent had to remember and chain by hand:
 render → review → compose the frame (Stitch or the vision model, with a plate from
 Gemini) → composite → publish. Every step was documented somewhere, and an agent
 that skipped one still produced a plausible-looking result: the release shipped
-the BUILTIN frame template while the contract and the lessons both required a
-composed one, because nothing in the pipeline demanded it.
+the BUILTIN frame template while the contract required a composed one, because
+nothing in the pipeline demanded it.
 
 This module is that demand. It runs the steps in the only order that works, and it
 REFUSES to continue when an input the workflow requires is missing — a missing

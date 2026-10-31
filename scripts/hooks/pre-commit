@@ -2,7 +2,7 @@
 # The team's procedure is written in three documents, and a duplicate is how a
 # step gets skipped: the older copy survives, an agent follows it, and the newer
 # rule never runs. (Observed: a storefront frame shipped from the builtin template
-# while the contract and the lessons both required a composed one.)
+# while the contract required a composed one.)
 #
 # Newest text is the source of truth, so on every commit that touches a doc:
 #   1. remove the OLDER copy of an overlap that is provably a pure restatement

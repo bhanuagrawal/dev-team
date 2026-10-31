@@ -50,11 +50,11 @@ MAX_QUEUE = 6
 # Measured in this pipeline: the nightly of 2026-10-23 ran plan → developer →
 # verify → release → alarm in 01:00:05–01:11:51 (~12 min wall clock for one
 # shipped release, of which the CI watch is ~7 min); a developer session that
-# shipped a 1305-line deletion measured ~5 min (lessons 2026-10-22). The
-# effort_min : wall-clock ratio observed is therefore ~6-10x, which is what
-# bounds the ceiling (below) rather than taste.
+# shipped a 1305-line deletion measured ~5 min. The effort_min : wall-clock ratio
+# observed is therefore ~6-10x, which is what bounds the ceiling (below) rather
+# than taste.
 #
-# The band stays a band: a wide one is the same as none (lessons 2026-10-16).
+# The band stays a band: a wide one is the same as none.
 TARGET_EFFORT_MIN = 150
 MIN_EFFORT_MIN = 90
 # The ceiling is bounded because an entry must still finish, verify and release

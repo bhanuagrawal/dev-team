@@ -137,10 +137,15 @@ next `ci --write` silently rewrites it.
 
 ## Self-improvement (standing duty)
 
-After any surprising run, append to `skills/lessons.md` (append-only) and, when
-the lesson yields a durable fix, apply it **in this repo** — generic, run-derived,
-and provable (`devteam doctor <project>` still green). `skills/lessons.md` is the
-only file allowed to name a project.
+A surprise is closed by **code, not by a note.** When a run does something you did
+not expect, fix the mechanism that allowed it, **in this repo**, in the same run —
+generic, run-derived, provable (`devteam doctor <project>` still green). There is
+no lessons log to append to and no prose file to remember: the record of a lesson
+is the commit that made the failure impossible, and if it is not a commit it did
+not happen. If the fix is too large or too risky for the run, write it into
+`scripts/rules.json` as an `enforcible` rule (the backlog `docs-audit --rules`
+prints) rather than into a narrative nobody re-reads. Team code names no project;
+a project's quirks live in that project's `.pipeline/profile.json`.
 
 ## Where working guidance lives — and where it does NOT
 

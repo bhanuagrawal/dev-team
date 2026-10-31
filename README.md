@@ -408,12 +408,12 @@ a human can answer. It is documented in its own repo.
 - **Emulators are torn down, never abandoned.** A run records a start-of-run
   baseline and stops only the emulators that appeared during it — never one you
   had open deliberately. A leak is reported; it never reds a gate.
-- **The team improves itself, but stays generic.** Every surprise goes to
-  `skills/lessons.md`, and a lesson that yields a durable fix is implemented in
-  the same run — generic, traced to a real surprise, proven by `doctor`. `doctor`
-  greps the team's own code, skills, prompts and README for every registered
-  project's name and blocks on any hit; a project's quirks belong in that
-  project's profile, never here.
+- **The team improves itself, but stays generic.** A surprise becomes a change to
+  the team's own code in the same run — generic, traced to what actually happened,
+  proven by `doctor`; if the fix is too large for the run it is filed in
+  `scripts/rules.json` as an `enforcible` rule. `doctor` greps the team's code,
+  skills, prompts and README for every registered project's name and blocks on any
+  hit; a project's quirks belong in that project's profile, never here.
 - **Minimal tools.** Every agent runs with whatever connections the project
   actually has, never blocks on an absent data source, and ends its report with
   an **Upgrades** section: what connecting that source would buy, exactly how. Once
@@ -514,7 +514,6 @@ skills/dev-team/        THE contract any orchestrator agent must follow
 skills/new-project/     mode-B create-a-new-app playbook + reference assets
 skills/android-code/    coding-style law for developer subagents
 skills/checks/          executable expertise (localization completeness, …)
-skills/lessons.md       append-only surprises log (the team's memory)
 ```
 
 The team repo can live anywhere; it is resolved by path, and projects are
