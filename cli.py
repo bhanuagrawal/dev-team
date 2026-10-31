@@ -2037,6 +2037,7 @@ def cmd_storefront_scenes(args: argparse.Namespace) -> int:
                  getattr(args, "assign", None), getattr(args, "review", False),
                  getattr(args, "vision_frame", None)])
     if wrote:
+        from team import storefront_brand as sbf
         from team import storefront_direction as sd
         from team import storefront_frames as sfr
         from team import storefront_review as sr
@@ -2047,7 +2048,7 @@ def cmd_storefront_scenes(args: argparse.Namespace) -> int:
         # in the checkout — the exact "rumour" rule 10 forbids.
         landed = commit_paths(
             project,
-            [sp.SPEC_REL, sd.DIRECTION_REL, sr.REVIEW_REL,
+            [sp.SPEC_REL, sd.DIRECTION_REL, sr.REVIEW_REL, sbf.BRAND_REL,
              sfr.REGISTRY_REL, sfr.FRAMES_DIR_REL, "distribution/listing"],
             f"store: storefront screenshots (compositions: {frames})",
             log=print,
@@ -2154,6 +2155,7 @@ def cmd_storefront_build(args: argparse.Namespace) -> int:
     # The pass writes deliverables; a pass that ends with them uncommitted is not a
     # pass (rule 10). Committed here, after the critic gate, so only a listing that
     # actually passed the gate can land on main.
+    from team import storefront_brand as sbf
     from team import storefront_direction as sd
     from team import storefront_frames as sfr
     from team import storefront_preview as sp
@@ -2161,7 +2163,7 @@ def cmd_storefront_build(args: argparse.Namespace) -> int:
     from team.publish import commit_paths
     landed = commit_paths(
         project,
-        [sp.SPEC_REL, sd.DIRECTION_REL, sr.REVIEW_REL,
+        [sp.SPEC_REL, sd.DIRECTION_REL, sr.REVIEW_REL, sbf.BRAND_REL,
          sfr.REGISTRY_REL, sfr.FRAMES_DIR_REL, "distribution/listing"],
         f"store: storefront assets (composition: {res.get('frame')}, critic {res.get('score')})",
         log=print,
