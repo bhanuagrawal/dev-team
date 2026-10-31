@@ -2037,12 +2037,18 @@ def cmd_storefront_scenes(args: argparse.Namespace) -> int:
                  getattr(args, "assign", None), getattr(args, "review", False),
                  getattr(args, "vision_frame", None)])
     if wrote:
+        from team import storefront_direction as sd
         from team import storefront_frames as sfr
+        from team import storefront_review as sr
         from team.publish import commit_paths
         frames = ", ".join(sorted(sfr.load_registry(project)["assign"].values())) or "builtin"
+        # The DECISIONS are deliverables too. They used to be left out of this list, so
+        # a review or a direction could be locked, drive a render, and still exist only
+        # in the checkout — the exact "rumour" rule 10 forbids.
         landed = commit_paths(
             project,
-            [sp.SPEC_REL, sfr.REGISTRY_REL, sfr.FRAMES_DIR_REL, "distribution/listing"],
+            [sp.SPEC_REL, sd.DIRECTION_REL, sr.REVIEW_REL,
+             sfr.REGISTRY_REL, sfr.FRAMES_DIR_REL, "distribution/listing"],
             f"store: storefront screenshots (compositions: {frames})",
             log=print,
         )
@@ -2135,7 +2141,7 @@ def cmd_storefront_build(args: argparse.Namespace) -> int:
         project, frame=args.frame, plate=args.plate, gemini=args.gemini,
         layout=args.layout, frame_html=args.frame_html, stitch_source=args.stitch_source,
         brief=args.brief, builtin=args.builtin, force=args.force,
-        poster=args.poster, strict=args.strict, publish=args.publish, log=print,
+        poster=args.poster, strict=args.strict, publish=False, log=print,
     )
     if res.get("status") != "OK":
         print(f"STOREFRONT BUILD: {res.get('status')}")
@@ -2145,8 +2151,28 @@ def cmd_storefront_build(args: argparse.Namespace) -> int:
         return 1
     print(f"STOREFRONT BUILD: OK — composition {res.get('frame')}, critic {res.get('score')}/100")
     print(f"  order: {', '.join(res.get('order') or [])}")
-    if res.get("publish") is not None:
-        pub = res["publish"]
+    # The pass writes deliverables; a pass that ends with them uncommitted is not a
+    # pass (rule 10). Committed here, after the critic gate, so only a listing that
+    # actually passed the gate can land on main.
+    from team import storefront_direction as sd
+    from team import storefront_frames as sfr
+    from team import storefront_preview as sp
+    from team import storefront_review as sr
+    from team.publish import commit_paths
+    landed = commit_paths(
+        project,
+        [sp.SPEC_REL, sd.DIRECTION_REL, sr.REVIEW_REL,
+         sfr.REGISTRY_REL, sfr.FRAMES_DIR_REL, "distribution/listing"],
+        f"store: storefront assets (composition: {res.get('frame')}, critic {res.get('score')})",
+        log=print,
+    )
+    if not landed.get("pushed"):
+        print(f"  ! not committed: {landed.get('why')}")
+    if args.publish:
+        # Upload only AFTER the commit: a store upload must describe a revision, so
+        # `publish_listing_assets` refuses a dirty asset tree (and it is right to).
+        from team.play_listing import publish_listing_assets
+        pub = publish_listing_assets(project, dry_run=False, log=print)
         print(f"  publish: {pub.get('status')} {pub.get('error') or ''}".rstrip())
     else:
         print(f"  next: devteam store-publish {args.project} --yes   (upload + commit the listing)")
