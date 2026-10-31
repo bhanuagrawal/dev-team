@@ -41,12 +41,58 @@ def remote_latest_version(project: Path) -> tuple[int, int, int] | None:
     return max(versions) if versions else None
 
 
-def bump_version_file(worktree: Path, new: tuple[int, int, int], log: RunLog) -> str:
+def play_max_version_code(project: Path) -> tuple[int, str]:
+    """Highest versionCode Play already has for this app, or (0, why-not).
+
+    The tag stack in git says what the TEAM released; Play says what the STORE
+    accepted. Those can differ (a build uploaded outside the pipeline, a CI run
+    that died after upload), and Play rejects a duplicate or lower versionCode
+    with a hard failure at the very end of a release. So the store is the floor
+    for the next code; it is read with the service account the project already
+    declares for vitals/reviews, and a missing key simply means "no floor" —
+    a release must never depend on a third party being reachable.
+    """
+    from .research import _play_get, _play_token
+    profile = profile_of(project)
+    conns = profile.get("connections") or {}
+    for key in ("play_vitals", "play_reviews"):
+        conf = conns.get(key) or {}
+        pkg = conf.get("package")
+        if not pkg:
+            continue
+        token, why = _play_token(conf, "https://www.googleapis.com/auth/androidpublisher", project)
+        if not token:
+            return 0, f"{key}: {why}"
+        api = "https://androidpublisher.googleapis.com/androidpublisher/v3"
+        edit = _play_get(f"{api}/applications/{pkg}/edits", project, token, body={})
+        edit_id = edit.get("id")
+        if not edit_id:
+            return 0, f"{key}: could not open an edit ({edit.get('_error') or 'no id'})"
+        try:
+            bundles = _play_get(f"{api}/applications/{pkg}/edits/{edit_id}/bundles", project, token)
+            codes = [int(b.get("versionCode", 0)) for b in (bundles.get("bundles") or [])]
+            return (max(codes), f"{pkg} on Play") if codes else (0, f"{pkg}: no bundles uploaded")
+        finally:
+            # discard the edit: an uncommitted edit is a stray, and committing it
+            # would be a write where a read was intended
+            from .core import run
+            run(["curl", "-s", "-X", "DELETE", "-H", f"Authorization: Bearer {token}",
+                 f"{api}/applications/{pkg}/edits/{edit_id}"], project, timeout=60)
+    return 0, "no Play connection declared"
+
+
+def bump_version_file(worktree: Path, new: tuple[int, int, int], log: RunLog,
+                      floor_code: int = 0) -> str:
     profile = profile_of(worktree)
     gf = worktree / profile["version_file"]
     text = gf.read_text()
     name = ".".join(map(str, new))
     code = new[0] * 10000 + new[1] * 100 + new[2]
+    if floor_code >= code:
+        # Play already holds this code (or a higher one) — the upload would be
+        # rejected as "version code already used".
+        code = floor_code + 1
+        log(f"versionCode floor from Play: {floor_code} -> using {code}")
 
     # Generic: bump whichever versionName/versionCode constants exist in the file
     # (Android Gradle convention used by this project; CI parses them back).

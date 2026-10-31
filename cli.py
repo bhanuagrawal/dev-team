@@ -784,9 +784,25 @@ def cmd_release(args: argparse.Namespace) -> int:
     latest = shipper.remote_latest_version(project)
     if latest is None:
         raise SystemExit("no v* tags on origin; cannot compute next version")
+    # IDEMPOTENT RE-RUN: a release whose CI watch outlived the caller's timeout gets
+    # invoked a second time, and nothing used to notice the work was already pushed —
+    # one change produced four bumps and four tags. If the worktree's tree is already
+    # what origin/main holds, there is nothing to deliver.
+    import subprocess as _sp
+    wt_tree = _sp.run(["git", "rev-parse", "HEAD^{tree}"], cwd=worktree,
+                      capture_output=True, text=True).stdout.strip()
+    main_tree = _sp.run(["git", "rev-parse", "origin/" + profile_of(project)["main_branch"] + "^{tree}"],
+                        cwd=project, capture_output=True, text=True).stdout.strip()
+    if wt_tree and wt_tree == main_tree:
+        print(json.dumps({"delivered": True, "already_shipped": True,
+                          "version": ".".join(map(str, latest)),
+                          "note": "worktree tree already equals origin/main — nothing to ship"}, indent=2))
+        return 0
     new = (latest[0], latest[1], latest[2] + 1)
     task = json.loads(task_spec_path(project, args.task_spec).read_text())
-    name = shipper.bump_version_file(worktree, new, log)
+    floor, floor_note = shipper.play_max_version_code(project)
+    log(f"versionCode floor: {floor_note}" + (f" (max {floor})" if floor else ""))
+    name = shipper.bump_version_file(worktree, new, log, floor_code=floor)
     shipper.write_whatsnew(worktree, task, log)
     res = shipper.push_and_deliver(project, worktree, task, name, log)
     print(json.dumps(res, indent=2))
