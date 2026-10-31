@@ -152,8 +152,14 @@ def generate_all(project: Path, scenes: list[dict[str, Any]], direction: dict[st
             continue
         if not source.is_file():
             return {"status": "BLOCKED", "error": f"no render at {source.relative_to(project)}"}
-        jobs.append({"out": str(out), "src": str(source),
-                     "prompt": poster_prompt(project, scene, direction, extra=extra)})
+        # Every asset after the first is told to match what is already in the
+        # conversation. That is a cohesion instruction, not a creative one: it names
+        # no colour, no shape, no light — it only asks the model to keep the set it is
+        # building consistent, which is what one chat is FOR.
+        continuity = ("Match the visual style, lighting and layout language of the images "
+                      "already in this conversation, so this reads as one listing.") if jobs else ""
+        prompt = poster_prompt(project, scene, direction, extra=" ".join(x for x in (extra, continuity) if x))
+        jobs.append({"out": str(out), "src": str(source), "prompt": prompt})
     if not jobs:
         return {"status": "OK", "posters": posters, "chat": None, "painted": 0}
     if log:

@@ -35,6 +35,13 @@ from pathlib import Path
 from typing import Any
 
 
+# Play allows 2-8 phone screenshots. The owner's rule is stricter: a listing needs at
+# least four, because two frames cannot show what the app is, how it works, that it
+# works, and who is in control — the last of those was the frame that was missing
+# when the listing shipped three.
+MIN_SCREENSHOTS = 4
+
+
 def _say(log, text: str) -> None:
     if log:
         log(text)
@@ -220,6 +227,19 @@ def build(project: Path, *, frame: str = "auto", plate: str | None = None,
     if not review:
         return _fail("BLOCKED", "no editorial review",
                      f"devteam storefront-scenes {project.name} --review --apply <review.json>")
+
+    # 2a — how many frames ship. This is a gate, not advice: a run that would ship
+    # fewer than MIN_SCREENSHOTS stops before it renders anything.
+    shipping = [s for s in sr.ordered_scenes(spec, review)]
+    if len(shipping) < MIN_SCREENSHOTS:
+        cut = ", ".join(sorted(sr.rejected_ids(review))) or "none"
+        return _fail(
+            "BLOCKED",
+            f"{len(shipping)} screenshot(s) ship, the listing needs at least {MIN_SCREENSHOTS}",
+            f"add scene(s) to {sp.SPEC_REL} (id, badge, headline, sub, composable), re-run "
+            f"`devteam storefront-scenes {project.name} --scaffold --render`, then record a review "
+            f"that keeps them: `devteam storefront-scenes {project.name} --review --apply <json>` "
+            f"(currently cut: {cut})")
 
     # 2b — the DIRECTION: what the listing is trying to say. Without it the poster
     # is undirected (a generic plate plus whatever the model proposes first), and

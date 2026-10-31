@@ -61,6 +61,9 @@ checklist + release-candidate call) and the two page URLs `record` prints.
    every letter drawn by us. An image model repaints what it is shown, so a Gemini
    poster is a **depiction** of the app, never proof of it — say so, and never let
    a frame assert a feature or number the app does not have.
+   A listing ships **at least four** phone screenshots (`storefront-build` refuses
+   fewer): two cannot show what the app is, how it works, that it works, and who is
+   in control — and the control frame is the one that went missing when three shipped.
    What the listing SAYS is decided before anything is drawn, in
    `docs/storefront-direction.json` (concept, per-frame argument, palette emphasis, evidence).
    Publishing a listing is a **browser** step, not an API call: the Play API uploads and

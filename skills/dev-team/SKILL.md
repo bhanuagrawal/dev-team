@@ -759,8 +759,9 @@ The owner may ask for ONE agent only, and that must work:
   screen, which stays the real render.
   **Then run `devteam storefront-build <project> --poster` — the whole pass, in the only order
   that works.** It renders the app's own composables from origin/main, refuses to continue
-  without the editorial review, sends each scene's render to Gemini (browser, one prompt per
-  scene) which paints the marketing image, strips the model's watermark, upscales the result to
+  without the editorial review (and without **at least four shipping frames** — fewer is a
+  BLOCKED, not a warning), sends each scene's render to Gemini (browser, ONE chat, one prompt per
+  scene, each after the first told to match the set already in the conversation) which paints the marketing image, strips the model's watermark, upscales the result to
   a size Play accepts, gates on the critic, and prints the upload command. Run the steps
   individually only to debug one of them:
   1. **Render** from the app's own composables: `python3 <team>/cli.py storefront-scenes <project> --render`
