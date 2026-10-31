@@ -766,12 +766,25 @@ The owner may ask for ONE agent only, and that must work:
   3. **Frame in ranked order**: `--frame` writes `01_<slug>.png` … and removes pipeline-owned
      frames the review cut. The critic (`store-assets`) fails a listing that still carries a
      monetization frame, `icon = null`/flat placeholder tiles, or an order that disagrees with the review.
-  4. **Publish, then verify**: `devteam store-publish <project>` (dry run) / `--yes` uploads
-     icon + feature graphic + screenshots in order through the Play API and verifies the committed
-     state. `PERMISSION_DENIED` on commit means the service account lacks publishing rights — finish
-     in Play Console; if the app has **Managed publishing** on, the approved change still needs the
-     owner's Publish click in Publishing overview. Never report "republished" from a successful
-     upload alone: a 403 commit used to read as success and left the paywall frame live.
+  4. **Publish — API for the upload, BROWSER for the publish.** `devteam store-publish <project>`
+     (dry run) / `--yes` uploads icon + feature graphic + screenshots in the editorial order,
+     commits the edit, and reads the bytes back through a fresh edit. That is where the API
+     stops: it cannot grant permissions and it cannot release a listing that **Managed
+     publishing** is holding. So this step is finished in the **browser** — `browser-control`,
+     driving the owner's own logged-in Play Console session — and it is never called done from
+     an API answer:
+     - `PERMISSION_DENIED` on commit = the service account lacks **Manage store presence** for
+       this app (a testing-track-only grant happily uploads every image and then has the edit
+       discarded, so nothing changes). Grant it in Play Console → Users and permissions → the
+       account → App permissions → Manage permissions. Console-only, one browser step, once
+       per app — then re-run `--yes`, which re-uploads nothing if the bytes already match.
+     - Managed publishing ON → the committed change lands in **Changes in review**, then in
+       **Publishing overview → Changes ready to publish**. Press Publish (an owner call when
+       the gate is theirs), then verify what customers actually see — the public listing page,
+       not an API read-back.
+     Never report "republished", "live" or "pushed to Play" from a successful upload or a
+     committed edit alone: an upload is not a publish, and a commit under managed publishing is
+     a staged change. A 403 commit used to read as success and left the paywall frame live.
 Rule: honor the narrower scope exactly — no pipeline chaining — except the
 non-negotiables (never commit on red gates; never
 hand-edit state.json; MODE-B gates still asked). State a one-line report of

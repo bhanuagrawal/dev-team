@@ -57,6 +57,10 @@ checklist + release-candidate call) and the two page URLs `record` prints.
    the backdrop plate** (`--gemini-brief` → Gemini in the browser → `--backdrop`):
    every image model repaints app UI, so a generated picture is a plate, never the
    screen, and `adopt` refuses any frame whose slot is not the real render at 1:1.
+   Publishing a listing is a **browser** step, not an API call: the Play API uploads and
+   commits an edit, but permissions ("Manage store presence") and **Managed publishing** are
+   console-only, so `store-publish` ends in Play Console through `browser-control` and nothing
+   is called live from an API answer.
 6. **Cleanup is part of the run.** `devteam pick` and `record` prune
    automatically; `devteam worktree-prune <project>` is the manual form (dry run
    by default). A tree is removed when its work is safe **somewhere else**: its
