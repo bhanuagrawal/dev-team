@@ -257,7 +257,14 @@ def ensure_design(project: Path,
 
 
 def extract_design_tokens(project: Path) -> dict[str, str]:
-    """Extract authoritative design tokens from docs/design.md."""
+    """Extract authoritative design tokens from docs/design.md.
+
+    The token table is `| `BrandPrimary` | `#E8442A` | role |`, so the NAME cell is
+    matched exactly. A substring test on the whole line is wrong and was observed
+    wrong: `OnBrandPrimary` (the colour of text ON the accent) contains
+    `BrandPrimary`, so it overwrote it — every generated poster, icon and Stitch
+    prompt was then seeded with a near-black "accent".
+    """
     tokens = {
         "surface_base": "#0A0E14",
         "surface_elevated": "#161F2E",
@@ -272,27 +279,51 @@ def extract_design_tokens(project: Path) -> dict[str, str]:
         "label_font": "JetBrains Mono",
     }
     design_doc = project / "docs/design.md"
-    if design_doc.is_file():
-        import re
-        text = design_doc.read_text(errors="ignore")
-        for line in text.splitlines():
-            line = line.strip()
-            m = re.search(r"#(?:[0-9a-fA-F]{6}|[0-9a-fA-F]{8})", line)
-            hex_val = m.group(0)[:7] if m else None
-            if not hex_val:
-                continue
-            if "SurfaceBase" in line or "background:" in line.lower():
-                tokens["surface_base"] = hex_val
-            elif "SurfaceElevated" in line or "surface:" in line.lower():
-                tokens["surface_elevated"] = hex_val
-            elif "SurfaceElevatedHigh" in line or "surface-high:" in line.lower():
-                tokens["surface_highlight"] = hex_val
-            elif "ServingAccent" in line or "accent:" in line.lower() or "BrandPrimary" in line or "AccentSuccess" in line:
-                tokens["primary_accent"] = hex_val
-            elif "ReceivingAccent" in line or "accent-coral:" in line.lower() or "AccentError" in line:
-                tokens["secondary_accent"] = hex_val
-            elif "warning:" in line.lower() or "AccentWarning" in line:
-                tokens["warning_accent"] = hex_val
+    if not design_doc.is_file():
+        return tokens
+    import re
+    text = design_doc.read_text(errors="ignore")
+
+    roles = {
+        "surfacebase": "surface_base",
+        "surfaceelevated": "surface_elevated",
+        "surfaceelevatedhigh": "surface_highlight",
+        "brandprimary": "primary_accent",
+        "servingaccent": "primary_accent",
+        "brandsecondary": "secondary_accent",
+        "receivingaccent": "secondary_accent",
+        "accentwarning": "warning_accent",
+    }
+    matched = False
+    for line in text.splitlines():
+        m = re.match(r"\s*\|\s*`?([A-Za-z][\w -]*?)`?\s*\|\s*`?(#[0-9a-fA-F]{6})", line)
+        if m:
+            key = roles.get(m.group(1).replace(" ", "").lower())
+            if key:
+                tokens[key] = m.group(2)
+                matched = True
+    if matched:
+        return tokens
+
+    # Docs that are not a token table still carry colours on labelled lines.
+    for line in text.splitlines():
+        line = line.strip()
+        m = re.search(r"#(?:[0-9a-fA-F]{6}|[0-9a-fA-F]{8})", line)
+        hex_val = m.group(0)[:7] if m else None
+        if not hex_val:
+            continue
+        if "SurfaceBase" in line or "background:" in line.lower():
+            tokens["surface_base"] = hex_val
+        elif "SurfaceElevatedHigh" in line or "surface-high:" in line.lower():
+            tokens["surface_highlight"] = hex_val
+        elif "SurfaceElevated" in line or "surface:" in line.lower():
+            tokens["surface_elevated"] = hex_val
+        elif "BrandPrimary" in line or "ServingAccent" in line or "accent:" in line.lower():
+            tokens["primary_accent"] = hex_val
+        elif "BrandSecondary" in line or "ReceivingAccent" in line or "accent-coral:" in line.lower():
+            tokens["secondary_accent"] = hex_val
+        elif "warning:" in line.lower() or "AccentWarning" in line:
+            tokens["warning_accent"] = hex_val
     return tokens
 
 

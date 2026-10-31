@@ -931,7 +931,16 @@ def compose_frames(project: Path, log: Any = None, force: bool = False) -> dict[
             continue
         html_file = frames_dir / f"{name}.html"
         out_png = listing / name
-        html_file.write_text(_frame_html(scene, png.resolve().as_uri(), colors))
+        # A scene may ship inside an ADOPTED composition (docs/frames/<name>.html,
+        # authored once and committed) instead of the builtin one-template layout.
+        # The screenshot filling it is the same real render either way — only the
+        # poster around it changes — so provenance stays compose_preview.
+        from . import storefront_frames as sfr
+        adopted, source = sfr.html_for_scene(project, scene, png)
+        html_file.write_text(adopted if adopted is not None
+                             else _frame_html(scene, png.resolve().as_uri(), colors))
+        if log and source != "builtin":
+            log(f"    composition: {source}")
         try:
             subprocess.run(
                 [chrome, "--headless", "--disable-gpu", "--hide-scrollbars",
@@ -947,6 +956,13 @@ def compose_frames(project: Path, log: Any = None, force: bool = False) -> dict[
             status = "OK"
             if dims != (FRAME_W, FRAME_H):
                 status = f"WRONG_SIZE {dims} (expected {(FRAME_W, FRAME_H)}) — headless Chrome "                         "clamped the window; the frame is cut and must not ship"
+            if adopted is not None:
+                # The composed file is what shipped: measure it again with this scene's
+                # copy in place. A headline one line longer than the placeholder's can
+                # grow into the phone, and no amount of authoring prevents that.
+                issues = sfr.verify(html_file)
+                if issues:
+                    status = "UNVERIFIED: " + "; ".join(issues)
             written.append({"id": sid, "file": str(out_png.relative_to(project)),
                             "bytes": out_png.stat().st_size, "status": status})
             if log:

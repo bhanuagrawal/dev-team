@@ -1779,7 +1779,9 @@ def cmd_storefront_scenes(args: argparse.Namespace) -> int:
     do_all = getattr(args, "all", False)
     if not any([do_all, getattr(args, "scaffold", False), getattr(args, "render", False),
                 getattr(args, "frame", False), getattr(args, "status", False),
-                getattr(args, "review", False)]):
+                getattr(args, "review", False), getattr(args, "frames", False),
+                getattr(args, "design_frame", None), getattr(args, "adopt_frame", None),
+                getattr(args, "assign", None)]):
         do_all = True
 
     if do_all or getattr(args, "scaffold", False):
@@ -1857,6 +1859,73 @@ def cmd_storefront_scenes(args: argparse.Namespace) -> int:
             return 1
         print(f"  {res.get('count', len(res.get('scenes', [])))} scene(s) rendered -> .pipeline/storefront_scenes")
 
+    if getattr(args, "assign", None):
+        from team import storefront_frames as sfr
+        for pair in args.assign:
+            if "=" not in pair:
+                print(f"  ✗ --assign expects SCENE=FRAME, got {pair!r}")
+                return 1
+            scene_id, frame = (p.strip() for p in pair.split("=", 1))
+            sfr.assign(project, scene_id, frame or None)
+            print(f"  {scene_id} -> {frame or 'builtin'}")
+
+    if getattr(args, "design_frame", None):
+        from team import storefront_frames as sfr
+        spec = sp.load_spec(project, create=False)
+        scenes = spec.get("scenes") or []
+        want = getattr(args, "frame_scene", None)
+        scene = next((s for s in scenes if str(s.get("id")) == str(want)), None) if want else None
+        if scene is None and not want and scenes:
+            scene = scenes[0]
+        if scene is None:
+            print(f"  ✗ no scene {want!r} in {sp.SPEC_REL}")
+            return 1
+        prompt = sfr.compile_prompt(project, scene, brief=getattr(args, "brief", "") or "",
+                                    name=args.design_frame, scenes=scenes)
+        out = project / ".pipeline" / f"storefront-frame-prompt-{sfr.slug(args.design_frame)}.txt"
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_text(prompt)
+        print(prompt)
+        print(f"~ prompt -> {out.relative_to(project)}  (scene: {scene.get('id')})")
+        print("  next: ask Stitch with this prompt, save the returned HTML, then")
+        print(f"  devteam storefront-scenes {args.project} --adopt-frame {args.design_frame} "
+              f"--frame-html <saved.html> --stitch-source <projects/…/screens/…>")
+
+    if getattr(args, "adopt_frame", None):
+        from team import storefront_frames as sfr
+        html_arg = getattr(args, "frame_html", None)
+        html_file = Path(html_arg).expanduser() if html_arg else None
+        if not html_file or not html_file.is_file():
+            print(f"  ✗ --adopt-frame needs --frame-html <path> (a saved Stitch HTML document)")
+            return 1
+        res = sfr.adopt(project, args.adopt_frame, html_file.read_text(),
+                        source=getattr(args, "stitch_source", "") or "",
+                        force=getattr(args, "force", False))
+        if res.get("status") != "OK":
+            print(f"ADOPT FRAME: {res.get('status')}")
+            for issue in res.get("issues") or []:
+                print(f"  ✗ {issue}")
+            if res.get("error"):
+                print(f"  ✗ {res['error']}")
+            print("  the composition was NOT written; a frame that fails these checks crops or "
+                  "misrepresents the app")
+            return 1
+        m = res.get("measured") or {}
+        canvas = m.get("canvas") or [0, 0]
+        slot = m.get("slot") or [0, 0, 0, 0]
+        print(f"ADOPT FRAME: OK — {res['file']}")
+        print(f"  canvas {canvas[0]}x{canvas[1]} · slot {slot[2]}x{slot[3]} at {slot[0]},{slot[1]}"
+              f" · object-fit {m.get('fit')}")
+        invented = res.get("invented") or []
+        if invented:
+            print(f"  ⚑ words the app's own copy never uses: {', '.join(invented[:14])}")
+            print("    check each one: a poster may not advertise a feature the app does not have")
+        print(f"  assign it: devteam storefront-scenes {args.project} --assign <scene>={args.adopt_frame}")
+
+    if getattr(args, "frames", False):
+        from team import storefront_frames as sfr
+        print(sfr.format_status(sfr.status(project)))
+
     if do_all or getattr(args, "frame", False):
         print("~ compositing marketing frames (1620x3200, 1080-wide opening)")
         res = sp.compose_frames(project, log=print, force=getattr(args, "force", False))
@@ -1878,6 +1947,26 @@ def cmd_storefront_scenes(args: argparse.Namespace) -> int:
                 print(f"  cut:      {', '.join(st['review_cut'])}")
         else:
             print("  review:   NONE — run --review (an LLM decides what ships and in what order)")
+    # A command that writes inside a project ends committed: the store assets and
+    # dotfiles this run produced are deliverables, and a listing that exists only in
+    # this checkout is a rumour. `commit_paths` copies exactly these paths into an
+    # origin-anchored worktree, so the owner's unrelated WIP is never swept in.
+    wrote = any([do_all, getattr(args, "scaffold", False), getattr(args, "render", False),
+                 getattr(args, "frame", False), getattr(args, "adopt_frame", None),
+                 getattr(args, "assign", None), getattr(args, "review", False)])
+    if wrote:
+        from team import storefront_frames as sfr
+        from team.publish import commit_paths
+        frames = ", ".join(sorted(sfr.load_registry(project)["assign"].values())) or "builtin"
+        landed = commit_paths(
+            project,
+            [sp.SPEC_REL, sfr.REGISTRY_REL, sfr.FRAMES_DIR_REL, "distribution/listing"],
+            f"store: storefront screenshots (compositions: {frames})",
+            log=print,
+        )
+        if not landed.get("pushed"):
+            print(f"  ! not committed: {landed.get('why')}")
+
     return 0
 
 
@@ -2212,6 +2301,17 @@ def main() -> None:
     sfp.add_argument("--scaffold", action="store_true", help="create docs/storefront.json + Kotlin preview harness and wire the Gradle plugin")
     sfp.add_argument("--render", action="store_true", help="render the harness off-device into .pipeline/storefront_scenes")
     sfp.add_argument("--frame", action="store_true", help="composite marketing frames into distribution/listing/en-US/images/phoneScreenshots")
+    sfp.add_argument("--frames", action="store_true", help="list adopted frame compositions and their scene assignments")
+    sfp.add_argument("--design-frame", metavar="NAME",
+                     help="compile the Stitch prompt for a new frame composition (writes .pipeline/storefront-frame-prompt-NAME.txt)")
+    sfp.add_argument("--brief", metavar="TEXT", help="with --design-frame: the composition brief (layout idea, focal point, mood)")
+    sfp.add_argument("--frame-scene", metavar="ID", help="with --design-frame: author the frame around this scene's copy (default: first scene)")
+    sfp.add_argument("--adopt-frame", metavar="NAME",
+                     help="verify a Stitch-authored HTML poster and commit it as docs/frames/NAME.html")
+    sfp.add_argument("--frame-html", metavar="PATH", help="with --adopt-frame: the saved Stitch HTML file")
+    sfp.add_argument("--stitch-source", metavar="URL", help="with --adopt-frame: the Stitch screen/file it came from (provenance)")
+    sfp.add_argument("--assign", metavar="SCENE=FRAME", action="append",
+                     help="with --frame: render SCENE inside FRAME (use builtin to revert)")
     sfp.add_argument("--review", action="store_true",
                      help="editorial pass: an LLM decides which scenes ship and in what order "
                           "(paywall/purchase surfaces are always cut); written to docs/storefront-review.json")

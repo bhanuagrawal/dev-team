@@ -223,7 +223,23 @@ def commit_paths(project: Path, paths: list[str], message: str, log=None) -> dic
             return {"pushed": False, "sha": "", "why": why}
         for rel in keep:
             src, dst = project / rel, wt / rel
-            if src.exists():
+            if src.is_dir():
+                # A caller that hands over a directory means "this whole tree is
+                # mine": copy what the checkout has and drop what it no longer has
+                # (a storefront frame the review cut must disappear from origin, not
+                # linger as a file nobody renders). Scoped to the named path, so the
+                # owner's unrelated WIP is still untouched.
+                dst.mkdir(parents=True, exist_ok=True)
+                for f in sorted(src.rglob("*")):
+                    if not f.is_file():
+                        continue
+                    target = dst / f.relative_to(src)
+                    target.parent.mkdir(parents=True, exist_ok=True)
+                    shutil.copy2(f, target)
+                for f in sorted(dst.rglob("*"), reverse=True):
+                    if f.is_file() and not (src / f.relative_to(dst)).exists():
+                        f.unlink()
+            elif src.exists():
                 dst.parent.mkdir(parents=True, exist_ok=True)
                 shutil.copy2(src, dst)
             elif dst.exists():
