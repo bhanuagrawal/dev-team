@@ -66,9 +66,12 @@ off-machine (you generate; they never generate).
    androidMain — prefer that to expect/actual when only one target exists).
 3. Install the dev-team MVI core (references/mvi-core/*.kt) under
    `composeApp/src/commonMain/kotlin/<pkg>/core/event/` + rename package.
-   These become FROZEN files. Follow references release-proven.yml /
-   ship-on-version-bump-proven.yml to write `.github/workflows/` with the
-   package + `composeApp/build.gradle.kts` swapped in. Verify `android`
+   CI is NOT hand-written any more: set the project's `profile['ci']`
+   (`module`, `package_name`, and `flavors` when the app builds more than one
+   AAB) and run `python3 <team>/cli.py ci <project> --write`. That renders the
+   team's ONE canonical workflow (`team/templates/ci-release.yml`): a `v*` tag →
+   signed AAB → Play **internal**, with the upload staged behind
+   `PLAY_SERVICE_ACCOUNT_JSON` and no production path at all. Verify `android`
    skills guidance for project creation if the template needs adaptation.
 4. Write `AGENTS.md` (baseline from skills/android-code + this repo's own
    release/froze law), `docs/PRD.md` (draft from the idea),
@@ -76,7 +79,7 @@ off-machine (you generate; they never generate).
    profile.json + state.json (field list same shape as `devteam onboard`
    output; src_root = composeApp/src/commonMain/kotlin;
    version_file = composeApp/build.gradle.kts; ci_workflow =
-   ship-on-version-bump.yml; frozen_paths = core/event/**).
+   release.yml; ci_trigger = tag; ci = {module, package_name}).
    **Also write `profile.json['goals']`** — from the owner's own words in
    intake: `vision` (the long-term thesis, one sentence) and `milestones`
    (mid-term, in order: `{id, title, outcome, measures[]}` where a measure is

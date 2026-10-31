@@ -558,6 +558,19 @@ def print_page(project: Path, note: str = "", file=None,
 # orchestrator-facing deterministic commands
 # --------------------------------------------------------------------------- #
 
+def cmd_ci(args: argparse.Namespace) -> int:
+    project = resolve_project(args.project)
+    from team import ci
+    if getattr(args, "write", False):
+        res = ci.write(project)
+        print(f"ci: wrote {res['workflow']} (trigger: {res['trigger']}, package: {res['package']})")
+        for name in res["retired"]:
+            print(f"  - retired .github/workflows/{name}")
+        return 0
+    print(ci.render(project))
+    return 0
+
+
 def cmd_worktree_prune(args: argparse.Namespace) -> None:
     project = resolve_project(args.project)
     from team import worktrees
@@ -1945,6 +1958,10 @@ def main() -> None:
     rh = sub.add_parser("run-headless"); rh.add_argument("project"); rh.add_argument("--task-spec", required=True); rh.add_argument("--supervised", action="store_true"); rh.set_defaults(fn=cmd_run_headless)
     ro = sub.add_parser("run-orchestrator"); ro.add_argument("project"); ro.add_argument("--prompt"); ro.add_argument("--timeout", type=int, default=5400); ro.set_defaults(fn=cmd_run_orchestrator)
     v = sub.add_parser("verify");      v.add_argument("project"); v.add_argument("--worktree"); v.add_argument("--task-spec"); v.add_argument("--skip-gradle", action="store_true"); v.set_defaults(fn=cmd_verify)
+    ci_p = sub.add_parser("ci", help="print or write the canonical release workflow (tag → AAB → Play internal)")
+    ci_p.add_argument("project")
+    ci_p.add_argument("--write", action="store_true", help="render .github/workflows/release.yml, retire the old workflows and set the profile trigger to tag")
+    ci_p.set_defaults(fn=cmd_ci)
     wp = sub.add_parser("worktree-prune", help="remove task worktrees whose work already landed (dry run unless --yes)")
     wp.add_argument("project")
     wp.add_argument("--yes", action="store_true", help="actually remove merged worktrees and their dt/ branches")
