@@ -846,9 +846,24 @@ def cmd_record(args: argparse.Namespace) -> None:
     entry = {"date": today(), "task_id": args.task or task.get("id", "?"),
              "result": args.result, "note": args.note or "",
              "finished": now_iso()}
-    state.setdefault("runs", []).append(entry)
     if args.result == "shipped":
         entry["version"] = args.version or ""
+    runs = state.setdefault("runs", [])
+    # Recording the same delivery twice (a retried command, a repair after the
+    # ledger missed it) must UPDATE the run, never append a phantom second one.
+    same_run = next(
+        (r for r in runs
+         if r.get("task_id") == entry["task_id"]
+         and str(r.get("version") or "") == str(entry.get("version") or "")
+         and r.get("result") == entry["result"]),
+        None,
+    )
+    if same_run is not None:
+        same_run.update(entry)
+        entry = same_run
+    else:
+        runs.append(entry)
+    if args.result == "shipped":
         label = task.get("surface", {}).get("label", args.task or "?")
         targets = task.get("surface", {}).get("targets", [])
         # Attribute the delivery to the milestone the queue entry named, so the
@@ -861,10 +876,18 @@ def cmd_record(args: argparse.Namespace) -> None:
                 if (q.get("label") or "") == label:
                     adv = str(q.get("advances") or "")
                     break
-        already = {s["target"] for s in state.get("shipped", [])}
+        # One ledger row per (target, version): a later release that re-touches a
+        # path must still record itself, or the delivery is invisible — the
+        # queue entry cannot be recognised as delivered, `status` names the
+        # previous version, and the next plan review re-queues shipped work
+        # (seen 2026-11-01: v1.0.24 wrote no rows because v1.0.23 had already
+        # shipped the same ui/screens + feature/summary + commonTest targets).
+        already = {(s.get("target"), str(s.get("version") or ""))
+                   for s in state.get("shipped", [])}
+        version_key = str(args.version or "?")
         for t in targets:
-            if t in already:
-                continue  # concurrent runs may both ship; keep one ledger row per target
+            if (t, version_key) in already:
+                continue  # concurrent runs may both ship; keep one row per target per release
             state.setdefault("shipped", []).append({
                 "target": t, "label": label, "version": args.version or "?",
                 "commit": args.commit or "", "date": today(),
