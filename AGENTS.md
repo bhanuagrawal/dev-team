@@ -77,6 +77,16 @@ checklist + release-candidate call) and the two page URLs `record` prints.
    catch — say so in the handover when a task touches them.
 9. **Ask the owner only what no agent can decide** (freeze-worthy incidents,
    discard-vs-keep on their WIP, direction). Never ask about promotion.
+10. **Nothing remains uncommitted, ever.** Every change an agent makes ends in a
+   commit on a pushed ref before its turn ends: a project change on `main` (once
+   the gates pass) or on its `dt/<task-id>` branch; a team change on this repo's
+   `main`. "Clean tree" is not the test — **"does this exist anywhere but this
+   disk"** is. `devteam doctor` / `status` report every checkout file whose work
+   exists nowhere else (`core.checkout_dirty`, which excludes only the plan
+   mirror when origin already serves the identical bytes). Never leave a dirty
+   worktree, an unpushed commit, or "I'll commit later": the next session may be
+   a different tool that never saw this one. Work you did not write — the
+   owner's WIP — is reported, never committed on their behalf.
 
 ## What lands where — and what the owner is never asked to hold
 
@@ -139,4 +149,6 @@ reads it here — one source, no copies to drift.
 
 `verify` PASS → `release` delivered (CI green, internal testing updated) →
 `record` + `rc` + `alarm` printed → worktrees pruned → the report quotes the
-handover, the flags and the page URLs. Nothing sits uncommitted.
+handover, the flags and the page URLs. Nothing sits uncommitted anywhere:
+`devteam doctor <project>` prints no `uncommitted: WARN` line, and `status`
+shows no `⏸ parked` attempt the report failed to mention.

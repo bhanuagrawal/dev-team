@@ -315,6 +315,57 @@ def git_ref_state(project: Path, ref: str = DELIVERY_REF) -> dict[str, Any]:
     return state
 
 
+def _git_lines(args: list[str], cwd: Path, timeout: int = 60) -> list[str]:
+    r = git(args, cwd=cwd, timeout=timeout)
+    if r.returncode != 0:
+        return []
+    return [line.strip() for line in (r.stdout or "").splitlines() if line.strip()]
+
+
+
+def _mirror_on_origin(project: Path, branch: str, rel: str) -> bool:
+    """Is this file's exact content already on origin/<branch>?
+
+    The plan mirror is rendered into the checkout on every run and committed
+    from an origin-anchored worktree, so the checkout legitimately differs from
+    its own HEAD while origin serves the identical bytes. Content, not topology.
+    """
+    there = git(["rev-parse", "--verify", "--quiet", f"origin/{branch}:{rel}"],
+                cwd=project, timeout=30)
+    if there.returncode != 0:
+        return False
+    local = git(["hash-object", "--", rel], cwd=project, timeout=30)
+    if local.returncode != 0:
+        return False
+    return (local.stdout or "").strip() == (there.stdout or "").strip()
+
+
+def checkout_dirty(project: Path) -> list[str]:
+    """Files in the checkout carrying work that exists NOWHERE else.
+
+    AGENTS.md says nothing may exist only on this disk. This is the checkable
+    form of it, used by `status` and `doctor`: every changed or untracked file
+    whose exact content is not already on origin/<main>. A file whose bytes
+    origin already serves is a COPY (the checkout is deliberately never rebased),
+    not uncommitted work; `.pipeline/` is machine-local by contract.
+
+    The team never commits the owner's WIP on their behalf — it reports it, and
+    the owner (or the agent that wrote it) commits or parks it.
+    """
+    prof = load_json(project / ".pipeline" / "profile.json", {}) or {}
+    branch = str(prof.get("main_branch") or "main")
+    changed = _git_lines(["diff", "--name-only", "HEAD"], project)
+    changed += _git_lines(["ls-files", "--others", "--exclude-standard"], project)
+    out: list[str] = []
+    for rel in dict.fromkeys(changed):
+        if rel == ".pipeline" or rel.startswith(".pipeline/"):
+            continue
+        if _mirror_on_origin(project, branch, rel):
+            continue
+        out.append(rel)
+    return out
+
+
 def delivery_notice(project: Path) -> str:
     """One line stating which tree is authoritative, for stages that read code."""
     s = git_ref_state(project)

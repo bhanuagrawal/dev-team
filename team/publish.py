@@ -194,6 +194,57 @@ def publish(project: Path, log=None) -> dict:
                    "on origin; the next run retries"}
 
 
+def commit_paths(project: Path, paths: list[str], message: str, log=None) -> dict:
+    """Commit the LOCAL versions of `paths` onto origin/<main>, from the anchored
+    worktree. Generic form of `publish()` for any command that writes into the
+    project directory (store assets, harness scaffolding, listing edits).
+
+    The checkout is never staged, rebased or reset: the identical bytes are
+    copied into a detached worktree sitting on origin, committed there and
+    pushed. So a dirty or diverged checkout cannot block the commit, and the
+    owner's own WIP is never swept into it — callers pass only the paths their
+    command touched.
+
+    Returns {pushed, sha, why}. `pushed: False` always carries a `why` and is
+    never fatal: the next run retries.
+    """
+    say = log or (lambda *_: None)
+    profile = profile_of(project)
+    branch = str(profile.get("main_branch") or "main")
+    # `.pipeline/` is machine-local by contract (repo-local exclude) — never
+    # commit it, even if a caller passes a path inside it.
+    keep = [str(p).strip() for p in paths
+            if str(p).strip() and not str(p).strip().startswith(".pipeline/")]
+    if not keep:
+        return {"pushed": False, "sha": "", "why": "no committable paths"}
+    for _attempt in range(1, 4):
+        wt, why = _origin_tree(project, branch)
+        if wt is None:
+            return {"pushed": False, "sha": "", "why": why}
+        for rel in keep:
+            src, dst = project / rel, wt / rel
+            if src.exists():
+                dst.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(src, dst)
+            elif dst.exists():
+                _g(["rm", "-q", "--", rel], wt, timeout=60)
+        _g(["add", "-A", "--", *keep], wt, timeout=120)
+        if _g(["diff", "--cached", "--quiet", "--", *keep], wt, timeout=60).returncode == 0:
+            return {"pushed": True, "sha": "", "why": "already on origin"}
+        c = _g(["commit", "-m", message, "--", *keep], wt, timeout=120)
+        if c.returncode != 0:
+            tail = (c.stderr or c.stdout or "").strip().splitlines()
+            return {"pushed": False, "sha": "",
+                    "why": f"commit failed: {tail[-1] if tail else 'unknown'}"}
+        sha = (_g(["rev-parse", "--short", "HEAD"], wt, timeout=30).stdout or "").strip()
+        r = _g(["push", "origin", f"HEAD:{branch}"], wt, timeout=180)
+        if r.returncode == 0:
+            say(f"committed {len(keep)} path(s) → origin/{branch} @ {sha}")
+            return {"pushed": True, "sha": sha, "why": "committed"}
+        say("push rejected — origin moved; rebuilding the commit on the new tip")
+    return {"pushed": False, "sha": "", "why": "push rejected 3 times"}
+
+
 def line(project: Path, res: dict) -> str:
     """One owner-facing line about the shared plan."""
     if res.get("pushed") and res.get("url"):

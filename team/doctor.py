@@ -294,6 +294,28 @@ def run_doctor(project: Path, log) -> dict:
             "checks_passed": sum(1 for _, ok, _ in generic_checks if ok),
         }
 
+    # Nothing may exist only on this disk (AGENTS.md). `status` reports the same
+    # set: it is the detection half of the rule — the writer commits or parks
+    # its own work, the team never commits the owner's WIP for them.
+    try:
+        from .core import checkout_dirty
+        dirty = checkout_dirty(project)
+        if dirty:
+            shown = ", ".join(dirty[:6]) + (" …" if len(dirty) > 6 else "")
+            log(f"doctor uncommitted: WARN — {len(dirty)} file(s) in the checkout "
+                f"exist only on this disk: {shown}")
+            # A WARN, not a block: the checkout is the owner's, and their WIP is
+            # theirs to commit. What the pipeline must never do is ADD to it.
+            report["uncommitted"] = {
+                "status": "warn",
+                "blocked": [],
+                "checks_passed": 0,
+                "note": ("commit it (or park it on a dt/* branch) — a change that "
+                         "exists only here is lost with this machine/session"),
+            }
+    except Exception as e:  # a check must never hide the report
+        log(f"doctor uncommitted: could not check ({e})")
+
     try:
         state = state_of(project)
         state["doctor"] = {"generated_at": now_iso(), "report": report}
