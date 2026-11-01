@@ -216,6 +216,16 @@ def publish_listing_assets(project: Path, dry_run: bool = True, log: Any = None)
     # two paths were indistinguishable once written, so a fallback shipped looking
     # exactly like the rule's path (observed 2026-11-01).
     try:
+        from . import storefront_build as sfb
+
+        run = sfb.status(root).get("run") or {}
+        if run.get("status") == "interrupted":
+            blockers.append(
+                f"the last storefront run died at step '{run.get('step')}' — the listing on disk "
+                "may be half-written; re-run `devteam storefront-build <project>`")
+    except Exception:
+        pass
+    try:
         from . import storefront_frames as sfr
 
         comp = (sfr.load_registry(root).get("composition") or {})

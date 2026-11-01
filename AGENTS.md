@@ -65,7 +65,13 @@ checklist + release-candidate call) and the two page URLs `record` prints.
    pixel-crisp>"`; the reason is recorded in `docs/storefront-frames.json` and
    `store-publish` refuses a listing whose frames are code-composed without one,
    or that has no recorded composition path at all (`storefront-build --plan`
-   prints the path a run would take, without painting anything). The two other brand assets follow the same rule with
+   prints the path a run would take, without painting anything). A long pass keeps
+   a run record (`.pipeline/storefront_run.json`: pid, step, verdict), so a run an
+   agent backgrounded and abandoned reads as `interrupted at step '<x>'` rather
+   than vanishing; `devteam storefront-status <project>` is how anyone — owner or
+   orchestrator — checks what actually happened, and `store-publish` refuses an
+   interrupted run outright. Never take an agent's word that a long command
+   finished: read that record. The two other brand assets follow the same rule with
    different makers: the **icon is a Stitch design**, adopted from the artboard it
    returns (`storefront-brand --stitch-prompt` → `--adopt-stitch`), and the feature
    graphic is painted by Gemini from the hero screen. A listing whose icon or banner

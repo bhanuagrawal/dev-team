@@ -252,6 +252,94 @@ def _record_composition(project: Path, path: str, why: str = "", flags: list[str
             + (f" — why: {why.strip()}" if (why or "").strip() else ""))
 
 
+RUN_STATE_REL = ".pipeline/storefront_run.json"
+
+
+def _state_path(project: Path) -> Path:
+    return project / RUN_STATE_REL
+
+
+def _read_state(project: Path) -> dict[str, Any]:
+    import json as _json
+
+    try:
+        return _json.loads(_state_path(project).read_text()) or {}
+    except Exception:
+        return {}
+
+
+def _write_state(project: Path, record: dict[str, Any]) -> None:
+    import json as _json
+
+    path = _state_path(project)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(_json.dumps(record, indent=2) + "\n")
+
+
+def _pid_alive(pid: int) -> bool:
+    import os as _os
+
+    if pid <= 0:
+        return False
+    try:
+        _os.kill(pid, 0)
+        return True
+    except OSError:
+        return False
+
+
+def run_begin(project: Path, path: str, log=None) -> dict[str, Any]:
+    """Open a run record, and SAY SO when the previous one died mid-flight.
+
+    A long command has no way to tell "still painting" from "the process is
+    gone": an agent that started this in the background and ended its turn left
+    no trace, and the next reader could not tell a killed run from one that never
+    began (observed 2026-11-01 — a subagent reported "build is running" and the
+    process was already dead). The record names the pid and the step, so the next
+    invocation — or `devteam storefront-status` — can see the interruption and
+    resume, instead of guessing.
+    """
+    import os as _os
+
+    from .core import now_iso
+
+    previous = _read_state(project)
+    if previous.get("status") == "running" and not _pid_alive(int(previous.get("pid") or 0)):
+        previous["status"] = "interrupted"
+        previous["interrupted_at"] = now_iso()
+        _write_state(project, previous)
+        if log:
+            log(f"! the previous storefront run died at step '{previous.get('step')}' "
+                f"(started {previous.get('started_at')}, pid {previous.get('pid')} is gone) "
+                f"— nothing was published; a re-run continues from the caches")
+    record = {"pid": _os.getpid(), "status": "running", "path": path, "step": "start",
+              "started_at": now_iso()}
+    _write_state(project, record)
+    return previous
+
+
+def run_step(project: Path, step: str) -> None:
+    """Mark progress, so an interrupted run names the step it died on."""
+    record = _read_state(project)
+    if record.get("status") != "running":
+        return
+    record["step"] = step
+    _write_state(project, record)
+
+
+def run_end(project: Path, result: dict[str, Any] | None, log=None) -> None:
+    from .core import now_iso
+
+    record = _read_state(project)
+    record.update({
+        "status": "ok" if (result or {}).get("status") == "OK" else "failed",
+        "finished_at": now_iso(),
+        "result": {k: (result or {}).get(k) for k in
+                   ("status", "error", "score", "frame", "order", "chat")},
+    })
+    _write_state(project, record)
+
+
 def resolve_path(*, frame: str = "auto", plate: str | None = None, gemini: bool = False,
                  layout: str | None = None, frame_html: str | None = None,
                  builtin: bool = False, poster: bool = False, why: str = "") -> dict[str, Any]:
@@ -361,6 +449,7 @@ def build(project: Path, *, frame: str = "auto", plate: str | None = None,
     _say(log, f"~ direction: {direction.get('concept')}")
 
     # 3 — render the app's own composables (from origin/main, never a mock).
+    run_step(project, "render")
     _say(log, "~ render: the app's own composables (origin/main)")
     rendered = sp.render_previews(project, log=log)
     if rendered.get("status") != "OK":
@@ -371,6 +460,7 @@ def build(project: Path, *, frame: str = "auto", plate: str | None = None,
     # This is the owner's chosen shape: the preview screen goes IN as an attachment
     # and the marketing image comes OUT, per scene, one prompt each.
     if poster:
+        run_step(project, "poster")
         from . import storefront_poster as spt
         from . import storefront_review as sr
         ordered = sr.ordered_scenes(spec, review)
@@ -519,12 +609,14 @@ def build(project: Path, *, frame: str = "auto", plate: str | None = None,
             sfr.assign(project, scene["id"], frame)
 
     # 5 — composite the reviewed order into Play-ready PNGs.
+    run_step(project, "composite")
     _say(log, "~ composite: the reviewed order into phoneScreenshots")
     framed = sp.compose_frames(project, log=log, force=force)
     if framed.get("status") != "OK":
         return _fail(framed.get("status", "ERROR"), framed.get("error", "composite failed"))
 
     # 6 — the critic is a gate, not a score to admire.
+    run_step(project, "gate")
     report = asset_critic.review_store_assets(project)
     score = report.get("score", 0)
     _say(log, f"  critic: {score}/100")
@@ -540,3 +632,84 @@ def build(project: Path, *, frame: str = "auto", plate: str | None = None,
         from .play_listing import publish_listing_assets
         out["publish"] = publish_listing_assets(project, dry_run=False, log=log)
     return out
+
+
+def status(project: Path) -> dict[str, Any]:
+    """What the storefront pass last did — and whether the listing may ship.
+
+    The answer an orchestrator needs after handing this to another agent: did a
+    run finish, did one die mid-flight, which path made the frames, and would
+    publish accept them. Read from files, never from a report.
+    """
+    from . import storefront_brand as sbf, storefront_frames as sfr
+
+    state = _read_state(project)
+    running = state.get("status") == "running" and _pid_alive(int(state.get("pid") or 0))
+    # A record that says "running" with a dead pid is not running: it is the trace
+    # of a process that was killed (an agent that backgrounded the run and ended
+    # its turn). Reporting it as "running" is how a dead run looked alive.
+    raw_status = state.get("status") or "none"
+    if raw_status == "running" and not running:
+        raw_status = "interrupted"
+    comp = (sfr.load_registry(project).get("composition") or {})
+    listing = project / "distribution/listing/en-US/images/phoneScreenshots"
+    shots = sorted(p.name for p in listing.glob("*.png")) if listing.is_dir() else []
+
+    blockers: list[str] = []
+    if not comp:
+        blockers.append("no recorded composition path for the listing frames")
+    elif comp.get("path") != "poster" and not str(comp.get("why") or "").strip():
+        blockers.append("frames are code-composed with no recorded reason")
+    elif comp.get("path") == "poster":
+        marks = comp.get("watermark") or {}
+        if not marks:
+            blockers.append("the poster record carries no watermark verdict")
+        else:
+            bad = [sid for sid, m in marks.items() if not (m or {}).get("verified")]
+            if bad:
+                blockers.append("unproven watermark heal: " + ", ".join(sorted(bad)))
+    try:
+        blockers.extend(sbf.gate(project))
+    except Exception:
+        blockers.append("brand provenance could not be read")
+
+    return {
+        "run": {
+            "status": ("running" if running else raw_status),
+            "step": state.get("step"),
+            "path": state.get("path"),
+            "started_at": state.get("started_at"),
+            "finished_at": state.get("finished_at"),
+            "interrupted_at": state.get("interrupted_at"),
+            "pid": state.get("pid"),
+            "result": state.get("result") or {},
+        },
+        "composition": comp,
+        "screenshots": shots,
+        "publishable": not blockers,
+        "blockers": blockers,
+    }
+
+
+def format_status(brief: dict[str, Any]) -> str:
+    run = brief.get("run") or {}
+    comp = brief.get("composition") or {}
+    lines = [
+        "STOREFRONT STATUS",
+        f"  last run:    {run.get('status')}"
+        + (f" at step '{run.get('step')}'" if run.get("status") in ("running", "interrupted") else "")
+        + (f" — started {run.get('started_at')}" if run.get("started_at") else ""),
+        f"  path:        {comp.get('path') or '(none recorded)'}"
+        + (f" · painted {comp.get('painted')}" if comp.get("painted") is not None else "")
+        + (f" · {comp.get('chat')}" if comp.get("chat") else ""),
+    ]
+    marks = comp.get("watermark") or {}
+    if marks:
+        bad = [sid for sid, m in marks.items() if not (m or {}).get("verified")]
+        lines.append(f"  watermark:   {len(marks) - len(bad)}/{len(marks)} proved clean"
+                     + (f" — UNPROVEN: {', '.join(sorted(bad))}" if bad else ""))
+    lines.append(f"  screenshots: {len(brief.get('screenshots') or [])} on disk")
+    lines.append("  publishable: " + ("YES" if brief.get("publishable") else "NO"))
+    for b in brief.get("blockers") or []:
+        lines.append(f"    ✗ {b}")
+    return "\n".join(lines)

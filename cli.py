@@ -2154,6 +2154,21 @@ def cmd_takeover(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_storefront_status(args: argparse.Namespace) -> int:
+    """Did the storefront pass finish, die, or never run — and may it ship?"""
+    import json as _json
+
+    project = resolve_project(args.project)
+    from team import storefront_build as sb
+
+    brief = sb.status(project)
+    if getattr(args, "json", False):
+        print(_json.dumps(brief, indent=2, default=str))
+    else:
+        print(sb.format_status(brief))
+    return 0 if brief.get("publishable") else 1
+
+
 def cmd_storefront_build(args: argparse.Namespace) -> int:
     """One command, one order, no skippable steps — see team/storefront_build.py."""
     project = resolve_project(args.project)
@@ -2174,12 +2189,27 @@ def cmd_storefront_build(args: argparse.Namespace) -> int:
         if choice["path"] == "code":
             print(f"  why: {choice['why']}")
         return 0
-    res = sb.build(
-        project, frame=args.frame, plate=args.plate, gemini=args.gemini,
-        layout=args.layout, frame_html=args.frame_html, stitch_source=args.stitch_source,
-        brief=args.brief, builtin=args.builtin, force=args.force,
-        poster=args.poster, strict=args.strict, publish=False, why=args.why, log=print,
-    )
+    choice = sb.resolve_path(frame=args.frame, plate=args.plate, gemini=args.gemini,
+                             layout=args.layout, frame_html=args.frame_html,
+                             builtin=args.builtin, poster=args.poster, why=args.why)
+    # The run record is opened BEFORE anything renders and closed after the gates,
+    # so a killed process (an agent that backgrounded this and ended its turn)
+    # leaves "interrupted at step X" instead of no trace at all.
+    sb.run_begin(project, choice.get("path") or "?", log=print)
+    res: dict = {}
+    try:
+        res = sb.build(
+            project, frame=args.frame, plate=args.plate, gemini=args.gemini,
+            layout=args.layout, frame_html=args.frame_html, stitch_source=args.stitch_source,
+            brief=args.brief, builtin=args.builtin, force=args.force,
+            poster=args.poster, strict=args.strict, publish=False, why=args.why, log=print,
+        )
+    finally:
+        sb.run_end(project, res, log=print)
+    # One machine-readable line: an orchestrator checks this, not the agent's prose.
+    print("STOREFRONT BUILD JSON: " + json.dumps(
+        {k: res.get(k) for k in ("status", "error", "frame", "score", "order", "chat")},
+        default=str))
     if res.get("status") != "OK":
         print(f"STOREFRONT BUILD: {res.get('status')}")
         print(f"  ✗ {res.get('error')}")
@@ -2703,6 +2733,12 @@ def main() -> None:
                          "pixel-crisp and why the poster cannot do it. Recorded and gated at publish.")
     sb.add_argument("--publish", action="store_true", help="upload + commit the listing after the gates pass")
     sb.add_argument("--force", action="store_true", help="replace an existing composition")
+    sfs = sub.add_parser("storefront-status",
+                         help="what the storefront pass last did (finished / interrupted / never ran) "
+                              "and whether the listing may ship — read from files, not from a report")
+    sfs.add_argument("project")
+    sfs.add_argument("--json", action="store_true")
+    sfs.set_defaults(fn=cmd_storefront_status)
     sb.add_argument("--plan", action="store_true",
                     help="print which composition path this run would take (poster vs a fallback "
                          "and its reason) and exit — nothing is rendered or painted")
