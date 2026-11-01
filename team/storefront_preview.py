@@ -672,20 +672,13 @@ def _delivery_tree(project: Path, log: Any = None) -> Path:
 
 
 def render_previews(project: Path, log: Any = None, timeout: int = 900,
-                    tree: Path | None = None) -> dict[str, Any]:
+                    tree: Path | None = None, force: bool = False) -> dict[str, Any]:
     """Run AGP's layoutlib renderer and collect one PNG per scene.
 
     Renders the DELIVERY tree by default: a screenshot is a claim about the app,
     so it must come from the code CI ships, never from a stale checkout.
     """
-    if tree is None:
-        tree = _delivery_tree(project, log)
-    if log:
-        from .core import delivery_notice
-        log("  " + delivery_notice(project))
-        log(f"  rendering {tree.relative_to(project) if tree.is_relative_to(project) else tree}")
-
-    spec = load_spec(tree) if (tree / SPEC_REL).is_file() else load_spec(project)
+    spec = load_spec(tree) if tree and (tree / SPEC_REL).is_file() else load_spec(project)
     missing = unbound_scenes(spec)
     if missing:
         return {
@@ -694,6 +687,27 @@ def render_previews(project: Path, log: Any = None, timeout: int = 900,
             "missing": missing,
             "hint": "set \"composable\" for each scene (e.g. \"CompressScreen(data = CompressUIData(...), ...)\")",
         }
+
+    manifest_file = project / ".pipeline/storefront_scenes/manifest.json"
+    if not force and manifest_file.is_file():
+        try:
+            m = json.loads(manifest_file.read_text())
+            spec_scenes = [s["id"] for s in spec.get("scenes", [])]
+            rendered_scenes = [s["id"] for s in m.get("scenes", [])]
+            all_present = all((project / f".pipeline/storefront_scenes/{sid}.png").is_file() for sid in spec_scenes)
+            if all(s in rendered_scenes for s in spec_scenes) and all_present:
+                if log:
+                    log(f"  reusing {len(spec_scenes)} rendered scene(s) from .pipeline/storefront_scenes")
+                return {"status": "OK", **m}
+        except Exception:
+            pass
+
+    if tree is None:
+        tree = _delivery_tree(project, log)
+    if log:
+        from .core import delivery_notice
+        log("  " + delivery_notice(project))
+        log(f"  rendering {tree.relative_to(project) if tree.is_relative_to(project) else tree}")
     spec["module"] = spec.get("module") or find_compose_module(tree).name
     spec["renderer"] = spec.get("renderer") or renderer_of(tree)
     if log:

@@ -452,7 +452,7 @@ def build(project: Path, *, frame: str = "auto", plate: str | None = None,
     # 3 — render the app's own composables (from origin/main, never a mock).
     run_step(project, "render")
     _say(log, "~ render: the app's own composables (origin/main)")
-    rendered = sp.render_previews(project, log=log)
+    rendered = sp.render_previews(project, log=log, force=force)
     if rendered.get("status") != "OK":
         return _fail(rendered.get("status", "ERROR"), rendered.get("error", "render failed"),
                      rendered.get("hint", ""))
