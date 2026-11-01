@@ -55,7 +55,13 @@ checklist + release-candidate call) and the two page URLs `record` prints.
    the **input** to the marketing image: `storefront-build --poster` attaches the
    scene's rendered screen and has **Gemini paint the whole asset in the browser,
    one prompt per scene** (`--poster`), then strips its watermark and upscales to a
-   size Play accepts. The two other brand assets follow the same rule with
+   size Play accepts. `--poster` is the DEFAULT of `storefront-build`: a
+   code-composed frame (`--builtin`, `--gemini`/`--plate`, `--frame-html`,
+   `--layout`, `--frame`) is a fallback and must carry `--why "<what must stay
+   pixel-crisp>"`; the reason is recorded in `docs/storefront-frames.json` and
+   `store-publish` refuses a listing whose frames are code-composed without one,
+   or that has no recorded composition path at all (`storefront-build --plan`
+   prints the path a run would take, without painting anything). The two other brand assets follow the same rule with
    different makers: the **icon is a Stitch design**, adopted from the artboard it
    returns (`storefront-brand --stitch-prompt` → `--adopt-stitch`), and the feature
    graphic is painted by Gemini from the hero screen. A listing whose icon or banner

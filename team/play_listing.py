@@ -209,6 +209,28 @@ def publish_listing_assets(project: Path, dry_run: bool = True, log: Any = None)
         blockers.extend(sbf.gate(root))
     except Exception:
         blockers.append("brand asset provenance could not be read (docs/storefront-assets.json)")
+    # The frames must say HOW they were made: the rule's path is the poster
+    # (Gemini paints the asset from the real render), and a code-composed frame is
+    # an exception that carries a reason. An upload that cannot say which one it
+    # is — or takes the exception silently — does not go to Play. Without this the
+    # two paths were indistinguishable once written, so a fallback shipped looking
+    # exactly like the rule's path (observed 2026-11-01).
+    try:
+        from . import storefront_frames as sfr
+
+        comp = (sfr.load_registry(root).get("composition") or {})
+        if not comp:
+            blockers.append(
+                "no recorded composition path for the listing frames — run "
+                "`devteam storefront-build <project>` (its default is the --poster path)")
+        elif comp.get("path") != "poster" and not str(comp.get("why") or "").strip():
+            blockers.append(
+                "frames were composed by code ("
+                + ", ".join(comp.get("flags") or ["no flags given"])
+                + ") with no recorded reason — the rule's path is --poster")
+    except Exception:
+        blockers.append("the frames' composition record could not be read "
+                        "(docs/storefront-frames.json)")
     if blockers:
         return {"status": "BLOCKED", "blockers": blockers, "score": report.get("score")}
 

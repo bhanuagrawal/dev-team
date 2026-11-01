@@ -213,15 +213,97 @@ def _compose_scene(project: Path, scene: dict[str, Any], name: str, *,
     return {}
 
 
+def _record_composition(project: Path, path: str, why: str = "", flags: list[str] | None = None,
+                        chat: str | None = None, log=None) -> None:
+    """Write HOW the listing's frames were made into the frames registry.
+
+    A listing that reaches Play must be able to say whether the image model
+    painted it or code composed it, and — for code — who decided that and why.
+    Without this record the two paths are indistinguishable afterwards, which is
+    exactly how a fallback shipped as if it were the rule's path.
+    """
+    from . import storefront_frames as sfr
+    from .core import now_iso
+
+    registry = sfr.load_registry(project)
+    registry["composition"] = {
+        "path": path,
+        "flags": flags or [],
+        "why": (why or "").strip(),
+        "chat": chat or "",
+        "at": now_iso(),
+    }
+    sfr.save_registry(project, registry)
+    if log:
+        log(f"  composition path: {path}" + (f" ({', '.join(flags)})" if flags else "")
+            + (f" — why: {why.strip()}" if (why or "").strip() else ""))
+
+
+def resolve_path(*, frame: str = "auto", plate: str | None = None, gemini: bool = False,
+                 layout: str | None = None, frame_html: str | None = None,
+                 builtin: bool = False, poster: bool = False, why: str = "") -> dict[str, Any]:
+    """Which composition path this run takes — and whether the choice is legal.
+
+    ONE definition, used by the build and by `--plan`, so "what will this do?"
+    and "what did it do?" can never disagree. The rule's path is the poster:
+    Gemini paints the whole asset from the real render, one prompt per scene.
+    Everything else is a fallback for type that must stay pixel-crisp, and a
+    fallback is a DECISION: it carries a reason, it is recorded, and publish
+    refuses one without it. This used to be the other way round — no flag fell
+    through to the code path, which then asked the caller to pick between
+    --plate, --gemini and --builtin; a run picked one, and four code-composed
+    frames shipped as if they were the poster (observed 2026-11-01).
+    """
+    flags: list[str] = []
+    if builtin:
+        flags.append("--builtin")
+    if gemini:
+        flags.append("--gemini")
+    if plate:
+        flags.append("--plate")
+    if frame_html:
+        flags.append("--frame-html")
+    if layout:
+        flags.append("--layout")
+    if frame and frame not in ("", "auto"):
+        flags.append(f"--frame {frame}")
+    fallback = bool(flags)
+    if fallback and poster:
+        return {"ok": False, "path": "code", "flags": flags,
+                "why": "--poster and a code-composed frame are exclusive",
+                "hint": f"asked for both: --poster and {', '.join(flags)}. The poster IS the "
+                        "marketing image; a code-composed frame replaces it. Pick one."}
+    if fallback and not why.strip():
+        return {"ok": False, "path": "code", "flags": flags,
+                "why": "a code-composed frame needs a stated reason",
+                "hint": "the rule's path is --poster (Gemini paints the whole asset from the "
+                        "app's own render). A code-composed frame — " + ", ".join(flags) + " — "
+                        "is the exception for type that must stay pixel-crisp, so it needs "
+                        "--why \"<what must be crisp and why the poster cannot do it>\". The "
+                        "reason is recorded and the publish gate reads it."}
+    return {"ok": True, "path": "code" if fallback else "poster", "flags": flags,
+            "why": why.strip(), "hint": ""}
+
+
 def build(project: Path, *, frame: str = "auto", plate: str | None = None,
           gemini: bool = False, layout: str | None = None,
           frame_html: str | None = None, stitch_source: str = "",
           brief: str = "", builtin: bool = False, force: bool = False,
           poster: bool = False, strict: bool = False, publish: bool = False,
-          log=None) -> dict[str, Any]:
+          why: str = "", log=None) -> dict[str, Any]:
     from . import asset_critic, storefront_brand as sbf
     from . import storefront_direction as sd, storefront_frames as sfr
     from . import storefront_preview as sp, storefront_review as sr, vision_layout as vl
+
+    # 0 — WHICH PATH (see resolve_path): poster by default, fallback only with a reason.
+    choice = resolve_path(frame=frame, plate=plate, gemini=gemini, layout=layout,
+                          frame_html=frame_html, builtin=builtin, poster=poster, why=why)
+    if not choice["ok"]:
+        return _fail("BLOCKED", choice["why"], choice["hint"])
+    fallback_flags = choice["flags"]
+    poster = choice["path"] == "poster"
+    if poster and log:
+        log("~ composition: --poster (Gemini paints each frame from the real render)")
 
     # 1 — the spec is the project's, and it must exist before anything renders.
     spec_file = project / sp.SPEC_REL
@@ -339,6 +421,7 @@ def build(project: Path, *, frame: str = "auto", plate: str | None = None,
                "concept": direction.get("concept"),
                "order": [s["id"] for s in ordered],
                "screenshots": written, "chat": made.get("chat")}
+        _record_composition(project, "poster", chat=made.get("chat"), log=log)
         if publish:
             from .play_listing import publish_listing_assets
             out["publish"] = publish_listing_assets(project, dry_run=False, log=log)
@@ -426,6 +509,7 @@ def build(project: Path, *, frame: str = "auto", plate: str | None = None,
     out = {"status": "OK", "score": score, "frame": "builtin" if builtin else frame,
            "concept": direction.get("concept"),
            "order": [s["id"] for s in sr.ordered_scenes(spec, review)]}
+    _record_composition(project, "code", why=why, flags=fallback_flags, log=log)
     if publish:
         from .play_listing import publish_listing_assets
         out["publish"] = publish_listing_assets(project, dry_run=False, log=log)

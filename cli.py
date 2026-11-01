@@ -2161,11 +2161,24 @@ def cmd_storefront_build(args: argparse.Namespace) -> int:
     from team import storefront_build as sb
 
     print(delivery_notice(project))
+    if getattr(args, "plan", False):
+        choice = sb.resolve_path(frame=args.frame, plate=args.plate, gemini=args.gemini,
+                                 layout=args.layout, frame_html=args.frame_html,
+                                 builtin=args.builtin, poster=args.poster, why=args.why)
+        print(f"STOREFRONT BUILD PLAN: {'BLOCKED' if not choice['ok'] else 'OK'}")
+        print(f"  path: {choice['path']}" + (f" ({', '.join(choice['flags'])})" if choice['flags'] else ""))
+        if not choice["ok"]:
+            print(f"  ✗ {choice['why']}")
+            print(f"  → {choice['hint']}")
+            return 1
+        if choice["path"] == "code":
+            print(f"  why: {choice['why']}")
+        return 0
     res = sb.build(
         project, frame=args.frame, plate=args.plate, gemini=args.gemini,
         layout=args.layout, frame_html=args.frame_html, stitch_source=args.stitch_source,
         brief=args.brief, builtin=args.builtin, force=args.force,
-        poster=args.poster, strict=args.strict, publish=False, log=print,
+        poster=args.poster, strict=args.strict, publish=False, why=args.why, log=print,
     )
     if res.get("status") != "OK":
         print(f"STOREFRONT BUILD: {res.get('status')}")
@@ -2673,17 +2686,26 @@ def main() -> None:
                     help="refuse an asset whose watermark heal cannot be proved clean "
                          "(default: heal best-effort, report it, and let the owner decide)")
     sb.add_argument("--poster", action="store_true",
-                    help="let Gemini paint the WHOLE asset from the rendered screen, one prompt per "
-                         "scene (browser), then remove its watermark and upscale to Play size")
-    sb.add_argument("--plate", help="backdrop plate PNG painted by Gemini (browser) or another image model")
-    sb.add_argument("--gemini", action="store_true", help="paint the plate in Gemini through the owner's Chrome (browser-control)")
+                    help="THE rule's path, and the default: Gemini paints the WHOLE asset from the "
+                         "rendered screen, one prompt per scene (browser), then removes its "
+                         "watermark and upscales to Play size")
+    sb.add_argument("--plate", help="FALLBACK (needs --why): backdrop plate PNG painted by Gemini or another image model")
+    sb.add_argument("--gemini", action="store_true", help="FALLBACK (needs --why): paint the backdrop plate in Gemini through the owner's Chrome")
     sb.add_argument("--layout", help="layout JSON from a previous run (re-run deterministically instead of asking the model)")
     sb.add_argument("--frame-html", help="Stitch-authored frame HTML to adopt instead of composing with the vision model")
     sb.add_argument("--stitch-source", default="", help="with --frame-html: the Stitch screen it came from")
     sb.add_argument("--brief", default="", help="composition brief handed to the vision model / plate prompt")
-    sb.add_argument("--builtin", action="store_true", help="ship the plain builtin template DELIBERATELY (never a fallback)")
+    sb.add_argument("--builtin", action="store_true",
+                    help="FALLBACK (needs --why): ship the plain builtin template deliberately")
+    sb.add_argument("--why", default="",
+                    help="FALLBACK reason, required by every code-composed path (--builtin, "
+                         "--gemini, --plate, --frame-html, --layout, --frame): what must stay "
+                         "pixel-crisp and why the poster cannot do it. Recorded and gated at publish.")
     sb.add_argument("--publish", action="store_true", help="upload + commit the listing after the gates pass")
     sb.add_argument("--force", action="store_true", help="replace an existing composition")
+    sb.add_argument("--plan", action="store_true",
+                    help="print which composition path this run would take (poster vs a fallback "
+                         "and its reason) and exit — nothing is rendered or painted")
     sb.set_defaults(fn=cmd_storefront_build)
     sd = sub.add_parser("storefront-direction",
                         help="the direction layer: what the listing is trying to say, decided before anything is drawn")
