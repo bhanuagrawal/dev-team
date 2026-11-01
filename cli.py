@@ -2588,8 +2588,8 @@ def main() -> None:
     sub = ap.add_subparsers(dest="cmd", required=True)
 
     cr = sub.add_parser("create", help="scaffold, sign, configure CI, and onboard a new project")
-    cr.add_argument("name", help="project name (e.g. FieldCert)")
-    cr.add_argument("--package", help="package id (e.g. agrawal.bhanu.fieldcert)")
+    cr.add_argument("name", help="project name (e.g. MyApp)")
+    cr.add_argument("--package", help="package id (e.g. com.example.myapp)")
     cr.add_argument("--title", help="human app title")
     cr.add_argument("--desc", help="app description / thesis")
     cr.add_argument("--dir", help="target directory (defaults to ~/AndroidStudioProjects/<name>)")

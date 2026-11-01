@@ -52,17 +52,21 @@ def scaffold_android_project(
     pkg_dir = target_dir / "app/src/main/java" / package.replace(".", "/")
     pkg_dir.mkdir(parents=True, exist_ok=True)
 
-    # 1. Copy gradle wrapper and starter mipmaps from MindfulLauncher if available
-    ml = Path.home() / "AndroidStudioProjects" / "MindfulLauncher"
-    if ml.exists():
-        if (ml / "gradlew").exists():
-            shutil.copy2(ml / "gradlew", target_dir / "gradlew")
+    # 1. Copy gradle wrapper and starter mipmaps from any existing project or template
+    donor_proj = None
+    for p in (Path.home() / "AndroidStudioProjects").glob("*/gradlew"):
+        if p.parent != target_dir:
+            donor_proj = p.parent
+            break
+    if donor_proj:
+        if (donor_proj / "gradlew").exists():
+            shutil.copy2(donor_proj / "gradlew", target_dir / "gradlew")
             (target_dir / "gradlew").chmod(0o755)
-        if (ml / "gradle").exists():
-            shutil.copytree(ml / "gradle", target_dir / "gradle", dirs_exist_ok=True)
+        if (donor_proj / "gradle").exists():
+            shutil.copytree(donor_proj / "gradle", target_dir / "gradle", dirs_exist_ok=True)
         res_dir = target_dir / "app/src/main/res"
         res_dir.mkdir(parents=True, exist_ok=True)
-        for mipmap in (ml / "app/src/main/res").glob("mipmap*"):
+        for mipmap in (donor_proj / "app/src/main/res").glob("mipmap*"):
             if mipmap.is_dir():
                 shutil.copytree(mipmap, res_dir / mipmap.name, dirs_exist_ok=True)
     
@@ -233,17 +237,17 @@ dependencies {{
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
 
     <application
-        android:name=".FieldCertApp"
+        android:name=".{name}App"
         android:allowBackup="true"
         android:icon="@mipmap/ic_launcher"
         android:label="@string/app_name"
         android:roundIcon="@mipmap/ic_launcher_round"
         android:supportsRtl="true"
-        android:theme="@style/Theme.FieldCert">
+        android:theme="@style/Theme.{name}">
         <activity
             android:name=".MainActivity"
             android:exported="true"
-            android:theme="@style/Theme.FieldCert"
+            android:theme="@style/Theme.{name}"
             android:windowSoftInputMode="adjustResize">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
@@ -281,8 +285,8 @@ dependencies {{
 </resources>
 """)
 
-    (res_dir / "values/themes.xml").write_text("""<resources>
-    <style name="Theme.FieldCert" parent="android:Theme.Material.NoActionBar">
+    (res_dir / "values/themes.xml").write_text(f"""<resources>
+    <style name="Theme.{name}" parent="android:Theme.Material.NoActionBar">
         <item name="android:statusBarColor">#0A0E14</item>
         <item name="android:navigationBarColor">#0A0E14</item>
     </style>
@@ -449,10 +453,10 @@ keyPassword={kpw}
 6. **Instant Offline PDF Generation**: Production-ready, legally compliant PDF certificate exportable via Android share sheet.
 """)
 
-    (docs_dir / "design.md").write_text("""# FieldCert Design System — Dark Industrial Tactical
+    (docs_dir / "design.md").write_text(f"""# {name} Design System — Dark Industrial Tactical
 
 ## Brand Identity
-FieldCert is built for tradespeople working in demanding environments: direct bright sunlight on roofs, dim basements, and dusty boiler rooms.
+{title or name} is built for tradespeople working in demanding environments: direct bright sunlight on roofs, dim basements, and dusty boiler rooms.
 The UI is high-contrast, tactile, and dark-first with electric emerald and safety amber accents.
 
 ## Colors

@@ -549,7 +549,7 @@ def generate_all_marketing_templates(project: Path) -> dict[str, str]:
         # Frame 1: Hero Dashboard
         ui1 = f"""
       <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:28px;">
-        <div style="font-family:'Space Grotesk',sans-serif; font-size:36px; font-weight:700; color:#FFFFFF;">FIELDCERT</div>
+        <div style="font-family:'Space Grotesk',sans-serif; font-size:36px; font-weight:700; color:#FFFFFF;">{project_name.upper()}</div>
         <div style="font-family:'JetBrains Mono',monospace; font-size:16px; font-weight:700; color:{colors['primary']}; background:rgba(0,230,118,0.12); border:1px solid rgba(0,230,118,0.3); padding:8px 16px; border-radius:999px;">100% OFFLINE</div>
       </div>
       <div style="background:linear-gradient(135deg, {colors['surface']} 0%, {colors['surface_alt']} 100%); border-radius:28px; border:2px solid {colors['primary']}88; padding:32px; box-shadow:0 10px 40px {colors['primary']}26; margin-bottom:24px;">
@@ -674,7 +674,7 @@ def generate_all_marketing_templates(project: Path) -> dict[str, str]:
         </div>
         <div style="background:#FFFFFF; border-radius:16px; padding:24px; color:#0A0E14; box-shadow:0 12px 30px rgba(0,0,0,0.5);">
           <div style="display:flex; justify-content:space-between; border-bottom:2px solid #E2E8F0; padding-bottom:12px; margin-bottom:12px;">
-            <div style="font-weight:800; font-size:18px;">FIELDCERT CERTIFICATE OF COMPLIANCE</div>
+            <div style="font-weight:800; font-size:18px;">{project_name.upper()} COMPLIANCE CERTIFICATE</div>
             <div style="background:#DCFCE7; color:#15803D; font-weight:800; font-size:12px; padding:4px 8px; border-radius:4px;">VERIFIED</div>
           </div>
           <div style="font-size:12px; color:#64748B; margin-bottom:16px;">Inspection ID: CERT-84920 • Trade: HVAC / Fire Safety • All Checks Complete</div>
