@@ -26,8 +26,8 @@ class ReadinessCheck(NamedTuple):
     fix: str = ""
 
 
-# Google Play policy mandates targetSdk >= 34 (Android 14) for all app updates.
-MIN_ACCEPTABLE_TARGET_SDK = 34
+# Google Play policy mandates targetSdk >= 36 (Android 16 / 2026 requirement) for all new apps and updates.
+MIN_ACCEPTABLE_TARGET_SDK = 36
 MIN_RECOMMENDED_MIN_SDK = 21
 PLAY_APP_NAME_MAX_CHARS = 30
 PLAY_SHORT_DESC_MAX_CHARS = 80

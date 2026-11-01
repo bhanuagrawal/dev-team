@@ -124,13 +124,13 @@ if (keystorePropertiesFile.exists()) {{
 }}
 
 android {{
-    compileSdk 34
+    compileSdk 36
     namespace '{package}'
 
     defaultConfig {{
         applicationId "{package}"
         minSdkVersion 26
-        targetSdkVersion 34
+        targetSdkVersion 36
         versionCode (System.getenv("VERSION_CODE")?.toInteger() ?: 10000)
         versionName (System.getenv("VERSION_NAME") ?: "1.0.0")
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
