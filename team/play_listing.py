@@ -228,6 +228,19 @@ def publish_listing_assets(project: Path, dry_run: bool = True, log: Any = None)
                 "frames were composed by code ("
                 + ", ".join(comp.get("flags") or ["no flags given"])
                 + ") with no recorded reason — the rule's path is --poster")
+        elif comp.get("path") == "poster":
+            # A frame whose vendor-mark heal could not be proved clean does not
+            # reach the store: the mark is the model's advert on the owner's page.
+            marks = comp.get("watermark") or {}
+            unproven = [sid for sid, m in marks.items() if not (m or {}).get("verified")]
+            if not marks:
+                blockers.append(
+                    "the poster record carries no watermark verdict — re-run "
+                    "`devteam storefront-build <project>` so every frame's heal is proved")
+            elif unproven:
+                blockers.append(
+                    "frames carry an unproven watermark heal: " + ", ".join(sorted(unproven))
+                    + " — re-run the poster pass so they are painted and healed cleanly")
     except Exception:
         blockers.append("the frames' composition record could not be read "
                         "(docs/storefront-frames.json)")

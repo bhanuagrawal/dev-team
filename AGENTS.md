@@ -55,7 +55,11 @@ checklist + release-candidate call) and the two page URLs `record` prints.
    the **input** to the marketing image: `storefront-build --poster` attaches the
    scene's rendered screen and has **Gemini paint the whole asset in the browser,
    one prompt per scene** (`--poster`), then strips its watermark and upscales to a
-   size Play accepts. `--poster` is the DEFAULT of `storefront-build`: a
+   size Play accepts. The heal is strict: the corner the prompt keeps plain is
+   re-checked as a contract, a frame whose corner still shows the model's mark is
+   refused (never shipped with a warning), and the verdict is recorded per frame
+   and re-read at publish. The prompt also asks the model to match the frames it
+   has already painted in that chat — a soft instruction, not a gate. `--poster` is the DEFAULT of `storefront-build`: a
    code-composed frame (`--builtin`, `--gemini`/`--plate`, `--frame-html`,
    `--layout`, `--frame`) is a fallback and must carry `--why "<what must stay
    pixel-crisp>"`; the reason is recorded in `docs/storefront-frames.json` and

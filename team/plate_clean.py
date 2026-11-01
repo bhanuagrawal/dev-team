@@ -38,6 +38,12 @@ GROW = 1.35              # retry wider when the first box leaves contrast behind
 MIN_CONTRAST = 14        # local contrast a glyph edge leaves behind (grain stays under 8)
 OK_CONTRAST = 26         # best-effort tolerance: a healed corner may carry nearby art edges
 SCAN_LO = (0.60, 0.60)   # the "is there a SECOND mark elsewhere" scan
+# The corner the prompt mandates plain, as a contract we can check: the vendor
+# stamp lands somewhere in the last ~22% of both axes (its fixed centre is
+# 0.843,0.912 with a 0.045 half). Scanning the fixed box alone missed a real
+# sparkle that sat just above it and the image shipped "verified" (2026-11-01).
+CORNER_LO = (0.78, 0.78)
+CORNER_HALF = 0.05
 ELSEWHERE_OK = 8         # a mark leaves dozens of px; noise leaves a handful
 SCAN_MIN_LUMA = 70
 PAD = 6
@@ -288,7 +294,10 @@ def stamp_box(plate: Path, grow: float = 1.0) -> list[int]:
     return [max(0, cx - half), max(0, cy - half), min(w - 1, cx + half), min(h - 1, cy + half)]
 
 
-def detect_box(plate: Path, chrome: str | None = None, timeout: int = 120) -> dict[str, Any]:
+def detect_box(plate: Path, chrome: str | None = None, timeout: int = 120,
+               scan_lo: tuple[float, float] | None = None,
+               half: int | None = None,
+               min_contrast: int | None = None) -> dict[str, Any]:
     """Find where the stamp ACTUALLY is in the bottom-right quadrant.
 
     The stamp is usually at the fixed spot, but not always: a 1024x572 banner put
@@ -304,9 +313,12 @@ def detect_box(plate: Path, chrome: str | None = None, timeout: int = 120) -> di
     w, h = _size(plate)
     page = Path(tempfile.mkdtemp()) / "detect.html"
     data_uri = "data:image/png;base64," + base64.b64encode(plate.read_bytes()).decode()
-    page.write_text(_DETECT_PAGE % {"src": data_uri, "lox": SCAN_LO[0], "loy": SCAN_LO[1],
-                                    "half": max(16, round(w * STAMP_HALF)),
-                                    "mincontrast": MIN_CONTRAST * 3,
+    lox, loy = scan_lo or SCAN_LO
+    page.write_text(_DETECT_PAGE % {"src": data_uri, "lox": lox, "loy": loy,
+                                    "half": half if half is not None
+                                    else max(16, round(w * STAMP_HALF)),
+                                    "mincontrast": min_contrast if min_contrast is not None
+                                    else MIN_CONTRAST * 3,
                                     "scanluma": 55})
     try:
         res = subprocess.run(
@@ -425,10 +437,31 @@ def clean(plate: Path, out: Path | None = None, chrome: str | None = None,
     inside_healed = leftover is not None and any(_overlap(leftover, done) for done in healed_boxes)
     dirty = bool(leftover) and not inside_healed
 
+    # The corner the prompt mandates plain is a CONTRACT, not a hint. A blob THERE
+    # is the vendor's mark even when it overlaps a box we already healed — the old
+    # proof excused exactly that ("inside what we healed") and a poster shipped
+    # carrying the model's sparkle while reporting verified (observed 2026-11-01:
+    # raw and cleaned corners were pixel-identical). Scanning only the corner also
+    # stops the quadrant-wide "highest contrast blob" from choosing the app's own
+    # artwork and declaring the corner clean because it looked elsewhere.
+    corner_hit = detect_box(
+        work, chrome=chrome, timeout=timeout,
+        scan_lo=CORNER_LO,
+        half=max(12, round(size[0] * CORNER_HALF)),
+        min_contrast=MIN_CONTRAST,
+    )
+    if corner_hit.get("status") != "OK":
+        return corner_hit
+    corner_mark = corner_hit.get("box") if corner_hit.get("found") else None
+    if corner_mark:
+        dirty = True
+        leftover = leftover or corner_mark
+
     if dirty and strict:
         return {"status": "REJECTED", "removed": False,
                 "error": f"a vendor stamp is still present at {leftover} — refusing this image",
-                "box": leftover, "size": size, "residual": last.get("residual")}
+                "box": leftover, "corner_mark": corner_mark, "size": size,
+                "residual": last.get("residual")}
     if not healed_any:
         return {"status": "ERROR", "error": "the plate cleaner healed nothing"}
     out.parent.mkdir(parents=True, exist_ok=True)
@@ -438,6 +471,6 @@ def clean(plate: Path, out: Path | None = None, chrome: str | None = None,
             "box": healed_boxes[-1], "size": size,
             "detected": bool(detected_at), "detected_at": detected_at,
             "residual": last.get("residual"), "elsewhere": 0 if verified else 1,
-            "leftover": leftover,
+            "corner_mark": corner_mark, "leftover": leftover,
             "note": None if verified else
                     "healed, but a stamp still looks present — look at it before publishing"}

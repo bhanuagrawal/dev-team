@@ -74,6 +74,13 @@ def poster_prompt(project: Path, scene: dict[str, Any], direction: dict[str, Any
         f"label: {scene.get('badge') or ''}",
         f"headline: {scene.get('headline') or ''}",
         f"subtext: {scene.get('sub') or ''}",
+        # Soft consistency, not a check: the whole listing is painted in ONE chat, so
+        # the model can see the set it is building. Asking it to match what it already
+        # produced is what makes four frames read as one listing; nothing downstream
+        # verifies this, because "same look" is a judgement, not a measurement.
+        "If you have already produced images in this conversation, match them: the same "
+        "background treatment, the same device framing and the same type scale, so the "
+        "set reads as one listing rather than four unrelated posters.",
         "No watermark, no logos, no price, no rating badges.",
         # Not art direction: a production constraint. The vendor stamps its mark into
         # the bottom-right corner of every image, and the cleaner heals that corner. If

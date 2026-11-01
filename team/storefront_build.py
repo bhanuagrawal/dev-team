@@ -214,7 +214,8 @@ def _compose_scene(project: Path, scene: dict[str, Any], name: str, *,
 
 
 def _record_composition(project: Path, path: str, why: str = "", flags: list[str] | None = None,
-                        chat: str | None = None, log=None) -> None:
+                        chat: str | None = None, watermark: dict[str, dict[str, Any]] | None = None,
+                        log=None) -> None:
     """Write HOW the listing's frames were made into the frames registry.
 
     A listing that reaches Play must be able to say whether the image model
@@ -231,6 +232,7 @@ def _record_composition(project: Path, path: str, why: str = "", flags: list[str
         "flags": flags or [],
         "why": (why or "").strip(),
         "chat": chat or "",
+        "watermark": watermark or {},
         "at": now_iso(),
     }
     sfr.save_registry(project, registry)
@@ -371,11 +373,16 @@ def build(project: Path, *, frame: str = "auto", plate: str | None = None,
         if log and made.get("chat"):
             log(f"  chat: {made['chat']}")
         written = []
+        watermark: dict[str, dict[str, Any]] = {}
         for rank, scene in enumerate(ordered, 1):
             poster_file = made["posters"].get(scene["id"])
             if not poster_file:
                 return _fail("ERROR", f"no poster for {scene['id']}")
-            cleaned = spt.clean_poster(Path(poster_file), strict=strict)
+            # STRICT, always: a vendor mark on a shipping frame is not a warning.
+            # The best-effort default shipped a poster carrying the model's sparkle
+            # while the log said "healed" (observed 2026-11-01), so a frame whose
+            # corner cannot be proved plain is refused and must be re-painted.
+            cleaned = spt.clean_poster(Path(poster_file), strict=True)
             if cleaned.get("status") != "OK":
                 return _fail(cleaned.get("status", "ERROR"),
                              cleaned.get("error", "the model's watermark could not be removed"),
@@ -387,6 +394,11 @@ def build(project: Path, *, frame: str = "auto", plate: str | None = None,
                     + ("" if cleaned.get("verified", True) else
                        " — could not be proved clean; look at the corner, "
                        "or re-run with --strict to refuse outright"))
+            watermark[str(scene["id"])] = {
+                "verified": bool(cleaned.get("verified")),
+                "residual": cleaned.get("residual"),
+                "corner_mark": cleaned.get("corner_mark"),
+            }
             name = f"{rank:02d}_{sr._slug(str(scene['id']))}.png"
             sized = spt.to_play_size(Path(cleaned.get("file") or poster_file), listing / name)
             if sized.get("status") != "OK":
@@ -421,7 +433,8 @@ def build(project: Path, *, frame: str = "auto", plate: str | None = None,
                "concept": direction.get("concept"),
                "order": [s["id"] for s in ordered],
                "screenshots": written, "chat": made.get("chat")}
-        _record_composition(project, "poster", chat=made.get("chat"), log=log)
+        _record_composition(project, "poster", chat=made.get("chat"), log=log,
+                            watermark=watermark)
         if publish:
             from .play_listing import publish_listing_assets
             out["publish"] = publish_listing_assets(project, dry_run=False, log=log)
