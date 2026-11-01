@@ -275,6 +275,12 @@ dependencies {{
 </resources>
 """)
 
+    (res_dir / "values/colors.xml").write_text("""<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="ic_launcher_background">#0A0E14</color>
+</resources>
+""")
+
     (res_dir / "values/themes.xml").write_text("""<resources>
     <style name="Theme.FieldCert" parent="android:Theme.Material.NoActionBar">
         <item name="android:statusBarColor">#0A0E14</item>
