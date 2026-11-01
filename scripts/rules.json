@@ -1,155 +1,163 @@
 {
-  "_comment": "Every rule the team enforces, and WHERE it is enforced. This is the conversion backlog, kept as data so it cannot drift the way prose does: `code` = a command already refuses/does it; `enforcible` = a command could, and the proposal is written down; `judgment` = no mechanism can decide it, a person or model must; `reference` = facts/diagnostics that belong in docs, not in the contract. Print the gap with `devteam docs-audit --rules`. When a rule moves to code, change its kind here and delete the prose that restated it.",
-  "rules": [
-    {
-      "id": "worktree-isolation",
-      "rule": "never edit project code on main; every task runs on dt/<task-id> cut from origin/main",
-      "doc": "AGENTS.md#1",
-      "kind": "code",
-      "enforced_by": "devteam worktree-start / release"
-    },
-    {
-      "id": "delivery-ref",
-      "rule": "read project code from origin/main, not the checkout",
-      "doc": "AGENTS.md#2",
-      "kind": "code",
-      "enforced_by": "devteam status (DELIVERY line) / storefront-scenes renders from the scan tree"
-    },
-    {
-      "id": "state-is-written-not-edited",
-      "rule": "never hand-edit .pipeline/state.json; write via devteam record",
-      "doc": "AGENTS.md#3",
-      "kind": "enforcible",
-      "proposal": "doctor: keep a state checksum written by the CLI and BLOCK when the file changed outside it",
-      "note": "today only prose + convention"
-    },
-    {
-      "id": "one-canonical-ci",
-      "rule": ".github/workflows/release.yml is generated from team/templates/ci-release.yml",
-      "doc": "AGENTS.md#4",
-      "kind": "code",
-      "enforced_by": "devteam doctor (renders the template and compares the project workflow)"
-    },
-    {
-      "id": "store-assets-are-deliverables",
-      "rule": "screenshots render from the app's composables; the poster is composed (plate from an image model only), never hand-drawn HTML",
-      "doc": "AGENTS.md#5",
-      "kind": "code",
-      "enforced_by": "devteam storefront-build (refuses without a plate/layout; --builtin must be deliberate) + asset_critic provenance"
-    },
-    {
-      "id": "storefront-direction",
-      "rule": "what the listing says is decided and committed before anything is drawn",
-      "doc": "AGENTS.md#5",
-      "kind": "code",
-      "enforced_by": "devteam storefront-build (refuses without a locked direction) / storefront-direction --apply"
-    },
-    {
-      "id": "listing-publish-ends-in-browser",
-      "rule": "the API uploads and commits a listing edit; permissions and Managed publishing are console-only, so the publish is finished in Play Console",
-      "doc": "AGENTS.md#5",
-      "kind": "reference",
-      "note": "no mechanism can grant console permissions; the skill states the sequence"
-    },
-    {
-      "id": "cleanup-is-part-of-the-run",
-      "rule": "pick and record prune; a tree goes only when its work is safe somewhere else",
-      "doc": "AGENTS.md#6",
-      "kind": "code",
-      "enforced_by": "devteam worktree-prune (dry run by default) / pick / record"
-    },
-    {
-      "id": "worktree-is-not-a-record",
-      "rule": "work is closed when main contains it or origin holds its branch; unfinished work is parked",
-      "doc": "AGENTS.md#7",
-      "kind": "code",
-      "enforced_by": "worktrees.park + devteam takeover (parked list)"
-    },
-    {
-      "id": "no-auto-guards",
-      "rule": "no frozen paths, release-knob diff or dependency gates; compile/tests are the gates",
-      "doc": "AGENTS.md#8",
-      "kind": "reference",
-      "note": "a standing prohibition, not a checkable behaviour"
-    },
-    {
-      "id": "ask-only-what-no-agent-can-decide",
-      "rule": "ask the owner only for what no agent can decide (incidents, WIP, direction); never about promotion",
-      "doc": "AGENTS.md#9",
-      "kind": "judgment",
-      "note": "requires intent; the run banner is where it shows"
-    },
-    {
-      "id": "nothing-uncommitted",
-      "rule": "every change ends in a commit on a pushed ref; a dirty checkout is reported",
-      "doc": "AGENTS.md#10",
-      "kind": "code",
-      "note": "warn-only by design: the run commits its own work, it does not commit the owner's",
-      "enforced_by": "devteam doctor / status (checkout_dirty \u2014 reports, never commits the owner's WIP)"
-    },
-    {
-      "id": "verify-before-release",
-      "rule": "never push with red gates",
-      "doc": "SKILL.md#hard-rules",
-      "kind": "code",
-      "enforced_by": "devteam release (refuses on FAIL) / verify"
-    },
-    {
-      "id": "release-notes-curated",
-      "rule": "a whatsnew_curated project owns its release notes; the pipeline reports and never rewrites them",
-      "doc": "SKILL.md#hard-rules",
-      "kind": "code",
-      "enforced_by": "shipper (reads profile.whatsnew_curated)"
-    },
-    {
-      "id": "emulators-torn-down",
-      "rule": "a run stops only the emulators it started",
-      "doc": "SKILL.md#hard-rules",
-      "kind": "code",
-      "enforced_by": "devteam emulators --record / verify (baseline diff)"
-    },
-    {
-      "id": "emulator-failure-modes",
-      "rule": "three emulator-only failure modes (corrupt snapshot, AVD lock, crash-consent dialog) and how to repair them",
-      "doc": "SKILL.md#hard-rules",
-      "kind": "reference",
-      "note": "diagnostics, not a rule: 20 lines of troubleshooting sitting in the contract"
-    },
-    {
-      "id": "self-improvement-duty",
-      "rule": "a surprise is closed by a change to team code in the same run; nothing is appended to a log",
-      "doc": "SKILL.md#hard-rules",
-      "kind": "judgment",
-      "note": "no mechanism can decide what surprised an agent, but the FIX must be a commit; a fix too large for the run becomes an `enforcible` entry here"
-    },
-    {
-      "id": "generic-team-code",
-      "rule": "team code carries no project names",
-      "doc": "SKILL.md#hard-rules",
-      "kind": "code",
-      "enforced_by": "devteam doctor (greps every registered project name)"
-    },
-    {
-      "id": "docs-newest-wins",
-      "rule": "the newest text is the source of truth; overlapping copies are removed, not kept",
-      "doc": "scripts/hooks/pre-commit",
-      "kind": "code",
-      "enforced_by": "devteam docs-audit --check --new-only (pre-commit hook)"
-    },
-    {
-      "id": "resume-from-state",
-      "rule": "a run's starting position (delivery ref, dirty files, trees, queue head, open asks, next command) is read, not inferred from prose",
-      "doc": "team/takeover.py",
-      "kind": "code",
-      "enforced_by": "devteam takeover"
-    },
-    {
-      "id": "stale-owner-ask",
-      "rule": "an owner ask a surface shows must still be open \u2014 a blocked run recorded without a task id ('?') can never be closed by a later run on the same task, so a resolved question keeps being shown as open",
-      "doc": "AGENTS.md#10c",
-      "kind": "enforcible",
-      "proposal": "team/takeover.py open_asks: a blocked run with no task id is a run-level report, not a task-level ask \u2014 key it by its date (so a later plan review or shipped run closes it) or leave placeholder ids out of open_asks",
-      "note": "seen 2026-11-01: takeover listed '? No buildable work: foundation milestone blocked on owner decisions (phase-2 freeze issues #1/#2)' on a run that had already shipped phase 2 and the v1.5.7 wiring fix \u2014 four blocked runs shared the key '?', so the newest one could never be superseded"
-    }
-  ]
+ "_comment": "Every rule the team enforces, and WHERE it is enforced. This is the conversion backlog, kept as data so it cannot drift the way prose does: `code` = a command already refuses/does it; `enforcible` = a command could, and the proposal is written down; `judgment` = no mechanism can decide it, a person or model must; `reference` = facts/diagnostics that belong in docs, not in the contract. Print the gap with `devteam docs-audit --rules`. When a rule moves to code, change its kind here and delete the prose that restated it.",
+ "rules": [
+  {
+   "id": "worktree-isolation",
+   "rule": "never edit project code on main; every task runs on dt/<task-id> cut from origin/main",
+   "doc": "AGENTS.md#1",
+   "kind": "code",
+   "enforced_by": "devteam worktree-start / release"
+  },
+  {
+   "id": "delivery-ref",
+   "rule": "read project code from origin/main, not the checkout — and never publish a checkout's copy of a project file it did not just write",
+   "doc": "AGENTS.md#2",
+   "kind": "code",
+   "enforced_by": "devteam status (DELIVERY line) / storefront-scenes renders from the scan tree / commit_paths(baseline) drops paths the command did not change"
+  },
+  {
+   "id": "state-is-written-not-edited",
+   "rule": "never hand-edit .pipeline/state.json; write via devteam record",
+   "doc": "AGENTS.md#3",
+   "kind": "enforcible",
+   "proposal": "doctor: keep a state checksum written by the CLI and BLOCK when the file changed outside it",
+   "note": "today only prose + convention"
+  },
+  {
+   "id": "one-canonical-ci",
+   "rule": ".github/workflows/release.yml is generated from team/templates/ci-release.yml",
+   "doc": "AGENTS.md#4",
+   "kind": "code",
+   "enforced_by": "devteam doctor (renders the template and compares the project workflow)"
+  },
+  {
+   "id": "store-assets-are-deliverables",
+   "rule": "screenshots render from the app's composables; the poster is composed (plate from an image model only), never hand-drawn HTML",
+   "doc": "AGENTS.md#5",
+   "kind": "code",
+   "enforced_by": "devteam storefront-build (refuses without a plate/layout; --builtin must be deliberate) + asset_critic provenance"
+  },
+  {
+   "id": "storefront-direction",
+   "rule": "what the listing says is decided and committed before anything is drawn",
+   "doc": "AGENTS.md#5",
+   "kind": "code",
+   "enforced_by": "devteam storefront-build (refuses without a locked direction) / storefront-direction --apply"
+  },
+  {
+   "id": "listing-publish-ends-in-browser",
+   "rule": "the API uploads and commits a listing edit; permissions and Managed publishing are console-only, so the publish is finished in Play Console",
+   "doc": "AGENTS.md#5",
+   "kind": "reference",
+   "note": "no mechanism can grant console permissions; the skill states the sequence"
+  },
+  {
+   "id": "cleanup-is-part-of-the-run",
+   "rule": "pick and record prune; a tree goes only when its work is safe somewhere else",
+   "doc": "AGENTS.md#6",
+   "kind": "code",
+   "enforced_by": "devteam worktree-prune (dry run by default) / pick / record"
+  },
+  {
+   "id": "worktree-is-not-a-record",
+   "rule": "work is closed when main contains it or origin holds its branch; unfinished work is parked",
+   "doc": "AGENTS.md#7",
+   "kind": "code",
+   "enforced_by": "worktrees.park + devteam takeover (parked list)"
+  },
+  {
+   "id": "no-auto-guards",
+   "rule": "no frozen paths, release-knob diff or dependency gates; compile/tests are the gates",
+   "doc": "AGENTS.md#8",
+   "kind": "reference",
+   "note": "a standing prohibition, not a checkable behaviour"
+  },
+  {
+   "id": "ask-only-what-no-agent-can-decide",
+   "rule": "ask the owner only for what no agent can decide (incidents, WIP, direction); never about promotion",
+   "doc": "AGENTS.md#9",
+   "kind": "judgment",
+   "note": "requires intent; the run banner is where it shows"
+  },
+  {
+   "id": "nothing-uncommitted",
+   "rule": "every change ends in a commit on a pushed ref; a dirty checkout is reported",
+   "doc": "AGENTS.md#10",
+   "kind": "code",
+   "note": "warn-only by design: the run commits its own work, it does not commit the owner's",
+   "enforced_by": "devteam doctor / status (checkout_dirty — reports, never commits the owner's WIP)"
+  },
+  {
+   "id": "verify-before-release",
+   "rule": "never push with red gates",
+   "doc": "SKILL.md#hard-rules",
+   "kind": "code",
+   "enforced_by": "devteam release (refuses on FAIL) / verify"
+  },
+  {
+   "id": "release-notes-curated",
+   "rule": "a whatsnew_curated project owns its release notes; the pipeline reports and never rewrites them",
+   "doc": "SKILL.md#hard-rules",
+   "kind": "code",
+   "enforced_by": "shipper (reads profile.whatsnew_curated)"
+  },
+  {
+   "id": "emulators-torn-down",
+   "rule": "a run stops only the emulators it started",
+   "doc": "SKILL.md#hard-rules",
+   "kind": "code",
+   "enforced_by": "devteam emulators --record / verify (baseline diff)"
+  },
+  {
+   "id": "emulator-failure-modes",
+   "rule": "three emulator-only failure modes (corrupt snapshot, AVD lock, crash-consent dialog) and how to repair them",
+   "doc": "SKILL.md#hard-rules",
+   "kind": "reference",
+   "note": "diagnostics, not a rule: 20 lines of troubleshooting sitting in the contract"
+  },
+  {
+   "id": "self-improvement-duty",
+   "rule": "a surprise is closed by a change to team code in the same run; nothing is appended to a log",
+   "doc": "SKILL.md#hard-rules",
+   "kind": "judgment",
+   "note": "no mechanism can decide what surprised an agent, but the FIX must be a commit; a fix too large for the run becomes an `enforcible` entry here"
+  },
+  {
+   "id": "generic-team-code",
+   "rule": "team code carries no project names",
+   "doc": "SKILL.md#hard-rules",
+   "kind": "code",
+   "enforced_by": "devteam doctor (greps every registered project name)"
+  },
+  {
+   "id": "docs-newest-wins",
+   "rule": "the newest text is the source of truth; overlapping copies are removed, not kept",
+   "doc": "scripts/hooks/pre-commit",
+   "kind": "code",
+   "enforced_by": "devteam docs-audit --check --new-only (pre-commit hook)"
+  },
+  {
+   "id": "resume-from-state",
+   "rule": "a run's starting position (delivery ref, dirty files, trees, queue head, open asks, next command) is read, not inferred from prose",
+   "doc": "team/takeover.py",
+   "kind": "code",
+   "enforced_by": "devteam takeover"
+  },
+  {
+   "id": "stale-owner-ask",
+   "rule": "an owner ask a surface shows must still be open — a blocked run recorded without a task id ('?') can never be closed by a later run on the same task, so a resolved question keeps being shown as open",
+   "doc": "AGENTS.md#10c",
+   "kind": "enforcible",
+   "proposal": "team/takeover.py open_asks: a blocked run with no task id is a run-level report, not a task-level ask — key it by its date (so a later plan review or shipped run closes it) or leave placeholder ids out of open_asks",
+   "note": "seen 2026-11-01: takeover listed '? No buildable work: foundation milestone blocked on owner decisions (phase-2 freeze issues #1/#2)' on a run that had already shipped phase 2 and the v1.5.7 wiring fix — four blocked runs shared the key '?', so the newest one could never be superseded"
+  },
+  {
+   "id": "release-retry-adopts-green-attempt",
+   "rule": "a release whose CI watch timed out must adopt an attempt that later finished green, instead of bumping the version and shipping the same change twice",
+   "doc": "skills/dev-team/SKILL.md#self-healing-delivery-loop",
+   "kind": "enforcible",
+   "evidence": "2026-11-02 Paddle: v1.0.26 was pushed at 20:39Z and its release.yml run concluded SUCCESS at 21:10Z — 31 min, one minute past the watch window — so the 30-min watch reported 'CI unknown' and retry 2 shipped v1.0.27 for the same diff. Two tags and two internal-testing builds now describe one change.",
+   "proposal": "in push_and_deliver, before attempt N>1 re-bumps: re-read the PREVIOUS attempt's run by headSha and adopt it when conclusion == success (keep its version+tag as the delivered one); re-bump only on a real failure, or when the previous attempt is still absent after a second, longer wait."
+  }
+ ]
 }
