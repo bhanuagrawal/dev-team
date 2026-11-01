@@ -76,11 +76,31 @@ def published_url(project: Path) -> tuple[str | None, str]:
     return github_url(project, profile), ""
 
 
+def _primary_worktree(project: Path) -> Path:
+    """The checkout that OWNS `.git` — never a linked dev worktree.
+
+    The publish tree is long-lived bookkeeping for the project, so it belongs to
+    the primary checkout. When `project` is itself a dev worktree (which is how
+    every ad-hoc command in a run is invoked), `<project>/.pipeline/worktrees/
+    .publish` makes git register a worktree INSIDE a worktree: the inner one is
+    deleted with the outer tree and leaves a registration pointing at nothing, and
+    `git worktree list` shows a tree nobody can prune.
+    """
+    r = _g(["rev-parse", "--git-common-dir"], project, timeout=30)
+    common = (r.stdout or "").strip() if r.returncode == 0 else ""
+    if not common:
+        return project
+    p = Path(common)
+    if not p.is_absolute():
+        p = (project / p).resolve()
+    return p.parent if p.name == ".git" else project
+
+
 def _origin_tree(project: Path, branch: str) -> tuple[Path | None, str]:
     """A detached worktree sitting exactly on origin/<branch> — where the plan
     commit is BUILT. Returns (path, why-not); best-effort like everything here.
     """
-    wt = project / PUBLISH_TREE
+    wt = _primary_worktree(project) / PUBLISH_TREE
     _g(["fetch", "origin"], project, timeout=120)
     base = f"origin/{branch}"
     if _g(["rev-parse", "--verify", "--quiet", base], project, timeout=30).returncode != 0:
