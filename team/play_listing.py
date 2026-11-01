@@ -173,6 +173,89 @@ def _live_images(package: str, edit: str, token: str, project: Path,
     return data.get("images") or []
 
 
+def publish_icon(project: Path, dry_run: bool = True, log: Any = None) -> dict[str, Any]:
+    """Upload ONLY the listing icon, commit it, and read it back.
+
+    A brand change owns one asset. The full-listing upload also rewrites the
+    screenshots and the feature graphic, which a brand run neither produced nor
+    proved — so it refuses on their provenance and rightly uploads nothing. This
+    path touches the icon alone: the same edit machinery, the same read-back, and
+    a gate that is narrower by construction, not by a bypass flag.
+    """
+    say = log or (lambda *_: None)
+    root, source = _assets_root(project)
+    say(f"~ listing icon from {source}")
+    if root is None:
+        return {"status": "BLOCKED", "blockers": [source],
+                "hint": "commit the asset changes so the upload describes a commit"}
+    listing = _listing_dir(root)
+    if not listing:
+        return {"status": "ERROR", "error": "no listing directory (distribution/listing/en-US)"}
+    img = listing / "images" if (listing / "images").is_dir() else listing
+    icon = img / "icon.png"
+    if not icon.is_file():
+        return {"status": "ERROR", "error": "missing asset: icon.png"}
+    from . import brand_change as bc
+    from . import storefront_brand as sbf
+
+    blockers = [i for i in sbf.gate(root)
+                if "icon" in i.lower() and "feature" not in i.lower()]
+    blockers += [i for i in bc.gate(root)]
+    if blockers:
+        return {"status": "BLOCKED", "blockers": sorted(set(blockers)),
+                "hint": "the icon's provenance must match the commit before Play receives it"}
+
+    package, token, why = _play(project)
+    locale = (_assets(root) or {}).get("locale") or DEFAULT_LOCALE
+    plan = {"status": "DRY-RUN" if dry_run else "UPLOADING", "package": package,
+            "source": source, "locale": locale,
+            "icon": icon.name, "sha256": _sha256(icon)}
+    if not package or not token:
+        return {"status": "ERROR", "error": f"Play auth unavailable: {why}"}
+    if dry_run:
+        say("  (dry run — nothing was written)")
+        return plan
+    edit = _post(f"{API}/applications/{package}/edits", project, token)
+    edit_id = edit.get("id")
+    if not edit_id:
+        return {"status": "ERROR", "error": f"could not open a Play edit: {edit}"}
+    try:
+        gone = _delete(f"{API}/applications/{package}/edits/{edit_id}/listings/"
+                       f"{plan['locale']}/icon", project, token)
+        if gone.get("_error"):
+            raise RuntimeError(f"deleteall icon: {gone['_error']}")
+        up = _upload(icon, package, edit_id, token, plan["locale"], "icon", project)
+        image = up.get("image") or up
+        if up.get("_error") or not image.get("id"):
+            raise RuntimeError(f"upload icon: {up.get('_error') or up}")
+        want = image.get("sha256") or _sha256(icon)
+        say(f"  ↑ icon/{icon.name}")
+        live = _live_images(package, edit_id, token, project, plan["locale"], "icon")
+        if not live or live[0].get("sha256") != want:
+            raise RuntimeError("the uploaded icon did not verify in the edit")
+        committed = _post(f"{API}/applications/{package}/edits/{edit_id}:commit", project, token)
+        if committed.get("_error") or not committed.get("id"):
+            raise RuntimeError(f"commit rejected: {committed.get('_error') or committed}")
+        fresh = _post(f"{API}/applications/{package}/edits", project, token)
+        fresh_id = fresh.get("id")
+        if not fresh_id:
+            raise RuntimeError(f"commit verification could not open a new edit: {fresh}")
+        try:
+            got = _live_images(package, fresh_id, token, project, plan["locale"], "icon")
+        finally:
+            _discard(package, fresh_id, token, project)
+        if not got or got[0].get("sha256") != want:
+            raise RuntimeError("commit did not take effect: the app still serves a different icon")
+        plan.update(status="OK", committed=True, live_sha256=got[0].get("sha256"))
+        say(f"  ✓ committed listing edit {edit_id} for {package} (icon verified in a fresh edit)")
+        say("    note: if Managed publishing is ON, the change waits for the owner's "
+            "Publish click in Play Console → Publishing overview")
+        return plan
+    except Exception as exc:
+        _discard(package, edit_id, token, project)
+        return {"status": "ERROR", "error": str(exc)[:400]}
+
+
 def publish_listing_assets(project: Path, dry_run: bool = True, log: Any = None) -> dict[str, Any]:
     """Upload icon, feature graphic and ordered screenshots; commit the edit.
 

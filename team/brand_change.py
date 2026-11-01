@@ -677,9 +677,9 @@ def publish(project: Path, yes: bool = False, log=None) -> dict[str, Any]:
     if info["issues"]:
         return {"status": "BLOCKED", "blockers": info["issues"],
                 "hint": "fix the icon change before it goes to the store"}
-    from .play_listing import publish_listing_assets
+    from .play_listing import publish_icon
 
-    res = publish_listing_assets(project, dry_run=not yes, log=say)
+    res = publish_icon(project, dry_run=not yes, log=say)
     if res.get("status") in ("BLOCKED", "ERROR"):
         return res
     if yes:
