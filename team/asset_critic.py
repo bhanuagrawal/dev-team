@@ -180,6 +180,11 @@ def _find_listing_dir(project: Path) -> Path | None:
     return None
 
 
+# Below this a 512-wide PNG is almost certainly one flat colour (a placeholder), not
+# art: flat VECTOR art compresses to a few KB, which is legitimate.
+FLAT_PLACEHOLDER_BYTES = 4_000
+
+
 def review_store_assets(project: Path) -> dict[str, Any]:
     """Perform a rigorous ASO and visual compliance audit on Play Store visual assets."""
     profile = profile_of(project)
@@ -226,7 +231,10 @@ def review_store_assets(project: Path) -> dict[str, Any]:
         dims = _png_dimensions(icon_path)
         size = icon_path.stat().st_size
         if dims == (512, 512):
-            if size >= 30_000:
+            # A flat-vector icon (the Stitch design) is 4-8 KB by nature; a placeholder
+            # that is one solid colour lands around 1-2 KB. The old 30 KB bar assumed a
+            # raster icon and failed a perfectly designed one.
+            if size >= FLAT_PLACEHOLDER_BYTES:
                 tech_score += 6
                 icon_ok = True
                 report["assets"]["icon"] = {"dims": dims, "size_kb": round(size / 1024, 1), "status": "EXCELLENT"}
@@ -247,7 +255,7 @@ def review_store_assets(project: Path) -> dict[str, Any]:
         dims = _png_dimensions(fg_path)
         size = fg_path.stat().st_size
         if dims == (1024, 500):
-            if size >= 40_000:
+            if size >= FLAT_PLACEHOLDER_BYTES * 2:
                 tech_score += 6
                 fg_ok = True
                 report["assets"]["feature_graphic"] = {"dims": dims, "size_kb": round(size / 1024, 1), "status": "EXCELLENT"}

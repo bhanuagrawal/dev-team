@@ -787,13 +787,15 @@ The owner may ask for ONE agent only, and that must work:
      `storefront-build` refuses rather than default to it. The critic (`store-assets`) fails a
      listing that still carries a monetization frame, `icon = null`/flat placeholder tiles, or an
      order that disagrees with the review.
-  3b. **The icon and the banner are painted too, not templated.** `devteam storefront-brand <project>`
-     hands Gemini the app's real launcher icon (for the 512×512 icon) and its hero render (for the
-     1024×500 feature graphic), strips the mark under `--strict`, and records the result in
-     `docs/storefront-assets.json`. `storefront-build` runs it automatically. The provenance is the
-     gate: an icon upscaled from a mipmap, or a banner from an HTML template, scores zero and the
-     upload is refused — the owner may still supply either file, via `--adopt kind=<png>`, which is
-     recorded as `owner` rather than pretending the run made it.
+  3b. **The icon is a STITCH design; the banner is Gemini's.** `devteam storefront-brand <project>
+     --stitch-prompt` compiles the icon brief (artboard, palette, flat vector, mark only), you
+     generate it in Stitch, and `--adopt-stitch <file>` keeps the artboard at
+     `docs/storefront-icon.html` and renders it at exactly 512×512. The feature graphic is the
+     Gemini one: `--generate` hands the model the app's hero render and records the result.
+     Both land in `docs/storefront-assets.json`, and `storefront-build` runs the banner step
+     automatically while REFUSING to invent an icon — an upscaled mipmap or a template scores
+     zero and the upload stops. The owner may still supply either file with
+     `--adopt kind=<png>`, recorded as `owner`.
   4. **Publish — API for the upload, BROWSER for the publish.** `devteam store-publish <project>`
      (dry run) / `--yes` uploads icon + feature graphic + screenshots in the editorial order,
      commits the edit, and reads the bytes back through a fresh edit. That is where the API

@@ -2287,7 +2287,33 @@ def cmd_storefront_brand(args: argparse.Namespace) -> int:
 
     print(delivery_notice(project))
 
-    if getattr(args, "adopt", None):
+    if getattr(args, "stitch_prompt", False):
+        prompt = sbf.icon_stitch_prompt(project)
+        out = project / ".pipeline/stitch-icon-prompt.txt"
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_text(prompt)
+        print("STITCH ICON PROMPT — generate this in Stitch, then adopt the HTML:")
+        print("=" * 66)
+        print(prompt)
+        print("=" * 66)
+        print(f"~ saved -> {out.relative_to(project)}")
+        print(f"  devteam storefront-brand {args.project} --adopt-stitch <saved.html> "
+              f"--stitch-source <projects/…/screens/…>")
+        return 0
+
+    if getattr(args, "adopt_stitch", None):
+        res = sbf.adopt_stitch_icon(project, Path(str(args.adopt_stitch)).expanduser(),
+                                    stitch_source=args.stitch_source or "",
+                                    note=args.note or "")
+        if res.get("status") != "OK":
+            print(f"STOREFRONT BRAND: {res.get('status')}")
+            print(f"  ✗ {res.get('error')}")
+            if res.get("hint"):
+                print(f"  → {res['hint']}")
+            return 1
+        print(f"  + adopted the Stitch design as {res['file']} (kept at {res['html']})")
+
+    elif getattr(args, "adopt", None):
         kind, _, path = str(args.adopt).partition("=")
         if not kind.strip() or not path.strip():
             print("STOREFRONT BRAND: --adopt needs kind=path, e.g. --adopt icon=/tmp/icon.png")
@@ -2624,6 +2650,14 @@ def main() -> None:
     sbr.add_argument("project")
     sbr.add_argument("--generate", action="store_true",
                      help="paint icon + feature graphic in Gemini (browser) and record provenance")
+    sbr.add_argument("--stitch-prompt", action="store_true",
+                     help="print the icon prompt for Stitch and save it (the icon is a Stitch "
+                          "design, never an image-model painting)")
+    sbr.add_argument("--adopt-stitch", metavar="HTML",
+                     help="adopt a Stitch HTML design as the Play icon: kept in "
+                          "docs/storefront-icon.html, rendered at 512x512, provenance=stitch")
+    sbr.add_argument("--stitch-source", default="", help="with --adopt-stitch: the Stitch screen "
+                                                        "the design came from (provenance)")
     sbr.add_argument("--adopt", metavar="KIND=PATH",
                      help="record an OWNER-supplied file instead: icon=<png> | feature=<png> "
                           "(Play's exact dimensions required)")

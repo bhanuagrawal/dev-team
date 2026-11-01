@@ -37,7 +37,13 @@ from typing import Any
 BRAND_REL = "docs/storefront-assets.json"
 IMAGES_REL = "distribution/listing/en-US/images"
 SPECS: dict[str, tuple[int, int]] = {"icon": (512, 512), "feature": (1024, 500)}
-APPROVED = ("gemini", "owner")
+# The icon comes from Stitch (a designed, adopted artefact); the banner and every
+# screenshot are painted by Gemini. One owner-supplied file is the only other
+# legitimate source. Anything else — an HTML template nobody adopted, an upscale of
+# the launcher bitmap — is refused by `gate()`.
+APPROVED = ("gemini", "stitch", "owner")
+GEMINI_KINDS: tuple[str, ...] = ("feature",)
+ICON_HTML_REL = "docs/storefront-icon.html"
 FILES = {"icon": "icon.png", "feature": "featureGraphic.png"}
 VERSION = 1
 
@@ -100,11 +106,19 @@ def gate(project: Path) -> list[str]:
             issues.append(f"{FILES[kind]} is {dims}, Play needs {[w, h]}")
         source = str(record.get("source") or "")
         if source not in APPROVED:
-            issues.append(
-                f"{FILES[kind]} has no approved provenance (source: {source or 'none'}) — "
-                f"the image model paints it from the app's own material "
-                f"(`devteam storefront-brand <project>`), or the owner supplies the file "
-                f"(`devteam storefront-brand <project> --adopt {kind}=<png>`)")
+            if kind == "icon":
+                issues.append(
+                    f"{FILES[kind]} has no approved provenance (source: {source or 'none'}) — "
+                    f"the icon is a STITCH design, adopted from its saved HTML "
+                    f"(`devteam storefront-brand <project> --stitch-prompt`, generate it, then "
+                    f"`--adopt-stitch <file.html>`); the owner may supply the PNG instead "
+                    f"(`--adopt icon=<png>`)")
+            else:
+                issues.append(
+                    f"{FILES[kind]} has no approved provenance (source: {source or 'none'}) — "
+                    f"the image model paints it from the app's own screen "
+                    f"(`devteam storefront-brand <project> --generate`), or the owner supplies "
+                    f"the file (`--adopt feature=<png>`)")
         elif record.get("sha256") and record["sha256"] != _sha(target):
             issues.append(
                 f"{FILES[kind]} changed after it was recorded — the file on the listing is "
@@ -176,6 +190,39 @@ def icon_prompt(project: Path) -> str:
     ])
 
 
+def icon_stitch_prompt(project: Path) -> str:
+    """The prompt handed to STITCH for the Play icon.
+
+    Stitch is the design surface, so this asks for a designed 512x512 tile rather
+    than describing pixels: the mark, the palette and the prohibitions. The HTML it
+    returns is adopted (`adopt_stitch_icon`) and rendered at 512 — code owns size and
+    provenance, Stitch owns the craft.
+    """
+    try:
+        from .design import extract_design_tokens
+
+        tokens = extract_design_tokens(project)
+    except Exception:
+        tokens = {}
+    accent = tokens.get("primary_accent") or "#E8442A"
+    base = tokens.get("surface_base") or "#0D0D0D"
+    name = _app_name(project)
+    return "\n".join([
+        f"Design the Google Play store icon for the Android app {name}.",
+        "ARTBOARD: a single square 512x512 tile, edge to edge, nothing outside it.",
+        f"PALETTE: surface base {base} as the ground, {accent} as the one accent. "
+        f"Dark-first, high contrast, no extra hues.",
+        "SUBJECT: the app's own mark — a document sheet with a folded corner and the "
+        "letter P — rendered flat and geometric. Keep it recognisable at 48 pixels: "
+        "one silhouette, generous padding, no fine detail.",
+        "STYLE: flat vector, crisp edges, no bevel, no drop shadow, no 3D depth, no glow "
+        "that spills outside the tile, no photographic texture.",
+        "FORBIDDEN: any word other than the mark itself, device frames, badges, prices, "
+        "ratings, other product logos, gradients that change the hue.",
+        "Keep the bottom-right corner empty background — a vendor watermark is removed there.",
+    ])
+
+
 def feature_prompt(project: Path) -> str:
     """Paint the 1024x500 banner, printing only approved copy.
 
@@ -227,9 +274,13 @@ def _reference(project: Path, kind: str, log=None) -> Path | None:
     return None
 
 
-def generate(project: Path, kinds: tuple[str, ...] = ("icon", "feature"),
+def generate(project: Path, kinds: tuple[str, ...] = GEMINI_KINDS,
              force: bool = False, log=None) -> dict[str, Any]:
-    """Paint the brand assets, or finish the ones already painted.
+    """Paint the GEMINI-painted brand assets (the feature graphic), or finish one.
+
+    The icon is deliberately NOT here: it is a Stitch design, adopted through
+    `adopt_stitch_icon`. Asking Gemini for it would produce a second, competing
+    rendition of the app's mark — the exact drift this split exists to prevent.
 
     Three states per asset, and they must not be confused:
       * nothing painted        -> ask Gemini, with the real launcher icon / hero screen;
@@ -240,6 +291,12 @@ def generate(project: Path, kinds: tuple[str, ...] = ("icon", "feature"),
     """
     from . import storefront_poster as spt
 
+    kinds = tuple(k for k in kinds if k in GEMINI_KINDS)
+    if not kinds:
+        return {"status": "BLOCKED",
+                "error": "the icon is not painted by the image model",
+                "hint": "run `devteam storefront-brand <project> --stitch-prompt`, generate the "
+                        "icon in Stitch, then `--adopt-stitch <file.html>`"}
     existing = load(project)
     raw_dir = project / ".pipeline/storefront_brand"
     raw_dir.mkdir(parents=True, exist_ok=True)
@@ -355,6 +412,86 @@ def generate(project: Path, kinds: tuple[str, ...] = ("icon", "feature"),
     return {"status": "OK", "generated": made, "reused": reused, "chat": chat}
 
 
+def _render_html(html: Path, out: Path, width: int, height: int) -> dict[str, Any]:
+    """Render an adopted HTML document at an exact pixel size."""
+    import subprocess
+
+    from .marketing_asset_generator import _find_chrome_executable
+
+    chrome = _find_chrome_executable()
+    if not chrome:
+        return {"status": "ERROR", "error": "Google Chrome not found to render the icon"}
+    out.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        subprocess.run(
+            [chrome, "--headless", "--disable-gpu", "--hide-scrollbars",
+             "--virtual-time-budget=8000", f"--window-size={width},{height}",
+             f"--screenshot={out.resolve()}", html.resolve().as_uri()],
+            capture_output=True, text=True, timeout=90)
+    except subprocess.TimeoutExpired:
+        return {"status": "ERROR", "error": "rendering the adopted HTML timed out"}
+    if not out.is_file():
+        return {"status": "ERROR", "error": "the adopted HTML produced no PNG"}
+    dims = _png_size(out)
+    if dims != [width, height]:
+        return {"status": "ERROR",
+                "error": f"rendered {dims} instead of {[width, height]} — the artboard must be "
+                         f"exactly {width}x{height}"}
+    return {"status": "OK", "file": out, "size": dims}
+
+
+def adopt_stitch_icon(project: Path, html_file: Path, stitch_source: str = "",
+                      note: str = "") -> dict[str, Any]:
+    """Record a STITCH design as the Play icon: keep its source, render at 512.
+
+    The design Stitch produced (HTML, or the standalone SVG it returns for an icon)
+    is the deliverable, so it is saved inside the project
+    (`docs/storefront-icon.html`) and committed with the PNG: the icon can be
+    re-rendered from it, and the provenance names the screen it came from. Code owns
+    the size, the provenance and the watermark check; Stitch owns the craft.
+    """
+    src = Path(html_file).expanduser()
+    if not src.is_file():
+        return {"status": "BLOCKED", "error": f"no HTML at {src}"}
+    html = src.read_text(errors="ignore")
+    if len(html) < 400:
+        return {"status": "BLOCKED", "error": "the adopted design is empty or truncated"}
+    # Stitch returns an icon design as a standalone SVG (an artboard, not a page).
+    # Wrap it in a page that is exactly the tile, so Chrome's screenshot IS the icon.
+    if html.lstrip().startswith("<svg"):
+        html = ("<!DOCTYPE html><html><body style=\"margin:0;padding:0;background:#000;"
+                "overflow:hidden\">" + html + "</body></html>")
+    kept = project / ICON_HTML_REL
+    kept.parent.mkdir(parents=True, exist_ok=True)
+    kept.write_text(html)
+    width, height = SPECS["icon"]
+    target = project / IMAGES_REL / FILES["icon"]
+    rendered = _render_html(kept, target, width, height)
+    if rendered.get("status") != "OK":
+        return rendered
+    from . import storefront_poster as spt
+
+    cleaned = spt.clean_poster(target, strict=True, half_ratio=0.06)
+    if cleaned.get("status") != "OK":
+        return {"status": cleaned.get("status", "ERROR"),
+                "error": cleaned.get("error", "the icon still carries a mark"),
+                "hint": "re-generate in Stitch with the bottom-right corner empty"}
+    data = load(project)
+    data.setdefault("assets", {})["icon"] = {
+        "source": "stitch",
+        "generated_at": _now(),
+        "stitch_source": stitch_source,
+        "html": ICON_HTML_REL,
+        "html_sha256": _sha(kept),
+        "note": note,
+        "size": [width, height],
+        "sha256": _sha(target),
+    }
+    save(project, data)
+    return {"status": "OK", "kind": "icon", "file": str(target.relative_to(project)),
+            "html": ICON_HTML_REL}
+
+
 def adopt(project: Path, kind: str, path: Path, note: str = "") -> dict[str, Any]:
     """Record an OWNER-supplied brand asset: the one legitimate bypass.
 
@@ -390,16 +527,30 @@ def adopt(project: Path, kind: str, path: Path, note: str = "") -> dict[str, Any
 
 
 def ensure(project: Path, force: bool = False, log=None) -> dict[str, Any]:
-    """The gate-driven step the build calls: generate whatever is not approved."""
+    """The gate-driven step the build calls.
+
+    Only the feature graphic can be generated here: the icon is a Stitch design, and
+    a run that finds it missing must STOP with that instruction instead of quietly
+    producing a second rendition of the app's mark.
+    """
+    data = load(project)
     issues = gate(project)
+    icon_ok = not any("icon.png" in i for i in issues) and \
+        ((data.get("assets") or {}).get("icon") or {}).get("source") in APPROVED
+    if not icon_ok:
+        hint = ("run `devteam storefront-brand <project> --stitch-prompt`, generate the icon in "
+                "Stitch, then `--adopt-stitch <file.html>` (the owner may pass a finished PNG "
+                "with `--adopt icon=<png>`)")
+        return {"status": "BLOCKED", "error": "the Play icon has no approved Stitch design",
+                "hint": hint}
     if not issues and not force:
         if log:
             log("  brand: icon and feature graphic are approved")
         return {"status": "OK", "generated": [], "reused": ["icon", "feature"]}
-    needs = tuple(kind for kind in SPECS
-                  if not (project / IMAGES_REL / FILES[kind]).is_file()
-                  or ((load(project).get("assets") or {}).get(kind) or {}).get("source")
-                  not in APPROVED or force)
+    needs = tuple(kind for kind in GEMINI_KINDS
+                  if force
+                  or not (project / IMAGES_REL / FILES[kind]).is_file()
+                  or ((data.get("assets") or {}).get(kind) or {}).get("source") not in APPROVED)
     if not needs:
         return {"status": "OK", "generated": [], "reused": ["icon", "feature"]}
     return generate(project, kinds=needs, force=force, log=log)
