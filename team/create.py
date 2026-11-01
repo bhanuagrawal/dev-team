@@ -503,7 +503,7 @@ def setup_git_and_repo(target_dir: Path, name: str) -> None:
         # Play service account if available
         sa_path = Path.home() / ".config/devteam/play-service-account.json"
         if sa_path.exists():
-            subprocess.run(["gh", "secret", "set", "PLAY_SERVICE_ACCOUNT_JSON", "-R", repo_slug, "--body-file", str(sa_path)], check=False)
+            subprocess.run(["gh", "secret", "set", "PLAY_SERVICE_ACCOUNT_JSON", "-R", repo_slug, "--body", sa_path.read_text()], check=False)
             print("Configured PLAY_SERVICE_ACCOUNT_JSON secret in GitHub repository.")
 
         # Push to origin
