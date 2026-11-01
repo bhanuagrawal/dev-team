@@ -213,7 +213,8 @@ def _scene_id_for(stem: str) -> str:
 
 
 def clean_poster(poster: Path, strict: bool = False,
-                 half_ratio: float | None = None) -> dict[str, Any]:
+                 half_ratio: float | None = None,
+                 out: Path | None = None) -> dict[str, Any]:
     """Strip the vendor sparkle an image model leaves in a corner.
 
     A Play listing is the owner's product page; a model's watermark on it is an
@@ -222,7 +223,7 @@ def clean_poster(poster: Path, strict: bool = False,
     """
     from . import plate_clean
 
-    return plate_clean.clean(poster, strict=strict, half_ratio=half_ratio)
+    return plate_clean.clean(poster, strict=strict, half_ratio=half_ratio, out=out)
 
 
 def to_play_size(poster: Path, out: Path, width: int = 1080, height: int = 1920) -> dict[str, Any]:

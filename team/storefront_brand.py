@@ -466,16 +466,22 @@ def adopt_stitch_icon(project: Path, html_file: Path, stitch_source: str = "",
     kept.write_text(html)
     width, height = SPECS["icon"]
     target = project / IMAGES_REL / FILES["icon"]
-    rendered = _render_html(kept, target, width, height)
+    # Render and clean in the pipeline's own directory: the listing holds the final
+    # PNG and nothing else (a stray icon.clean.png once shipped inside Play's images).
+    scratch = project / ".pipeline/storefront_brand/icon-render.png"
+    rendered = _render_html(kept, scratch, width, height)
     if rendered.get("status") != "OK":
         return rendered
     from . import storefront_poster as spt
 
-    cleaned = spt.clean_poster(target, strict=True, half_ratio=0.06)
+    cleaned = spt.clean_poster(scratch, strict=True, half_ratio=0.06,
+                               out=project / ".pipeline/storefront_brand/icon-clean.png")
     if cleaned.get("status") != "OK":
         return {"status": cleaned.get("status", "ERROR"),
                 "error": cleaned.get("error", "the icon still carries a mark"),
                 "hint": "re-generate in Stitch with the bottom-right corner empty"}
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_bytes(Path(cleaned.get("file") or scratch).read_bytes())
     data = load(project)
     data.setdefault("assets", {})["icon"] = {
         "source": "stitch",
