@@ -2458,10 +2458,22 @@ def cmd_stitch_prompt(args: argparse.Namespace) -> int:
     from team.design import compile_stitch_screen_prompt
     screen_type = getattr(args, "screen", "main")
     prompt = compile_stitch_screen_prompt(project, screen_type=screen_type)
+    out_file = project / ".pipeline" / f"stitch-screen-prompt-{screen_type}.txt"
+    out_file.parent.mkdir(parents=True, exist_ok=True)
+    out_file.write_text(prompt)
+
     print(f"STITCH MCP SCREEN PROMPT ({project.name.upper()} • {screen_type.upper()}):")
     print("=" * 65)
     print(prompt)
     print("=" * 65)
+    print(f"~ saved -> {out_file.relative_to(project)}")
+    print("\nSTITCH INSTRUCTION FOR AGENTS:")
+    print("  1. Call StitchMCP tool `generate_screen_from_text` with:")
+    print("       projectId: <profile.stitch_project_id or create via `create_project`>")
+    print("       prompt: (the text saved in " + str(out_file.relative_to(project)) + ")")
+    print("       deviceType: \"MOBILE\"")
+    print("  2. Download the generated HTML and screenshot with `download_file` into docs/screens/")
+    print("  3. Implement the Jetpack Compose composables matching the Stitch layout and tokens.")
     return 0
 
 

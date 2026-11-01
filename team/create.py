@@ -385,18 +385,18 @@ keyPassword={kpw}
         "targets": [],
         "discovery_draft": [],
         "goals": {
-            "vision": f"{title or name} is a local-first safety and compliance inspection app for trade professionals.",
+            "vision": (description or f"{title or name} delivers a fast, focused, and tactile mobile experience.").strip(),
             "milestones": [
                 {
                     "id": "m1-core-loop",
                     "kind": "milestone",
-                    "title": "Complete Inspection & Generate Official PDF Offline",
+                    "title": f"Complete Core User Flow for {title or name}",
                     "decided_by": "owner",
                     "status": "active",
-                    "why": "The primary pain point: technicians spending weekend hours typing reports. A complete offline job -> checklist -> photos -> signature -> PDF export solves it immediately.",
-                    "outcome": "A technician can finish an on-site inspection and share an official signed PDF certificate in under 2 minutes completely offline.",
+                    "why": "The primary user value: executing the essential task end-to-end reliably and offline without friction.",
+                    "outcome": f"A user can launch {title or name}, perform the core action, and view or export the result immediately.",
                     "measures": [
-                        {"text": "Offline inspection job creation, execution, and PDF export completes end-to-end without network access"}
+                        {"text": "Primary user flow completes end-to-end with high responsiveness and zero crashes"}
                     ],
                     "children": []
                 }
@@ -436,52 +436,26 @@ keyPassword={kpw}
     (docs_dir / "PRD.md").write_text(f"""# {title or name} — Product Requirements Document
 
 ## Overview
-{description or 'A local-first compliance & safety inspection app for technicians and inspectors.'}
+{description or f'A focused mobile application for {title or name}.'}
 
 ## Target Users
-- Commercial Fire Safety Inspectors
-- Residential HVAC Technicians
-- Plumbers & Electricians
-- Roofing / Insurance Adjusters
+- Primary users seeking a reliable, high-performance offline mobile workflow
 
 ## Core MVP Features
-1. **Inspection Jobs Management**: Create, edit, and organize inspection records by site and client.
-2. **Offline Dynamic Checklists**: Multi-trade checklists with pass/fail/warning statuses and notes.
-3. **HVAC Reactive Math**: Automated Delta-T calculation ($\Delta T = T_{{return}} - T_{{supply}}$) with pass/fail threshold indication.
-4. **Photo Evidence & Annotation**: In-app photo attachment with canvas drawing (defect markup, arrows) and GPS/timestamp verification.
-5. **Vector Digital Signatures**: Smooth on-screen vector signature capture for inspector and client.
-6. **Instant Offline PDF Generation**: Production-ready, legally compliant PDF certificate exportable via Android share sheet.
+1. **Core Workspace**: Clean, focused interface for primary activity.
+2. **Local Persistence**: Fast, responsive on-device data store.
+3. **Execution & Feedback**: Real-time status, validation, and progress.
+4. **Export & Sharing**: Seamless standard Android share and export.
 """)
 
-    (docs_dir / "design.md").write_text(f"""# {name} Design System — Dark Industrial Tactical
+    from . import design
+    design.ensure_design(target_dir, topic=description or title or name)
 
-## Brand Identity
-{title or name} is built for tradespeople working in demanding environments: direct bright sunlight on roofs, dim basements, and dusty boiler rooms.
-The UI is high-contrast, tactile, and dark-first with electric emerald and safety amber accents.
-
-## Colors
-- **Background**: `#0A0E14` (Deep Obsidian)
-- **Surface**: `#161F2E` (Tactical Slate)
-- **Surface High**: `#1E293B` (Elevated Card)
-- **Primary Accent**: `#00E676` (Electric Emerald / Pass)
-- **Warning Accent**: `#FFB703` (Safety Amber / Warning)
-- **Error Accent**: `#FF3D71` (Hazard Coral / Fail)
-- **On Surface**: `#FFFFFF` (Crisp White)
-- **On Surface Muted**: `#94A3B8` (Slate Grey)
-
-## Typography
-- **Headlines & Values**: Space Grotesk / JetBrains Mono (precision, industrial feel)
-- **Body & Labels**: Inter (high legibility at small sizes)
-""")
-
-    # 14. AGENTS.md for the project
-    (target_dir / "AGENTS.md").write_text(f"""# {name} — Project Guidelines
-
-This project is driven by the dev-team orchestrator.
-Standard Android Jetpack Compose application.
-Package: `{package}`
-Local-first, offline-first architecture.
-""")
+    # 14. Scaffold storefront scene spec & Stitch design prompt
+    from . import storefront_preview
+    storefront_preview.load_spec(target_dir, create=True)
+    stitch_prompt = design.compile_stitch_screen_prompt(target_dir, screen_type="main")
+    (pdir / "stitch-screen-prompt-main.txt").write_text(stitch_prompt)
 
     return target_dir
 

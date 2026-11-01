@@ -103,6 +103,13 @@ off-machine (you generate; they never generate).
       to keep code tokens and visual mockups aligned.
    4. *Enforce in Code:* Register `docs/design.md` in `profile.json['conventions']`. Every Compose screen
       must consume tokens from this design module. No app is scaffolded with default/unstyled UI.
+   5. *Storefront Brand & Asset Loop (Rule 5 Compliance):* Never fabricate flat placeholder assets
+      or bypass brand provenance (`_make_solid_png` is eliminated; `store-readiness` enforces BLOCKER
+      severity on asset provenance and visual quality). The 512x512 Play Store icon MUST be generated via
+      Stitch MCP artboard prompt (`storefront-brand --stitch-prompt` -> adopt). The 1024x500 feature graphic
+      MUST be painted by Gemini from the hero render (`storefront-brand --generate`). Minimum 4 phone
+      screenshots MUST be rendered from real Compose composables (`storefront-scenes --all`) and framed into
+      marketing posters by Gemini in the browser (`storefront-build --poster`).
    **Also stamp `"profile_schema": 2`** (the team's current data shape) so the
    project is born current. From then on `devteam adapt <project>` — step 0 of
    every workflow run — keeps it that way as the team itself changes; a project
