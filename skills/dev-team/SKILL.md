@@ -98,8 +98,12 @@ answer).
 
 ## OFFICIAL-SKILLS REFRESH (before writing/editing ANY project code)
 Development leans on official Google/JetBrains skills and they drift:
-1. `android skills add --all --project <project>` — updates the official
-   Google Android skills (`github.com/android/skills`) to latest.
+1. `android skills add --all --project <absolute project path>` — updates the
+   official Google Android skills (`github.com/android/skills`) to latest. Pass the
+   project's ROOT PATH, never its bare name: `--project` takes a path, so a name
+   silently creates a nested `<name>/` directory inside whatever checkout you ran it
+   from (seen 2026-11-01 — a junk tree in the owner's project root that no gate
+   noticed, because an untracked directory is not a change to any tracked file).
 2. `git -C ~/.agents/kotlin-skills pull` (or clone
    `github.com/Kotlin/kotlin-agent-skills`) — official Kotlin org skills
    (AGP9 migration, gradle-dsl-doctor, tooling).
