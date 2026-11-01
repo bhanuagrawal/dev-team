@@ -215,7 +215,7 @@ def _compose_scene(project: Path, scene: dict[str, Any], name: str, *,
 
 def _record_composition(project: Path, path: str, why: str = "", flags: list[str] | None = None,
                         chat: str | None = None, watermark: dict[str, dict[str, Any]] | None = None,
-                        log=None) -> None:
+                        painted: int | None = None, log=None) -> None:
     """Write HOW the listing's frames were made into the frames registry.
 
     A listing that reaches Play must be able to say whether the image model
@@ -227,14 +227,25 @@ def _record_composition(project: Path, path: str, why: str = "", flags: list[str
     from .core import now_iso
 
     registry = sfr.load_registry(project)
+    previous = registry.get("composition") or {}
+    # A run that REUSES cached posters painted nothing, so it has no chat of its
+    # own: dropping the link to the chat that did paint them destroyed the only
+    # provenance the listing had (observed 2026-11-01 — the record went from the
+    # real chat URL to ""). A new chat wins; otherwise the old one stands.
     registry["composition"] = {
         "path": path,
         "flags": flags or [],
         "why": (why or "").strip(),
-        "chat": chat or "",
+        "chat": chat or previous.get("chat") or "",
+        "painted": painted if painted is not None else previous.get("painted", 0),
         "watermark": watermark or {},
         "at": now_iso(),
     }
+    # The two records must not disagree about how the frames were made: a poster
+    # listing has no code-composed frame assignments, so a stale `assign` (left by
+    # an earlier code run) is cleared rather than left to contradict `path`.
+    if path == "poster":
+        registry["assign"] = {}
     sfr.save_registry(project, registry)
     if log:
         log(f"  composition path: {path}" + (f" ({', '.join(flags)})" if flags else "")
@@ -365,11 +376,13 @@ def build(project: Path, *, frame: str = "auto", plate: str | None = None,
         ordered = sr.ordered_scenes(spec, review)
         listing = project / "distribution/listing/en-US/images/phoneScreenshots"
         listing.mkdir(parents=True, exist_ok=True)
-        made = spt.generate_all(project, ordered, direction, log=log, extra=brief)
+        made = spt.generate_all(project, ordered, direction, log=log, extra=brief, force=force)
         if made.get("status") != "OK":
             return _fail(made.get("status", "ERROR"), made.get("error", "posters not generated"),
                          "the poster is a Gemini deliverable: re-run, or drop a finished image at "
                          ".pipeline/storefront_posters/poster-<scene>.png")
+        if log and not made.get("painted"):
+            log(f"  poster: reused {len(ordered)} cached frame(s) — nothing was painted this run")
         if log and made.get("chat"):
             log(f"  chat: {made['chat']}")
         written = []
@@ -434,7 +447,7 @@ def build(project: Path, *, frame: str = "auto", plate: str | None = None,
                "order": [s["id"] for s in ordered],
                "screenshots": written, "chat": made.get("chat")}
         _record_composition(project, "poster", chat=made.get("chat"), log=log,
-                            watermark=watermark)
+                            watermark=watermark, painted=made.get("painted"))
         if publish:
             from .play_listing import publish_listing_assets
             out["publish"] = publish_listing_assets(project, dry_run=False, log=log)

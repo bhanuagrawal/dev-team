@@ -145,18 +145,33 @@ def _batch_script(jobs: list[dict[str, str]]) -> str:
         return {{ data: c.toDataURL("image/png"), w: c.width, h: c.height }};
       }}, picked);
       fs.writeFileSync(job.out, Buffer.from(data.data.split(",")[1], "base64"));
+      // The cache key travels with the image: which prompt painted it.
+      if (job.sidecar) fs.writeFileSync(job.sidecar,
+        JSON.stringify({{ prompt_sha: job.sha, chat: page.url() }}));
       results.push({{ ok: true, out: job.out, w: data.w, h: data.h }});
     }}
     return {{ ok: results.length && results.every(r => r.ok), chat: page.url(), results }};
     """
 
 
+def _prompt_sha(prompt: str) -> str:
+    import hashlib
+
+    return hashlib.sha256(prompt.encode("utf-8")).hexdigest()[:16]
+
+
 def generate_all(project: Path, scenes: list[dict[str, Any]], direction: dict[str, Any],
-                 log=None, extra: str = "") -> dict[str, Any]:
+                 log=None, extra: str = "", force: bool = False) -> dict[str, Any]:
     """Paint every poster in ONE Gemini chat, one prompt per scene.
 
-    Returns {"status", "posters": {scene_id: path}, "chat"}. Reuses any poster that
-    already exists, so a re-run is deterministic and does not repaint the set.
+    Returns {"status", "posters": {scene_id: path}, "chat", "painted"}.
+
+    The cache is keyed by the PROMPT, not by the scene name. Reusing on the file
+    name alone meant an edit to poster_prompt never reached a listing: the run
+    reported "reusing poster-*.png" and shipped images painted by the old prompt
+    (observed 2026-11-01 — a prompt change was silently a no-op). Each poster now
+    carries a sidecar with the hash of the prompt that painted it; a different
+    hash repaints, and `force` repaints regardless.
     """
     out_dir = project / ".pipeline/storefront_posters"
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -166,19 +181,26 @@ def generate_all(project: Path, scenes: list[dict[str, Any]], direction: dict[st
         name = _poster_name(scene)
         out = out_dir / f"poster-{name}.png"
         source = project / ".pipeline/storefront_scenes" / f"{scene['id']}.png"
-        if out.is_file():
-            if log:
-                log(f"  poster: reusing {out.name} ({out.stat().st_size // 1024} KB)")
-            posters[scene["id"]] = out
-            continue
         if not source.is_file():
             return {"status": "BLOCKED", "error": f"no render at {source.relative_to(project)}"}
-        # No continuity instruction: the owner reviewed the set painted without one and
-        # kept it. Forcing "match the previous images" changed the composition the model
-        # chose (a tilted phone, a different face) and read as art direction, which is
-        # exactly what the model is here to do. One chat is enough to keep a set together.
         prompt = poster_prompt(project, scene, direction, extra=extra)
-        jobs.append({"out": str(out), "src": str(source), "prompt": prompt})
+        sha = _prompt_sha(prompt)
+        sidecar = out.with_suffix(".json")
+        painted_by = ""
+        try:
+            painted_by = (json.loads(sidecar.read_text()) or {}).get("prompt_sha") or ""
+        except Exception:
+            painted_by = ""
+        if out.is_file() and not force and painted_by == sha:
+            if log:
+                log(f"  poster: reusing {out.name} ({out.stat().st_size // 1024} KB, same prompt)")
+            posters[scene["id"]] = out
+            continue
+        if out.is_file() and log:
+            log(f"  poster: repainting {out.name} — "
+                + ("--force" if force else "the prompt changed since it was painted"))
+        jobs.append({"out": str(out), "src": str(source), "prompt": prompt,
+                     "sha": sha, "sidecar": str(sidecar)})
     if not jobs:
         return {"status": "OK", "posters": posters, "chat": None, "painted": 0}
     if log:
