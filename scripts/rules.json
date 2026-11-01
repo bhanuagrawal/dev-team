@@ -142,6 +142,14 @@
       "doc": "team/takeover.py",
       "kind": "code",
       "enforced_by": "devteam takeover"
+    },
+    {
+      "id": "stale-owner-ask",
+      "rule": "an owner ask a surface shows must still be open \u2014 a blocked run recorded without a task id ('?') can never be closed by a later run on the same task, so a resolved question keeps being shown as open",
+      "doc": "AGENTS.md#10c",
+      "kind": "enforcible",
+      "proposal": "team/takeover.py open_asks: a blocked run with no task id is a run-level report, not a task-level ask \u2014 key it by its date (so a later plan review or shipped run closes it) or leave placeholder ids out of open_asks",
+      "note": "seen 2026-11-01: takeover listed '? No buildable work: foundation milestone blocked on owner decisions (phase-2 freeze issues #1/#2)' on a run that had already shipped phase 2 and the v1.5.7 wiring fix \u2014 four blocked runs shared the key '?', so the newest one could never be superseded"
     }
   ]
 }
