@@ -191,6 +191,16 @@ def run(project: Path, log: RunLog | None = None, apply: bool = True) -> dict:
     # 3. state keys ----------------------------------------------------------
     changes += _state_defaults(state)
 
+    # 3b. sync from docs/plan.md (single source of truth) ---------------------
+    try:
+        from . import plan_sync
+        if plan_sync.sync_from_plan_md(project, log=log):
+            note("synced goals and queue from docs/plan.md (source of truth)")
+            profile, state = profile_of(project), state_of(project)
+    except Exception as e:
+        if log:
+            log(f"adapt: plan_sync warning: {e}")
+
     # 4. direction: ask, never invent ----------------------------------------
     a = goals.direction_ask(profile, state, project)
     if a:
