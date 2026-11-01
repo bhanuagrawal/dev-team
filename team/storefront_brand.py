@@ -212,9 +212,9 @@ def icon_stitch_prompt(project: Path) -> str:
         "ARTBOARD: a single square 512x512 tile, edge to edge, nothing outside it.",
         f"PALETTE: surface base {base} as the ground, {accent} as the one accent. "
         f"Dark-first, high contrast, no extra hues.",
-        "SUBJECT: the app's own mark — a document sheet with a folded corner and the "
-        "letter P — rendered flat and geometric. Keep it recognisable at 48 pixels: "
-        "one silhouette, generous padding, no fine detail.",
+        "SUBJECT: the app's own mark, the same silhouette its launcher icon shows, "
+        "rendered flat and geometric. Keep it recognisable at 48 pixels: one "
+        "silhouette, generous padding, no fine detail.",
         "STYLE: flat vector, crisp edges, no bevel, no drop shadow, no 3D depth, no glow "
         "that spills outside the tile, no photographic texture.",
         "FORBIDDEN: any word other than the mark itself, device frames, badges, prices, "
