@@ -206,14 +206,15 @@ def generate_all(project: Path, scenes: list[dict[str, Any]], direction: dict[st
     if log:
         log(f"  poster: Gemini (browser) painting {len(jobs)} asset(s) in one chat")
     try:
-        res = subprocess.run(["browser-control", "execute", "--json", _batch_script(jobs)],
-                             capture_output=True, text=True, timeout=900)
+        from . import gemini_browser
+
+        res = gemini_browser.execute(_batch_script(jobs), timeout=900, log=log)
     except FileNotFoundError:
-        return {"status": "BLOCKED", "error": "browser-control is not installed"}
+        return {"status": "BLOCKED", "error": "Playwright or browser-control is not installed"}
     except subprocess.TimeoutExpired:
         return {"status": "BLOCKED", "error": "Gemini did not finish within 15 minutes"}
     if res.returncode != 0:
-        return {"status": "BLOCKED", "error": (res.stderr or "browser-control failed").strip()[:300]}
+        return {"status": "BLOCKED", "error": (res.stderr or "browser execution failed").strip()[:300]}
     try:
         payload = json.loads(res.stdout)
     except Exception:

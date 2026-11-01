@@ -2154,6 +2154,25 @@ def cmd_takeover(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_gemini_auth(args: argparse.Namespace) -> int:
+    """Manage or verify persistent Playwright login for Gemini image generation."""
+    from team import gemini_browser
+
+    ready, reason = gemini_browser.is_headless_ready()
+    profile = gemini_browser.gemini_profile_dir()
+    if getattr(args, "status", False):
+        print(f"GEMINI PLAYWRIGHT PROFILE: {profile}")
+        print(f"  ready:  {'YES' if ready else 'NO'} ({reason})")
+        return 0 if ready else 1
+    if ready and not getattr(args, "force", False):
+        print(f"Gemini Playwright profile is already authenticated at {profile}.")
+        print("  pass --force to re-authenticate or re-open the browser.")
+        return 0
+    print(f"Starting Gemini authentication flow for profile at {profile}...")
+    ok = gemini_browser.auth_flow(log=print)
+    return 0 if ok else 1
+
+
 def cmd_storefront_status(args: argparse.Namespace) -> int:
     """Did the storefront pass finish, die, or never run — and may it ship?"""
     import json as _json
@@ -2739,6 +2758,11 @@ def main() -> None:
     sfs.add_argument("project")
     sfs.add_argument("--json", action="store_true")
     sfs.set_defaults(fn=cmd_storefront_status)
+    gma = sub.add_parser("gemini-auth",
+                         help="authenticate or check persistent headless Playwright for Gemini asset generation")
+    gma.add_argument("--status", action="store_true", help="check status of persistent profile and prerequisites")
+    gma.add_argument("--force", action="store_true", help="force re-authentication even if profile already exists")
+    gma.set_defaults(fn=cmd_gemini_auth)
     sb.add_argument("--plan", action="store_true",
                     help="print which composition path this run would take (poster vs a fallback "
                          "and its reason) and exit — nothing is rendered or painted")

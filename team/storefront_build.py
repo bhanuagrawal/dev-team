@@ -119,8 +119,9 @@ def gemini_plate(project: Path, name: str, prompt: str, log=None) -> Path | None
     return {{ ok: true, path: out, w: data.w, h: data.h }};
     """
     try:
-        res = subprocess.run(["browser-control", "execute", "--json", script],
-                             capture_output=True, text=True, timeout=420)
+        from . import gemini_browser
+
+        res = gemini_browser.execute(script, timeout=420, log=log)
     except FileNotFoundError:
         return None
     except subprocess.TimeoutExpired:

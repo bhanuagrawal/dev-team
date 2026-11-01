@@ -338,18 +338,16 @@ def generate(project: Path, kinds: tuple[str, ...] = GEMINI_KINDS,
         if log:
             log(f"  brand: Gemini (browser) painting {len(jobs)} asset(s)")
         try:
-            import subprocess
+            from . import gemini_browser
 
-            res = subprocess.run(
-                ["browser-control", "execute", "--json", spt._batch_script(jobs)],
-                capture_output=True, text=True, timeout=900)
+            res = gemini_browser.execute(spt._batch_script(jobs), timeout=900, log=log)
         except FileNotFoundError:
-            return {"status": "BLOCKED", "error": "browser-control is not installed"}
+            return {"status": "BLOCKED", "error": "Playwright or browser-control is not installed"}
         except Exception as exc:  # timeout and anything else the browser raises
             return {"status": "BLOCKED", "error": f"Gemini did not finish: {exc}"}
         if res.returncode != 0:
             return {"status": "BLOCKED",
-                    "error": (res.stderr or "browser-control failed").strip()[:300]}
+                    "error": (res.stderr or "browser execution failed").strip()[:300]}
         try:
             payload = json.loads(res.stdout)
         except Exception:
