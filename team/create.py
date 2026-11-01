@@ -360,8 +360,12 @@ keyPassword={kpw}
         ],
         "target_name_re": r"Screen|Sheet|Dialog|Menu|Banner|Overlay|Picker|Bar",
         "skip_name_re": r"^(Test|Theme|Color|Type|Preview|Demo|Token)",
+        "reference_screen": None,
+        "reference_picker": None,
+        "connections": {},
         "conventions": [
-            str(Path(__file__).parent.parent / "skills/android-code/SKILL.md")
+            str(Path(__file__).parent.parent / "skills/android-code/SKILL.md"),
+            str(target_dir / "docs/design.md")
         ],
         "targets": [],
         "discovery_draft": [],
