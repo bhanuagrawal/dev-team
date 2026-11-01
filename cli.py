@@ -1817,6 +1817,18 @@ def cmd_store_readiness(args: argparse.Namespace) -> int:
 def cmd_storefront_scenes(args: argparse.Namespace) -> int:
     project = resolve_project(args.project)
     from team import storefront_preview as sp
+    from team import storefront_brand as sbf
+    from team import storefront_direction as sd
+    from team import storefront_frames as sfr
+    from team import storefront_review as sr
+    from team.publish import commit_paths, snapshot_paths
+
+    # The listing's own files. Their baseline is taken BEFORE any step runs, so the
+    # commit at the end carries only what this command wrote — a checkout that is
+    # behind origin publishes nothing of its own (its old bytes would be a revert).
+    deliverables = [sp.SPEC_REL, sd.DIRECTION_REL, sr.REVIEW_REL, sbf.BRAND_REL,
+                    sfr.REGISTRY_REL, sfr.FRAMES_DIR_REL, "distribution/listing"]
+    baseline = snapshot_paths(project, deliverables)
 
     do_all = getattr(args, "all", False)
     if not any([do_all, getattr(args, "scaffold", False), getattr(args, "render", False),
@@ -2075,21 +2087,16 @@ def cmd_storefront_scenes(args: argparse.Namespace) -> int:
                  getattr(args, "assign", None), getattr(args, "review", False),
                  getattr(args, "vision_frame", None)])
     if wrote:
-        from team import storefront_brand as sbf
-        from team import storefront_direction as sd
-        from team import storefront_frames as sfr
-        from team import storefront_review as sr
-        from team.publish import commit_paths
         frames = ", ".join(sorted(sfr.load_registry(project)["assign"].values())) or "builtin"
         # The DECISIONS are deliverables too. They used to be left out of this list, so
         # a review or a direction could be locked, drive a render, and still exist only
         # in the checkout — the exact "rumour" rule 10 forbids.
         landed = commit_paths(
             project,
-            [sp.SPEC_REL, sd.DIRECTION_REL, sr.REVIEW_REL, sbf.BRAND_REL,
-             sfr.REGISTRY_REL, sfr.FRAMES_DIR_REL, "distribution/listing"],
+            deliverables,
             f"store: storefront screenshots (compositions: {frames})",
             log=print,
+            baseline=baseline,
         )
         if not landed.get("pushed"):
             print(f"  ! not committed: {landed.get('why')}")
@@ -2208,6 +2215,19 @@ def cmd_storefront_build(args: argparse.Namespace) -> int:
     project = resolve_project(args.project)
     from team.core import delivery_notice
     from team import storefront_build as sb
+    from team import storefront_brand as sbf
+    from team import storefront_direction as sd
+    from team import storefront_frames as sfr
+    from team import storefront_preview as sp
+    from team import storefront_review as sr
+    from team.publish import commit_paths, snapshot_paths
+
+    # Taken BEFORE the pass opens a browser or renders anything: the commit at the
+    # end must describe what this pass wrote, not whatever the checkout happens to
+    # carry (a stale checkout's old copy of a decision file is a silent revert).
+    deliverables = [sp.SPEC_REL, sd.DIRECTION_REL, sr.REVIEW_REL, sbf.BRAND_REL,
+                    sfr.REGISTRY_REL, sfr.FRAMES_DIR_REL, "distribution/listing"]
+    baseline = snapshot_paths(project, deliverables)
 
     print(delivery_notice(project))
     if getattr(args, "plan", False):
@@ -2255,18 +2275,12 @@ def cmd_storefront_build(args: argparse.Namespace) -> int:
     # The pass writes deliverables; a pass that ends with them uncommitted is not a
     # pass (rule 10). Committed here, after the critic gate, so only a listing that
     # actually passed the gate can land on main.
-    from team import storefront_brand as sbf
-    from team import storefront_direction as sd
-    from team import storefront_frames as sfr
-    from team import storefront_preview as sp
-    from team import storefront_review as sr
-    from team.publish import commit_paths
     landed = commit_paths(
         project,
-        [sp.SPEC_REL, sd.DIRECTION_REL, sr.REVIEW_REL, sbf.BRAND_REL,
-         sfr.REGISTRY_REL, sfr.FRAMES_DIR_REL, "distribution/listing"],
+        deliverables,
         f"store: storefront assets (composition: {res.get('frame')}, critic {res.get('score')})",
         log=print,
+        baseline=baseline,
     )
     if not landed.get("pushed"):
         print(f"  ! not committed: {landed.get('why')}")

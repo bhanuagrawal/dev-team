@@ -21,6 +21,7 @@ owner never got a `shared plan:` link.
 """
 from __future__ import annotations
 
+import hashlib
 import shutil
 from pathlib import Path
 
@@ -214,7 +215,35 @@ def publish(project: Path, log=None) -> dict:
                    "on origin; the next run retries"}
 
 
-def commit_paths(project: Path, paths: list[str], message: str, log=None) -> dict:
+def fingerprint(path: Path) -> str:
+    """A byte fingerprint of one file or a whole tree ('' when absent).
+
+    Commands must be able to tell THEIR OWN writes from what was already on disk:
+    a checkout that is behind origin carries old bytes in a file the command never
+    touched, and copying those onto main is a silent revert.
+    """
+    if path.is_dir():
+        h = hashlib.sha1()
+        for f in sorted(p for p in path.rglob("*") if p.is_file()):
+            h.update(str(f.relative_to(path)).encode())
+            h.update(b"\0")
+            h.update(f.read_bytes())
+            h.update(b"\0")
+        return h.hexdigest()
+    if path.is_file():
+        return hashlib.sha1(path.read_bytes()).hexdigest()
+    return ""
+
+
+def snapshot_paths(project: Path, paths: list[str]) -> dict[str, str]:
+    """Take this BEFORE the command writes anything: `commit_paths(baseline=…)`
+    then commits only the paths whose bytes changed under the command."""
+    return {str(p).strip(): fingerprint(project / str(p).strip())
+            for p in paths if str(p).strip()}
+
+
+def commit_paths(project: Path, paths: list[str], message: str, log=None,
+                 baseline: dict[str, str] | None = None) -> dict:
     """Commit the LOCAL versions of `paths` onto origin/<main>, from the anchored
     worktree. Generic form of `publish()` for any command that writes into the
     project directory (store assets, harness scaffolding, listing edits).
@@ -224,6 +253,13 @@ def commit_paths(project: Path, paths: list[str], message: str, log=None) -> dic
     pushed. So a dirty or diverged checkout cannot block the commit, and the
     owner's own WIP is never swept into it — callers pass only the paths their
     command touched.
+
+    `baseline` (from `snapshot_paths`, taken before the command ran) narrows that
+    to what the command actually WROTE. Without it a stale checkout publishes its
+    old copies of every path in the list: on 2026-11-02 a `storefront-scenes
+    --render` run, which touched no spec at all, committed the checkout's
+    five-commits-behind docs/storefront.json back onto main and reverted a fix
+    that had shipped minutes earlier.
 
     Returns {pushed, sha, why}. `pushed: False` always carries a `why` and is
     never fatal: the next run retries.
@@ -237,6 +273,16 @@ def commit_paths(project: Path, paths: list[str], message: str, log=None) -> dic
             if str(p).strip() and not str(p).strip().startswith(".pipeline/")]
     if not keep:
         return {"pushed": False, "sha": "", "why": "no committable paths"}
+    if baseline is not None:
+        untouched = [rel for rel in keep
+                     if rel in baseline and fingerprint(project / rel) == baseline[rel]]
+        if untouched:
+            say(f"not committing {len(untouched)} path(s) this command did not write: "
+                + ", ".join(untouched))
+            keep = [rel for rel in keep if rel not in untouched]
+        if not keep:
+            return {"pushed": True, "sha": "",
+                    "why": "this command changed none of these paths"}
     for _attempt in range(1, 4):
         wt, why = _origin_tree(project, branch)
         if wt is None:
