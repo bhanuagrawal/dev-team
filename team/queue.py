@@ -182,11 +182,54 @@ def impact_block(source: str, added: list[dict], verdicts: list[dict],
     return "\n".join(lines)
 
 
+#: One developer session's target length in minutes — the plan's documented size.
+DEFAULT_EFFORT_MIN = 150
+EFFORT_BAND = (90, 240)
+
+
+def normalise_admission(entry: dict) -> list[str]:
+    """Every queued entry carries a size and a goal — whoever admitted it.
+
+    The PLAN path validates both (`effort_min` inside the band, `advances` naming a
+    live branch or "none"), but the explicit-add path validated neither and had no
+    way to declare a size at all: on 2026-11-01 `queue add --label …` produced
+    `effort_min: null` and `advances: ""`, and `pick` then handed the developer an
+    unsized, undirected task. Normalising here — the single admission point — closes
+    that for every caller (the CLI, the prompt handler's pinned owner request)
+    instead of trusting each one to remember.
+    """
+    notes: list[str] = []
+    if entry.get("type") in ("feature", "bugfix", "motion", "investigation"):
+        effort = entry.get("effort_min")
+        if effort is None:
+            entry["effort_min"] = DEFAULT_EFFORT_MIN
+            notes.append(f"effort_min defaulted to {DEFAULT_EFFORT_MIN} min (the target "
+                         "size) — pass --effort-min to size it deliberately")
+        else:
+            try:
+                value = int(effort)
+            except (TypeError, ValueError):
+                value = DEFAULT_EFFORT_MIN
+            lo, hi = EFFORT_BAND
+            clamped = min(max(value, lo), hi)
+            if clamped != value:
+                entry["effort_min"] = clamped
+                notes.append(f"effort_min {value} is outside the {lo}-{hi} band → {clamped} "
+                             "(split or bundle the entry instead of shipping a mis-sized run)")
+            else:
+                entry["effort_min"] = clamped
+    if not str(entry.get("advances") or "").strip():
+        entry["advances"] = "none"
+        notes.append('advances named no milestone → declared off-goal ("none"), never left blank')
+    return notes
+
+
 def add_task(state: dict, entry: dict, source: str = "orchestrator",
              position: str = "head") -> str:
     """Admit ONE task: judge the existing queue against it, drop what it makes
     irrelevant (recording every verdict), and place it head|tail. Mutates
     `state` in place; the caller saves."""
+    admission_notes = normalise_admission(entry)
     existing = list(state.get("queue", []))
     shipped, shipped_labels = shipped_from_state(state)
     verdicts = judge(existing, [entry], shipped, shipped_labels)
@@ -199,7 +242,10 @@ def add_task(state: dict, entry: dict, source: str = "orchestrator",
         if v["verdict"] in ("superseded", "redundant"):
             _record(state, source, v["verdict"], v["label"], v["reason"],
                     v["superseded_by"])
-    return impact_block(source, [entry], verdicts)
+    block = impact_block(source, [entry], verdicts)
+    if admission_notes:
+        block += "\n  admission: " + "; ".join(admission_notes)
+    return block
 
 
 def apply_plan(state: dict, incoming: list[dict], source: str = "research",

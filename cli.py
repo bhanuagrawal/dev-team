@@ -695,6 +695,8 @@ def cmd_queue(args: argparse.Namespace) -> None:
                 entry["risk"] = args.risk
             if getattr(args, "advances", None):
                 entry["advances"] = args.advances
+            if getattr(args, "effort_min", None) is not None:
+                entry["effort_min"] = args.effort_min
         if args.supersedes:
             known = {qmod._norm(qmod.label_of(q)) for q in state.get("queue", [])}
             known |= {qmod._norm(q.get("id", "")) for q in state.get("queue", [])}
@@ -2702,6 +2704,8 @@ def main() -> None:
                                              default="head")
     q.add_argument("--advances", help="milestone id this task serves "
                                       "(profile.goals.milestones[].id)")
+    q.add_argument("--effort-min", type=int, default=None,
+                   help="minutes of developer work for this entry (target 150, band 90-240)")
     q.add_argument("--supersedes", action="append", default=[])
     q.set_defaults(fn=cmd_queue)
     rh = sub.add_parser("run-headless"); rh.add_argument("project"); rh.add_argument("--task-spec", required=True); rh.add_argument("--supervised", action="store_true"); rh.set_defaults(fn=cmd_run_headless)
