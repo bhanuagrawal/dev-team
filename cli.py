@@ -63,6 +63,31 @@ def language_conventions(project: Path) -> list[str]:
 
 
 # --------------------------------------------------------------------------- #
+# project creation: scaffold, sign, wire secrets, and configure CI
+# --------------------------------------------------------------------------- #
+
+def cmd_create(args: argparse.Namespace) -> None:
+    from team import create as tcreate
+    name = args.name.strip()
+    pkg = (args.package or f"agrawal.bhanu.{name.lower()}").strip()
+    target_dir = Path(args.dir).expanduser() if args.dir else Path.home() / "AndroidStudioProjects" / name
+    if target_dir.exists() and any(target_dir.iterdir()):
+        raise SystemExit(f"Target directory {target_dir} already exists and is not empty")
+    print(f"Scaffolding {name} ({pkg}) in {target_dir}...")
+    tcreate.scaffold_android_project(
+        name=name,
+        package=pkg,
+        target_dir=target_dir,
+        title=args.title or name,
+        description=args.desc or "",
+    )
+    if not args.no_gh:
+        tcreate.setup_git_and_repo(target_dir, name)
+    print(f"\nProject created successfully at {target_dir}")
+    print(f"Run `python3 cli.py status {name}` to inspect.")
+
+
+# --------------------------------------------------------------------------- #
 # onboarding: detect everything generic; write profile draft + starter state
 # --------------------------------------------------------------------------- #
 
@@ -2561,6 +2586,15 @@ def cmd_console(args: argparse.Namespace) -> int:
 def main() -> None:
     ap = argparse.ArgumentParser(prog="devteam")
     sub = ap.add_subparsers(dest="cmd", required=True)
+
+    cr = sub.add_parser("create", help="scaffold, sign, configure CI, and onboard a new project")
+    cr.add_argument("name", help="project name (e.g. FieldCert)")
+    cr.add_argument("--package", help="package id (e.g. agrawal.bhanu.fieldcert)")
+    cr.add_argument("--title", help="human app title")
+    cr.add_argument("--desc", help="app description / thesis")
+    cr.add_argument("--dir", help="target directory (defaults to ~/AndroidStudioProjects/<name>)")
+    cr.add_argument("--no-gh", action="store_true", help="skip GitHub repo creation and secrets wiring")
+    cr.set_defaults(fn=cmd_create)
 
     o = sub.add_parser("onboard");     o.add_argument("project"); o.set_defaults(fn=cmd_onboard)
     s = sub.add_parser("status");      s.add_argument("project"); s.add_argument("--skip-gradle", action="store_true"); s.set_defaults(fn=cmd_status)
