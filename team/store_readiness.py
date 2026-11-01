@@ -1069,17 +1069,21 @@ def generate_store_readiness_pack(project: Path, log: RunLog | None = None) -> d
         full_file.write_text(full_text[:PLAY_FULL_DESC_MAX_CHARS])
         generated.append(str(full_file.relative_to(project)))
 
-    # 4. Synthesize high-conversion visual assets (icon, feature graphic, screenshots)
-    try:
-        from .marketing_asset_generator import generate_all_marketing_templates, render_storefront_assets
-        generate_all_marketing_templates(project)
-        render_res = render_storefront_assets(project, log=log)
-        if render_res.get("status") == "OK":
-            for r in render_res.get("rendered", []):
-                generated.append(r["file"])
-    except Exception as e:
-        if log:
-            log(f"  warning: marketing storefront asset generation failed: {e}")
+    # 4. Synthesize fallback visual assets ONLY if completely missing
+    icon_file = img_dir / "icon.png"
+    fg_file = img_dir / "featureGraphic.png"
+    shots = list(shots_dir.glob("*.png"))
+    if not icon_file.is_file() or not fg_file.is_file() or len(shots) < 4:
+        try:
+            from .marketing_asset_generator import generate_all_marketing_templates, render_storefront_assets
+            generate_all_marketing_templates(project)
+            render_res = render_storefront_assets(project, log=log)
+            if render_res.get("status") == "OK":
+                for r in render_res.get("rendered", []):
+                    generated.append(r["file"])
+        except Exception as e:
+            if log:
+                log(f"  warning: marketing storefront asset generation failed: {e}")
 
     # Note: Brand assets (icon and feature graphic) are strictly required to have
     # authentic provenance per Rule 5 (Stitch for icon, Gemini for feature graphic).

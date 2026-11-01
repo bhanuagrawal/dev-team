@@ -267,16 +267,16 @@ def build_icon_html(project_name: str, colors: dict[str, str]) -> str:
     """Build a standalone 512x512 app icon template."""
     acc = colors["primary"]
     sec = colors.get("secondary", "#7C4DFF")
-    p_low = project_name.lower()
-    is_court = any(k in p_low for k in ("pickle", "score", "court", "racket"))
+    
+    # Generic modern monogram icon
+    words = [w for w in project_name.replace("-", " ").replace("_", " ").split() if w]
+    initials = "".join(w[0] for w in words)[:2].upper() if words else "AP"
 
     inner_icon = f"""
-    <div class="doc-shape">
-      <div class="fold"></div>
-      <div class="fold-tab"></div>
-      <div class="doc-text">PDF</div>
+    <div style="width:260px; height:260px; border-radius:64px; background:linear-gradient(135deg, {acc} 0%, {sec} 100%); display:flex; align-items:center; justify-content:center; box-shadow:0 20px 50px {acc}55;">
+      <div style="font-family:'Space Grotesk',sans-serif; font-size:110px; font-weight:700; color:#FFFFFF; letter-spacing:-2px;">{initials}</div>
     </div>
-    <div class="badge">OFFLINE</div>
+    <div class="badge">PRO</div>
         """
 
     return f"""<!DOCTYPE html>
@@ -381,24 +381,26 @@ def build_feature_graphic_html(project_name: str, vision: str, colors: dict[str,
     """Build a standalone 1024x500 marketing feature graphic banner."""
     acc = colors["primary"]
     sec = colors.get("secondary", "#7C4DFF")
-    p_low = project_name.lower()
-    is_court = any(k in p_low or k in vision.lower() for k in ("pickle", "score", "court", "racket"))
+    headline = project_name.upper()
+    sub = vision or "Fast, intuitive, and modern mobile user experience."
+    if len(sub) > 120:
+        sub = sub[:117] + "..."
 
     left_html = f"""
     <div class="badge"><div class="badge-dot"></div>100% PRIVATE • ON-DEVICE</div>
-    <div class="title">Desktop-Class PDF Tools In Your Pocket</div>
-    <div class="subtitle">Merge, split, compress, and convert documents instantly with zero cloud uploads or subscriptions.</div>
+    <div class="title">{headline}</div>
+    <div class="subtitle">{sub}</div>
     <div class="features-row">
       <div class="pill">⚡ FAST LOSSLESS</div>
       <div class="pill">🔒 100% OFFLINE</div>
-      <div class="pill">📄 PRO QUALITY</div>
+      <div class="pill">★ PRO QUALITY</div>
     </div>
         """
     right_html = f"""
     <div class="preview-card">
-      <div class="card-label">SMART COMPRESS</div>
-      <div class="card-metric">-88% SAVINGS</div>
-      <div class="card-hint">18.4 MB → 2.1 MB • Vector Preserved</div>
+      <div class="card-label">CORE WORKFLOW</div>
+      <div class="card-metric">100%</div>
+      <div class="card-hint">Offline & Local First Engine</div>
     </div>
         """
 
@@ -541,523 +543,95 @@ def generate_all_marketing_templates(project: Path) -> dict[str, str]:
     templates_dir.mkdir(parents=True, exist_ok=True)
 
     templates: dict[str, str] = {}
-    is_pdf = "pdf" in name.lower() or "pdf" in vision.lower() or "document" in vision.lower()
-    is_court_sports = "pickleball" in vision.lower() or "scoreboard" in vision.lower() or "tennis" in vision.lower() or "court" in vision.lower()
-    is_inspection = ("cert" in name.lower() or "inspect" in name.lower() or "safety" in vision.lower() or "trade" in vision.lower() or "field" in name.lower() or "audit" in vision.lower())
+    features = profile.get("features", []) or profile.get("core_features", [])
+    feat1 = str(features[0]) if len(features) > 0 else "Instant Performance"
+    feat2 = str(features[1]) if len(features) > 1 else "Seamless Execution"
+    feat3 = str(features[2]) if len(features) > 2 else "100% Offline Architecture"
+    feat4 = str(features[3]) if len(features) > 3 else "Built For Power Users"
 
-    if is_inspection:
-        # Frame 1: Hero Dashboard
-        ui1 = f"""
-      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:28px;">
-        <div style="font-family:'Space Grotesk',sans-serif; font-size:36px; font-weight:700; color:#FFFFFF;">{project_name.upper()}</div>
-        <div style="font-family:'JetBrains Mono',monospace; font-size:16px; font-weight:700; color:{colors['primary']}; background:rgba(0,230,118,0.12); border:1px solid rgba(0,230,118,0.3); padding:8px 16px; border-radius:999px;">100% OFFLINE</div>
-      </div>
-      <div style="background:linear-gradient(135deg, {colors['surface']} 0%, {colors['surface_alt']} 100%); border-radius:28px; border:2px solid {colors['primary']}88; padding:32px; box-shadow:0 10px 40px {colors['primary']}26; margin-bottom:24px;">
-        <div style="font-family:'JetBrains Mono',monospace; font-size:16px; font-weight:700; color:{colors['primary']}; margin-bottom:10px; letter-spacing:1px;">ACTIVE JOB AUDIT</div>
-        <div style="font-family:'Space Grotesk',sans-serif; font-size:34px; font-weight:700; color:#FFFFFF; margin-bottom:10px;">Commercial Life Safety & HVAC</div>
-        <div style="font-size:18px; color:{colors['text_muted']}; line-height:1.4; margin-bottom:20px;">Site: 742 Evergreen Terrace • Client: Apex Property Mgmt</div>
-        <div style="display:flex; gap:12px;">
-          <div style="flex:1; background:{colors['primary']}; color:#0A0E14; font-family:'Space Grotesk',sans-serif; font-size:18px; font-weight:700; border-radius:12px; padding:14px; text-align:center;">RESUME AUDIT</div>
-          <div style="background:#202B3C; color:#FFFFFF; font-family:'JetBrains Mono',monospace; font-size:16px; font-weight:700; border-radius:12px; padding:14px 18px;">GPS LOCKED</div>
-        </div>
-      </div>
-      <div style="display:grid; grid-template-columns:1fr 1fr; gap:16px;">
-        <div style="background:{colors['surface']}; border:1px solid #2B3A50; border-radius:20px; padding:20px;">
-          <div style="font-family:'JetBrains Mono',monospace; font-size:14px; color:{colors['primary']};">ACTIVE AUDITS</div>
-          <div style="font-family:'Space Grotesk',sans-serif; font-size:36px; font-weight:700; color:#FFFFFF; margin:8px 0;">12</div>
-          <div style="font-size:14px; color:{colors['text_muted']};">Zero cloud required</div>
-        </div>
-        <div style="background:{colors['surface']}; border:1px solid #2B3A50; border-radius:20px; padding:20px;">
-          <div style="font-family:'JetBrains Mono',monospace; font-size:14px; color:{colors['secondary']};">COMPLIANT RATE</div>
-          <div style="font-family:'Space Grotesk',sans-serif; font-size:36px; font-weight:700; color:#FFFFFF; margin:8px 0;">94%</div>
-          <div style="font-size:14px; color:{colors['text_muted']};">Tamper-evident logs</div>
-        </div>
-      </div>
-        """
-        html1 = build_screenshot_html(
-            project_name=name,
-            badge_text="Field-Ready Tactical Clipboard",
-            headline="Smart Digital Clipboard",
-            sub_headline="Engineered for harsh basements and bright roofs. Complete compliance inspections 100% offline.",
-            inner_ui_html=ui1,
-            colors=colors,
-            accent_color=colors["primary"],
-        )
-        p1 = templates_dir / "01_hero.html"
-        p1.write_text(html1)
-        templates["01_hero"] = str(p1)
-
-        # Frame 2: Checklist & Reactive Math
-        ui2 = f"""
-      <div style="background:{colors['surface']}; border-radius:28px; border:2px solid {colors['secondary']}88; padding:32px; box-shadow:0 0 30px {colors['secondary']}33; margin-bottom:24px;">
-        <div style="font-family:'JetBrains Mono',monospace; font-size:16px; font-weight:700; color:{colors['secondary']}; letter-spacing:1px; margin-bottom:12px;">REACTIVE MATH ENGINE • DELTA-T</div>
-        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px;">
-          <div style="font-family:'Space Grotesk',sans-serif; font-size:24px; font-weight:700; color:#FFFFFF;">Evaporator Coil Temperature Split</div>
-          <div style="font-family:'JetBrains Mono',monospace; font-size:16px; font-weight:700; color:{colors['primary']}; background:rgba(0,230,118,0.15); padding:6px 12px; border-radius:8px;">18.0°F (OPTIMAL)</div>
-        </div>
-        <div style="display:grid; grid-template-columns:1fr 1fr; gap:16px; margin-bottom:16px;">
-          <div style="background:#0A0E14; border-radius:14px; padding:16px; border:1px solid #334155;">
-            <div style="font-size:12px; color:{colors['text_muted']};">RETURN AIR</div>
-            <div style="font-size:28px; font-weight:700; color:#FFFFFF; font-family:'JetBrains Mono',monospace;">75.0°F</div>
-          </div>
-          <div style="background:#0A0E14; border-radius:14px; padding:16px; border:1px solid #334155;">
-            <div style="font-size:12px; color:{colors['text_muted']};">SUPPLY AIR</div>
-            <div style="font-size:28px; font-weight:700; color:#FFFFFF; font-family:'JetBrains Mono',monospace;">57.0°F</div>
-          </div>
-        </div>
-        <div style="font-size:15px; color:{colors['primary']}; font-family:'JetBrains Mono',monospace;">✓ Normal heat absorption within ASHRAE compliance envelope.</div>
-      </div>
-      <div style="display:flex; flex-direction:column; gap:12px;">
-        <div style="background:{colors['surface']}; border-radius:16px; padding:18px; border:1px solid #2B3A50; display:flex; justify-content:space-between; align-items:center;">
-          <div style="font-family:'Space Grotesk',sans-serif; font-size:18px; font-weight:600; color:#FFFFFF;">Emergency Exit Route Clearance</div>
-          <div style="font-family:'JetBrains Mono',monospace; font-size:14px; color:{colors['primary']}; font-weight:700;">PASS</div>
-        </div>
-        <div style="background:{colors['surface']}; border-radius:16px; padding:18px; border:1px solid #2B3A50; display:flex; justify-content:space-between; align-items:center;">
-          <div style="font-family:'Space Grotesk',sans-serif; font-size:18px; font-weight:600; color:#FFFFFF;">Sprinkler Riser Pressure Gauge</div>
-          <div style="font-family:'JetBrains Mono',monospace; font-size:14px; color:{colors['primary']}; font-weight:700;">PASS</div>
-        </div>
-      </div>
-        """
-        html2 = build_screenshot_html(
-            project_name=name,
-            badge_text="Automated Calculation Engine",
-            headline="Reactive Diagnostics & Codes",
-            sub_headline="Instant HVAC Delta-T calculations, conditional branching checks, and multi-trade checklists.",
-            inner_ui_html=ui2,
-            colors=colors,
-            accent_color=colors["secondary"],
-        )
-        p2 = templates_dir / "02_checklist.html"
-        p2.write_text(html2)
-        templates["02_checklist"] = str(p2)
-
-        # Frame 3: Photo Markup Canvas
-        ui3 = f"""
-      <div style="flex:1; background:linear-gradient(135deg, {colors['surface']} 0%, {colors['surface_alt']} 100%); border-radius:28px; border:2px solid {colors.get('amber', '#FFB703')}; padding:28px; display:flex; flex-direction:column; justify-content:space-between; box-shadow:0 0 30px {colors.get('amber', '#FFB703')}33;">
-        <div>
-          <div style="font-family:'JetBrains Mono',monospace; font-size:16px; font-weight:700; color:{colors.get('amber', '#FFB703')}; letter-spacing:1px; margin-bottom:8px;">TAMPER-EVIDENT EVIDENCE</div>
-          <div style="font-family:'Space Grotesk',sans-serif; font-size:28px; font-weight:700; color:#FFFFFF;">Defect Markup & GPS Stamping</div>
-        </div>
-        <div style="background:#0A0E14; border-radius:20px; border:2px dashed {colors.get('coral', '#FF3D71')}; height:280px; display:flex; flex-direction:column; justify-content:center; align-items:center; position:relative; overflow:hidden;">
-          <div style="font-size:48px; color:{colors.get('coral', '#FF3D71')}; margin-bottom:12px;">↘ ◯</div>
-          <div style="font-family:'Space Grotesk',sans-serif; font-size:20px; font-weight:700; color:#FFFFFF;">Fouled Evaporator Coil Fins</div>
-          <div style="font-family:'JetBrains Mono',monospace; font-size:13px; color:{colors.get('coral', '#FF3D71')}; margin-top:6px;">[DEFECT CRITICAL: CODE VIOLATION]</div>
-          <div style="position:absolute; bottom:12px; left:16px; font-family:'JetBrains Mono',monospace; font-size:11px; color:{colors['primary']}; background:rgba(0,0,0,0.7); padding:4px 8px; border-radius:4px;">
-            LAT: 37.7749° N • LON: 122.4194° W • 2026-11-01 16:40 UTC
-          </div>
-        </div>
-        <div style="display:flex; justify-content:space-between; align-items:center; background:#1C2638; border-radius:14px; padding:14px 18px;">
-          <div style="font-size:14px; color:#FFFFFF; font-weight:600;">Drawing Tools: Arrow • Circle • Callout</div>
-          <div style="font-family:'JetBrains Mono',monospace; font-size:14px; color:{colors['primary']};">CANVAS READY</div>
-        </div>
-      </div>
-        """
-        html3 = build_screenshot_html(
-            project_name=name,
-            badge_text="Visual Evidence Capture",
-            headline="Finger-Drawn Photo Markup",
-            sub_headline="Snap defect photos, draw callout arrows with your finger, and burn GPS timestamps directly into evidence.",
-            inner_ui_html=ui3,
-            colors=colors,
-            accent_color=colors.get("amber", "#FFB703"),
-        )
-        p3 = templates_dir / "03_markup.html"
-        p3.write_text(html3)
-        templates["03_markup"] = str(p3)
-
-        # Frame 4: Instant Official PDF
-        ui4 = f"""
-      <div style="flex:1; background:linear-gradient(135deg, {colors['surface']} 0%, {colors['surface_alt']} 100%); border-radius:28px; border:2px solid {colors['primary']}; padding:32px; display:flex; flex-direction:column; justify-content:space-between; box-shadow:0 0 30px {colors['primary']}33;">
-        <div>
-          <div style="font-family:'JetBrains Mono',monospace; font-size:16px; font-weight:700; color:{colors['primary']}; letter-spacing:1px; margin-bottom:8px;">INSTANT ON-SITE EXPORT</div>
-          <div style="font-family:'Space Grotesk',sans-serif; font-size:28px; font-weight:700; color:#FFFFFF;">Legally Compliant PDF Certificate</div>
-        </div>
-        <div style="background:#FFFFFF; border-radius:16px; padding:24px; color:#0A0E14; box-shadow:0 12px 30px rgba(0,0,0,0.5);">
-          <div style="display:flex; justify-content:space-between; border-bottom:2px solid #E2E8F0; padding-bottom:12px; margin-bottom:12px;">
-            <div style="font-weight:800; font-size:18px;">{project_name.upper()} COMPLIANCE CERTIFICATE</div>
-            <div style="background:#DCFCE7; color:#15803D; font-weight:800; font-size:12px; padding:4px 8px; border-radius:4px;">VERIFIED</div>
-          </div>
-          <div style="font-size:12px; color:#64748B; margin-bottom:16px;">Inspection ID: CERT-84920 • Trade: HVAC / Fire Safety • All Checks Complete</div>
-          <div style="display:flex; gap:16px; margin-top:20px;">
-            <div style="flex:1; border:1px solid #CBD5E1; border-radius:8px; padding:8px; text-align:center;">
-              <div style="font-family:cursive; font-size:20px; color:#1E293B;">Bhanu Agrawal</div>
-              <div style="font-size:10px; color:#94A3B8;">Certified Lead Inspector</div>
-            </div>
-            <div style="flex:1; border:1px solid #CBD5E1; border-radius:8px; padding:8px; text-align:center;">
-              <div style="font-family:cursive; font-size:20px; color:#1E293B;">Apex Property</div>
-              <div style="font-size:10px; color:#94A3B8;">Site Facility Manager</div>
-            </div>
-          </div>
-        </div>
-        <div style="background:{colors['primary']}; color:#0A0E14; font-family:'Space Grotesk',sans-serif; font-size:22px; font-weight:700; border-radius:16px; padding:18px; text-align:center; box-shadow:0 0 25px {colors['primary']}55;">
-          SHARE CERTIFICATE VIA EMAIL / PRINT
-        </div>
-      </div>
-        """
-        html4 = build_screenshot_html(
-            project_name=name,
-            badge_text="Zero Typing Weekend Reports",
-            headline="Instant PDF & Signatures",
-            sub_headline="Capture customer signatures on-screen and export official certificates in under 2 minutes.",
-            inner_ui_html=ui4,
-            colors=colors,
-            accent_color=colors["primary"],
-        )
-        p4 = templates_dir / "04_certificate.html"
-        p4.write_text(html4)
-        templates["04_certificate"] = str(p4)
-
-    elif is_pdf:
-        # Frame 1: Core Hero Workstation
-        ui1 = f"""
-      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:32px;">
-        <div style="font-family:'Space Grotesk',sans-serif; font-size:38px; font-weight:700; color:#FFFFFF;">PDF KIT</div>
-        <div style="font-family:'JetBrains Mono',monospace; font-size:18px; font-weight:700; color:#00E676; background:rgba(0,230,118,0.12); border:1px solid rgba(0,230,118,0.3); padding:8px 18px; border-radius:999px;">OFFLINE SECURE</div>
-      </div>
-      <div style="background:linear-gradient(135deg, #161F2E 0%, #202B3C 100%); border-radius:32px; border:2px solid {colors['primary']}88; padding:40px; box-shadow:0 10px 40px {colors['primary']}26; margin-bottom:32px;">
-        <div style="font-family:'JetBrains Mono',monospace; font-size:18px; font-weight:700; color:{colors['primary']}; margin-bottom:14px; letter-spacing:1px;">FEATURED ENGINE</div>
-        <div style="font-family:'Space Grotesk',sans-serif; font-size:42px; font-weight:700; color:#FFFFFF; margin-bottom:14px;">Smart Lossless Compress</div>
-        <div style="font-size:22px; color:{colors['text_muted']}; line-height:1.4; margin-bottom:28px;">Reduce PDF size up to 88% while retaining crystal-clear vector typography.</div>
-        <div style="background:{colors['primary']}; color:#0A0E14; font-family:'Space Grotesk',sans-serif; font-size:26px; font-weight:700; border-radius:18px; padding:22px; text-align:center; box-shadow:0 0 25px {colors['primary']}55;">SELECT PDF DOCUMENT</div>
-      </div>
-      <div style="display:grid; grid-template-columns:1fr 1fr; gap:18px;">
-        <div style="background:#161F2E; border:1px solid #2B3A50; border-radius:24px; padding:24px; display:flex; flex-direction:column; gap:12px;">
-          <div style="font-size:28px; color:{colors['primary']}; font-weight:700;">⧉</div>
-          <div style="font-family:'Space Grotesk',sans-serif; font-size:24px; font-weight:700; color:#FFFFFF;">Merge PDFs</div>
-          <div style="font-size:16px; color:{colors['text_muted']};">Combine multiple files into one.</div>
-        </div>
-        <div style="background:#161F2E; border:1px solid #2B3A50; border-radius:24px; padding:24px; display:flex; flex-direction:column; gap:12px;">
-          <div style="font-size:28px; color:{colors['secondary']}; font-weight:700;">✂</div>
-          <div style="font-family:'Space Grotesk',sans-serif; font-size:24px; font-weight:700; color:#FFFFFF;">Split PDF</div>
-          <div style="font-size:16px; color:{colors['text_muted']};">Extract custom page ranges.</div>
-        </div>
-        <div style="background:#161F2E; border:1px solid #2B3A50; border-radius:24px; padding:24px; display:flex; flex-direction:column; gap:12px;">
-          <div style="font-size:28px; color:#FFB703; font-weight:700;">⇋</div>
-          <div style="font-family:'Space Grotesk',sans-serif; font-size:24px; font-weight:700; color:#FFFFFF;">Convert</div>
-          <div style="font-size:16px; color:{colors['text_muted']};">PDF to images & back.</div>
-        </div>
-        <div style="background:#161F2E; border:1px solid #2B3A50; border-radius:24px; padding:24px; display:flex; flex-direction:column; gap:12px;">
-          <div style="font-size:28px; color:#00E676; font-weight:700;">⇅</div>
-          <div style="font-family:'Space Grotesk',sans-serif; font-size:24px; font-weight:700; color:#FFFFFF;">Rearrange</div>
-          <div style="font-size:16px; color:{colors['text_muted']};">Drag-and-drop page canvas.</div>
-        </div>
-      </div>
-        """
-        html1 = build_screenshot_html(
-            project_name=name,
-            badge_text="Desktop-Grade Toolbox",
-            headline="All-In-One PDF Workstation",
-            sub_headline="Merge, split, compress, and convert documents on your device with instant offline speed.",
-            inner_ui_html=ui1,
-            colors=colors,
-            accent_color=colors["primary"],
-        )
-        p1 = templates_dir / "01_hero.html"
-        p1.write_text(html1)
-        templates["01_hero"] = str(p1)
-
-        # Frame 2: Compression Studio
-        ui2 = f"""
-      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:28px;">
-        <div style="font-family:'Space Grotesk',sans-serif; font-size:32px; font-weight:700; color:#FFFFFF;">← Smart Compress</div>
-        <div style="font-family:'JetBrains Mono',monospace; font-size:16px; color:{colors['primary']};">ENGINE V4.2</div>
-      </div>
-      <div style="background:#161F2E; border-radius:28px; border:1px solid #2B3A50; padding:28px; margin-bottom:28px; display:flex; align-items:center; gap:20px;">
-        <div style="width:70px; height:85px; background:linear-gradient(135deg, {colors['primary']} 0%, {colors['secondary']} 100%); border-radius:12px; display:flex; align-items:center; justify-content:center; font-weight:700; font-size:24px; color:#000;">PDF</div>
-        <div>
-          <div style="font-family:'Space Grotesk',sans-serif; font-size:24px; font-weight:700; color:#FFFFFF; margin-bottom:6px;">Annual_Report_2026.pdf</div>
-          <div style="font-family:'JetBrains Mono',monospace; font-size:16px; color:{colors['text_muted']};">18.4 MB • 48 Pages • Vector</div>
-        </div>
-      </div>
-      <div style="background:linear-gradient(135deg, #161F2E 0%, #202B3C 100%); border-radius:32px; border:2px solid #00E676; padding:36px; box-shadow:0 0 40px rgba(0,230,118,0.2); margin-bottom:28px;">
-        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:20px;">
-          <div style="font-family:'JetBrains Mono',monospace; font-size:18px; font-weight:700; color:#00E676;">PROJECTED SAVINGS</div>
-          <div style="font-family:'JetBrains Mono',monospace; font-size:16px; color:#00E676; background:rgba(0,230,118,0.15); padding:6px 14px; border-radius:999px;">-88% REDUCTION</div>
-        </div>
-        <div style="font-family:'Space Grotesk',sans-serif; font-size:68px; font-weight:700; color:#FFFFFF; margin-bottom:12px; letter-spacing:-1px;">18.4 MB → 2.1 MB</div>
-        <div style="font-size:20px; color:{colors['text_muted']};">Saved 16.3 MB • Visual fidelity preserved</div>
-      </div>
-      <div style="background:#161F2E; border-radius:24px; border:1px solid #2B3A50; padding:24px; margin-bottom:32px;">
-        <div style="font-family:'JetBrains Mono',monospace; font-size:16px; color:#FFFFFF; margin-bottom:16px;">COMPRESSION PRESET: BALANCED</div>
-        <div style="height:12px; background:#202B3C; border-radius:999px; overflow:hidden; position:relative;">
-          <div style="width:75%; height:100%; background:linear-gradient(90deg, {colors['primary']}, #00E676); border-radius:999px;"></div>
-        </div>
-      </div>
-      <div style="background:#00E676; color:#0A0E14; font-family:'Space Grotesk',sans-serif; font-size:26px; font-weight:700; border-radius:18px; padding:22px; text-align:center; box-shadow:0 0 30px rgba(0,230,118,0.4);">COMPRESS PDF NOW (~1.4s)</div>
-        """
-        html2 = build_screenshot_html(
-            project_name=name,
-            badge_text="Lossless Compression",
-            headline="Shrink Files Up To 90%",
-            sub_headline="Intelligent downsampling reduces file size dramatically while preserving razor-sharp vector text.",
-            inner_ui_html=ui2,
-            colors=colors,
-            accent_color="#00E676",
-        )
-        p2 = templates_dir / "02_compress.html"
-        p2.write_text(html2)
-        templates["02_compress"] = str(p2)
-
-        # Frame 3: Visual Page Canvas
-        ui3 = f"""
-      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:28px;">
-        <div style="font-family:'Space Grotesk',sans-serif; font-size:32px; font-weight:700; color:#FFFFFF;">Page Studio</div>
-        <div style="font-family:'JetBrains Mono',monospace; font-size:16px; color:{colors['secondary']}; background:rgba(124,77,255,0.15); padding:6px 14px; border-radius:999px;">8 OF 24 SELECTED</div>
-      </div>
-      <div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:16px; margin-bottom:32px;">
-        <div style="background:#161F2E; border:2px solid {colors['primary']}; border-radius:18px; padding:16px; aspect-ratio:3/4; display:flex; flex-direction:column; justify-content:space-between; position:relative;">
-          <div style="font-family:'JetBrains Mono',monospace; font-size:14px; color:{colors['primary']}; font-weight:700;">PAGE 1</div>
-          <div style="font-size:36px; text-align:center;">📄</div>
-          <div style="font-size:12px; color:{colors['text_muted']};">COVER</div>
-        </div>
-        <div style="background:#161F2E; border:2px solid {colors['primary']}; border-radius:18px; padding:16px; aspect-ratio:3/4; display:flex; flex-direction:column; justify-content:space-between;">
-          <div style="font-family:'JetBrains Mono',monospace; font-size:14px; color:{colors['primary']}; font-weight:700;">PAGE 2</div>
-          <div style="font-size:36px; text-align:center;">📊</div>
-          <div style="font-size:12px; color:{colors['text_muted']};">CHART</div>
-        </div>
-        <div style="background:#161F2E; border:1px solid #2B3A50; border-radius:18px; padding:16px; aspect-ratio:3/4; display:flex; flex-direction:column; justify-content:space-between; opacity:0.6;">
-          <div style="font-family:'JetBrains Mono',monospace; font-size:14px; color:{colors['text_muted']}; font-weight:700;">PAGE 3</div>
-          <div style="font-size:36px; text-align:center;">📝</div>
-          <div style="font-size:12px; color:{colors['text_muted']};">NOTES</div>
-        </div>
-        <div style="background:#161F2E; border:2px solid {colors['primary']}; border-radius:18px; padding:16px; aspect-ratio:3/4; display:flex; flex-direction:column; justify-content:space-between;">
-          <div style="font-family:'JetBrains Mono',monospace; font-size:14px; color:{colors['primary']}; font-weight:700;">PAGE 4</div>
-          <div style="font-size:36px; text-align:center;">📑</div>
-          <div style="font-size:12px; color:{colors['text_muted']};">TABLE</div>
-        </div>
-        <div style="background:#161F2E; border:2px solid {colors['primary']}; border-radius:18px; padding:16px; aspect-ratio:3/4; display:flex; flex-direction:column; justify-content:space-between;">
-          <div style="font-family:'JetBrains Mono',monospace; font-size:14px; color:{colors['primary']}; font-weight:700;">PAGE 5</div>
-          <div style="font-size:36px; text-align:center;">📋</div>
-          <div style="font-size:12px; color:{colors['text_muted']};">LEGAL</div>
-        </div>
-        <div style="background:#161F2E; border:1px solid #2B3A50; border-radius:18px; padding:16px; aspect-ratio:3/4; display:flex; flex-direction:column; justify-content:space-between; opacity:0.6;">
-          <div style="font-family:'JetBrains Mono',monospace; font-size:14px; color:{colors['text_muted']}; font-weight:700;">PAGE 6</div>
-          <div style="font-size:36px; text-align:center;">📎</div>
-          <div style="font-size:12px; color:{colors['text_muted']};">APPENDIX</div>
-        </div>
-      </div>
-      <div style="display:flex; gap:12px; margin-bottom:28px;">
-        <div style="flex:1; background:#161F2E; border:1px solid #2B3A50; padding:16px; border-radius:14px; text-align:center; font-family:'JetBrains Mono',monospace; font-size:16px; color:#FFFFFF;">ROTATE 90°</div>
-        <div style="flex:1; background:#161F2E; border:1px solid #2B3A50; padding:16px; border-radius:14px; text-align:center; font-family:'JetBrains Mono',monospace; font-size:16px; color:#FFFFFF;">SELECT ALL</div>
-      </div>
-      <div style="background:{colors['secondary']}; color:#FFFFFF; font-family:'Space Grotesk',sans-serif; font-size:26px; font-weight:700; border-radius:18px; padding:22px; text-align:center; box-shadow:0 0 30px {colors['secondary']}55;">EXTRACT & MERGE SELECTED</div>
-        """
-        html3 = build_screenshot_html(
-            project_name=name,
-            badge_text="Visual Page Canvas",
-            headline="Visual Drag & Drop Studio",
-            sub_headline="Reorder, rotate, split, and merge pages with intuitive drag-and-drop and real-time previews.",
-            inner_ui_html=ui3,
-            colors=colors,
-            accent_color=colors["secondary"],
-        )
-        p3 = templates_dir / "03_organize.html"
-        p3.write_text(html3)
-        templates["03_organize"] = str(p3)
-
-        # Frame 4: Privacy & Offline Sovereignty
-        ui4 = f"""
-      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:36px;">
-        <div style="font-family:'Space Grotesk',sans-serif; font-size:32px; font-weight:700; color:#FFFFFF;">Privacy & Security</div>
-        <div style="font-family:'JetBrains Mono',monospace; font-size:16px; color:#00E676;">100% PRIVATE</div>
-      </div>
-      <div style="background:linear-gradient(135deg, #161F2E 0%, #202B3C 100%); border-radius:36px; border:2px solid {colors['primary']}; padding:48px; text-align:center; box-shadow:0 0 50px {colors['primary']}26; margin-bottom:36px;">
-        <div style="font-size:80px; margin-bottom:20px;">🛡️</div>
-        <div style="font-family:'Space Grotesk',sans-serif; font-size:38px; font-weight:700; color:#FFFFFF; margin-bottom:16px;">Zero Cloud Uploads</div>
-        <div style="font-size:22px; color:{colors['text_muted']}; line-height:1.4; margin-bottom:28px;">All PDF parsing, rendering, compression, and merging executes 100% locally in your device's memory.</div>
-        <div style="display:inline-block; font-family:'JetBrains Mono',monospace; font-size:18px; font-weight:700; color:#00E676; background:rgba(0,230,118,0.12); border:1px solid rgba(0,230,118,0.3); padding:10px 24px; border-radius:999px;">SANDBOX VERIFIED</div>
-      </div>
-      <div style="display:flex; flex-direction:column; gap:16px;">
-        <div style="background:#161F2E; border:1px solid #2B3A50; border-radius:20px; padding:20px 24px; display:flex; justify-content:space-between; align-items:center;">
-          <div style="font-size:20px; color:#FFFFFF; font-weight:600;">No Account Required</div>
-          <div style="font-size:20px; color:#00E676;">✓</div>
-        </div>
-        <div style="background:#161F2E; border:1px solid #2B3A50; border-radius:20px; padding:20px 24px; display:flex; justify-content:space-between; align-items:center;">
-          <div style="font-size:20px; color:#FFFFFF; font-weight:600;">Zero Advertisements or Trackers</div>
-          <div style="font-size:20px; color:#00E676;">✓</div>
-        </div>
-        <div style="background:#161F2E; border:1px solid #2B3A50; border-radius:20px; padding:20px 24px; display:flex; justify-content:space-between; align-items:center;">
-          <div style="font-size:20px; color:#FFFFFF; font-weight:600;">Works Completely Offline (Airplane Mode)</div>
-          <div style="font-size:20px; color:#00E676;">✓</div>
-        </div>
-      </div>
-        """
-        html4 = build_screenshot_html(
-            project_name=name,
-            badge_text="Local-First Privacy",
-            headline="Zero Cloud Uploads. Ever.",
-            sub_headline="Your sensitive documents never touch external servers. Everything happens 100% on your device.",
-            inner_ui_html=ui4,
-            colors=colors,
-            accent_color=colors["primary"],
-        )
-        p4 = templates_dir / "04_privacy.html"
-        p4.write_text(html4)
-        templates["04_privacy"] = str(p4)
-
-    elif is_court_sports:
-        # Court sports 4-frame narrative
-        ui1 = f"""
-      <div style="flex:1; background:linear-gradient(135deg, {colors['surface']} 0%, {colors['surface_alt']} 100%); border-radius:32px; border:3px solid {colors['primary']}; padding:36px; display:flex; flex-direction:column; justify-content:space-between; box-shadow:0 0 30px {colors['primary']}33;">
-        <div style="font-family:'JetBrains Mono',monospace; font-size:26px; font-weight:700; color:{colors['primary']}; letter-spacing:1px;">{name.upper()} • ACTIVE PLAY</div>
-        <div style="font-family:'Anton',sans-serif; font-size:220px; line-height:0.9; text-align:center; color:#FFFFFF; margin:auto 0;">10</div>
-        <div style="font-family:'JetBrains Mono',monospace; font-size:20px; color:{colors['text_muted']}; text-align:center; letter-spacing:2px;">TAP ANYWHERE TO ADVANCE SCORE</div>
-      </div>
-        """
-        html1 = build_screenshot_html(
-            project_name=name,
-            badge_text="Core User Loop",
-            headline="The Screen IS The Scoreboard",
-            sub_headline="Massive full-bleed court targets engineered for fast, mid-rally tapping without looking.",
-            inner_ui_html=ui1,
-            colors=colors,
-            accent_color=colors["primary"],
-        )
-        p1 = templates_dir / "01_hero.html"
-        p1.write_text(html1)
-        templates["01_hero"] = str(p1)
-
-        ui2 = f"""
-      <div style="flex:1; background:linear-gradient(135deg, {colors['surface']} 0%, {colors['surface_alt']} 100%); border-radius:32px; border:3px solid {colors['secondary']}; padding:36px; display:flex; flex-direction:column; justify-content:space-between; box-shadow:0 0 30px {colors['secondary']}33;">
-        <div style="font-family:'JetBrains Mono',monospace; font-size:26px; font-weight:700; color:{colors['secondary']}; letter-spacing:1px;">REGULATION ENGINE • DOUBLES</div>
-        <div style="font-family:'Anton',sans-serif; font-size:180px; line-height:0.9; text-align:center; color:#FFFFFF; margin:auto 0;">0-0-2</div>
-        <div style="font-family:'JetBrains Mono',monospace; font-size:20px; color:{colors['text_muted']}; text-align:center; letter-spacing:2px;">AUTO SERVER 1 / 2 ADVANCEMENT</div>
-      </div>
-        """
-        html2 = build_screenshot_html(
-            project_name=name,
-            badge_text="Smart Rules Engine",
-            headline="Accurate Serving Rotation",
-            sub_headline="Handles doubles 0-0-2 starts, second-server transitions, and side-outs automatically.",
-            inner_ui_html=ui2,
-            colors=colors,
-            accent_color=colors["secondary"],
-        )
-        p2 = templates_dir / "02_rules.html"
-        p2.write_text(html2)
-        templates["02_rules"] = str(p2)
-
-        ui3 = f"""
-      <div style="flex:1; background:linear-gradient(135deg, {colors['surface']} 0%, {colors['surface_alt']} 100%); border-radius:32px; border:3px solid {colors.get('amber', '#FFB703')}; padding:36px; display:flex; flex-direction:column; justify-content:space-between; box-shadow:0 0 30px {colors.get('amber', '#FFB703')}33;">
-        <div style="font-family:'JetBrains Mono',monospace; font-size:26px; font-weight:700; color:{colors.get('amber', '#FFB703')}; letter-spacing:1px;">MATCH SETUP • CONFIGURATION</div>
-        <div style="font-family:'Anton',sans-serif; font-size:220px; line-height:0.9; text-align:center; color:#FFFFFF; margin:auto 0;">11</div>
-        <div style="font-family:'JetBrains Mono',monospace; font-size:20px; color:{colors['text_muted']}; text-align:center; letter-spacing:2px;">DOUBLES • PLAY TO 11 • WIN BY 2</div>
-      </div>
-        """
-        html3 = build_screenshot_html(
-            project_name=name,
-            badge_text="Custom Rules & Modes",
-            headline="Every Format & Ruleset",
-            sub_headline="Singles, doubles, tournament play to 11, 15, or 21, with win-by-2 or sudden death.",
-            inner_ui_html=ui3,
-            colors=colors,
-            accent_color=colors.get("amber", "#FFB703"),
-        )
-        p3 = templates_dir / "03_modes.html"
-        p3.write_text(html3)
-        templates["03_modes"] = str(p3)
-
-        ui4 = f"""
-      <div style="flex:1; background:linear-gradient(135deg, {colors['surface']} 0%, {colors['surface_alt']} 100%); border-radius:32px; border:3px solid {colors['primary']}; padding:36px; display:flex; flex-direction:column; justify-content:space-between; box-shadow:0 0 30px {colors['primary']}33;">
-        <div style="font-family:'JetBrains Mono',monospace; font-size:26px; font-weight:700; color:{colors['primary']}; letter-spacing:1px;">MATCH TELEMETRY • COURT LOG</div>
-        <div style="font-family:'Anton',sans-serif; font-size:180px; line-height:0.9; text-align:center; color:#FFFFFF; margin:auto 0;">11 - 9</div>
-        <div style="font-family:'JetBrains Mono',monospace; font-size:20px; color:{colors['text_muted']}; text-align:center; letter-spacing:2px;">68% SERVE EFFICIENCY • 4 SIDE-OUTS</div>
-      </div>
-        """
-        html4 = build_screenshot_html(
-            project_name=name,
-            badge_text="Post-Match Telemetry",
-            headline="Deep Performance Stats",
-            sub_headline="Track rally lengths, side-out efficiency, momentum streaks, and career wins.",
-            inner_ui_html=ui4,
-            colors=colors,
-            accent_color=colors["primary"],
-        )
-        p4 = templates_dir / "04_analytics.html"
-        p4.write_text(html4)
-        templates["04_analytics"] = str(p4)
-
-    else:
-        # Generic high-contrast fallback (4 frames to satisfy Google Play >= 4 rule)
-        ui1 = f"""
+    # Frame 1: Core Dashboard
+    ui1 = f"""
       <div style="flex:1; background:linear-gradient(135deg, {colors['surface']} 0%, {colors['surface_alt']} 100%); border-radius:32px; border:3px solid {colors['primary']}; padding:36px; display:flex; flex-direction:column; justify-content:space-between; box-shadow:0 0 30px {colors['primary']}33;">
         <div style="font-family:'JetBrains Mono',monospace; font-size:26px; font-weight:700; color:{colors['primary']}; letter-spacing:1px;">{name.upper()} • DASHBOARD</div>
-        <div style="font-family:'Space Grotesk',sans-serif; font-size:80px; font-weight:700; line-height:1; text-align:center; color:#FFFFFF; margin:auto 0;">CORE</div>
-        <div style="font-family:'JetBrains Mono',monospace; font-size:20px; color:{colors['text_muted']}; text-align:center; letter-spacing:2px;">INSTANT PERFORMANCE</div>
+        <div style="font-family:'Space Grotesk',sans-serif; font-size:64px; font-weight:700; line-height:1.1; text-align:center; color:#FFFFFF; margin:auto 0;">{feat1.upper()[:24]}</div>
+        <div style="font-family:'JetBrains Mono',monospace; font-size:20px; color:{colors['text_muted']}; text-align:center; letter-spacing:2px;">100% OFFLINE READY</div>
       </div>
-        """
-        html1 = build_screenshot_html(
-            project_name=name,
-            badge_text="Core User Loop",
-            headline=f"Engineered For {name.upper()}",
-            sub_headline=vision or "Fast, intuitive, and modern mobile user experience.",
-            inner_ui_html=ui1,
-            colors=colors,
-            accent_color=colors["primary"],
-        )
-        p1 = templates_dir / "01_hero.html"
-        p1.write_text(html1)
-        templates["01_hero"] = str(p1)
+    """
+    html1 = build_screenshot_html(
+        project_name=name,
+        badge_text="Core Experience",
+        headline=f"Engineered For {name.upper()}",
+        sub_headline=vision or "Fast, intuitive, and modern mobile user experience.",
+        inner_ui_html=ui1,
+        colors=colors,
+        accent_color=colors["primary"],
+    )
+    p1 = templates_dir / "01_hero.html"
+    p1.write_text(html1)
+    templates["01_hero"] = str(p1)
 
-        ui2 = f"""
+    # Frame 2: Primary Workflow
+    ui2 = f"""
       <div style="flex:1; background:linear-gradient(135deg, {colors['surface']} 0%, {colors['surface_alt']} 100%); border-radius:32px; border:3px solid {colors['secondary']}; padding:36px; display:flex; flex-direction:column; justify-content:space-between; box-shadow:0 0 30px {colors['secondary']}33;">
         <div style="font-family:'JetBrains Mono',monospace; font-size:26px; font-weight:700; color:{colors['secondary']}; letter-spacing:1px;">{name.upper()} • WORKFLOW</div>
-        <div style="font-family:'Space Grotesk',sans-serif; font-size:64px; font-weight:700; line-height:1.1; text-align:center; color:#FFFFFF; margin:auto 0;">SMART FLOW</div>
+        <div style="font-family:'Space Grotesk',sans-serif; font-size:64px; font-weight:700; line-height:1.1; text-align:center; color:#FFFFFF; margin:auto 0;">{feat2.upper()[:24]}</div>
         <div style="font-family:'JetBrains Mono',monospace; font-size:20px; color:{colors['text_muted']}; text-align:center; letter-spacing:2px;">SEAMLESS EXECUTION</div>
       </div>
-        """
-        html2 = build_screenshot_html(
-            project_name=name,
-            badge_text="Workflow Engine",
-            headline="Tailored For Daily Use",
-            sub_headline="Streamlined tools designed for daily reliability and speed.",
-            inner_ui_html=ui2,
-            colors=colors,
-            accent_color=colors["secondary"],
-        )
-        p2 = templates_dir / "02_workflow.html"
-        p2.write_text(html2)
-        templates["02_workflow"] = str(p2)
+    """
+    html2 = build_screenshot_html(
+        project_name=name,
+        badge_text="Workflow Engine",
+        headline="Tailored For Daily Use",
+        sub_headline="Streamlined tools designed for daily reliability and speed.",
+        inner_ui_html=ui2,
+        colors=colors,
+        accent_color=colors["secondary"],
+    )
+    p2 = templates_dir / "02_workflow.html"
+    p2.write_text(html2)
+    templates["02_workflow"] = str(p2)
 
-        ui3 = f"""
+    # Frame 3: Local First Data & Evidence
+    ui3 = f"""
       <div style="flex:1; background:linear-gradient(135deg, {colors['surface']} 0%, {colors['surface_alt']} 100%); border-radius:32px; border:3px solid {colors.get('amber', '#FFB703')}; padding:36px; display:flex; flex-direction:column; justify-content:space-between; box-shadow:0 0 30px {colors.get('amber', '#FFB703')}33;">
         <div style="font-family:'JetBrains Mono',monospace; font-size:26px; font-weight:700; color:{colors.get('amber', '#FFB703')}; letter-spacing:1px;">{name.upper()} • LOCAL FIRST</div>
-        <div style="font-family:'Space Grotesk',sans-serif; font-size:64px; font-weight:700; line-height:1.1; text-align:center; color:#FFFFFF; margin:auto 0;">OFFLINE</div>
+        <div style="font-family:'Space Grotesk',sans-serif; font-size:64px; font-weight:700; line-height:1.1; text-align:center; color:#FFFFFF; margin:auto 0;">{feat3.upper()[:24]}</div>
         <div style="font-family:'JetBrains Mono',monospace; font-size:20px; color:{colors['text_muted']}; text-align:center; letter-spacing:2px;">DATA REMAINS YOURS</div>
       </div>
-        """
-        html3 = build_screenshot_html(
-            project_name=name,
-            badge_text="Privacy & Speed",
-            headline="Instant Local Execution",
-            sub_headline="Zero lag, offline-ready architecture that works anywhere.",
-            inner_ui_html=ui3,
-            colors=colors,
-            accent_color=colors.get("amber", "#FFB703"),
-        )
-        p3 = templates_dir / "03_offline.html"
-        p3.write_text(html3)
-        templates["03_offline"] = str(p3)
+    """
+    html3 = build_screenshot_html(
+        project_name=name,
+        badge_text="Privacy & Speed",
+        headline="Instant Local Execution",
+        sub_headline="Zero lag, offline-ready architecture that works anywhere.",
+        inner_ui_html=ui3,
+        colors=colors,
+        accent_color=colors.get("amber", "#FFB703"),
+    )
+    p3 = templates_dir / "03_offline.html"
+    p3.write_text(html3)
+    templates["03_offline"] = str(p3)
 
-        ui4 = f"""
+    # Frame 4: Power User Control
+    ui4 = f"""
       <div style="flex:1; background:linear-gradient(135deg, {colors['surface']} 0%, {colors['surface_alt']} 100%); border-radius:32px; border:3px solid {colors['primary']}; padding:36px; display:flex; flex-direction:column; justify-content:space-between; box-shadow:0 0 30px {colors['primary']}33;">
-        <div style="font-family:'JetBrains Mono',monospace; font-size:26px; font-weight:700; color:{colors['primary']}; letter-spacing:1px;">{name.upper()} • COMPLETE CONTROL</div>
-        <div style="font-family:'Space Grotesk',sans-serif; font-size:64px; font-weight:700; line-height:1.1; text-align:center; color:#FFFFFF; margin:auto 0;">CONTROL</div>
+        <div style="font-family:'JetBrains Mono',monospace; font-size:26px; font-weight:700; color:{colors['primary']}; letter-spacing:1px;">{name.upper()} • CONTROL</div>
+        <div style="font-family:'Space Grotesk',sans-serif; font-size:64px; font-weight:700; line-height:1.1; text-align:center; color:#FFFFFF; margin:auto 0;">{feat4.upper()[:24]}</div>
         <div style="font-family:'JetBrains Mono',monospace; font-size:20px; color:{colors['text_muted']}; text-align:center; letter-spacing:2px;">OWNER DRIVEN</div>
       </div>
-        """
-        html4 = build_screenshot_html(
-            project_name=name,
-            badge_text="Complete Control",
-            headline="Built For Power Users",
-            sub_headline="Customizable, secure, and built without unnecessary clutter.",
-            inner_ui_html=ui4,
-            colors=colors,
-            accent_color=colors["primary"],
-        )
-        p4 = templates_dir / "04_control.html"
-        p4.write_text(html4)
-        templates["04_control"] = str(p4)
+    """
+    html4 = build_screenshot_html(
+        project_name=name,
+        badge_text="Complete Control",
+        headline="Built For Power Users",
+        sub_headline="Customizable, secure, and built without unnecessary clutter.",
+        inner_ui_html=ui4,
+        colors=colors,
+        accent_color=colors["primary"],
+    )
+    p4 = templates_dir / "04_control.html"
+    p4.write_text(html4)
+    templates["04_control"] = str(p4)
 
     # Always generate standalone 512x512 icon and 1024x500 feature graphic
     icon_html = build_icon_html(project_name=name, colors=colors)
@@ -1109,18 +683,31 @@ def render_storefront_assets(
             previews_are_real = False
 
     # Map templates to target PNG files and viewport sizes
-    render_tasks = [
-        ("icon.html", img_dir / "icon.png", 512, 512),
-        ("feature_graphic.html", img_dir / "featureGraphic.png", 1024, 500),
-    ]
+    render_tasks = []
 
-    # Collect screenshot templates
-    if not previews_are_real:
+    # Provenance guard per Rule 5:
+    # Stitch icon must never be overwritten
+    icon_dest = img_dir / "icon.png"
+    if not icon_dest.is_file():
+        render_tasks.append(("icon.html", icon_dest, 512, 512))
+    elif log:
+        log("  ~ icon already exists with genuine provenance — skipping HTML mock")
+
+    # Gemini feature graphic must never be overwritten
+    fg_dest = img_dir / "featureGraphic.png"
+    if not fg_dest.is_file():
+        render_tasks.append(("feature_graphic.html", fg_dest, 1024, 500))
+    elif log:
+        log("  ~ feature graphic already exists with genuine provenance — skipping HTML mock")
+
+    # Screenshots must never be overwritten if real composables or existing shots exist
+    existing_shots = list(shots_dir.glob("*.png"))
+    if not previews_are_real and not existing_shots:
         for html_file in sorted(templates_dir.glob("0*.html")):
             png_name = html_file.stem + ".png"
             render_tasks.append((html_file.name, shots_dir / png_name, 1080, 2400))
-    elif log:
-        log("  ~ phone screenshots are compose_preview — skipping HTML mock renders")
+    elif log and existing_shots:
+        log(f"  ~ {len(existing_shots)} screenshots already present — skipping HTML mock renders")
 
     for template_name, target_png, width, height in render_tasks:
         src_file = templates_dir / template_name
