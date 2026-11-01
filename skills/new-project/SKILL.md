@@ -177,6 +177,9 @@ Status summary to owner: what's live, what's pending gates, next build time.
 - NEVER build iOS blocks or iOS code (owner decision: Android-first).
 - NEVER invent CI/credentials ourselves; use gh/keytool commands shown.
 - NEVER push a bump/tag with red CI. Never hold user passwords—generate yours.
+- NEVER invent procedural mock HTML assets; follow Rule 5 strictly (Stitch for icon, Gemini for feature graphic, real Compose renders for screenshots).
+- NEVER leave `docs/plan.md` empty; populate the multi-milestone roadmap and sync it so it serves as the single source of truth.
+- NEVER claim "done" to the owner without completing the 8-step Pre-Handover Checklist in AGENTS.md.
 - Show ONE consolidated gate-report message, not a drip of questions.
 - If official-skill sources moved — trust android CLI first, then JetBrains
   wizard/templates — never re-create art by memory.

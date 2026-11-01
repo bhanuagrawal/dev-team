@@ -188,6 +188,43 @@ reads it here — one source, no copies to drift.
 | store scene spec | `<project>/docs/storefront.json` |
 | rendered scenes | `<project>/.pipeline/storefront_scenes/` |
 
+## New App "In One Go" — Non-Negotiable Order & Hard Checklist
+
+When building and shipping a brand-new app MVP in one go, the agent MUST execute these steps in strict sequence before returning to the owner that work is done:
+
+1. **Discovery & Architecture:**
+   - Draft `docs/PRD.md` with explicit, domain-specific features (no generic placeholders).
+   - Perform competitive recon and write `docs/COMPETITION_RESEARCH.md` (minimum 5 competitors with pricing, weaknesses, and differentiation).
+2. **Initial UI Design & Stitch MCP:**
+   - Initial UI is designed via **Stitch MCP** (`generate_screen_from_text` or `create_design_system_from_design_md`), NEVER invented blindly.
+   - Design tokens, typography, and color palette written into `docs/design.md`.
+3. **Single Source of Truth Plan (`docs/plan.md`):**
+   - `docs/plan.md` MUST be populated with a multi-milestone roadmap (Milestone 1 Core Loop, Milestones 2–5) with outcomes, measures, and the initial execution queue.
+   - Run `devteam adapt <project>` to sync `docs/plan.md` into `profile.json` and `state.json`. `docs/plan.md` must never be left as an empty skeleton.
+4. **Code Implementation:**
+   - 100% native platform code (Compose / Kotlin).
+   - Real offline persistence, real domain logic (no mocks, no fake static data).
+   - All screens adhere to `docs/design.md` tokens.
+5. **Storefront Brand & Marketing Posters (Rule 5):**
+   - App Icon (512x512): Created by Stitch MCP (`storefront-brand --stitch-prompt` → adopt).
+   - Feature Graphic (1024x500): Painted by Gemini from the hero render (`storefront-brand --generate`).
+   - Phone Screenshots (minimum 4): Rendered from real app composables via `storefront-scenes` → framed by Gemini posters (`storefront-build`).
+   - Zero procedural HTML mocks or cross-app template leakage. Critic score ≥ 90/100 [Grade A].
+6. **Services & Telemetry:**
+   - Firebase: Project created, SHA-1 and SHA-256 registered, `google-services.json` committed.
+   - GA4: Property and Data Stream created, linked to app package.
+   - Privacy Policy: `docs/privacy.html` committed and verified live on public HTTPS URL (HTTP 200).
+7. **Store Distribution & Review:**
+   - Build & sign AAB bundle via canonical CI (`release.yml`).
+   - Upload AAB to Play Console internal testing track.
+   - Fill Play Store listing copy and upload all 6 authentic visual assets (Icon, Feature Graphic, 4 Posters).
+   - Save changes and submit for Google Play review ("Changes in review").
+   - Obtain internal testing join link (`https://play.google.com/apps/internaltest/...`).
+8. **Pre-Handover Sanity Gates:**
+   - `python3 cli.py store-readiness <project>` → PASS.
+   - `python3 cli.py doctor <project>` → PASS.
+   - Both git repos (`dev-team` and `<project>`) are 100% clean with all commits pushed to origin.
+
 ## Done means
 
 `verify` PASS → `release` delivered (CI green, internal testing updated) →
