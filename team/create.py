@@ -52,7 +52,7 @@ def scaffold_android_project(
     pkg_dir = target_dir / "app/src/main/java" / package.replace(".", "/")
     pkg_dir.mkdir(parents=True, exist_ok=True)
 
-    # 1. Copy gradle wrapper from MindfulLauncher if available
+    # 1. Copy gradle wrapper and starter mipmaps from MindfulLauncher if available
     ml = Path.home() / "AndroidStudioProjects" / "MindfulLauncher"
     if ml.exists():
         if (ml / "gradlew").exists():
@@ -60,6 +60,11 @@ def scaffold_android_project(
             (target_dir / "gradlew").chmod(0o755)
         if (ml / "gradle").exists():
             shutil.copytree(ml / "gradle", target_dir / "gradle", dirs_exist_ok=True)
+        res_dir = target_dir / "app/src/main/res"
+        res_dir.mkdir(parents=True, exist_ok=True)
+        for mipmap in (ml / "app/src/main/res").glob("mipmap*"):
+            if mipmap.is_dir():
+                shutil.copytree(mipmap, res_dir / mipmap.name, dirs_exist_ok=True)
     
     # 2. Root build.gradle
     root_gradle = """buildscript {
