@@ -209,6 +209,18 @@ def apply_plan(state: dict, incoming: list[dict], source: str = "research",
     explicitly drops is recorded as an unexplained drop (never silent)."""
     existing = list(state.get("queue", []))
     new_queue = [dict(q) for q in incoming]
+    # A PINNED entry is a live owner request (the prompt handler admitted it).
+    # The planner may reorder everything else, but it cannot quietly drop the
+    # owner's own sentence: it stays at the head until it ships or the owner
+    # drops it explicitly (`queue --done`). Observed need: a plan review that
+    # did not know about the request replaced the queue and the request simply
+    # vanished (2026-11-01).
+    carried_labels = {_norm(label_of(q)) for q in new_queue}
+    pinned = [q for q in existing
+              if q.get("pinned") and _norm(label_of(q)) not in carried_labels]
+    if pinned:
+        new_queue = pinned + new_queue
+        carried_labels |= {_norm(label_of(q)) for q in pinned}
     # Explicit drops become synthetic supersede-markers so judge() can explain
     # them; they are signals for the verdict pass, never queue entries.
     markers = [{"label": d.get("label"), "type": d.get("type"),

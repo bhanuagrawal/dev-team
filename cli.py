@@ -1397,6 +1397,19 @@ def cmd_status(args: argparse.Namespace) -> None:
     r = subprocess.run(["git", "log", "--oneline", "-1"], cwd=project,
                        capture_output=True, text=True)
     print(f"local HEAD: {r.stdout.strip()}")
+    # An open brand change is a run in progress: the next agent must see which
+    # step is owed instead of re-deriving the chain from a skill (owner,
+    # 2026-11-01). Reads the state file, prints the single next command.
+    try:
+        from team import brand_change as brand_mod
+        bstate = brand_mod.state(project)
+        if bstate and bstate.get("state") not in (None, "published"):
+            info = brand_mod.status(project)
+            print(f"brand:      open at '{bstate.get('state')}' — {info.get('label')}"
+                  + (f"  ⚠ {len(info['issues'])} gate issue(s)" if info.get("issues") else ""))
+            print(f"  next:     {info.get('next')}")
+    except Exception:
+        pass
     # Trees on disk are a cache; a stopped attempt is a BRANCH. Report both, so
     # a session that died mid-run is visible to the next agent instead of living
     # only as a 230 MB directory nobody lists.
@@ -2404,6 +2417,119 @@ def cmd_storefront_brand(args: argparse.Namespace) -> int:
     return 0 if not sbf.gate(project) else 1
 
 
+def cmd_route(args: argparse.Namespace) -> int:
+    """THE PROMPT HANDLER: one owner sentence → ordered tool plan (optionally queued).
+
+    The planner (`devteam plan`) is a different step and runs INSIDE the plan's
+    first step when the request is admitted — the handler decides the order, the
+    planner decides the queue's shape. See team/router.py.
+    """
+    project = resolve_project(args.project)
+    from team.core import delivery_notice
+    from team import router
+
+    print(delivery_notice(project))
+    res = router.apply(project, args.prompt) if getattr(args, "apply", False) \
+        else router.plan(project, args.prompt)
+    if getattr(args, "json", False):
+        print(json.dumps(res, indent=2))
+    else:
+        print(router.format_plan(res))
+        if res.get("queue_impact"):
+            print()
+            print(res["queue_impact"])
+    if res.get("blocked"):
+        print("\nROUTE: blocked — answer the question above before any tool runs")
+        return 2
+    if not getattr(args, "apply", False):
+        print("\n  nothing was queued; re-run with --apply to admit the task and pin it")
+    return 0
+
+
+def cmd_brand(args: argparse.Namespace) -> int:
+    """Owner feedback → Stitch → app icon → Play icon → publish, one chain.
+
+    Every step is a file or a hash; `verify` refuses an icon change whose design,
+    prompt or provenance is not in the commit. See team/brand_change.py.
+    """
+    project = resolve_project(args.project)
+    from team.core import delivery_notice
+    from team import brand_change as bc
+
+    print(delivery_notice(project))
+
+    if getattr(args, "reset", False):
+        path = project / bc.STATE_REL
+        if path.is_file():
+            path.replace(path.with_suffix(".bak.json"))
+            print("brand: state cleared (kept as .pipeline/brand.bak.json)")
+        return 0
+
+    if getattr(args, "feedback", None):
+        res = bc.intake(project, args.feedback)
+        if res.get("status") != "OK":
+            print(f"BRAND: {res.get('status')}")
+            print(f"  ✗ {res.get('error')}")
+            if res.get("hint"):
+                print(f"  → {res['hint']}")
+            return 1
+        print(f"BRAND: queued '{res['label']}' at the head of the plan")
+        print("  the brief Stitch will receive (locked in the commit with the design):")
+        print("=" * 66)
+        print(res["prompt"])
+        print("=" * 66)
+        print(f"  next: devteam worktree-start {project.name} --task-id <id>")
+        print(f"        devteam brand {project.name} --design --worktree <WORKTREE_PATH>")
+        return 0
+
+    if getattr(args, "design", False):
+        if not args.worktree:
+            print("BRAND: --design writes the app icon, so it needs the task worktree")
+            print(f"  → devteam worktree-start {project.name} --task-id <id>")
+            print(f"    devteam brand {project.name} --design --worktree <WORKTREE_PATH>")
+            return 1
+        res = bc.design(project, Path(args.worktree).expanduser(),
+                        from_file=getattr(args, "from_file", None),
+                        stitch_source=getattr(args, "stitch_source", ""),
+                        timeout=getattr(args, "timeout", 900), log=print)
+        if res.get("status") != "OK":
+            print(f"BRAND DESIGN: {res.get('status')}")
+            print(f"  ✗ {res.get('error')}")
+            if res.get("hint"):
+                print(f"  → {res['hint']}")
+            return 1
+        print(f"  ✓ design {res['design']['sha256'][:16]}  play icon "
+              f"{str((res.get('launcher') or {}).get('play_icon', {}).get('sha256', ''))[:16]}"
+              f"  ground {res['background']}")
+        print(f"  ✓ launcher: {', '.join(sorted(res['launcher']['densities']))}")
+        print(bc.format_status(project, root=Path(args.worktree).expanduser()))
+        return 0
+
+    if getattr(args, "publish", False):
+        res = bc.publish(project, yes=getattr(args, "yes", False), log=print)
+        status = res.get("status")
+        if status in ("BLOCKED", "ERROR"):
+            print(f"BRAND PUBLISH: {status}")
+            for b in res.get("blockers") or [res.get("error")]:
+                if b:
+                    print(f"  ✗ {b}")
+            if res.get("hint"):
+                print(f"  → {res['hint']}")
+            return 1
+        print(f"BRAND PUBLISH: {status} — {res.get('package')} ({res.get('locale')})")
+        if status == "DRY-RUN":
+            print("  nothing was written; re-run with --yes to upload and commit")
+        return 0
+
+    info = bc.status(project, root=Path(args.worktree).expanduser() if args.worktree else None)
+    if getattr(args, "json", False):
+        print(json.dumps(info, indent=2))
+        return 0 if info.get("status") in ("OK", "NONE") else 1
+    print(bc.format_status(project, root=Path(args.worktree).expanduser()
+                           if args.worktree else None))
+    return 0 if info.get("status") in ("OK", "NONE") else 1
+
+
 def cmd_store_publish(args: argparse.Namespace) -> int:
     project = resolve_project(args.project)
     from team.core import delivery_notice
@@ -2726,6 +2852,37 @@ def main() -> None:
     sbr.add_argument("--note", default="", help="why the owner supplied it (recorded)")
     sbr.add_argument("--force", action="store_true", help="repaint even if an approved asset exists")
     sbr.set_defaults(fn=cmd_storefront_brand)
+    br = sub.add_parser("brand", help="OWNER brand feedback → Stitch artboard (from code) → app "
+                                     "launcher icon → Play icon → release → publish, in one "
+                                     "deterministic chain that verify refuses to skip")
+    br.add_argument("project")
+    br.add_argument("--feedback", metavar="TEXT",
+                    help="the owner's words, verbatim: starts the change and queues the task")
+    br.add_argument("--design", action="store_true",
+                    help="generate the artboard in Stitch and write the app + listing icons "
+                         "(run with --worktree, never in the checkout)")
+    br.add_argument("--from", dest="from_file", metavar="SVG_OR_HTML",
+                    help="adopt an existing Stitch artboard instead of calling Stitch")
+    br.add_argument("--stitch-source", default="",
+                    help="with --from: the Stitch screen the artboard came from (provenance)")
+    br.add_argument("--worktree", help="the dt/<task> tree that receives the icon change")
+    br.add_argument("--publish", action="store_true", help="commit the listing edit to Play")
+    br.add_argument("--yes", action="store_true", help="with --publish: write to Play (default is a dry run)")
+    br.add_argument("--status", action="store_true", help="where the chain stands (the default)")
+    br.add_argument("--json", action="store_true", help="with --status: machine-readable")
+    br.add_argument("--timeout", type=int, default=900, help="Stitch generation budget, seconds")
+    br.add_argument("--reset", action="store_true",
+                    help="clear an abandoned brand run deliberately (kept as a .bak file)")
+    br.set_defaults(fn=cmd_brand)
+    rt = sub.add_parser("route", help="THE PROMPT HANDLER: turn one owner sentence into the "
+                                      "ordered tool plan it implies, judge alignment with the "
+                                      "current plan, and pin the task at the queue head")
+    rt.add_argument("project")
+    rt.add_argument("--prompt", required=True, help="the owner's words, verbatim")
+    rt.add_argument("--apply", action="store_true",
+                    help="admit the task (pinned head) and record the plan; default is a dry run")
+    rt.add_argument("--json", action="store_true", help="machine-readable plan")
+    rt.set_defaults(fn=cmd_route)
     sb = sub.add_parser("storefront-build",
                         help="THE storefront asset pass: render, compose the designed frame, composite, gate, publish — in one deterministic order")
     sb.add_argument("project")

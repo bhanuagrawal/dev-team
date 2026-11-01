@@ -127,6 +127,32 @@ def scope_check(profile: dict, files: list[str]) -> tuple[bool, str]:
     return True, f"{len(files)} files changed"
 
 
+def brand_check(worktree: Path, files: list[str]) -> tuple[bool, str]:
+    """An icon change carries its provenance, or it does not ship.
+
+    The previous icon release (2026-10-31) bumped the version, replaced every
+    mipmap and claimed "stitch-designed" in the commit message — with no
+    artboard, no prompt and no provenance record anywhere in the diff. Nothing
+    refused it, so the owner could not tell designed art from an accident, and
+    the store gate that would have refused it was never asked (owner,
+    2026-11-01: the icon is bad; we need more determinism).
+
+    This runs only when the diff touches a launcher icon or the listing icon.
+    """
+    triggers = [f for f in files
+                if re.search(r"(^|/)mipmap-[^/]+/ic_launcher(_round|_foreground)?\.png$", f)
+                or re.search(r"(^|/)listing/[^/]+/images/icon\.png$", f)]
+    if not triggers:
+        return True, ""
+    from . import brand_change
+
+    issues = brand_change.gate(worktree)
+    if issues:
+        return False, ("ICON CHANGE WITHOUT PROVENANCE: " + "; ".join(issues) +
+                       " — `devteam brand <project> --status` shows the missing step")
+    return True, f"{len(triggers)} icon file(s), provenance matches"
+
+
 def localization_check(project_root: Path, files: list[str]) -> tuple[bool, str]:
     """Expertise-as-script: every NEW R.string reference in Kotlin changes must
     exist in every locale's strings.xml (this app ships 15 locales)."""
@@ -347,6 +373,12 @@ def verify_all(project: Path, worktree: Path, base: str, log, gradle: bool = Tru
 
     ok, msg = localization_check(worktree, files)
     log("localization: ok" if ok else "localization: FAIL")
+    if not ok:
+        failures.append(msg)
+        return False, failures
+
+    ok, msg = brand_check(worktree, files)
+    log("brand: ok (" + msg + ")" if ok else "brand: FAIL — " + msg)
     if not ok:
         failures.append(msg)
         return False, failures

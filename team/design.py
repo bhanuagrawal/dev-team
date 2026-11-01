@@ -293,6 +293,17 @@ def extract_design_tokens(project: Path) -> dict[str, str]:
         "brandsecondary": "secondary_accent",
         "receivingaccent": "secondary_accent",
         "accentwarning": "warning_accent",
+        # Material-style tables name the same roles differently: a project whose
+        # design.md says `background`/`accent` was seeded from the DEFAULTS
+        # (#0A0E14 / #00E676) — another app's palette — so every generated icon
+        # was designed against the wrong colours.
+        "background": "surface_base",
+        "surface": "surface_elevated",
+        "surfacehigh": "surface_highlight",
+        "surfacehighest": "surface_highlight",
+        "accent": "primary_accent",
+        "onsurface": "text_primary",
+        "onsurfacevariant": "text_secondary",
     }
     matched = False
     for line in text.splitlines():

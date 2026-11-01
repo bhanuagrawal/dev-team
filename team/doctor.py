@@ -169,11 +169,41 @@ def _name_tokens(name: str) -> set[str]:
     return {w.lower() for w in words if len(w) >= 4}
 
 
+_COMMON_WORDS: set[str] | None = None
+
+
+def _common_words() -> set[str]:
+    """The host's English dictionary, when it has one (macOS does).
+
+    Used to decide whether a lowercase project name is distinctive enough to
+    match as a bare token. Without it, a project named "field" made every code
+    identifier called `field` a project reference.
+    """
+    global _COMMON_WORDS
+    if _COMMON_WORDS is not None:
+        return _COMMON_WORDS
+    words: set[str] = set()
+    for path in ("/usr/share/dict/words", "/usr/share/dict/web2"):
+        try:
+            words = {w.strip().lower() for w in Path(path).read_text(errors="ignore").splitlines()
+                     if len(w.strip()) >= 3}
+            if words:
+                break
+        except Exception:
+            continue
+    _COMMON_WORDS = words
+    return words
+
+
+def _is_common(word: str) -> bool:
+    return word.lower() in _common_words()
+
+
 def _distinctive_tokens(names: set[str]) -> set[str]:
     toks: set[str] = set()
     for n in names:
         toks |= _name_tokens(n)
-    return toks - GENERIC_TOKENS
+    return {t for t in toks - GENERIC_TOKENS if not _is_common(t)}
 
 
 def _find_name_hits(text: str, names: set[str]) -> list[str]:
@@ -185,11 +215,39 @@ def _find_name_hits(text: str, names: set[str]) -> list[str]:
     inside the team's generic generator and every gate stayed green (2026-10-30). A
     distinctive word of the name identifies the project just as well as the full name,
     in any casing.
+
+    A lowercase name or token counts only when it is REFERENCED (a path segment, a
+    quoted string, a package member, a branch name) — not when the same letters occur
+    in English prose. A registered project whose name contains a common word ("field")
+    made every `field` in a comment a "project reference", so verify failed on
+    untouched code and the gate had to be ignored to release anything (2026-11-01).
+    CamelCase names stay prose-matchable: those are distinctive on their own.
     """
-    low = text.lower()
-    hits = {n for n in names if n and n.lower() in low}
+    neighbours = set("/\\\"'`:=.@-_")
+    hits: set[str] = set()
+
+    def referenced(name: str) -> bool:
+        if any(c.isupper() for c in name):
+            return name in text
+        common = _is_common(name)
+        for m in re.finditer(rf"(?<![A-Za-z0-9]){re.escape(name)}(?![A-Za-z0-9])",
+                             text, re.I):
+            before = text[m.start() - 1] if m.start() else ""
+            after = text[m.end()] if m.end() < len(text) else ""
+            # A dictionary word is only evidence when used as a PATH segment:
+            # `field/...` names a project, `field = 34` names a parameter.
+            if common:
+                if before == "/" or after == "/":
+                    return True
+            elif before in neighbours or after in neighbours:
+                return True
+        return False
+
+    for name in names:
+        if name and referenced(name):
+            hits.add(name)
     for tok in _distinctive_tokens(names):
-        if re.search(rf"\b{re.escape(tok)}\b", low):
+        if referenced(tok):
             hits.add(tok)
     return sorted(hits)
 

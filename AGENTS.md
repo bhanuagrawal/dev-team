@@ -33,6 +33,42 @@ python3 cli.py alarm   <project>
 Report the outcome banner with the `RELEASE HANDOVER` block (store note + owner
 checklist + release-candidate call) and the two page URLs `record` prints.
 
+## Owner prompts have ONE entry point: the prompt handler
+
+A nightly run has a fixed order; an owner sentence does not — it has to be
+interpreted. That interpretation is code, not judgment:
+
+```bash
+python3 cli.py route <project> --prompt "<the owner's words>"          # the plan
+python3 cli.py route <project> --prompt "<the owner's words>" --apply  # + queue it
+```
+
+The handler (`team/router.py`) is **not the planner**. It classifies the sentence
+(brand / store / release / bugfix / visual / feature / direction), judges whether
+it belongs in the plan that exists (OK / PROVISIONAL / BLOCKED / OWNER), and
+prints the ordered tool chain — whose step 1 is `devteam plan --focus`, i.e. it
+*invokes* the planner to reconcile the queue. It refuses an unknown sentence and
+a direction change rather than guessing. `--apply` admits the task **pinned at
+the queue head**; a plan review reorders everything else but cannot drop a live
+owner request.
+
+| the sentence | the chain it resolves to |
+|---|---|
+| icon/logo/brand | `plan` → worktree → `brand --design` → verify → release → record → `brand --publish` |
+| a button/screen looks wrong, a crash | `plan` → pick → worktree → developer → verify → release → record |
+| screenshots/listing | `storefront-direction` → `storefront-build` → `store-publish` |
+| "ship it" | status → record |
+| "we should focus on …" | owner ask (a direction change is never an agent rewrite) |
+
+An icon change has its own deterministic chain — `devteam brand <project>
+--feedback "<words>"`, then `--design --worktree <tree>`, then the normal
+release, then `--publish`. Stitch is called **from code** (`team/stitch_mcp.py`),
+not by an agent reading a prompt, and the artboard + the brief + the provenance
+record ship in the same commit. `verify` refuses an icon change whose four
+provenance files are missing or do not hash-match, so "it looked designed" can
+never again be the evidence. `devteam brand <project> --status` shows the step
+owed, and `devteam status` prints any open brand change.
+
 ## Rules that hold for every agent
 
 1. **Never edit project code on `main`.** Every task runs in
