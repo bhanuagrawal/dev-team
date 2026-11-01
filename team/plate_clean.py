@@ -37,11 +37,11 @@ STAMP_X, STAMP_Y, STAMP_HALF = 0.843, 0.912, 0.045
 GROW = 1.35              # retry wider when the first box leaves contrast behind
 MIN_CONTRAST = 14        # local contrast a glyph edge leaves behind (grain stays under 8)
 OK_CONTRAST = 26         # best-effort tolerance: a healed corner may carry nearby art edges
-SCAN_LO = (0.60, 0.60)   # the "is there a SECOND mark elsewhere" scan
 # The corner the prompt mandates plain, as a contract we can check: the vendor
 # stamp lands somewhere in the last ~22% of both axes (its fixed centre is
-# 0.843,0.912 with a 0.045 half). Scanning the fixed box alone missed a real
-# sparkle that sat just above it and the image shipped "verified" (2026-11-01).
+# 0.843,0.912 with a 0.045 half). Scanning anywhere outside this corner (e.g. 0.60)
+# picks up the app's own UI inside the phone screen as a false stamp.
+SCAN_LO = (0.78, 0.78)
 CORNER_LO = (0.78, 0.78)
 CORNER_HALF = 0.05
 ELSEWHERE_OK = 8         # a mark leaves dozens of px; noise leaves a handful
