@@ -703,7 +703,21 @@ def research_collect(project: Path, log: RunLog) -> dict:
                     if scan.already_delivered(q, state) else q
                     for q in state.get("queue", [])],
                 "queue_impact_log": state.get("queue_events", [])[-8:],
-                "insights": state.get("insights", {}),
+                # The PREVIOUS cycle's written judgement, NOT a signal. It was true
+                # when it was written and nothing keeps it true: on 2026-11-02 the
+                # stored prose still said "profile.targets is empty and the six
+                # screens sit in targets_paused" while the profile had already
+                # restored targets and the scan saw 6/6 animated — a plan written
+                # from it would have closed a measure that was already met for the
+                # wrong reason. It travels with its date and this label so a reader
+                # re-verifies it against the signals instead of quoting it as fact.
+                "insights": {
+                    "note": ("the PREVIOUS cycle's written judgement, not a collected "
+                             "signal — re-verify every claim in it against the signals "
+                             "above; if they disagree, the signals win"),
+                    "at": state.get("last_research_at"),
+                    **(state.get("insights") or {}),
+                },
                 "open_asks": _open_asks_pull(profile),
                 "commits": _recent_commits_pull(project, latest_tag=latest),
             },
@@ -788,6 +802,12 @@ Rules:
   progress, so never judge the product from it (a review that does reviews code
   that is not deployed). Repo-relative paths in this prompt are all relative to
   that tree.
+- `signals.repo.insights` IS NOT A SIGNAL: it is the PREVIOUS cycle's written
+  judgement, stamped with `at`. It can be days old and nothing keeps it true —
+  re-verify each claim against the collected signals (and the source tree) before
+  repeating it in `insights` or acting on it in `milestone_verdict`. When the two
+  disagree, the signals win and the stale claim is a defect to report, not
+  evidence.
 - RECENT COMMITS & CODEBASE CONTEXT (`signals.repo.commits`):
   Inspect `signals.repo.commits.recent_commits`, `unreleased_commits`, `local_unpushed_commits`, and `detected_intent`.
   Recent commits indicate owner intent, landed architecture, updated design specifications
