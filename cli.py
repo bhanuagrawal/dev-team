@@ -273,6 +273,35 @@ def profile_reference_fill(profile: dict, project: Path) -> None:
 # outcome contract helpers — the orchestrator's duty is to relay, not remember:
 # upgrades/capability-asks flagged by the research agents are printed BY CODE
 # at record time; the run banner must quote what was printed.
+def _refreshed_play_store_flags(project: Path, flags: list) -> list:
+    """Re-read the Play-readiness flags against the tree as it is NOW.
+
+    The upgrade list is a snapshot taken at plan time, but `record` prints it
+    after the run's change has landed — so a run that resolves the very blocker
+    the snapshot named would otherwise hand the owner the same chore back, one
+    minute after fixing it (seen 2026-11-02: a shipped QUERY_ALL_PACKAGES removal
+    still told the owner to "resolve the Google Play Store readiness blockers").
+    An upgrade is a hypothesis; before it is relayed as work, the cheap
+    deterministic collector is re-run and the play-store flags are recomputed.
+    Best-effort by design: an audit that errors leaves the snapshot untouched,
+    because a broken audit must never erase an owner-facing flag.
+    """
+    ids = {str(u.get("id", "")) for u in flags}
+    if not any(i.startswith("play-store-") for i in ids):
+        return flags
+    try:
+        from team.research import _store_readiness_pull, capability_upgrades
+        readiness = _store_readiness_pull(Path(project))
+        if readiness.get("status") == "error":
+            return flags
+        fresh = [u for u in capability_upgrades({"store_readiness": readiness}, {})
+                 if str(u.get("id", "")).startswith("play-store-")]
+    except Exception:
+        return flags
+    kept = [u for u in flags if not str(u.get("id", "")).startswith("play-store-")]
+    return kept + fresh
+
+
 def print_agent_flags(project: Path) -> None:
     state = state_of(project)
     flags = state.get("upgrades", [])
@@ -282,6 +311,7 @@ def print_agent_flags(project: Path) -> None:
                                .read_text()).get("upgrades", [])
         except Exception:
             flags = []
+    flags = _refreshed_play_store_flags(Path(project), flags)
     if not flags:
         return
     print("--- AGENT FLAGS (upgrades surfaced by research — quote these in the run banner) ---")
