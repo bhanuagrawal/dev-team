@@ -217,8 +217,14 @@ def park(project: Path, tree: Path, branch: str, log=None) -> dict[str, Any]:
     return {"ok": True, "sha": sha, "branch": branch}
 
 
-def inventory(project: Path) -> list[dict[str, Any]]:
-    """Every task worktree with the facts the prune decision needs."""
+def inventory(project: Path, ended: str | None = None) -> list[dict[str, Any]]:
+    """Every task worktree with the facts the prune decision needs.
+
+    `ended` names the tree whose run has just closed (`record` is printing its
+    outcome, so no session can still be working in it). That tree's own run lock
+    no longer means "live" — without this, a finished run could not reclaim its
+    own tree and a repo kept a stale worktree for the whole settle window.
+    """
     root = project / RUN_BASE
     if not root.is_dir():
         return []
@@ -258,7 +264,7 @@ def inventory(project: Path) -> list[dict[str, Any]]:
         parked = bool(remote) and _contains(project, sha or "", f"origin/{branch}")
         idle_min = int(max(0, now - _last_activity(entry)) // 60)
         locked = entry.resolve().as_posix() in locks or str(entry) in locks
-        live = locked and idle_min * 60 < settle
+        live = locked and idle_min * 60 < settle and entry.name != ended
         keep_branch = False
 
         if live:
@@ -327,13 +333,16 @@ def _gc_branches(project: Path, apply: bool, log=None) -> list[str]:
     return gone
 
 
-def prune(project: Path, apply: bool = False, force: bool = False, log=None) -> dict[str, Any]:
+def prune(project: Path, apply: bool = False, force: bool = False, log=None,
+          ended: str | None = None) -> dict[str, Any]:
     """Remove task worktrees whose work is safe somewhere else. Never guesses.
 
     `force` means "remove even when the work cannot be parked" — it is the only
-    way to drop uncommitted work, and it is never implied.
+    way to drop uncommitted work, and it is never implied. `ended` is the tree of
+    the run that just finished: its lock cannot mean "live" any more (see
+    [inventory]).
     """
-    trees = inventory(project)
+    trees = inventory(project, ended=ended)
     removable = [t for t in trees if t["decision"] == "remove"]
     parkable = [t for t in trees if t["decision"] == "park-and-remove"]
     kept = [t for t in trees if t["decision"] == "keep"]

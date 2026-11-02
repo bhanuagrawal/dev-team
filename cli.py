@@ -977,7 +977,10 @@ def cmd_record(args: argparse.Namespace) -> None:
     # ones that used to leave a 230 MB tree nobody could ever delete.
     try:
         from team import worktrees
-        pruned = worktrees.prune(project, apply=True)
+        ended = None
+        if getattr(args, "task_spec", None):
+            ended = Path(str(args.task_spec)).stem
+        pruned = worktrees.prune(project, apply=True, ended=ended)
         if pruned["removed"]:
             print(f"worktrees: removed {len(pruned['removed'])} tree(s), "
                   f"~{pruned['reclaimable_mb']} MB reclaimed")
