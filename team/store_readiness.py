@@ -26,8 +26,8 @@ class ReadinessCheck(NamedTuple):
     fix: str = ""
 
 
-# Google Play policy mandates targetSdk >= 34 (Android 14) for all app updates.
-MIN_ACCEPTABLE_TARGET_SDK = 34
+# Google Play policy mandates targetSdk >= 36 (Android 16 / 2026 requirement) for all new apps and updates.
+MIN_ACCEPTABLE_TARGET_SDK = 36
 MIN_RECOMMENDED_MIN_SDK = 21
 PLAY_APP_NAME_MAX_CHARS = 30
 PLAY_SHORT_DESC_MAX_CHARS = 80
@@ -553,9 +553,9 @@ def run_store_readiness_audit(project: Path, tree: Path | None = None) -> list[R
             category="Storefront Graphic Assets",
             name="Play Store 512x512 Icon",
             passed=has_512,
-            severity="WARNING" if not has_512 else "INFO",
+            severity="BLOCKER" if not has_512 else "INFO",
             detail=f"512x512 PNG icon present ({icon_dims[0]}x{icon_dims[1]})" if has_512 else ("Missing images/icon.png" if not icon_dims else f"Icon dimensions are {icon_dims[0]}x{icon_dims[1]}, expected 512x512"),
-            fix="Provide 512x512 32-bit PNG icon in images/icon.png",
+            fix="Provide 512x512 32-bit PNG icon in images/icon.png via `devteam storefront-brand <project>` (Stitch design)",
         ))
 
         fg_path = img_dir / "featureGraphic.png" if (img_dir / "featureGraphic.png").is_file() else img_dir / "feature-graphic.png"
@@ -565,21 +565,34 @@ def run_store_readiness_audit(project: Path, tree: Path | None = None) -> list[R
             category="Storefront Graphic Assets",
             name="Play Store Feature Graphic (1024x500)",
             passed=has_1024,
-            severity="WARNING" if not has_1024 else "INFO",
+            severity="BLOCKER" if not has_1024 else "INFO",
             detail=f"1024x500 feature graphic present ({fg_dims[0]}x{fg_dims[1]})" if has_1024 else ("Missing images/featureGraphic.png" if not fg_dims else f"Feature graphic dimensions are {fg_dims[0]}x{fg_dims[1]}, expected 1024x500"),
-            fix="Provide 1024x500 PNG/JPEG in images/featureGraphic.png",
+            fix="Provide 1024x500 PNG/JPEG in images/featureGraphic.png via `devteam storefront-brand <project> --generate` (Gemini painted)",
         ))
 
         shots_dir = img_dir / "phoneScreenshots" if (img_dir / "phoneScreenshots").is_dir() else img_dir / "phone-screenshots"
         shots = [f for f in shots_dir.glob("*.png")] + [f for f in shots_dir.glob("*.jpg")] if shots_dir.is_dir() else []
-        has_shots = len(shots) >= 2
+        has_shots = len(shots) >= 4
         checks.append(ReadinessCheck(
             category="Storefront Graphic Assets",
-            name="Phone Screenshots (min 2)",
+            name="Phone Screenshots (min 4)",
             passed=has_shots,
-            severity="WARNING" if not has_shots else "INFO",
-            detail=f"{len(shots)} phone screenshots present" if has_shots else f"Found {len(shots)} screenshots (Google Play requires at least 2)",
-            fix="Provide at least 2 phone screenshots in images/phoneScreenshots/",
+            severity="BLOCKER" if not has_shots else "INFO",
+            detail=f"{len(shots)} phone screenshots present (minimum 4 required)" if has_shots else f"Found {len(shots)} screenshots (Rule 5 requires at least 4 phone screenshots)",
+            fix="Render composables and compile marketing posters via `devteam storefront-build <project> --poster`",
+        ))
+
+        # Brand Asset Provenance Gate (Rule 5: Stitch icon + Gemini banner)
+        from . import storefront_brand as sbf
+        brand_issues = sbf.gate(src)
+        passed_brand = len(brand_issues) == 0
+        checks.append(ReadinessCheck(
+            category="Storefront Graphic Assets",
+            name="Brand Asset Provenance Gate",
+            passed=passed_brand,
+            severity="BLOCKER" if not passed_brand else "INFO",
+            detail="Brand assets verified (icon=Stitch, featureGraphic=Gemini)" if passed_brand else "; ".join(brand_issues),
+            fix="Run `devteam storefront-brand <project>` to generate Stitch icon and Gemini feature graphic",
         ))
 
         # Visual Asset Quality & ASO Conversion Score
@@ -592,9 +605,9 @@ def run_store_readiness_audit(project: Path, tree: Path | None = None) -> list[R
             category="Storefront Graphic Assets",
             name="Visual Asset Quality & ASO Score",
             passed=passed_quality,
-            severity="WARNING" if not passed_quality else "INFO",
+            severity="BLOCKER" if not passed_quality else "INFO",
             detail=f"Storefront visual assets scored {score}/100 [Grade {grade}]: {critic_rep.get('status')}",
-            fix="Elevate visual assets with high-contrast marketing headlines and realistic device bezels via `devteam store-assets <project>`",
+            fix="Elevate visual assets with high-contrast marketing headlines and realistic device bezels via `devteam storefront-build <project> --poster`",
         ))
 
     # ── 7. Localization Completeness ──────────────────────────────────────────
@@ -698,6 +711,36 @@ def run_store_readiness_audit(project: Path, tree: Path | None = None) -> list[R
             passed=True,
             severity="INFO",
             detail=f"Public HTTPS URL verified live (HTTP 200): {privacy_url}",
+        ))
+
+    # 9. Automation Loop (Nightly launchd Schedule)
+    from . import scheduler
+    is_manual = profile.get("schedule") == "manual"
+    sched_installed = scheduler.is_project_scheduled(project.name)
+    if is_manual:
+        checks.append(ReadinessCheck(
+            category="Automation & Operations",
+            name="Nightly Autonomous Execution Loop",
+            passed=True,
+            severity="INFO",
+            detail="Explicit manual mode declared in profile.json",
+        ))
+    elif sched_installed:
+        checks.append(ReadinessCheck(
+            category="Automation & Operations",
+            name="Nightly Autonomous Execution Loop",
+            passed=True,
+            severity="INFO",
+            detail=f"launchd nightly schedule registered ({scheduler.project_label(project.name)})",
+        ))
+    else:
+        checks.append(ReadinessCheck(
+            category="Automation & Operations",
+            name="Nightly Autonomous Execution Loop",
+            passed=False,
+            severity="BLOCKER",
+            detail=f"No nightly schedule registered in launchd for {project.name}",
+            fix=f"Run `devteam setup --project {project.name} --schedule auto` to register daily launchd trigger",
         ))
 
     return checks
@@ -1056,29 +1099,32 @@ def generate_store_readiness_pack(project: Path, log: RunLog | None = None) -> d
         full_file.write_text(full_text[:PLAY_FULL_DESC_MAX_CHARS])
         generated.append(str(full_file.relative_to(project)))
 
-    # 4. Synthesize high-conversion visual assets (icon, feature graphic, screenshots)
-    try:
-        from .marketing_asset_generator import generate_all_marketing_templates, render_storefront_assets
-        generate_all_marketing_templates(project)
-        render_res = render_storefront_assets(project, log=log)
-        if render_res.get("status") == "OK":
-            for r in render_res.get("rendered", []):
-                generated.append(r["file"])
-    except Exception as e:
-        if log:
-            log(f"  warning: marketing storefront asset generation failed: {e}")
-
-    # Fallback starter 512x512 icon if rendering was not possible
+    # 4. Synthesize fallback visual assets ONLY if completely missing
     icon_file = img_dir / "icon.png"
-    if not icon_file.is_file():
-        icon_file.write_bytes(_make_solid_png(512, 512, 10, 14, 20, border_rgb=(0, 230, 118)))
-        generated.append(str(icon_file.relative_to(project)))
-
-    # Fallback starter 1024x500 feature graphic if rendering was not possible
     fg_file = img_dir / "featureGraphic.png"
-    if not fg_file.is_file():
-        fg_file.write_bytes(_make_solid_png(1024, 500, 16, 31, 46, border_rgb=(0, 230, 118)))
-        generated.append(str(fg_file.relative_to(project)))
+    shots = list(shots_dir.glob("*.png"))
+    if not icon_file.is_file() or not fg_file.is_file() or len(shots) < 4:
+        try:
+            from .marketing_asset_generator import generate_all_marketing_templates, render_storefront_assets
+            generate_all_marketing_templates(project)
+            render_res = render_storefront_assets(project, log=log)
+            if render_res.get("status") == "OK":
+                for r in render_res.get("rendered", []):
+                    generated.append(r["file"])
+        except Exception as e:
+            if log:
+                log(f"  warning: marketing storefront asset generation failed: {e}")
+
+    # Note: Brand assets (icon and feature graphic) are strictly required to have
+    # authentic provenance per Rule 5 (Stitch for icon, Gemini for feature graphic).
+    # Never fabricate solid flat placeholders.
+    icon_file = img_dir / "icon.png"
+    if not icon_file.is_file() and log:
+        log("  notice: Play icon missing — generate via `devteam storefront-brand <project> --stitch-prompt` and adopt")
+
+    fg_file = img_dir / "featureGraphic.png"
+    if not fg_file.is_file() and log:
+        log("  notice: Feature graphic missing — generate via `devteam storefront-brand <project> --generate` (Gemini)")
 
     return {
         "generated": generated,

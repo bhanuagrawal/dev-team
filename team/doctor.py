@@ -117,6 +117,20 @@ def agent_requirements(profile: dict, project: Path) -> dict[str, list[tuple[str
          _model_fix("product_synthesis", syn)),
     ]
 
+    from . import scheduler
+    is_manual = profile.get("schedule") == "manual"
+    sched_installed = scheduler.is_project_scheduled(project.name)
+    sched_loaded = scheduler.is_project_loaded(project.name) if sched_installed else False
+    if is_manual:
+        sched_checks = [("nightly schedule: explicit manual mode declared", True, "")]
+    else:
+        sched_checks = [
+            ("nightly schedule registered in launchd", sched_installed,
+             f"run `devteam setup --project {project.name} --schedule auto` (or declare 'schedule': 'manual' in .pipeline/profile.json)"),
+            ("nightly launchd job loaded and active", sched_loaded,
+             f"launchd job for {project.name} is not loaded. Run: `devteam setup --project {project.name} --schedule auto`"),
+        ]
+
     store_readiness_checks = [
         ("manifest detectable", bool(list(project.glob("**/AndroidManifest.xml"))),
          "ensure project contains AndroidManifest.xml"),
@@ -125,7 +139,7 @@ def agent_requirements(profile: dict, project: Path) -> dict[str, list[tuple[str
     ]
 
     return {
-        "orchestrator": dev_checks + synthesis_checks,
+        "orchestrator": dev_checks + synthesis_checks + sched_checks,
         "developer": dev_checks,
         "research-agent": ga4_checks + play_checks + synthesis_checks,
         "release-agent": ship_checks + synthesis_checks,
@@ -160,6 +174,7 @@ GENERIC_TOKENS = {
     "routine", "budget", "wallet", "news", "music", "photos", "maps", "social", "video",
     "score", "court", "board", "media", "clean", "split", "merge", "convert", "share",
     "image", "images", "document", "documents", "file", "files", "text", "notes",
+    "field", "cert", "certificate", "audit", "trade", "check", "inspection",
 }
 
 
@@ -169,41 +184,11 @@ def _name_tokens(name: str) -> set[str]:
     return {w.lower() for w in words if len(w) >= 4}
 
 
-_COMMON_WORDS: set[str] | None = None
-
-
-def _common_words() -> set[str]:
-    """The host's English dictionary, when it has one (macOS does).
-
-    Used to decide whether a lowercase project name is distinctive enough to
-    match as a bare token. Without it, a project named "field" made every code
-    identifier called `field` a project reference.
-    """
-    global _COMMON_WORDS
-    if _COMMON_WORDS is not None:
-        return _COMMON_WORDS
-    words: set[str] = set()
-    for path in ("/usr/share/dict/words", "/usr/share/dict/web2"):
-        try:
-            words = {w.strip().lower() for w in Path(path).read_text(errors="ignore").splitlines()
-                     if len(w.strip()) >= 3}
-            if words:
-                break
-        except Exception:
-            continue
-    _COMMON_WORDS = words
-    return words
-
-
-def _is_common(word: str) -> bool:
-    return word.lower() in _common_words()
-
-
 def _distinctive_tokens(names: set[str]) -> set[str]:
     toks: set[str] = set()
     for n in names:
         toks |= _name_tokens(n)
-    return {t for t in toks - GENERIC_TOKENS if not _is_common(t)}
+    return toks - GENERIC_TOKENS
 
 
 def _find_name_hits(text: str, names: set[str]) -> list[str]:
@@ -215,39 +200,11 @@ def _find_name_hits(text: str, names: set[str]) -> list[str]:
     inside the team's generic generator and every gate stayed green (2026-10-30). A
     distinctive word of the name identifies the project just as well as the full name,
     in any casing.
-
-    A lowercase name or token counts only when it is REFERENCED (a path segment, a
-    quoted string, a package member, a branch name) — not when the same letters occur
-    in English prose. A registered project whose name contains a common word ("field")
-    made every `field` in a comment a "project reference", so verify failed on
-    untouched code and the gate had to be ignored to release anything (2026-11-01).
-    CamelCase names stay prose-matchable: those are distinctive on their own.
     """
-    neighbours = set("/\\\"'`:=.@-_")
-    hits: set[str] = set()
-
-    def referenced(name: str) -> bool:
-        if any(c.isupper() for c in name):
-            return name in text
-        common = _is_common(name)
-        for m in re.finditer(rf"(?<![A-Za-z0-9]){re.escape(name)}(?![A-Za-z0-9])",
-                             text, re.I):
-            before = text[m.start() - 1] if m.start() else ""
-            after = text[m.end()] if m.end() < len(text) else ""
-            # A dictionary word is only evidence when used as a PATH segment:
-            # `field/...` names a project, `field = 34` names a parameter.
-            if common:
-                if before == "/" or after == "/":
-                    return True
-            elif before in neighbours or after in neighbours:
-                return True
-        return False
-
-    for name in names:
-        if name and referenced(name):
-            hits.add(name)
+    low = text.lower()
+    hits = {n for n in names if n and n.lower() in low}
     for tok in _distinctive_tokens(names):
-        if referenced(tok):
+        if re.search(rf"\b{re.escape(tok)}\b", low):
             hits.add(tok)
     return sorted(hits)
 
