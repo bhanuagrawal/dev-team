@@ -450,7 +450,11 @@ def _handover_text(project: Path, task: dict, version: str, commit: str = "") ->
         line(f"    how: install v{version} from internal testing only if you want a smoke test; "
              "nothing in this build is supposed to look different to a user.")
     if not areas and not claim:
-        line("    (no targets or claim recorded for this run — nothing specific to walk)")
+        line("    (no targets or claim recorded for this run yet — if this build's run is "
+             f"not recorded, run `devteam record <project> --result shipped --version "
+             f"{version} --task-spec .pipeline/tasks/<id>.json` first, then reprint with "
+             f"`devteam rc <project> --version {version} --yes|--no --note \"...\"`; the "
+             "checklist then names the change that actually shipped)")
 
     verdict = rc_verdict(state, version)
     if verdict:
@@ -470,9 +474,13 @@ def _handover_text(project: Path, task: dict, version: str, commit: str = "") ->
 def _task_for_version(state: dict, project: Path, version: str) -> dict:
     """The task spec behind a shipped version, so the handover can name its claim.
 
-    A spec may have been pruned or the version may predate the ledger; a missing
-    spec degrades the handover to the checklist it can still derive — it never
-    aborts the command that was asked to print it.
+    The ledger's `runs[].version → task_id` is the ONLY honest link between a
+    version and the change that shipped it, so an unmatched version returns {}
+    rather than borrowing the newest run's spec: on 2026-11-04 `rc` was called for
+    a build whose run had not been recorded yet, the fallback picked the previous
+    release's task, and the owner's checklist asked them to "confirm" a feature
+    that build did not contain. A missing spec degrades the handover to an
+    explicit instruction; it never aborts the command that was asked to print it.
     """
     def _load(task_id: str) -> dict:
         for cand in (Path(".pipeline/tasks") / f"{task_id}.json",
@@ -484,14 +492,8 @@ def _task_for_version(state: dict, project: Path, version: str) -> dict:
                 continue
         return {}
 
-    runs = state.get("runs", [])
-    for run in reversed(runs):
+    for run in reversed(state.get("runs", [])):
         if str(run.get("version") or "") == version and run.get("task_id"):
-            task = _load(run["task_id"])
-            if task:
-                return task
-    for run in reversed(runs):
-        if run.get("task_id"):
             task = _load(run["task_id"])
             if task:
                 return task
@@ -547,7 +549,13 @@ def cmd_rc(args: argparse.Namespace) -> None:
     # Reprint the COMPLETE handover: the block `record` printed said "NOT CALLED YET",
     # and the owner must never be handed a stale verdict beside a fresh one.
     print()
-    print_release_handover(project, _task_for_version(state, project, version), version)
+    task = _task_for_version(state, project, version)
+    if not task:
+        print("note: no recorded run names this version yet, so the checklist below cannot "
+              "name the change that shipped. Record the run first (`devteam record <project> "
+              f"--result shipped --version {version} --task-spec .pipeline/tasks/<id>.json`) "
+              "and call rc again for the full handover.")
+    print_release_handover(project, task, version)
     prev = [v for v in reversed(state["release_candidates"][:-1])
             if str(v.get("version") or "") == version]
     if prev and bool(prev[-1].get("rc")) != entry["rc"]:
