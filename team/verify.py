@@ -63,6 +63,16 @@ def android_sdk_env(start: Path | None = None) -> dict:
                 val = line.split("=", 1)[-1].strip()
                 if val and Path(val).is_dir():
                     return {"ANDROID_HOME": val}
+    # Last resort, and the one that actually fires on this machine: Android
+    # Studio installs the SDK at a fixed per-user path and a project may have no
+    # `local.properties` at all (the owner's IDE resolved the SDK by itself, so
+    # every pipeline gate died with "SDK location not found" while the owner's
+    # own builds were fine; seen 2026-11-03). Probing the standard install
+    # locations costs nothing and cannot pick a wrong SDK: each candidate must
+    # exist as a directory.
+    for candidate in (Path.home() / "Library/Android/sdk", Path.home() / "Android/Sdk"):
+        if candidate.is_dir():
+            return {"ANDROID_HOME": str(candidate)}
     return {}
 
 
