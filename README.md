@@ -244,6 +244,29 @@ when no goal is set), on a ship the **RELEASE HANDOVER** block (below), the
 **THE TEAM CHANGED THE PLAN** block if the plan moved, and the URLs. It also
 publishes the plan (below).
 
+#### Who the ask belongs to is decided by code, not by the agent
+
+An implementation chore dressed as an owner ask ("enable this API", "create that
+product", "grant this permission") is how an owner ends up doing an agent's work.
+`cli.py asks <project>` reviews every open ask and flag against a **deterministic
+rule table** (`team/asks.py`: no model, no network, no project names) and the tools
+this machine actually has, and answers with the tool, the ordered plan, and the one
+thing the owner genuinely still supplies (a card, a legal answer, a 2FA tap):
+
+```
+? Connect Play vitals (crash/ANR per version)
+  verdict: AGENT — a tool can do this end to end; do not hand it to the owner
+  tool:    browser-control (the owner's own logged-in Chromium) — available (browser-control at …)
+  plan:    open Play Console → Users and permissions → … → read the change back from the page
+  owner supplies: nothing — the agent can do this end to end
+```
+
+`record`, `doctor` and `alarm` run the same review, so every banner carries an
+`agent-tool:` line and `doctor` warns while an open item is agent work. `--json`
+gives a machine payload, `--strict` exits 1 while any open item is agent work, and
+`--selftest` re-runs the rule table's fixed cases so a rule edit that starts
+mis-filing real work fails loudly.
+
 #### The release handover (on every ship)
 
 Handing over a build is not the same as reporting one. On a ship the same command

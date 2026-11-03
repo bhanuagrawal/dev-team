@@ -69,6 +69,18 @@ def check(project, log) -> int:
                                         "NOT updated. Inspect the Actions run.")
                     break
 
+    # An owner ask a machine can drive is work the pipeline owes, not a chore for
+    # the owner (deterministic rule table in team/asks.py). Reported here because
+    # the nightly's last word is this line; it never files an issue — the fix is a
+    # run, not a decision.
+    try:
+        from . import asks as asks_mod
+        rows = asks_mod.review_project(project)
+        if any(r["verdict"] in ("agent", "mixed") for r in rows):
+            log("alarm asks: " + asks_mod.summary_line(rows))
+    except Exception:
+        pass
+
     if not problems:
         log("alarm: healthy")
         return 0

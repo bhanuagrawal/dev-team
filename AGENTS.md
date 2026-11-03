@@ -18,6 +18,7 @@ release, whichever agent runs it.
 cd ~/dev-team
 python3 cli.py adapt   <project>     # make the project match the current team
 python3 cli.py status  <project>     # queue, delivery state, goal
+python3 cli.py asks    <project>     # review every open ask/flag: can a machine do it?
 python3 cli.py plan    <project>     # planner maintains the queue (runs every cycle)
 python3 cli.py pick    <project>     # the queue head → task spec + worktree command
 python3 cli.py worktree-start <project> --task-id <id>
@@ -114,7 +115,14 @@ checklist + release-candidate call) and the two page URLs `record` prints.
    tests. Version/signing/SDK changes and new libraries are the reviewer's diff to
    catch — say so in the handover when a task touches them.
 9. **Ask the owner only what no agent can decide** (freeze-worthy incidents,
-   discard-vs-keep on their WIP, direction). Never ask about promotion.
+   discard-vs-keep on their WIP, direction). Never ask about promotion. Whether an
+   ask is even the owner's is **decided by code, not by the agent's judgement**:
+   `team/asks.py` classifies every ask/flag against a rule table and the tools this
+   machine actually has, and `record`, `doctor` and `alarm` print the verdict
+   (`agent-tool: browser-control CAN do this …`). An ask a browser or desktop
+   driver can complete is **agent work** — do it, don't relay it; only what the
+   verdict names as owner-only (a policy act, a payment instrument, the owner's
+   legal/identity answers, one 2FA tap) reaches them.
 10. **Nothing remains uncommitted, ever.** Every change an agent makes ends in a
    commit on a pushed ref before its turn ends: a project change on `main` (once
    the gates pass) or on its `dt/<task-id>` branch; a team change on this repo's

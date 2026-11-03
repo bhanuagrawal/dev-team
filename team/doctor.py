@@ -369,6 +369,28 @@ def run_doctor(project: Path, log) -> dict:
     except Exception as e:  # a check must never hide the report
         log(f"doctor uncommitted: could not check ({e})")
 
+    # An owner ask a machine can do is not an ask — it is work the pipeline owes.
+    # Deterministic rule table (team/asks.py): the same text on the same machine
+    # always yields the same verdict, and the evidence names the binary/config that
+    # decided tool availability. WARN, never block: resolving it may need the
+    # owner's 2FA tap, but the ask must never be relayed to them as a chore.
+    try:
+        from . import asks as asks_mod
+        rows = asks_mod.review_project(project)
+        agentish = [r for r in rows if r["verdict"] in ("agent", "mixed")]
+        if agentish:
+            log(f"doctor asks: WARN — {asks_mod.summary_line(rows)}")
+            for r in agentish[:5]:
+                log(f"  · {r['title'][:72]} → {r['tool']}"
+                    f" ({'available' if r['available'] else 'tool not started'})")
+            report["asks"] = {"status": "warn", "blocked": [], "checks_passed": 0,
+                              "note": asks_mod.summary_line(rows)}
+        elif rows:
+            log(f"doctor asks: ready — {asks_mod.summary_line(rows)}")
+            report["asks"] = {"status": "ready", "blocked": [], "checks_passed": 1}
+    except Exception as e:  # a review must never hide the report
+        log(f"doctor asks: could not review ({e})")
+
     try:
         state = state_of(project)
         state["doctor"] = {"generated_at": now_iso(), "report": report}

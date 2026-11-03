@@ -563,6 +563,23 @@ never silently blocking.
     outcome, and the banner MUST carry it verbatim — plus put the question to the
     owner in plain words. A shipped run with an unanswered standing ask still ends
     with that ask.
+10c-bis. **Every ask/flag now carries `agent-tool:` — obey it, never relay it.**
+    Both blocks are reviewed by CODE (`team/asks.py`, a deterministic rule table —
+    no model, no network) against the tools this machine actually has, and each
+    item ends with one of:
+      - `agent-tool: browser-control CAN do this` / `desktop-use CAN do this` —
+        **AGENT WORK, not an owner chore.** Do it (the block prints the ordered
+        plan and, when present, the ONE thing the owner must still supply: a
+        card, a legal answer, a 2FA tap). Relaying it as an owner ask is a
+        run-report failure.
+      - `agent-tool: none — <why>` — genuinely the owner's (a policy act, a
+        payment instrument, or text naming no console/OS surface at all).
+    A block that ends `(N of these are AGENT WORK…)` is not a report line, it is
+    a work order. `devteam asks <project>` prints the same review on demand
+    (`--json` for a machine payload, `--strict` exits 1 while any open item is
+    agent work, `--selftest` re-runs the rule table's own cases). When the console
+    trip is done, record the identifier in the profile and re-run the collector —
+    a presence-driven flag clears itself when the read answers.
 10d. **A shipped run also hands over the BUILD** — `record --result shipped`
     prints a `RELEASE HANDOVER` block (release note + length, what to test by
     hand, and the release-candidate call). Two duties here, in order:

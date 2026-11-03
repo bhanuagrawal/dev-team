@@ -303,7 +303,46 @@ def _refreshed_play_store_flags(project: Path, flags: list) -> list:
     return kept + fresh
 
 
-def print_agent_flags(project: Path) -> None:
+def _print_ask_review(title: str, how: str, profile: dict, tools: dict) -> str:
+    """The deterministic tool verdict for ONE ask, on one indented line.
+
+    Printed under every owner ask and every agent flag: an implementation chore
+    dressed as an owner ask must never reach the owner as a chore. Returns the
+    verdict so the block can count how many are actually agent work.
+    """
+    from team import asks as asks_mod
+
+    row = asks_mod.review(title, how, profile=profile, tools=tools)
+    if row["verdict"] == "owner":
+        print(f"    agent-tool: none — {row['why']}")
+        return "owner"
+    where = row["tool_label"]
+    state = ("available" if row["available"] else row["evidence"])
+    print(f"    agent-tool: {where} CAN do this ({state})")
+    if row["steps"]:
+        import textwrap
+        plan = " → ".join(row["steps"])
+        print("      plan: " + "\n            ".join(
+            textwrap.wrap(plan, width=100)))
+    if row["owner_input"]:
+        for note in row["owner_input"]:
+            print(f"      owner supplies: {note}")
+    else:
+        print("      owner supplies: nothing — the agent can do this end to end")
+    return row["verdict"]
+
+
+def _print_ask_review_tail(verdicts: list[str]) -> None:
+    agentish = sum(1 for v in verdicts if v in ("agent", "mixed"))
+    if agentish:
+        print(f"  ({agentish} of these are AGENT WORK, not owner chores — "
+              "do them; `devteam asks <project>` prints the tool plan)")
+
+
+def _project_upgrades(project: Path) -> list[dict]:
+    """The agent flags this project currently carries — state first, then the
+    research file, with the store-readiness ones refreshed from live checks so a
+    banner never quotes a blocker the project already cleared."""
     state = state_of(project)
     flags = state.get("upgrades", [])
     if not flags:
@@ -312,13 +351,23 @@ def print_agent_flags(project: Path) -> None:
                                .read_text()).get("upgrades", [])
         except Exception:
             flags = []
-    flags = _refreshed_play_store_flags(Path(project), flags)
+    return _refreshed_play_store_flags(Path(project), flags)
+
+
+def print_agent_flags(project: Path) -> None:
+    flags = _project_upgrades(project)
     if not flags:
         return
+    from team import asks as asks_mod
+    profile, tools = profile_of(project), asks_mod.probe_tools()
     print("--- AGENT FLAGS (upgrades surfaced by research — quote these in the run banner) ---")
+    verdicts = []
     for u in flags:
         print(f"  · {u.get('title', '?')} — {u.get('benefit', '?')}")
         print(f"    how: {u.get('how', '?')}")
+        verdicts.append(_print_ask_review(u.get("title", ""), u.get("how", ""),
+                                          profile, tools))
+    _print_ask_review_tail(verdicts)
 
 
 def print_owner_asks(project: Path) -> None:
@@ -332,12 +381,17 @@ def print_owner_asks(project: Path) -> None:
     asks = goals.owner_asks(profile_of(project), state_of(project), project.name)
     if not asks:
         return
+    from team import asks as asks_mod
+    profile, tools = profile_of(project), asks_mod.probe_tools()
     print("--- OWNER ASKS (only the owner can answer these — "
           "quote this block in the run banner) ---")
+    verdicts = []
     for a in asks:
         print(f"  ? {a['what']}")
         if a.get("how"):
             print(f"    how: {a['how']}")
+        verdicts.append(_print_ask_review(a["what"], a.get("how") or "", profile, tools))
+    _print_ask_review_tail(verdicts)
 
 
 def latest_shipped_version(state: dict) -> str:
@@ -1895,6 +1949,34 @@ def cmd_vision(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_asks(args: argparse.Namespace) -> int:
+    """Review every open owner ask / agent flag against the tools this machine has.
+
+    Deterministic by construction: the rule table in `team/asks.py` decides, not a
+    model. An ask a browser or desktop driver can complete is AGENT WORK — the
+    owner must never be handed it as a chore — and `--strict` exits non-zero while
+    one remains, so a pipeline step can refuse to relay it as an ask.
+    """
+    project = resolve_project(args.project)
+    from team import asks as asks_mod
+    if args.selftest:
+        failures = asks_mod.selftest()
+        for f in failures:
+            print(f"FAIL  {f}")
+        print(f"selftest: {len(asks_mod.SELFTEST) - len(failures)}/{len(asks_mod.SELFTEST)} "
+              "rule-table cases hold")
+        return 1 if failures else 0
+    rows = asks_mod.review_project(project, flags=_project_upgrades(project))
+    if args.json:
+        print(json.dumps(rows, indent=2))
+        return 1 if (args.strict and any(r["verdict"] in ("agent", "mixed") for r in rows)) else 0
+    print(asks_mod.render(rows))
+    print()
+    print(asks_mod.summary_line(rows))
+    print_page(project)
+    return 1 if (args.strict and any(r["verdict"] in ("agent", "mixed") for r in rows)) else 0
+
+
 def cmd_doctor(args: argparse.Namespace) -> int:
     project = resolve_project(args.project)
     log = RunLog(project, "doctor-" + today())
@@ -3016,6 +3098,17 @@ def main() -> None:
                     help="extended effort ceiling in minutes (owner request to give a task more time / revamp in one go)")
     pl.set_defaults(fn=cmd_plan)
     do = sub.add_parser("doctor");     do.add_argument("project"); do.set_defaults(fn=cmd_doctor)
+    ak = sub.add_parser(
+        "asks",
+        help="review every open owner ask/flag: can browser-control or desktop-use "
+             "do it instead of the owner? (deterministic rule table, no model)")
+    ak.add_argument("project")
+    ak.add_argument("--json", action="store_true", help="machine payload, one row per ask")
+    ak.add_argument("--strict", action="store_true",
+                    help="exit 1 while any open ask is agent work (a step can refuse to relay it)")
+    ak.add_argument("--selftest", action="store_true",
+                    help="run the rule table's own fixed cases and exit non-zero on a misfile")
+    ak.set_defaults(fn=cmd_asks)
     ad = sub.add_parser("adapt");      ad.add_argument("project")
     ad.add_argument("--dry-run", action="store_true",
                     help="report what would change without touching anything")
