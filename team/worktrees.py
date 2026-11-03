@@ -104,6 +104,26 @@ def _worktree_root(tree: Path) -> Path | None:
     return Path(out).resolve() if r.returncode == 0 and out else None
 
 
+def _same_path(a: Path | None, b: Path | None) -> bool:
+    """Do these name the same directory, whatever the spelling?
+
+    macOS is case-insensitive by default, so a checkout addressed in lowercase
+    and the same path as git reports it (the directory's own capitalisation) are
+    ONE directory with two spellings — and `Path.resolve()` does not fold case.
+    Comparing the strings made every worktree of such a project look
+    unregistered: `record` refused to reclaim a merged tree and `park` refused
+    to save an unfinished one, leaving a ~1.3 GB directory "left for a human"
+    (seen 2026-11-04). `samefile` asks the filesystem, which is the only thing
+    that knows.
+    """
+    if a is None or b is None:
+        return False
+    try:
+        return os.path.samefile(a, b)
+    except OSError:
+        return str(a) == str(b)
+
+
 def _file_count(path: Path) -> int:
     try:
         return sum(1 for p in path.rglob("*") if p.is_file())
@@ -202,7 +222,7 @@ def park(project: Path, tree: Path, branch: str, log=None) -> dict[str, Any]:
     if not branch.startswith("dt/"):
         return {"ok": False,
                 "why": f"refusing to park onto '{branch or '(no branch)'}': only dt/* holds an attempt"}
-    if _worktree_root(tree) != tree.resolve():
+    if not _same_path(_worktree_root(tree), tree.resolve()):
         return {"ok": False,
                 "why": f"{tree.name} is not a worktree root — git would answer for the checkout"}
     ok, why = _commit_all(tree, f"wip({branch}): attempt parked when the run "
@@ -236,7 +256,7 @@ def inventory(project: Path, ended: str | None = None) -> list[dict[str, Any]]:
     for entry in sorted(root.iterdir()):
         if not entry.is_dir() or entry.name in KEEP_DIRS:
             continue
-        if _worktree_root(entry) != entry.resolve():
+        if not _same_path(_worktree_root(entry), entry.resolve()):
             # A leftover directory that is no longer a registered worktree has
             # no git state of its own; git answers for the project checkout from
             # inside it. It can hold no tracked work, so the only question is
@@ -263,7 +283,9 @@ def inventory(project: Path, ended: str | None = None) -> list[dict[str, Any]]:
         # parked == the branch at origin already holds everything in this tree
         parked = bool(remote) and _contains(project, sha or "", f"origin/{branch}")
         idle_min = int(max(0, now - _last_activity(entry)) // 60)
-        locked = entry.resolve().as_posix() in locks or str(entry) in locks
+        # Same spelling hazard as the root check above: a lock registered under
+        # another case must still count, or a LIVE tree reads as abandoned.
+        locked = any(_same_path(Path(p), entry) for p in locks)
         live = locked and idle_min * 60 < settle and entry.name != ended
         keep_branch = False
 
