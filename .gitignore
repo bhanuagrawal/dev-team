@@ -12,3 +12,4 @@ logs/
 # Local editor / OS junk
 .DS_Store
 .idea/
+site/

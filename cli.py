@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
 import subprocess
 import sys
@@ -539,6 +540,7 @@ def cmd_rc(args: argparse.Namespace) -> None:
              "why": args.note or "", "date": today(), "by": by}
     state.setdefault("release_candidates", []).append(entry)
     save_state(project, state)
+    _refresh_site(project)
     verdict = "a RELEASE CANDIDATE (✅)" if entry["rc"] else "NOT a release candidate"
     print(f"recorded ({by}): v{version} is {verdict}"
           + (f" — {entry['note']}" if entry["note"] else ""))
@@ -587,6 +589,146 @@ def print_page(project: Path, note: str = "", file=None,
 # --------------------------------------------------------------------------- #
 # orchestrator-facing deterministic commands
 # --------------------------------------------------------------------------- #
+
+def _refresh_site(project: Path) -> None:
+    """Rebuild the local report page after a ledger change.
+
+    Never fatal: the page is a view of the ledger, and a broken view must not fail
+    the thing it describes. It prints its own URL so the owner can open it from the
+    phone without remembering a port.
+    """
+    try:
+        from team import report
+        report.build()
+        port = 8788
+        urls = _site_urls(port)
+        tail = next((u for u in urls if "ts.net" in u), urls[0] if urls else "")
+        print(f"report:     {tail}   ({project.name} updated)")
+    except Exception:
+        pass
+
+
+def cmd_site(args: argparse.Namespace) -> int:
+    """Build / serve the local report page (what shipped, what to test).
+
+    Tailnet only: the page names commit hashes, file paths and unreleased work, so
+    it binds a port for Tailscale to reach and never a public interface.
+    """
+    from team import report
+
+    if args.status:
+        st = report.status()
+        if not st["built"]:
+            print("site: never built — run: python3 cli.py site")
+            return 1
+        print(f"site: built {st['built']}")
+        if st["stale"]:
+            print("site: STALE — ledger changed since: " + ", ".join(st["stale"]))
+            print("  fix: python3 cli.py site")
+            return 1
+        print("site: current")
+        return 0
+
+    if args.uninstall:
+        return _site_launchd(install=False)
+
+    res = report.build()
+    print(f"site: {res['files']} page(s) for {len(res['apps'])} app(s) -> {res['dir']}")
+
+    if args.install:
+        return _site_launchd(install=True, port=args.port)
+
+    if args.serve:
+        return _site_serve(args.port)
+
+    for target in _site_urls(args.port):
+        print(f"  {target}")
+    return 0
+
+
+def _site_urls(port: int) -> list[str]:
+    """The URLs this page answers on: loopback, the tailnet IP, and MagicDNS."""
+    urls = [f"http://127.0.0.1:{port}/"]
+    try:
+        from team.core import run
+        r = run(["tailscale", "status", "--json"], None, timeout=20)
+        import json as _json
+        me = _json.loads(r.stdout or "{}").get("Self") or {}
+        dns = str(me.get("DNSName") or "").rstrip(".")
+        ips = [str(i) for i in (me.get("TailscaleIPs") or []) if ":" not in str(i)]
+        if ips:
+            urls.append(f"http://{ips[0]}:{port}/")
+        if dns:
+            urls.append(f"http://{dns}:{port}/")
+    except Exception:
+        pass
+    return urls
+
+
+def _site_serve(port: int) -> int:
+    import functools, http.server, socketserver
+    from team import report
+    handler = functools.partial(http.server.SimpleHTTPRequestHandler,
+                                directory=str(report.SITE_DIR))
+    class Quiet(handler.func):  # type: ignore[misc]
+        def log_message(self, fmt, *a):
+            pass
+    socketserver.TCPServer.allow_reuse_address = True
+    with socketserver.TCPServer(("0.0.0.0", port), functools.partial(
+            http.server.SimpleHTTPRequestHandler, directory=str(report.SITE_DIR))) as httpd:
+        print(f"site: serving {report.SITE_DIR} on 0.0.0.0:{port} (tailnet only, Ctrl-C to stop)")
+        for u in _site_urls(port):
+            print(f"  {u}")
+        try:
+            httpd.serve_forever()
+        except KeyboardInterrupt:
+            print("\nsite: stopped")
+    return 0
+
+
+def _site_launchd(install: bool, port: int = 8788) -> int:
+    """A login-surviving server for the page, mirroring the nightly's plist shape."""
+    import subprocess
+    from pathlib import Path as _P
+    label = "com.devteam.site"
+    library = _P.home() / "Library" / "LaunchAgents"
+    plist = library / f"{label}.plist"
+    if not install:
+        subprocess.run(["launchctl", "bootout", f"gui/{os.getuid()}/{label}"],
+                       capture_output=True)
+        if plist.exists():
+            plist.unlink()
+        print("site: service uninstalled")
+        return 0
+    cli = _P(__file__).resolve()
+    library.mkdir(parents=True, exist_ok=True)
+    logs = _P.home() / "Library" / "Logs"
+    body = f"""<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+  <key>Label</key><string>{label}</string>
+  <key>ProgramArguments</key><array>
+    <string>/usr/bin/python3</string><string>{cli}</string>
+    <string>site</string><string>--serve</string><string>--port</string><string>{port}</string>
+  </array>
+  <key>WorkingDirectory</key><string>{cli.parent}</string>
+  <key>RunAtLoad</key><true/>
+  <key>KeepAlive</key><true/>
+  <key>StandardOutPath</key><string>{logs}/devteam-site.log</string>
+  <key>StandardErrorPath</key><string>{logs}/devteam-site.err.log</string>
+</dict></plist>"""
+    plist.write_text(body)
+    subprocess.run(["launchctl", "bootout", f"gui/{os.getuid()}/{label}"], capture_output=True)
+    r = subprocess.run(["launchctl", "bootstrap", f"gui/{os.getuid()}", str(plist)],
+                       capture_output=True, text=True)
+    if r.returncode != 0:
+        print(f"site: launchd bootstrap failed: {(r.stderr or r.stdout).strip()[:200]}")
+        return 1
+    print(f"site: installed {label} (auto-starts at login, keeps serving on port {port})")
+    for u in _site_urls(port):
+        print(f"  {u}")
+    return 0
+
 
 def cmd_ci(args: argparse.Namespace) -> int:
     project = resolve_project(args.project)
@@ -959,6 +1101,7 @@ def cmd_record(args: argparse.Namespace) -> None:
     save_state(project, state)
     scribe.update(project)
     print(f"recorded: {entry['result']} {entry['task_id']}")
+    _refresh_site(project)
     # A shipped run recorded WITHOUT its task-spec writes no shipped-ledger rows,
     # so the queue entry it delivered cannot later be recognised as delivered
     # (lesson 2026-10-18: exactly this let a delivered entry stay at the head of
@@ -2786,6 +2929,14 @@ def main() -> None:
     ci_p.add_argument("project")
     ci_p.add_argument("--write", action="store_true", help="render .github/workflows/release.yml, retire the old workflows and set the profile trigger to tag")
     ci_p.set_defaults(fn=cmd_ci)
+    st_ = sub.add_parser("site", help="build and serve the local report page: every app, "
+                                      "what changed, what to test (tailnet only)")
+    st_.add_argument("--port", type=int, default=8788)
+    st_.add_argument("--serve", action="store_true", help="serve it (Ctrl-C to stop)")
+    st_.add_argument("--install", action="store_true", help="install a launchd service so it keeps serving")
+    st_.add_argument("--uninstall", action="store_true")
+    st_.add_argument("--status", action="store_true", help="is the page current? exits 1 when stale")
+    st_.set_defaults(fn=cmd_site)
     wp = sub.add_parser("worktree-prune", help="remove task worktrees whose work already landed (dry run unless --yes)")
     wp.add_argument("project")
     wp.add_argument("--yes", action="store_true", help="actually remove merged worktrees and their dt/ branches")

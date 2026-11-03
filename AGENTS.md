@@ -197,6 +197,7 @@ reads it here — one source, no copies to drift.
 | run logs | `<project>/.pipeline/runs/` |
 | handover copy | `<project>/.pipeline/runs/<date>-handover-v<version>.md` |
 | store scene spec | `<project>/docs/storefront.json` |
+| report page (all apps, what changed / what to test) | `~/dev-team/site/` — `devteam site` builds it, `--serve` serves it, `--install` keeps it up at login |
 | rendered scenes | `<project>/.pipeline/storefront_scenes/` |
 
 ## New App "In One Go" — Non-Negotiable Order & Hard Checklist
