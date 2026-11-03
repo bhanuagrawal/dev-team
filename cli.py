@@ -609,7 +609,8 @@ def cmd_worktree_prune(args: argparse.Namespace) -> None:
     project = resolve_project(args.project)
     from team import worktrees
     res = worktrees.prune(project, apply=getattr(args, "yes", False),
-                          force=getattr(args, "force", False), log=print)
+                          force=getattr(args, "force", False), log=print,
+                          force_live=getattr(args, "force_live", False))
     verb = "removed" if res["applied"] else "removable"
     print(f"\nWORKTREES — {len(res['removable'])} {verb} · {res['reclaimable_mb']} MB · "
           f"{len(res['kept'])} kept")
@@ -2788,7 +2789,10 @@ def main() -> None:
     wp = sub.add_parser("worktree-prune", help="remove task worktrees whose work already landed (dry run unless --yes)")
     wp.add_argument("project")
     wp.add_argument("--yes", action="store_true", help="actually remove merged worktrees and their dt/ branches")
-    wp.add_argument("--force", action="store_true", help="also remove merged worktrees that still have uncommitted work")
+    wp.add_argument("--force", action="store_true", help="also remove merged worktrees that still have uncommitted work (this DISCARDS it)")
+    wp.add_argument("--force-live", dest="force_live", action="store_true",
+                    help="also act on a tree touched inside the settle window — a run may be using it "
+                         "(lock state is not proof: an unlocked live tree is the incident this guards)")
     wp.set_defaults(fn=cmd_worktree_prune)
     em = sub.add_parser("emulators");  em.add_argument("project"); em.add_argument("--record", action="store_true"); em.add_argument("--reset", action="store_true"); em.set_defaults(fn=cmd_emulators)
     r = sub.add_parser("release");     r.add_argument("project"); r.add_argument("--worktree", required=True); r.add_argument("--task-spec", required=True)

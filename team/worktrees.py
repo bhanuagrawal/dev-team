@@ -334,18 +334,39 @@ def _gc_branches(project: Path, apply: bool, log=None) -> list[str]:
 
 
 def prune(project: Path, apply: bool = False, force: bool = False, log=None,
-          ended: str | None = None) -> dict[str, Any]:
+          ended: str | None = None, force_live: bool = False) -> dict[str, Any]:
     """Remove task worktrees whose work is safe somewhere else. Never guesses.
 
     `force` means "remove even when the work cannot be parked" — it is the only
     way to drop uncommitted work, and it is never implied. `ended` is the tree of
     the run that just finished: its lock cannot mean "live" any more (see
     [inventory]).
+
+    `freshness` is a SEPARATE gate from `force`, and it exists because of a real
+    incident: a nightly run's tree was unlocked by hand and then pruned with
+    --force, which deleted a live agent's 23 uncommitted files. Unlocking is not
+    proof that a run is dead, so a tree touched inside the settle window is kept
+    unless the caller says `force_live` — dropping uncommitted work and
+    overruling "a run may be using this right now" are different decisions and
+    must never ride on one flag.
     """
     trees = inventory(project, ended=ended)
+    settle = _settle_seconds()
+    fresh: list[dict[str, Any]] = []
+    if not force_live:
+        still: list[dict[str, Any]] = []
+        for t in trees:
+            young = t.get("idle_min", 10 ** 6) * 60 < settle
+            if young and t["decision"] in ("remove", "park-and-remove") and t["task"] != (ended or ""):
+                t = dict(t, reason=(t["reason"] + " · touched inside the settle window — "
+                                               f"a run may be live (pass --force-live to overrule)"))
+                fresh.append(t)
+            else:
+                still.append(t)
+        trees = still
     removable = [t for t in trees if t["decision"] == "remove"]
     parkable = [t for t in trees if t["decision"] == "park-and-remove"]
-    kept = [t for t in trees if t["decision"] == "keep"]
+    kept = [t for t in trees if t["decision"] == "keep"] + fresh
     candidates = removable + parkable
     freed_kb = sum(t["size_kb"] for t in candidates)
 
