@@ -713,6 +713,36 @@ def run_store_readiness_audit(project: Path, tree: Path | None = None) -> list[R
             detail=f"Public HTTPS URL verified live (HTTP 200): {privacy_url}",
         ))
 
+    # 9. Automation Loop (Nightly launchd Schedule)
+    from . import scheduler
+    is_manual = profile.get("schedule") == "manual"
+    sched_installed = scheduler.is_project_scheduled(project.name)
+    if is_manual:
+        checks.append(ReadinessCheck(
+            category="Automation & Operations",
+            name="Nightly Autonomous Execution Loop",
+            passed=True,
+            severity="INFO",
+            detail="Explicit manual mode declared in profile.json",
+        ))
+    elif sched_installed:
+        checks.append(ReadinessCheck(
+            category="Automation & Operations",
+            name="Nightly Autonomous Execution Loop",
+            passed=True,
+            severity="INFO",
+            detail=f"launchd nightly schedule registered ({scheduler.project_label(project.name)})",
+        ))
+    else:
+        checks.append(ReadinessCheck(
+            category="Automation & Operations",
+            name="Nightly Autonomous Execution Loop",
+            passed=False,
+            severity="BLOCKER",
+            detail=f"No nightly schedule registered in launchd for {project.name}",
+            fix=f"Run `devteam setup --project {project.name} --schedule auto` to register daily launchd trigger",
+        ))
+
     return checks
 
 

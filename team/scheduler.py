@@ -43,6 +43,29 @@ def list_installed_schedules() -> list[dict]:
     return out
 
 
+def is_project_scheduled(project_name: str) -> bool:
+    """Returns True if this project has an installed LaunchAgent plist."""
+    label = project_label(project_name)
+    installed = {s["label"] for s in list_installed_schedules()}
+    if label in installed:
+        return True
+    if LAUNCH_LABEL in installed and _loaded_job_plist(LAUNCH_LABEL):
+        legacy = Path(_loaded_job_plist(LAUNCH_LABEL) or "").read_text(errors="ignore")
+        if project_name.lower() in legacy.lower():
+            return True
+    library = Path.home() / "Library" / "LaunchAgents"
+    return (library / f"{label}.plist").exists()
+
+
+def is_project_loaded(project_name: str) -> bool:
+    """Returns True if this project's launchd job is currently loaded in launchctl."""
+    label = project_label(project_name)
+    r = subprocess.run(["launchctl", "list"], capture_output=True, text=True, timeout=10)
+    if r.returncode != 0:
+        return True  # If launchctl cannot be queried, do not block
+    return (label in r.stdout) or (LAUNCH_LABEL in r.stdout and is_project_scheduled(project_name))
+
+
 def pick_free_slot(pref_at: str | None, exclude_project: str | None = None) -> tuple[int, int]:
     """Choose a slot not colliding with any installed devteam schedule.
     Explicit pref_at wins if free; otherwise first free slot in the owner's

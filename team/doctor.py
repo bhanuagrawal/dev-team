@@ -117,6 +117,20 @@ def agent_requirements(profile: dict, project: Path) -> dict[str, list[tuple[str
          _model_fix("product_synthesis", syn)),
     ]
 
+    from . import scheduler
+    is_manual = profile.get("schedule") == "manual"
+    sched_installed = scheduler.is_project_scheduled(project.name)
+    sched_loaded = scheduler.is_project_loaded(project.name) if sched_installed else False
+    if is_manual:
+        sched_checks = [("nightly schedule: explicit manual mode declared", True, "")]
+    else:
+        sched_checks = [
+            ("nightly schedule registered in launchd", sched_installed,
+             f"run `devteam setup --project {project.name} --schedule auto` (or declare 'schedule': 'manual' in .pipeline/profile.json)"),
+            ("nightly launchd job loaded and active", sched_loaded,
+             f"launchd job for {project.name} is not loaded. Run: `devteam setup --project {project.name} --schedule auto`"),
+        ]
+
     store_readiness_checks = [
         ("manifest detectable", bool(list(project.glob("**/AndroidManifest.xml"))),
          "ensure project contains AndroidManifest.xml"),
@@ -125,7 +139,7 @@ def agent_requirements(profile: dict, project: Path) -> dict[str, list[tuple[str
     ]
 
     return {
-        "orchestrator": dev_checks + synthesis_checks,
+        "orchestrator": dev_checks + synthesis_checks + sched_checks,
         "developer": dev_checks,
         "research-agent": ga4_checks + play_checks + synthesis_checks,
         "release-agent": ship_checks + synthesis_checks,

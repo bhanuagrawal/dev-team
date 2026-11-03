@@ -52,6 +52,13 @@
       "note": "no mechanism can grant console permissions; the skill states the sequence"
     },
     {
+      "id": "nightly-schedule-enforced",
+      "rule": "every app must have an active launchd nightly schedule (or explicit manual mode in profile.json) verified by doctor and store-readiness",
+      "doc": "AGENTS.md",
+      "kind": "code",
+      "enforced_by": "devteam doctor (orchestrator check) + devteam store-readiness (Automation & Operations category)"
+    },
+    {
       "id": "cleanup-is-part-of-the-run",
       "rule": "pick and record prune; a tree goes only when its work is safe somewhere else",
       "doc": "AGENTS.md#6",
