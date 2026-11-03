@@ -287,20 +287,11 @@ def _refreshed_play_store_flags(project: Path, flags: list) -> list:
     Best-effort by design: an audit that errors leaves the snapshot untouched,
     because a broken audit must never erase an owner-facing flag.
     """
+    from team import asks as asks_mod
+    flags = asks_mod.resolve_collector_flags(Path(project), flags)
     ids = {str(u.get("id", "")) for u in flags}
     if not any(i.startswith("play-store-") for i in ids):
         return flags
-    try:
-        from team.research import _store_readiness_pull, capability_upgrades
-        readiness = _store_readiness_pull(Path(project))
-        if readiness.get("status") == "error":
-            return flags
-        fresh = [u for u in capability_upgrades({"store_readiness": readiness}, {})
-                 if str(u.get("id", "")).startswith("play-store-")]
-    except Exception:
-        return flags
-    kept = [u for u in flags if not str(u.get("id", "")).startswith("play-store-")]
-    return kept + fresh
 
 
 def _print_ask_review(title: str, how: str, profile: dict, tools: dict) -> str:

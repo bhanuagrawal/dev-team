@@ -358,6 +358,44 @@ def review(title: str, how: str = "", profile: dict | None = None,
 # --------------------------------------------------------------------------- #
 # gathering the open items (asks + agent flags) from a project
 # --------------------------------------------------------------------------- #
+# A collector-backed upgrade is answered as soon as its collector does: the id
+# `capability_upgrades` gives the flag → the signal that silences it.
+_COLLECTOR_FLAGS = {
+    "analytics": "ga4",
+    "vitals": "vitals",
+    "store-reviews": "reviews",
+}
+
+
+def resolve_collector_flags(project: Path, flags: list[dict]) -> list[dict]:
+    """Drop upgrades the project has ALREADY answered, before anyone relays them.
+
+    A flag is presence-driven by design ("once connected, it disappears from
+    reports automatically"), but `state['upgrades']` is the plan-time snapshot,
+    so a run that connects the source — or an agent that connects it between
+    plans — still handed the owner the same chore on the very next banner (seen
+    2026-11-04: Play vitals answered with live data and both `doctor` and `asks`
+    still called it open agent work). The evidence is already on disk: when the
+    freshest `research.json` reports a signal `ok`, the flag that signal would
+    silence is dropped. No network, no model; a missing or unreadable file
+    leaves every flag in place, because a broken audit must never erase a flag.
+    """
+    ids = {str(u.get("id", "")) for u in flags} & set(_COLLECTOR_FLAGS)
+    if not ids:
+        return flags
+    try:
+        import json
+        signals = json.loads((Path(project) / ".pipeline" / "research.json")
+                             .read_text()).get("signals") or {}
+    except Exception:
+        return flags
+    answered = {flag for flag in ids
+                if str((signals.get(_COLLECTOR_FLAGS[flag]) or {}).get("status")) == "ok"}
+    if not answered:
+        return flags
+    return [u for u in flags if str(u.get("id", "")) not in answered]
+
+
 def open_items(project: Path, flags: list[dict] | None = None) -> list[dict]:
     """Every open ask/flag as {source, title, how, benefit} — one loader for the
     banner, `doctor` and the `asks` command, so they can never disagree.
@@ -384,6 +422,7 @@ def open_items(project: Path, flags: list[dict] | None = None) -> list[dict]:
                                    .read_text()).get("upgrades", [])
             except Exception:
                 flags = []
+    flags = resolve_collector_flags(project, flags)
     for u in flags:
         rows.append({"source": "agent_flag",
                      "title": u.get("title") or u.get("id") or "?",
