@@ -220,7 +220,8 @@ When building and shipping a brand-new app MVP in one go, the agent MUST execute
    - Fill Play Store listing copy and upload all 6 authentic visual assets (Icon, Feature Graphic, 4 Posters).
    - Save changes and submit for Google Play review ("Changes in review").
    - Obtain internal testing join link (`https://play.google.com/apps/internaltest/...`).
-8. **Pre-Handover Sanity Gates:**
+8. **Nightly Automation Loop & Handover Sanity Gates:**
+   - Register nightly schedule: `python3 cli.py setup --project <project> --schedule auto` (assigns clash-free `launchd` daily trigger inside owner window 22:00–06:00 IST). Verify with `python3 cli.py schedules`.
    - `python3 cli.py store-readiness <project>` → PASS.
    - `python3 cli.py doctor <project>` → PASS.
    - Both git repos (`dev-team` and `<project>`) are 100% clean with all commits pushed to origin.
