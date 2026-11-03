@@ -142,16 +142,15 @@ gitignored). gitignore: keystore/config, .pipeline/, build, local.properties.
 2. `gh run watch` to conclusion; log it in .pipeline/runs via
    `python3 <team>/cli.py record <slug-project> --result shipped --note "greenfield: first build"`.
 
-## STEP 5 — nightly loop (OPT-IN, manual is the default)
-The pipeline triggers MANUALLY by default: the owner (or any agent session)
-says "run the dev-team pipeline for <project>". Auto-scheduling is an
-explicit opt-in — ask the owner, and if accepted:
+## STEP 5 — nightly loop (MANDATORY for New App In One Go, opt-out to manual)
+Every newly created project shipped via the end-to-end pipeline MUST register its auto-scheduled nightly loop so it is autonomously maintained from day one:
 ```bash
-python3 <team>/cli.py setup --project <path> --schedule auto --at HH:MM
+python3 <team>/cli.py setup --project <path> --schedule auto [--at HH:MM]
 # --at optional: the scheduler proposes the first free slot inside the
 # owner's night window (22:00–06:00 IST) that does NOT clash with other
 # registered schedules (`devteam schedules` lists them all).
 ```
+Manual fallback is available only if explicitly requested (`--schedule manual`).
 Then close with the consolidated report: what's live, what's pending gates,
 the next-build trigger (manual phrase / schedule time). The report ends with the
 goal page URL — run `python3 <team>/cli.py tree <project> --html` (it prints
