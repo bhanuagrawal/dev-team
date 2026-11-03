@@ -174,10 +174,15 @@ def localization_check(project_root: Path, files: list[str]) -> tuple[bool, str]
 
 
 def gradle_task(worktree: Path, task: str, timeout: int, log) -> tuple[bool, str]:
-    log(f"~ gradle {task} (≤{timeout}s)")
-    r = run(["./gradlew", task], worktree, timeout=timeout, env=gradle_env(worktree))
+    # `task` may name SEVERAL Gradle tasks, comma/whitespace separated. A KMP project
+    # keeps its pure logic in a library module while the profile names the app's task,
+    # so a shared-module unit test used to compile and never run in any gate. One field
+    # carries them all; the invocation stays a single gradlew call.
+    tasks = [t for t in re.split(r"[,\s]+", task.strip()) if t]
+    log(f"~ gradle {' '.join(tasks)} (≤{timeout}s)")
+    r = run(["./gradlew", *tasks], worktree, timeout=timeout, env=gradle_env(worktree))
     if r.returncode == 0:
-        log(f"  ok: {task}")
+        log(f"  ok: {' '.join(tasks)}")
         return True, ""
     out = (r.stdout + r.stderr)
     tail = out[-4000:]
@@ -185,14 +190,16 @@ def gradle_task(worktree: Path, task: str, timeout: int, log) -> tuple[bool, str
     # (KGP 2.x) while pure-Android modules keep `compileDebugKotlin` — profiles
     # written for one scheme shouldn't fail gate runs under the other.
     if "Cannot locate tasks that match" in out or "Task not found" in out:
-        alt = (task.replace("KotlinAndroid", "Kotlin")
-               if "KotlinAndroid" in task
-               else (task + "Android" if task.endswith("Kotlin") else None))
-        if alt:
-            log(f"  {task} not found in this project — retrying as {alt}")
-            r = run(["./gradlew", alt], worktree, timeout=timeout, env=gradle_env(worktree))
+        alt = [
+            t.replace("KotlinAndroid", "Kotlin") if "KotlinAndroid" in t
+            else (t + "Android" if t.endswith("Kotlin") else t)
+            for t in tasks
+        ]
+        if alt != tasks:
+            log(f"  {' '.join(tasks)} not found in this project — retrying as {' '.join(alt)}")
+            r = run(["./gradlew", *alt], worktree, timeout=timeout, env=gradle_env(worktree))
             if r.returncode == 0:
-                log(f"  ok: {alt}")
+                log(f"  ok: {' '.join(alt)}")
                 return True, ""
             tail = (r.stdout + r.stderr)[-4000:]
     return False, f"{task} FAILED:\n{tail}"
