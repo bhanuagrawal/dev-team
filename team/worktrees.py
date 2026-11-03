@@ -280,12 +280,15 @@ def inventory(project: Path, ended: str | None = None) -> list[dict[str, Any]]:
             decision = "park-and-remove"
             reason = "merged, but has uncommitted work — committed to its branch first"
             keep_branch = True
-        elif parked:
+        elif parked and not dirty:
             decision, reason = "remove", f"parked at origin {branch} @ {(remote or '')[:8]}"
             keep_branch = True
         else:
             decision = "park-and-remove"
-            reason = "not merged — commit + push its branch, then drop the tree"
+            reason = (f"HEAD is at origin {branch} but the tree has uncommitted work — "
+                      f"committed and pushed to the branch first"
+                      if parked else
+                      "not merged — commit + push its branch, then drop the tree")
             keep_branch = True
 
         if locked:
