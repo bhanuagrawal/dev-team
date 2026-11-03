@@ -859,13 +859,35 @@ def cmd_release(args: argparse.Namespace) -> int:
                           "version": ".".join(map(str, latest)),
                           "note": "worktree tree already equals origin/main — nothing to ship"}, indent=2))
         return 0
-    new = (latest[0], latest[1], latest[2] + 1)
+    # THE DECISION, BEFORE THE BUILD. The release-candidate call used to be
+    # recorded only after CI had already delivered, which made it impossible to
+    # put -rc in the name it was describing. It is asked here, where the agent
+    # that wrote the change is holding the diff and the verify result.
+    is_rc = args.rc == "yes"
     task = json.loads(task_spec_path(project, args.task_spec).read_text())
+    state = state_of(project)
+    name, why = shipper.next_version_name(project, rc=is_rc)
     floor, floor_note = shipper.play_max_version_code(project)
+    code = shipper.next_version_code(state, floor)
     log(f"versionCode floor: {floor_note}" + (f" (max {floor})" if floor else ""))
-    name = shipper.bump_version_file(worktree, new, log, floor_code=floor)
+    log(f"version: {name} (code {code}) — {why}")
+    log(f"release candidate: {'YES' if is_rc else 'NO'} (decided before the tag)")
+
+    name = shipper.bump_version_file(worktree, name, log, floor_code=floor, code=code)
     shipper.write_whatsnew(worktree, task, log)
-    res = shipper.push_and_deliver(project, worktree, task, name, log)
+
+    # The call is recorded BEFORE the build, so the handover and the rc command
+    # read one answer instead of two competing ones.
+    state.setdefault("release_candidates", []).append({
+        "version": name, "rc": is_rc,
+        "note": args.note if hasattr(args, "note") and args.note else why,
+        "why": args.note if hasattr(args, "note") and args.note else why,
+        "date": today(), "by": "agent", "stage": "release", "code": code,
+    })
+    state["last_version_code"] = code
+    save_state(project, state)
+
+    res = shipper.push_and_deliver(project, worktree, task, name, log, code=code)
     print(json.dumps(res, indent=2))
     return 0 if res.get("delivered") else 1
 
@@ -922,6 +944,7 @@ def cmd_record(args: argparse.Namespace) -> None:
                 continue  # concurrent runs may both ship; keep one row per target per release
             state.setdefault("shipped", []).append({
                 "target": t, "label": label, "version": args.version or "?",
+                "version_code": state.get("last_version_code"),
                 "commit": args.commit or "", "date": today(),
                 "task_id": args.task or task.get("id", ""),
                 "advances": adv})
@@ -2768,7 +2791,11 @@ def main() -> None:
     wp.add_argument("--force", action="store_true", help="also remove merged worktrees that still have uncommitted work")
     wp.set_defaults(fn=cmd_worktree_prune)
     em = sub.add_parser("emulators");  em.add_argument("project"); em.add_argument("--record", action="store_true"); em.add_argument("--reset", action="store_true"); em.set_defaults(fn=cmd_emulators)
-    r = sub.add_parser("release");     r.add_argument("project"); r.add_argument("--worktree", required=True); r.add_argument("--task-spec", required=True); r.set_defaults(fn=cmd_release)
+    r = sub.add_parser("release");     r.add_argument("project"); r.add_argument("--worktree", required=True); r.add_argument("--task-spec", required=True)
+    r.add_argument("--rc", choices=["yes", "no"], default="no",
+                   help="is this build a release candidate? Decided HERE, before the tag, "
+                        "so the name can carry -rc.N (it used to be recorded after the build)")
+    r.set_defaults(fn=cmd_release)
     rec = sub.add_parser("record"); rec.add_argument("project")
     rec.add_argument("--task"); rec.add_argument("--task-spec"); rec.add_argument("--result", required=True,
               choices=["shipped", "failed", "blocked"])

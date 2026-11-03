@@ -1,8 +1,15 @@
 # CANONICAL CI: one signed AAB per app → Play internal testing.
 #
-# Every project uses this exact file; the four __PLACEHOLDERS__ are filled from the
-# project's profile `ci` block by `devteam ci <project> --write`. Do not hand-edit a
-# project's copy — change this template, then re-render all projects.
+# Every project uses this exact file; the placeholders are filled from the
+# project's profile `ci` block by `devteam ci <project> --write`.
+# Do not hand-edit a project's copy — change this template, then re-render all
+# projects.
+#
+# TEMPLATE_VERSION 2 — the version is READ FROM THE RELEASE COMMIT, not derived
+# from the tag. `devteam release` writes versionName/versionCode into the version
+# file and tags the commit that carries them, so there is exactly one author of
+# the number (v1: CI re-derived it from the tag string and did arithmetic on it,
+# which broke the moment a name carried a prerelease, e.g. 1.0.9-rc.1).
 #
 # WHY ONE SHAPE (owner directive 2026-10-31): projects had diverged into tag-
 # triggered and bump-triggered variants, one of them carried a production-promotion
@@ -51,19 +58,39 @@ jobs:
       - name: Set up Gradle (with cache)
         uses: gradle/actions/setup-gradle@v4
 
-      # versionName = tag without the leading 'v' (v1.3 -> 1.3), or the manual input
-      # versionCode = semver encoding            (1.3 -> 10300)
-      - name: Compute version
+      # The version is whatever the release commit stamped, verbatim. No parsing
+      # of the tag, no arithmetic on the name: `1.0.9-rc.1` is a legal value and
+      # `versionCode` was already allocated above Play's floor by `devteam release`.
+      # A manual dispatch may still override the NAME (hotfix builds), and then the
+      # committed code is reused — which is safe because a used code is caught by
+      # the upload, loudly, not silently.
+      - name: Read version from the release commit
         run: |
-          if [ -n "${{ inputs.version_name }}" ]; then
-            TAG="${{ inputs.version_name }}"
-          else
-            TAG="${GITHUB_REF_NAME#v}"
-          fi
-          IFS='.' read -r MAJOR MINOR PATCH <<< "$TAG"
-          PATCH="${PATCH:-0}"
-          echo "VERSION_NAME=$TAG" >> "$GITHUB_ENV"
-          echo "VERSION_CODE=$((MAJOR * 10000 + MINOR * 100 + PATCH))" >> "$GITHUB_ENV"
+          python3 - "$GITHUB_ENV" <<'EOF'
+          import pathlib, re, sys
+          out = pathlib.Path(sys.argv[1])
+          gf = pathlib.Path("__VERSION_FILE__")
+          lines = gf.read_text(encoding="utf-8").splitlines() if gf.is_file() else []
+          def line_with(word):
+              return next((ln for ln in lines if word in ln), "")
+          name_line, code_line = line_with("versionName"), line_with("versionCode")
+          names = re.findall(r"[\"']([^\"']+)[\"']", name_line)
+          version_rx = r"\d+\.\d+(\.\d+)?(-[0-9A-Za-z][0-9A-Za-z.-]*)?"
+          name = next((n for n in reversed(names) if re.fullmatch(version_rx, n)), None)
+          codes = re.findall(r"(?<![\w.])(\d+)(?![\w.])", code_line)
+          code = codes[-1] if codes else None
+          if not name or not code:
+              sys.exit(f"cannot read versionName/versionCode from {gf} (name={name!r}, "
+                       f"code={code!r}) - the release commit must carry both literals; "
+                       "see `devteam release`")
+          override = "${{ inputs.version_name }}"
+          if override:
+              name = override
+              print(f"manual dispatch overrides the name: {name}")
+          with out.open("a", encoding="utf-8") as fh:
+              fh.write(f"VERSION_NAME={name}\nVERSION_CODE={code}\n")
+          print(f"version from the release commit: {name} (versionCode {code})")
+          EOF
 
       - name: Restore keystore
         run: |

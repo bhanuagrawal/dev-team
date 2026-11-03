@@ -22,23 +22,110 @@ from pathlib import Path
 from .core import read_delivery_file, RunLog, git, profile_of, run, target_items, target_matches
 
 
+SEMVER_RX = re.compile(r"^(\d+)\.(\d+)(?:\.(\d+))?(?:-([0-9A-Za-z][0-9A-Za-z.\-]*))?$")
+
+
 def _parse_version(s: str) -> tuple[int, int, int] | None:
-    m = re.match(r"^(\d+)\.(\d+)(?:\.(\d+))?$", str(s or "").strip())
+    """The numeric triple of a version name, prerelease suffix ignored.
+
+    `1.0.9-rc.1` is (1, 0, 9): the suffix is a CHANNEL, and it must never leak
+    into the arithmetic that builds a versionCode.
+    """
+    parsed = parse_version_name(s)
+    return parsed[:3] if parsed else None
+
+
+def parse_version_name(s: str) -> tuple[int, int, int, str] | None:
+    """(major, minor, patch, prerelease) — prerelease is "" for a final build."""
+    m = SEMVER_RX.match(str(s or "").strip())
     if not m:
         return None
-    return (int(m.group(1)), int(m.group(2)), int(m.group(3) or 0))
+    return (int(m.group(1)), int(m.group(2)), int(m.group(3) or 0), m.group(4) or "")
 
 
-def remote_latest_version(project: Path) -> tuple[int, int, int] | None:
+def _pre_index(pre: str) -> int:
+    """`rc.3` / `rc3` / `rc-3` → 3; anything unrecognised → 0."""
+    m = re.search(r"(\d+)$", pre or "")
+    return int(m.group(1)) if m else 0
+
+
+def remote_latest_release(project: Path) -> dict | None:
+    """The highest version tag on origin, prerelease-aware.
+
+    Ordering is SemVer's: a prerelease sorts BELOW its own final version
+    (`1.0.9-rc.2 < 1.0.9`), and above any earlier final. Getting this wrong is
+    how a chain of rc builds makes the next release compute the wrong number.
+    """
     prefix = profile_of(project).get("tag_prefix", "v")
     r = git(["ls-remote", "--tags", "origin", f"refs/tags/{prefix}*"],
             cwd=project, timeout=60)
     if r.returncode != 0:
         return None
-    # patch segment optional: v1.5 counts as (1,5,0)
-    rx = rf"refs/tags/{re.escape(prefix)}(\d+)\.(\d+)(?:\.(\d+))?$"
-    versions = [(int(a), int(b), int(c or 0)) for a, b, c in re.findall(rx, r.stdout, re.M)]
-    return max(versions) if versions else None
+    rx = rf"refs/tags/{re.escape(prefix)}(\d+\.\d+(?:\.\d+)?(?:-[0-9A-Za-z][0-9A-Za-z.\-]*)?)$"
+    found: list[dict] = []
+    for name in re.findall(rx, r.stdout, re.M):
+        parsed = parse_version_name(name)
+        if not parsed:
+            continue
+        major, minor, patch, pre = parsed
+        found.append({"version": name, "major": major, "minor": minor,
+                      "patch": patch, "pre": pre, "pre_index": _pre_index(pre)})
+    if not found:
+        return None
+    # Final > prerelease for the same triple; then compare the triple.
+    return max(found, key=lambda v: (v["major"], v["minor"], v["patch"],
+                                     v["pre"] == "", v["pre_index"]))
+
+
+def remote_latest_version(project: Path) -> tuple[int, int, int] | None:
+    latest = remote_latest_release(project)
+    return None if latest is None else (latest["major"], latest["minor"], latest["patch"])
+
+
+def next_version_name(project: Path, rc: bool) -> tuple[str, str]:
+    """(version_name, why) for the next build — the ONE place that decides it.
+
+    `rc=True` continues (or opens) a prerelease chain for the next patch:
+    1.0.8 → 1.0.9-rc.1 → 1.0.9-rc.2. `rc=False` closes an open chain with its
+    final version (1.0.9), or starts a fresh patch when there is no chain open.
+    """
+    latest = remote_latest_release(project)
+    if latest is None:
+        raise SystemExit("no version tags on origin; cannot compute the next version")
+
+    if latest["pre"]:
+        triple = f"{latest['major']}.{latest['minor']}.{latest['patch']}"
+        if rc:
+            nxt = latest["pre_index"] + 1
+            return (f"{triple}-rc.{nxt}",
+                    f"continues the open rc chain ({latest['version']} → -rc.{nxt})")
+        return (triple, f"closes the open rc chain {latest['version']} as its final build")
+
+    triple = f"{latest['major']}.{latest['minor']}.{latest['patch'] + 1}"
+    if rc:
+        return (f"{triple}-rc.1", f"opens an rc chain after {latest['version']}")
+    return (triple, f"next patch after {latest['version']}")
+
+
+def next_version_code(state: dict, play_floor: int = 0) -> int:
+    """The next versionCode: monotonic, independent of the version NAME.
+
+    A prerelease and its eventual final are different uploads and Play refuses a
+    reused code, so the code cannot be derived from the semver triple alone.
+    It is the highest of: what Play holds (floor), what the ledger last used.
+    """
+    used = 0
+    for row in state.get("shipped") or []:
+        code = row.get("version_code")
+        if isinstance(code, int) and code > used:
+            used = code
+        triple = _parse_version(str(row.get("version") or ""))
+        if triple:
+            used = max(used, triple[0] * 10000 + triple[1] * 100 + triple[2])
+    last = state.get("last_version_code")
+    if isinstance(last, int) and last > used:
+        used = last
+    return max(play_floor, used) + 1
 
 
 def play_max_version_code(project: Path) -> tuple[int, str]:
@@ -81,14 +168,25 @@ def play_max_version_code(project: Path) -> tuple[int, str]:
     return 0, "no Play connection declared"
 
 
-def bump_version_file(worktree: Path, new: tuple[int, int, int], log: RunLog,
-                      floor_code: int = 0) -> str:
+def bump_version_file(worktree: Path, new, log: RunLog,
+                      floor_code: int = 0, code: int | None = None) -> str:
+    """Write `new` (a version NAME string) + its versionCode into the version file.
+
+    The name is written verbatim, so `1.0.9-rc.1` is a legal release: the
+    prerelease suffix is a channel marker, and only the numeric triple feeds the
+    fallback code. `code` (when given) wins outright — `release` allocates it
+    monotonically so a prerelease and its final never share a Play versionCode.
+    """
     profile = profile_of(worktree)
     gf = worktree / profile["version_file"]
     text = gf.read_text()
-    name = ".".join(map(str, new))
-    code = new[0] * 10000 + new[1] * 100 + new[2]
-    if floor_code >= code:
+    name = str(new).strip()
+    triple = _parse_version(name)
+    if triple is None:
+        raise SystemExit(f"not a version name: {name!r} (expected MAJOR.MINOR.PATCH[-prerelease])")
+    explicit_code = code is not None
+    code = code if code is not None else triple[0] * 10000 + triple[1] * 100 + triple[2]
+    if floor_code >= code and not explicit_code:
         # Play already holds this code (or a higher one) — the upload would be
         # rejected as "version code already used".
         code = floor_code + 1
@@ -99,7 +197,7 @@ def bump_version_file(worktree: Path, new: tuple[int, int, int], log: RunLog,
     # versionName may be 1-3 segments (some projects use "1.4", most "1.2.3");
     # always write major.minor.patch — CI computes the code from the same scheme.
     new_text, n_name = re.subn(
-        r'(versionName[\s\S]{0,70}?["\'])(\d+(?:\.\d+){0,2})(["\'])',
+        r'(versionName[\s\S]{0,70}?["\'])(\d+(?:\.\d+){0,2}(?:-[0-9A-Za-z][0-9A-Za-z.\-]*)?)(["\'])',
         rf"\g<1>{name}\g<3>", text, count=1)
 
     if profile.get("version_code_bump") == "increment":
@@ -110,7 +208,7 @@ def bump_version_file(worktree: Path, new: tuple[int, int, int], log: RunLog,
         # literal by +1 instead (profile-driven; default stays the semver
         # overwrite below).
         new_text, n_code = re.subn(
-            r'(versionCode[\s\S]{0,30}?[?:=\s])(\d{4,})(\s*\)?)',
+            r'(versionCode[^\n]{0,30}?[?:=\s])(\d+)(\s*\)?)',
             lambda m: f"{m.group(1)}{int(m.group(2)) + 1}{m.group(3)}",
             new_text)
         if n_name != 1:
@@ -125,7 +223,7 @@ def bump_version_file(worktree: Path, new: tuple[int, int, int], log: RunLog,
         return name
 
     new_text, n_code = re.subn(
-        r'(versionCode[\s\S]{0,70}?[?:=\s])(\d{4,})(\s*\)?)',
+        r'(versionCode[^\n]{0,70}?[?:=\s])(\d+)(\s*\)?)',
         rf"\g<1>{code}\g<3>", new_text, count=1)
     if n_name != 1:
         log(f"FATAL: could not bump versionName in {profile['version_file']} — refusing to ship")
@@ -319,29 +417,41 @@ def bump_subject(task: dict, new_version: str) -> str:
 
 
 def push_and_deliver(project: Path, worktree: Path, task: dict, new_version: str,
-                     log: RunLog, max_retries: int = 3) -> dict:
-    """Push version bump and monitor CI until success, retrying up to max_retries times.
+                     log: RunLog, max_retries: int = 3, code: int | None = None) -> dict:
+    """Push the release commit/tag and monitor CI until it succeeds.
 
-    Each retry creates a fresh version bump commit (the previous one is already on
-    main, so the next bump increments from there). CI is monitored after each
-    attempt; if it fails or times out, the loop retries with a new push.
+    A retry RE-RUNS THE SAME WORKFLOW for the SAME version. It used to re-bump the
+    version on every attempt, which is the worst of both worlds: a flaky upload
+    could ship `1.0.10` when the artifact that was tested and reviewed was
+    `1.0.9`, and the version you approved never existed in the store. A version
+    is fixed by its release commit; if the run cannot be re-run, the honest
+    answer is "fix it and release again", which allocates a new version openly
+    instead of silently.
     """
     profile = profile_of(project)
     branch = profile["main_branch"]
+    run_id: str | None = None
 
     for attempt in range(1, max_retries + 1):
         if attempt > 1:
-            log(f"retry {attempt}/{max_retries}: re-bumping version and re-pushing")
-            # Increment from the previously attempted version so each retry produces a fresh commit and version
-            cur = _parse_version(new_version)
-            if cur is None:
-                latest = remote_latest_version(project)
-                if latest is None:
-                    return {"delivered": False, "error": "no remote tags for retry", "ci": {}}
-                cur = latest
-            next_ver = (cur[0], cur[1], cur[2] + 1)
-            new_version = ".".join(map(str, next_ver))
-            bump_version_file(worktree, next_ver, log)
+            if not run_id:
+                return {"delivered": False, "version": new_version,
+                        "error": "CI failed and the run id is unknown — cannot re-run; "
+                                 "fix the cause and release again (a new version is allocated openly)",
+                        "ci": {}}
+            log(f"retry {attempt}/{max_retries}: re-running CI run {run_id} for v{new_version} "
+                "(same version, same commit)")
+            rr = run(["gh", "run", "rerun", str(run_id), "-R", profile["repo_slug"]],
+                     project, timeout=120)
+            if rr.returncode != 0:
+                return {"delivered": False, "version": new_version,
+                        "error": f"could not re-run CI run {run_id}: {(rr.stdout + rr.stderr)[-160:]}",
+                        "ci": {}}
+            ci = await_ci(project, {"commit": _pushed_sha(worktree), "run_id": str(run_id)})
+            if ci.get("conclusion") == "success":
+                return {"delivered": True, "commit": _pushed_sha(worktree),
+                        "version": new_version, "ci": ci}
+            continue
 
         # An untracked file in the worktree is staged by `git add -A` and rides
         # into the release commit. A crashed or interrupted developer session can
@@ -398,10 +508,12 @@ def push_and_deliver(project: Path, worktree: Path, task: dict, new_version: str
                     log(f"pushed tag {tag} → CI (tag-gated delivery)")
                 else:
                     log(f"tag push failed: {(r.stdout + r.stderr)[-200:]}")
-        ci = await_ci(project, sha, log)
+        ci = await_ci(project, {"commit": sha})
+        run_id = str(ci.get("run_id") or "") or None
 
         if ci.get("conclusion") == "success":
-            return {"delivered": True, "commit": sha, "version": new_version, "ci": ci}
+            return {"delivered": True, "commit": sha, "version": new_version,
+                    "code": code, "ci": ci}
 
         if attempt < max_retries:
             log(f"CI {ci.get('conclusion', 'unknown')} on attempt {attempt}/{max_retries} — retrying")
@@ -412,21 +524,53 @@ def push_and_deliver(project: Path, worktree: Path, task: dict, new_version: str
             "ci": ci, "commit": sha, "version": new_version}
 
 
-def await_ci(project: Path, sha: str, log: RunLog, max_wait_s: int = 1800) -> dict:
+def _pushed_sha(worktree: Path) -> str:
+    return git(["rev-parse", "HEAD"], cwd=worktree).stdout.strip()
+
+
+def _ci_runs(project: Path, slug: str, wf: str, how: int = 8) -> list[dict]:
+    import json
+    r = run(["gh", "run", "list", "-R", slug, "--workflow", wf, "-L", str(how),
+             "--json", "databaseId,status,conclusion,headSha"], project, timeout=60)
+    if r.returncode != 0:
+        return []
+    try:
+        return json.loads(r.stdout or "[]")
+    except ValueError:
+        return []
+
+
+def await_ci(project: Path, target, log: RunLog | None = None,
+             max_wait_s: int = 1800) -> dict:
+    """Wait for the CI run for `target`; return its conclusion AND its run id.
+
+    `target` is a commit sha (string) or {"commit": sha, "run_id": id}. The run id
+    matters because a retry re-runs that exact run instead of minting a new
+    version, so it is returned on every completed answer.
+    """
+    if isinstance(target, str):
+        target = {"commit": target}
+    sha = str(target.get("commit") or "")
+    want_run = str(target.get("run_id") or "")
     profile = profile_of(project)
     slug = profile["repo_slug"]
     wf = profile["ci_workflow"]
     deadline = time.time() + max_wait_s
     while time.time() < deadline:
-        r = run(["gh", "run", "list", "-R", slug, "--workflow", wf, "-L", "5",
-                 "--json", "status,conclusion,headSha"], project, timeout=60)
-        if r.returncode == 0:
-            import json
-            for e in json.loads(r.stdout or "[]"):
-                if e.get("headSha") == sha and e["status"] == "completed":
-                    log(f"CI {sha[:8]}: {e['conclusion']} — internal testing "
-                        + ("updated" if e["conclusion"] == "success" else "NOT updated"))
-                    return {"status": "completed", "conclusion": e["conclusion"]}
+        for e in _ci_runs(project, slug, wf):
+            run_id = str(e.get("databaseId") or "")
+            if want_run and run_id != want_run:
+                continue
+            if not want_run and sha and e.get("headSha") != sha:
+                continue
+            if e.get("status") != "completed":
+                continue
+            if log:
+                log(f"CI {(sha or run_id)[:8]}: {e.get('conclusion')} — internal testing "
+                    + ("updated" if e.get("conclusion") == "success" else "NOT updated"))
+            return {"status": "completed", "conclusion": e.get("conclusion"),
+                    "run_id": run_id}
         time.sleep(60)
-    log("CI still running — alarm will reconcile later")
+    if log:
+        log("CI still running — alarm will reconcile later")
     return {"status": "pending"}

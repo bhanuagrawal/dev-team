@@ -314,7 +314,10 @@ def run_doctor(project: Path, log) -> dict:
     try:
         from . import ci as ci_mod
         target = project / ci_mod.WORKFLOW_REL
+        template_problems = ci_mod.self_check()
+        template_ok = not template_problems
         if not target.is_file():
+            same = False
             checks = [("the canonical workflow exists", False,
                        f"run: devteam ci {project.name} --write")]
         else:
@@ -322,6 +325,13 @@ def run_doctor(project: Path, log) -> dict:
             checks = [("the workflow matches the team template", same,
                        f"run: devteam ci {project.name} --write (the project copy is generated, "
                        f"never hand-edited)")]
+        # The generated copy can only be as good as its generator: a template that
+        # computes the version with shell arithmetic (or names a placeholder nobody
+        # fills) is a TEAM bug that every project would inherit. Reported once, here,
+        # instead of as N mysterious project drifts.
+        checks.insert(0, ("the CI template is internally sound" if template_ok
+                          else "the CI template is internally sound: " + "; ".join(template_problems),
+                          template_ok, "fix team/templates/ci-release.yml (see ci.self_check())"))
         bad = [(r, fix) for r, ok, fix in checks if not ok]
         report["ci"] = {
             "status": "ready" if not bad else "blocked",
