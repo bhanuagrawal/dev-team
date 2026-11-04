@@ -566,7 +566,22 @@ def gate(root: Path) -> list[str]:
     elif icon.get("sha256") and icon["sha256"] != _sha(play):
         issues.append("the listing icon changed after adoption — re-adopt it")
     elif str((launcher_data.get("play_icon") or {}).get("sha256") or "") != _sha(play):
-        issues.append("the app icon and the Play icon are different designs")
+        # The launcher is a RE-RENDER of the adopted icon, not a copy: Chrome
+        # rasterises the same artboard to slightly different bytes on a different
+        # day (measured 2026-11-04: two renders of one artboard differed in sha
+        # while the mark was identical). Byte equality therefore demanded a
+        # re-render that could never satisfy it. What must hold is the DESIGN —
+        # the installed icon and the listing icon are one mark — and that is what
+        # is measured, on the pixels that actually ship.
+        from . import pngcmp
+
+        res_probe = _res_dir(root)
+        biggest = sorted((res_probe.glob("mipmap-*/ic_launcher.png") if res_probe else []),
+                         key=lambda p: p.stat().st_size, reverse=True)
+        sim = pngcmp.shape_similarity(play, biggest[0]) if biggest else None
+        if sim is None or sim < 0.9:
+            issues.append("the app icon and the Play icon are different designs "
+                          f"(shape {sim if sim is None else round(sim, 2)})")
     res = _res_dir(root)
     if res is None:
         issues.append("no Android res dir to check the launcher icon against")
