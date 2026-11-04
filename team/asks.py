@@ -364,7 +364,13 @@ _COLLECTOR_FLAGS = {
     "analytics": "ga4",
     "vitals": "vitals",
     "store-reviews": "reviews",
+    "play-store-blockers": "store_readiness",
 }
+
+# A collector's "this is handled" word is not spelled "ok" by every collector:
+# the store-readiness audit answers `ready` once every check passes. Both mean
+# the same thing to a flag — the evidence is on disk, so stop relaying the chore.
+_ANSWERED_STATUSES = ("ok", "ready")
 
 
 def resolve_collector_flags(project: Path, flags: list[dict]) -> list[dict]:
@@ -390,7 +396,8 @@ def resolve_collector_flags(project: Path, flags: list[dict]) -> list[dict]:
     except Exception:
         return flags
     answered = {flag for flag in ids
-                if str((signals.get(_COLLECTOR_FLAGS[flag]) or {}).get("status")) == "ok"}
+                if str((signals.get(_COLLECTOR_FLAGS[flag]) or {}).get("status"))
+                in _ANSWERED_STATUSES}
     if not answered:
         return flags
     return [u for u in flags if str(u.get("id", "")) not in answered]
