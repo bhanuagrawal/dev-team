@@ -97,22 +97,48 @@ def _app_name(project: Path) -> str:
 
 
 def _res_dir(project: Path) -> Path | None:
-    """The Android res dir, from the profile's module when it names one."""
+    """The Android res dir of the module that ships the launcher icon.
+
+    Resolution is LAYOUT-AGNOSTIC because the team does not choose a project's
+    module shape: a plain Android module keeps resources in `app/src/main/res`,
+    while a KMP project keeps them in the Android source set of the shared app
+    module (`app/src/androidMain/res`). Reading only `src/main/res` made
+    `brand --design` refuse every KMP project with "no Android res dir" — the
+    one command that fixes an icon mismatch Play blocks a release on (seen
+    2026-11-04, first run of this task kind on a KMP tree). Order: a profile
+    that names the dir, then the profile's compile module (every source set),
+    then any module (any source set), preferring one that actually holds
+    mipmap icons.
+    """
+    candidates: list[Path] = []
+
+    def add(path: Path) -> None:
+        if path.is_dir() and "build" not in path.parts and path not in candidates:
+            candidates.append(path)
+
     try:
         from .core import profile_of
 
-        compile_task = str((profile_of(project).get("verify") or {}).get("compile") or "")
+        profile = profile_of(project)
+        declared = profile.get("android_res") or profile.get("res_dir")
+        if declared:
+            add(project / str(declared))
+        compile_task = str((profile.get("verify") or {}).get("compile") or "")
         m = re.match(r":([\w-]+):", compile_task)
         if m:
-            candidate = project / m.group(1) / "src/main/res"
-            if candidate.is_dir():
-                return candidate
+            add(project / m.group(1) / "src/main/res")
+            for candidate in sorted((project / m.group(1) / "src").glob("*/res")):
+                add(candidate)
     except Exception:
         pass
-    for candidate in sorted(project.glob("*/src/main/res")):
-        if "build" not in candidate.parts:
-            return candidate
-    return None
+    add(project / "app/src/main/res")
+    for pattern in ("*/src/main/res", "*/src/*Main/res", "*/src/*/res"):
+        for candidate in sorted(project.glob(pattern)):
+            add(candidate)
+    if not candidates:
+        return None
+    with_icons = [c for c in candidates if any(c.glob("mipmap-*"))]
+    return (with_icons or candidates)[0]
 
 
 def _listing_images(project: Path) -> Path:
@@ -462,25 +488,26 @@ def _render_tile(src: Path, out: Path, size: int, mode: str) -> None:
 
 def _edge_color(png: Path) -> str:
     """The tile's own ground colour (top-left 8x8, averaged) — the adaptive
-    background, so the scaled foreground's square edge disappears into it."""
-    sips = shutil.which("sips")
-    if not sips:
+    background, so the scaled foreground's square edge disappears into it.
+
+    Read from the pixels themselves, in Python. The previous version shelled out
+    to `sips` with `--cropOffset`, which silently CROPS FROM THE CENTRE when the
+    flag is unsupported — so the "ground" was sampled from the middle of the
+    mark (measured 2026-11-04: a dark-ground icon reported #00E5FF, its accent,
+    and the adaptive background would have shipped as a cyan ring around every
+    masked launcher icon). A ground colour is a pixel fact, so it is decoded,
+    never inferred from a tool's default behaviour.
+    """
+    block = _png_block(png, 8, 8)
+    if not block:
         return "#0A1628"
-    crop = png.with_suffix(".edge.png")
-    pixel = png.with_suffix(".pixel.png")
-    try:
-        subprocess.run([sips, "--cropToHeightWidth", "8", "8", "--cropOffset", "0", "0",
-                        str(png), "--out", str(crop)], capture_output=True, timeout=60)
-        subprocess.run([sips, "-z", "1", "1", str(crop), "--out", str(pixel)],
-                       capture_output=True, timeout=60)
-        rgb = _png_pixel(pixel)
-        return "#%02X%02X%02X" % rgb if rgb else "#0A1628"
-    finally:
-        crop.unlink(missing_ok=True)
-        pixel.unlink(missing_ok=True)
+    count = len(block)
+    return "#%02X%02X%02X" % tuple(
+        round(sum(px[i] for px in block) / count) for i in range(3))
 
 
-def _png_pixel(path: Path) -> tuple[int, int, int] | None:
+def _png_block(path: Path, cols: int, rows: int) -> list[tuple[int, int, int]] | None:
+    """The top-left `cols` x `rows` RGB pixels of an 8-bit, non-interlaced PNG."""
     import struct
     import zlib
 
@@ -488,23 +515,62 @@ def _png_pixel(path: Path) -> tuple[int, int, int] | None:
         blob = path.read_bytes()
     except OSError:
         return None
-    pos, idat, channels = 8, b"", 3
-    while pos < len(blob):
+    if blob[:8] != b"\x89PNG\r\n\x1a\n":
+        return None
+    pos, idat = 8, b""
+    width = height = depth = colour = interlace = 0
+    while pos + 8 <= len(blob):
         length = struct.unpack(">I", blob[pos:pos + 4])[0]
         kind = blob[pos + 4:pos + 8]
         data = blob[pos + 8:pos + 8 + length]
-        if kind == b"IHDR":
-            channels = {0: 1, 2: 3, 4: 2, 6: 4}.get(data[9], 3)
+        if kind == b"IHDR" and len(data) >= 13:
+            width, height, depth, colour, _, _, interlace = struct.unpack(">IIBBBBB", data[:13])
         elif kind == b"IDAT":
             idat += data
         pos += 12 + length
+    channels = {0: 1, 2: 3, 4: 2, 6: 4}.get(colour)
+    if depth != 8 or interlace or not channels or not width:
+        return None
     try:
         raw = zlib.decompress(idat)
     except Exception:
         return None
-    if len(raw) < 1 + channels:
-        return None
-    return tuple(raw[1:4])  # type: ignore[return-value]
+    stride = width * channels
+    take_rows, take_cols = min(rows, height), min(cols, width)
+    out: list[tuple[int, int, int]] = []
+    prev = bytearray(stride)
+    cursor = 0
+    for row_index in range(take_rows):
+        if cursor + 1 + stride > len(raw):
+            return None
+        kind = raw[cursor]
+        line = bytearray(raw[cursor + 1:cursor + 1 + stride])
+        cursor += 1 + stride
+        for i in range(stride):
+            left = line[i - channels] if i >= channels else 0
+            up = prev[i]
+            upleft = prev[i - channels] if i >= channels else 0
+            if kind == 1:
+                line[i] = (line[i] + left) & 0xFF
+            elif kind == 2:
+                line[i] = (line[i] + up) & 0xFF
+            elif kind == 3:
+                line[i] = (line[i] + (left + up) // 2) & 0xFF
+            elif kind == 4:
+                p = left + up - upleft
+                pa, pb, pc = abs(p - left), abs(p - up), abs(p - upleft)
+                predictor = left if (pa <= pb and pa <= pc) else (up if pb <= pc else upleft)
+                line[i] = (line[i] + predictor) & 0xFF
+        prev = line
+        for col in range(take_cols):
+            px = line[col * channels:(col + 1) * channels]
+            if channels == 1:
+                out.append((px[0], px[0], px[0]))
+            elif channels >= 3:
+                out.append((px[0], px[1], px[2]))
+            else:
+                out.append((px[0], px[0], px[0]))
+    return out or None
 
 
 def _png_size(path: Path) -> list[int] | None:
