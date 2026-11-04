@@ -101,6 +101,43 @@ def _strip_code_comments(text: str) -> str:
     return re.sub(r"//[^\n]*", "", text)
 
 
+_SIGNING_ENTRY_RE = re.compile(
+    r"""getByName\(\s*["']release["']\s*\)
+      | create\(\s*["']release["']\s*\)
+      | named\(\s*["']release["']\s*\)
+      | \brelease\s*\{""",
+    re.X,
+)
+
+
+def _braced_block(text: str, marker: str) -> str:
+    """The inside of the first `<marker> { … }` block, braces balanced.
+
+    Kotlin DSL writes `signingConfigs { create("release") { … } }` and Groovy
+    writes `signingConfigs { release { … } }` — same declaration, two syntaxes,
+    and a `release { }` block also exists under `buildTypes`. Scoping the search
+    to the signingConfigs braces is what keeps a signing check from being
+    answered by a release BUILD TYPE (false pass) or from missing Groovy
+    entirely (false warning on an app whose CI has signed every release).
+    """
+    i = text.find(marker)
+    if i < 0:
+        return ""
+    j = text.find("{", i)
+    if j < 0:
+        return ""
+    depth = 0
+    for k in range(j, len(text)):
+        ch = text[k]
+        if ch == "{":
+            depth += 1
+        elif ch == "}":
+            depth -= 1
+            if depth == 0:
+                return text[j:k + 1]
+    return text[j:]
+
+
 def _convention_constants(src: Path, combined_gradle: str) -> str:
     """Declarations that live in build-logic convention plugins.
 
@@ -638,14 +675,15 @@ def run_store_readiness_audit(project: Path, tree: Path | None = None) -> list[R
         ))
 
     # ── 8. Release Build & Signing Configuration ──────────────────────────────
-    has_signing = "signingConfigs" in combined_gradle and ("getByName(\"release\")" in combined_gradle or "create(\"release\")" in combined_gradle)
-    has_keystore_ref = "keystore.properties" in combined_gradle or "storeFile" in combined_gradle
+    signing_block = _braced_block(gradle_src, "signingConfigs")
+    has_signing = bool(signing_block) and _SIGNING_ENTRY_RE.search(signing_block) is not None
+    has_keystore_ref = "keystore.properties" in gradle_src or "storeFile" in gradle_src
     checks.append(ReadinessCheck(
         category="Release Configuration",
         name="Release Signing Configuration",
         passed=has_signing and has_keystore_ref,
         severity="WARNING" if not (has_signing and has_keystore_ref) else "INFO",
-        detail="Release signingConfig configured via keystore reference" if (has_signing and has_keystore_ref) else "Release signingConfig not fully configured in build.gradle.kts",
+        detail="Release signingConfig configured via keystore reference" if (has_signing and has_keystore_ref) else "Release signingConfig not fully configured in build.gradle / build.gradle.kts",
         fix="Configure signingConfigs.release with keystore properties for Play App Bundle signing",
     ))
 
