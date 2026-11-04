@@ -31,6 +31,13 @@ MIN_ACCEPTABLE_TARGET_SDK = 36
 MIN_RECOMMENDED_MIN_SDK = 21
 PLAY_APP_NAME_MAX_CHARS = 30
 PLAY_SHORT_DESC_MAX_CHARS = 80
+# Silhouette agreement between the listing icon and the installed launcher
+# bitmap (`pngcmp.shape_similarity`, 0..1). One design rendered twice lands at
+# 1.0 (a pair produced by `devteam brand`); a rejected update measured 0.28 and
+# two drifted pairs 0.11 and 0.14 — so the line sits in the empty gap between
+# "one design rendered twice" and "two marks".
+ICON_PARITY_PASS = 0.6
+ICON_PARITY_BLOCK = 0.45
 PLAY_FULL_DESC_MAX_CHARS = 4000
 PLAY_WHATSNEW_MAX_CHARS = 500
 
@@ -631,6 +638,58 @@ def run_store_readiness_audit(project: Path, tree: Path | None = None) -> list[R
             detail="Brand assets verified (icon=Stitch, featureGraphic=Gemini)" if passed_brand else "; ".join(brand_issues),
             fix="Run `devteam storefront-brand <project>` to generate Stitch icon and Gemini feature graphic",
         ))
+
+        # The icon a user taps must BE the icon the listing shows. Play rejected
+        # a shipped update on 2026-11-04 under the Misleading Claims policy —
+        # "your app's installed icon or name differs from its store listing" —
+        # and this audit passed it, because it only asked whether a launcher icon
+        # and a 512 PNG EXIST. Existence is not agreement: the store showed a
+        # green shield while the installed app showed a power glyph.
+        from . import pngcmp
+        listing_icon = img_dir / "icon.png"
+        launchers = [p for p in src.glob("**/res/mipmap-*/ic_launcher.png")
+                     if not re.search(r"(^|/)(build|\.pipeline|\.git)/",
+                                      p.relative_to(src).as_posix())]
+        launchers.sort(key=lambda p: p.stat().st_size, reverse=True)
+        if listing_icon.is_file() and launchers:
+            sim = pngcmp.shape_similarity(listing_icon, launchers[0])
+            dist = pngcmp.distance(listing_icon, launchers[0])
+            if sim is None:
+                checks.append(ReadinessCheck(
+                    category="Storefront Graphic Assets",
+                    name="Installed Icon Matches Store Listing",
+                    passed=False,
+                    severity="WARNING",
+                    detail="could not decode the listing icon or the launcher bitmap — parity is unproven",
+                    fix="Export images/icon.png and mipmap-*/ic_launcher.png as standard 8-bit PNGs",
+                ))
+            else:
+                same = sim >= ICON_PARITY_PASS
+                blocking = sim < ICON_PARITY_BLOCK
+                checks.append(ReadinessCheck(
+                    category="Storefront Graphic Assets",
+                    name="Installed Icon Matches Store Listing",
+                    passed=same,
+                    severity="INFO" if same else ("BLOCKER" if blocking else "WARNING"),
+                    detail=(f"launcher {launchers[0].name} and listing icon agree "
+                            f"(shape {sim:.2f}, dHash {dist})"
+                            if same else
+                            f"the installed app icon differs from the listing icon "
+                            f"(shape {sim:.2f}, dHash {dist}) — Play rejects this as an "
+                            f"app-store listing mismatch under the Misleading Claims policy"),
+                    fix=("Re-render the launcher from the listing art: `devteam brand <project> "
+                         "--design --from <artboard.html> --worktree <dt/… tree>` — one design, "
+                         "one set of pixels, and it records the provenance `verify` reads"),
+                ))
+        else:
+            checks.append(ReadinessCheck(
+                category="Storefront Graphic Assets",
+                name="Installed Icon Matches Store Listing",
+                passed=False,
+                severity="WARNING",
+                detail="no listing icon or no launcher bitmap to compare",
+                fix="Add images/icon.png and mipmap-*/ic_launcher.png, then re-run this audit",
+            ))
 
         # Visual Asset Quality & ASO Conversion Score
         from .asset_critic import review_store_assets

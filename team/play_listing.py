@@ -292,6 +292,31 @@ def publish_listing_assets(project: Path, dry_run: bool = True, log: Any = None)
         blockers.extend(sbf.gate(root))
     except Exception:
         blockers.append("brand asset provenance could not be read (docs/storefront-assets.json)")
+    # The icon the listing shows has to BE the icon the app installs. Play rejected
+    # a shipped 1.0.9 update (2026-11-04, Misleading Claims: "your app's installed icon or
+    # name differs from its store listing"), and this upload had already gone
+    # through: the provenance gate only proved where the art came from, never that
+    # the app carries it.
+    try:
+        from . import pngcmp
+
+        listing_icon = (_listing_dir(root) or root) / "images/icon.png"
+        if not listing_icon.is_file():
+            listing_icon = (_listing_dir(root) or root) / "icon.png"
+        launchers = sorted(
+            (p for p in root.glob("**/res/mipmap-*/ic_launcher.png")
+             if not any(part in ("build", ".pipeline", ".git")
+                        for part in p.relative_to(root).parts)),
+            key=lambda p: p.stat().st_size, reverse=True)
+        if listing_icon.is_file() and launchers:
+            sim = pngcmp.shape_similarity(listing_icon, launchers[0])
+            if sim is not None and sim < 0.6:
+                blockers.append(
+                    f"the installed app icon differs from the listing icon (shape {sim:.2f}) — "
+                    "Play rejects this as an app-store listing mismatch; re-render the launcher "
+                    "with `devteam brand <project> --design --from <artboard.html>` first")
+    except Exception:
+        pass
     # The frames must say HOW they were made: the rule's path is the poster
     # (Gemini paints the asset from the real render), and a code-composed frame is
     # an exception that carries a reason. An upload that cannot say which one it
