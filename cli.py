@@ -2514,7 +2514,8 @@ def cmd_storefront_build(args: argparse.Namespace) -> int:
     if getattr(args, "plan", False):
         choice = sb.resolve_path(frame=args.frame, plate=args.plate, gemini=args.gemini,
                                  layout=args.layout, frame_html=args.frame_html,
-                                 builtin=args.builtin, poster=args.poster, why=args.why)
+                                 builtin=args.builtin, poster=args.poster, why=args.why,
+                                 owner_approved=getattr(args, "owner_approved", False))
         print(f"STOREFRONT BUILD PLAN: {'BLOCKED' if not choice['ok'] else 'OK'}")
         print(f"  path: {choice['path']}" + (f" ({', '.join(choice['flags'])})" if choice['flags'] else ""))
         if not choice["ok"]:
@@ -2526,7 +2527,8 @@ def cmd_storefront_build(args: argparse.Namespace) -> int:
         return 0
     choice = sb.resolve_path(frame=args.frame, plate=args.plate, gemini=args.gemini,
                              layout=args.layout, frame_html=args.frame_html,
-                             builtin=args.builtin, poster=args.poster, why=args.why)
+                             builtin=args.builtin, poster=args.poster, why=args.why,
+                             owner_approved=getattr(args, "owner_approved", False))
     # The run record is opened BEFORE anything renders and closed after the gates,
     # so a killed process (an agent that backgrounded this and ended its turn)
     # leaves "interrupted at step X" instead of no trace at all.
@@ -2537,7 +2539,8 @@ def cmd_storefront_build(args: argparse.Namespace) -> int:
             project, frame=args.frame, plate=args.plate, gemini=args.gemini,
             layout=args.layout, frame_html=args.frame_html, stitch_source=args.stitch_source,
             brief=args.brief, builtin=args.builtin, force=args.force,
-            poster=args.poster, strict=args.strict, publish=False, why=args.why, log=print,
+            poster=args.poster, strict=args.strict, publish=False, why=args.why,
+            owner_approved=getattr(args, "owner_approved", False), log=print,
         )
     finally:
         sb.run_end(project, res, log=print)
@@ -3228,6 +3231,10 @@ def main() -> None:
     sb.add_argument("--brief", default="", help="composition brief handed to the vision model / plate prompt")
     sb.add_argument("--builtin", action="store_true",
                     help="FALLBACK (needs --why): ship the plain builtin template deliberately")
+    sb.add_argument("--owner-approved", action="store_true", dest="owner_approved",
+                    help="FALLBACK consent: the OWNER said the listing may be composed by code "
+                         "instead of painted. Required by every code path together with --why; "
+                         "recorded in docs/storefront-frames.json and checked by store-publish")
     sb.add_argument("--why", default="",
                     help="FALLBACK reason, required by every code-composed path (--builtin, "
                          "--gemini, --plate, --frame-html, --layout, --frame): what must stay "

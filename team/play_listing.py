@@ -321,6 +321,17 @@ def publish_listing_assets(project: Path, dry_run: bool = True, log: Any = None)
                 "frames were composed by code ("
                 + ", ".join(comp.get("flags") or ["no flags given"])
                 + ") with no recorded reason — the rule's path is --poster")
+        elif comp.get("path") != "poster" and not comp.get("owner_approved"):
+            # The painted listing is the rule's path and the owner rates its quality
+            # far higher (2026-11-04). Code composition is therefore the owner's
+            # decision, not an agent's judgement call, and consent is recorded —
+            # a reason alone does not mean anybody agreed.
+            blockers.append(
+                "frames were composed by code ("
+                + ", ".join(comp.get("flags") or ["no flags given"])
+                + ") WITHOUT the owner's approval — ask the owner whether the listing "
+                "may be drawn by code instead of painted, then re-run with "
+                "--owner-approved once they say yes")
         elif comp.get("path") == "poster":
             # A frame whose vendor-mark heal could not be proved clean does not
             # reach the store: the mark is the model's advert on the owner's page.

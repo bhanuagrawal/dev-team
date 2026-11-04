@@ -216,7 +216,8 @@ def _compose_scene(project: Path, scene: dict[str, Any], name: str, *,
 
 def _record_composition(project: Path, path: str, why: str = "", flags: list[str] | None = None,
                         chat: str | None = None, watermark: dict[str, dict[str, Any]] | None = None,
-                        painted: int | None = None, log=None) -> None:
+                        painted: int | None = None, owner_approved: bool = False,
+                        log=None) -> None:
     """Write HOW the listing's frames were made into the frames registry.
 
     A listing that reaches Play must be able to say whether the image model
@@ -240,6 +241,10 @@ def _record_composition(project: Path, path: str, why: str = "", flags: list[str
         "chat": chat or previous.get("chat") or "",
         "painted": painted if painted is not None else previous.get("painted", 0),
         "watermark": watermark or {},
+        # Code composition is the exception, and the exception is the owner's to
+        # grant. Recording it here (not only in the command line) is what lets the
+        # publish gate and `devteam asks` see whether consent exists.
+        "owner_approved": bool(owner_approved),
         "at": now_iso(),
     }
     # The two records must not disagree about how the frames were made: a poster
@@ -250,7 +255,8 @@ def _record_composition(project: Path, path: str, why: str = "", flags: list[str
     sfr.save_registry(project, registry)
     if log:
         log(f"  composition path: {path}" + (f" ({', '.join(flags)})" if flags else "")
-            + (f" — why: {why.strip()}" if (why or "").strip() else ""))
+            + (f" — why: {why.strip()}" if (why or "").strip() else "")
+            + (" — owner approved" if owner_approved else ""))
 
 
 RUN_STATE_REL = ".pipeline/storefront_run.json"
@@ -343,7 +349,8 @@ def run_end(project: Path, result: dict[str, Any] | None, log=None) -> None:
 
 def resolve_path(*, frame: str = "auto", plate: str | None = None, gemini: bool = False,
                  layout: str | None = None, frame_html: str | None = None,
-                 builtin: bool = False, poster: bool = False, why: str = "") -> dict[str, Any]:
+                 builtin: bool = False, poster: bool = False, why: str = "",
+                 owner_approved: bool = False) -> dict[str, Any]:
     """Which composition path this run takes — and whether the choice is legal.
 
     ONE definition, used by the build and by `--plan`, so "what will this do?"
@@ -383,6 +390,20 @@ def resolve_path(*, frame: str = "auto", plate: str | None = None, gemini: bool 
                         "is the exception for type that must stay pixel-crisp, so it needs "
                         "--why \"<what must be crisp and why the poster cannot do it>\". The "
                         "reason is recorded and the publish gate reads it."}
+    # WHICH PATH IS BETTER-LOOKING IS NOT THE AGENT'S CALL. The owner prefers the
+    # painted listing (2026-11-04: "its quality is 100x better") and an agent had
+    # switched the whole listing to code-composed frames on its own judgement, so
+    # the exception is now an OWNER decision that has to be stated in the command.
+    # A reason is not an approval: --why explains, --owner-approved records consent.
+    if fallback and not owner_approved:
+        return {"ok": False, "path": "code", "flags": flags,
+                "why": "a code-composed frame needs the OWNER's decision, not the agent's",
+                "hint": ("Ask the owner first: \"the painted listing is the rule's path, and "
+                         "these frames would be drawn by code instead (" + ", ".join(flags) +
+                         ") — do you want that?\" Only with a yes may the run add "
+                         "--owner-approved; the approval is recorded in "
+                         "docs/storefront-frames.json and store-publish refuses a "
+                         "code-composed listing without it.")}
     return {"ok": True, "path": "code" if fallback else "poster", "flags": flags,
             "why": why.strip(), "hint": ""}
 
@@ -392,14 +413,15 @@ def build(project: Path, *, frame: str = "auto", plate: str | None = None,
           frame_html: str | None = None, stitch_source: str = "",
           brief: str = "", builtin: bool = False, force: bool = False,
           poster: bool = False, strict: bool = False, publish: bool = False,
-          why: str = "", log=None) -> dict[str, Any]:
+          why: str = "", owner_approved: bool = False, log=None) -> dict[str, Any]:
     from . import asset_critic, storefront_brand as sbf
     from . import storefront_direction as sd, storefront_frames as sfr
     from . import storefront_preview as sp, storefront_review as sr, vision_layout as vl
 
     # 0 — WHICH PATH (see resolve_path): poster by default, fallback only with a reason.
     choice = resolve_path(frame=frame, plate=plate, gemini=gemini, layout=layout,
-                          frame_html=frame_html, builtin=builtin, poster=poster, why=why)
+                          frame_html=frame_html, builtin=builtin, poster=poster, why=why,
+                          owner_approved=owner_approved)
     if not choice["ok"]:
         return _fail("BLOCKED", choice["why"], choice["hint"])
     fallback_flags = choice["flags"]
@@ -647,7 +669,8 @@ def build(project: Path, *, frame: str = "auto", plate: str | None = None,
     out = {"status": "OK", "score": score, "frame": "builtin" if builtin else frame,
            "concept": direction.get("concept"),
            "order": [s["id"] for s in sr.ordered_scenes(spec, review)]}
-    _record_composition(project, "code", why=why, flags=fallback_flags, log=log)
+    _record_composition(project, "code", why=why, flags=fallback_flags,
+                        owner_approved=owner_approved, log=log)
     if publish:
         from .play_listing import publish_listing_assets
         out["publish"] = publish_listing_assets(project, dry_run=False, log=log)

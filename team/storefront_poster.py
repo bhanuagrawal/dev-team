@@ -83,17 +83,33 @@ def poster_prompt(project: Path, scene: dict[str, Any], direction: dict[str, Any
     if total:
         parts.append(f"This is frame {index + 1} of {total} of the listing.")
     parts.append(
-        "The attached image is the ONLY app screen this frame may show. Reproduce it as "
-        "the app screen — do not invent, restyle or replace the app's interface, and do "
-        "not reuse a screen from another image in this conversation.")
+        "The attached image is the ONLY app screen this frame may show. Treat it as the "
+        "source of truth for the phone's display: the screen in your image must be that "
+        "image, kept as it is. Do not redraw, restyle, merge or complete it — and do not "
+        "reuse a screen from another image in this conversation.")
     screen = str(scene.get("screen") or "").strip()
     if screen:
         parts.append(f"The attached screen is: {screen}. If the image you are about to "
                      "draw does not show that, draw it again.")
+    # The model's failure mode is ADDING: it put the dashboard's brand header, search
+    # field and bottom navigation inside the inspection screens — an interface the app
+    # does not have (observed 2026-11-04). Naming what the screen does NOT contain is
+    # the only instruction that ever stopped it, because "reproduce it exactly" leaves
+    # the model free to be helpful.
+    absent = str(scene.get("screen_absent") or "").strip()
+    if absent:
+        parts.append(f"The attached screen does NOT contain {absent} — do not add any of "
+                     "it to the phone.")
+    parts.append(
+        "Every element inside the phone must come from the attachment, in the same order "
+        "and position. The frame around it (background, headline, caption) is yours to "
+        "compose; the screen is not.")
     parts += [
         "Every number and status on that screen (counts, percentages, dates, PASS/FAIL, "
         "severity) is part of the screenshot: copy each one exactly as it appears. Never "
-        "calculate a new number and never round one.",
+        "calculate, increment or round one, and if a value is hard to read, keep it exactly "
+        "as drawn instead of substituting a plausible one — a number the app cannot produce "
+        "is worse than a soft one.",
         "Print exactly these words, and no other text:",
         f"label: {scene.get('badge') or ''}",
         f"headline: {scene.get('headline') or ''}",

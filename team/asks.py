@@ -427,6 +427,27 @@ def open_items(project: Path, flags: list[dict] | None = None) -> list[dict]:
         rows.append({"source": "agent_flag",
                      "title": u.get("title") or u.get("id") or "?",
                      "how": u.get("how") or "", "benefit": u.get("benefit") or ""})
+    # A listing whose frames are composed by CODE needs the owner's word: the painted
+    # listing is the rule's path and the owner rates its quality far higher
+    # (2026-11-04). An agent switched paths on its own judgement once; from now on the
+    # only way it can ship is with consent, so the consent is a first-class ask here.
+    try:
+        import json
+        reg = json.loads((Path(project) / "docs" / "storefront-frames.json").read_text())
+        comp = reg.get("composition") or {}
+        if comp.get("path") and comp.get("path") != "poster" and not comp.get("owner_approved"):
+            rows.append({
+                "source": "owner_ask",
+                "title": "Approve drawing the Play frames in code instead of painting them",
+                "how": ("docs/storefront-frames.json says the listing's frames are composed by "
+                        "code (" + ", ".join(comp.get("flags") or ["no flags"]) + "). The painted "
+                        "listing is the rule's path and rates higher; if you want the code frames, "
+                        "say yes and the pass re-runs with --owner-approved (store-publish refuses "
+                        "a code-composed listing without it)"),
+                "benefit": "",
+            })
+    except Exception:
+        pass
     return rows
 
 
