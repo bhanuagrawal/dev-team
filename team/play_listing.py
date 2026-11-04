@@ -233,7 +233,8 @@ def publish_icon(project: Path, dry_run: bool = True, log: Any = None) -> dict[s
         live = _live_images(package, edit_id, token, project, plan["locale"], "icon")
         if not live or live[0].get("sha256") != want:
             raise RuntimeError("the uploaded icon did not verify in the edit")
-        committed = _post(f"{API}/applications/{package}/edits/{edit_id}:commit", project, token)
+        committed = _post(f"{API}/applications/{package}/edits/{edit_id}:commit"
+              "?changesNotSentForReview=true", project, token)
         if committed.get("_error") or not committed.get("id"):
             raise RuntimeError(f"commit rejected: {committed.get('_error') or committed}")
         fresh = _post(f"{API}/applications/{package}/edits", project, token)
@@ -435,7 +436,8 @@ def publish_listing_assets(project: Path, dry_run: bool = True, log: Any = None)
                                                      if a["type"] == "phoneScreenshots"]:
             raise RuntimeError("screenshot ORDER after upload does not match the editorial order")
 
-        committed = _post(f"{API}/applications/{package}/edits/{edit_id}:commit", project, token)
+        committed = _post(f"{API}/applications/{package}/edits/{edit_id}:commit"
+              "?changesNotSentForReview=true", project, token)
         # A commit must come back as the edit object; anything else (an error
         # payload, a permission denial, an empty body) means the listing did NOT
         # change. Treating "no _error key" as success is what shipped a stale
