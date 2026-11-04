@@ -28,7 +28,9 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+import shutil
 import subprocess
+import tempfile
 from pathlib import Path
 from typing import Any
 
@@ -146,6 +148,26 @@ def poster_prompt(project: Path, scene: dict[str, Any], direction: dict[str, Any
     return "\n".join(p for p in parts if p.strip())
 
 
+def _script_syntax_error(script: str) -> str:
+    """`node --check` the generated script; "" when it parses.
+
+    The script runs as an async function body, so it is wrapped the same way before
+    checking. Returns the first line of the syntax error, or "" when node is absent
+    (a machine without node cannot paint at all; that is reported elsewhere).
+    """
+    node = shutil.which("node")
+    if not node:
+        return ""
+    with tempfile.TemporaryDirectory() as tmp:
+        path = Path(tmp) / "check.js"
+        path.write_text("(async () => {\n" + script + "\n})();\n")
+        res = subprocess.run([node, "--check", str(path)], capture_output=True, text=True)
+        if res.returncode == 0:
+            return ""
+        lines = [ln for ln in (res.stderr or "").splitlines() if ln.strip()]
+        return lines[0][:200] if lines else "node --check failed"
+
+
 def _batch_script(jobs: list[dict[str, str]]) -> str:
     """One browser session, one Gemini chat, one asset per job.
 
@@ -213,7 +235,7 @@ def _batch_script(jobs: list[dict[str, str]]) -> str:
       if (!delivered) {{
         results.push({{ ok: false, scene: job.out,
                        error: "the render is not in the sent message — the model was asked to "
-                              "draw a screen it never received" }});
+                              + "draw a screen it never received" }});
         break;
       }}
       const start = Date.now();
@@ -308,10 +330,19 @@ def generate_all(project: Path, scenes: list[dict[str, Any]], direction: dict[st
         return {"status": "OK", "posters": posters, "chat": None, "painted": 0}
     if log:
         log(f"  poster: Gemini (browser) painting {len(jobs)} asset(s) in one chat")
+    script = _batch_script(jobs)
+    # Check our OWN script before spending an image on it. A generated script is
+    # code; a stray Python-style string concatenation made it a SyntaxError, and
+    # the browser then reported a failure that read like Gemini's fault while the
+    # quota paid for it (observed 2026-11-04).
+    bad = _script_syntax_error(script)
+    if bad:
+        return {"status": "ERROR", "error": f"the generated browser script is invalid: {bad}",
+                "hint": "this is a team-code bug, not a Gemini one — nothing was painted"}
     try:
         from . import gemini_browser
 
-        res = gemini_browser.execute(_batch_script(jobs), timeout=900, log=log)
+        res = gemini_browser.execute(script, timeout=900, log=log)
     except FileNotFoundError:
         return {"status": "BLOCKED", "error": "Playwright or browser-control is not installed"}
     except subprocess.TimeoutExpired:
