@@ -813,7 +813,14 @@ def run_store_readiness_audit(project: Path, tree: Path | None = None) -> list[R
     # 9. Automation Loop (Nightly launchd Schedule)
     from . import scheduler
     is_manual = profile.get("schedule") == "manual"
-    sched_installed = scheduler.is_project_scheduled(project.name)
+    # The schedule belongs to the REGISTERED project, not to the directory this
+    # audit is pointed at. Auditing a task worktree (.pipeline/worktrees/dt-…)
+    # used the worktree's folder name as the launchd key and reported "no nightly
+    # schedule" for a project that has one — a false BLOCKER that could stop a
+    # worktree audit for the wrong reason. profile.json carries the registered
+    # name, so read the key from there.
+    sched_name = str(profile.get("name") or project.name)
+    sched_installed = scheduler.is_project_scheduled(sched_name)
     if is_manual:
         checks.append(ReadinessCheck(
             category="Automation & Operations",
@@ -828,7 +835,7 @@ def run_store_readiness_audit(project: Path, tree: Path | None = None) -> list[R
             name="Nightly Autonomous Execution Loop",
             passed=True,
             severity="INFO",
-            detail=f"launchd nightly schedule registered ({scheduler.project_label(project.name)})",
+            detail=f"launchd nightly schedule registered ({scheduler.project_label(sched_name)})",
         ))
     else:
         checks.append(ReadinessCheck(
@@ -836,16 +843,24 @@ def run_store_readiness_audit(project: Path, tree: Path | None = None) -> list[R
             name="Nightly Autonomous Execution Loop",
             passed=False,
             severity="BLOCKER",
-            detail=f"No nightly schedule registered in launchd for {project.name}",
-            fix=f"Run `devteam setup --project {project.name} --schedule auto` to register daily launchd trigger",
+            detail=f"No nightly schedule registered in launchd for {sched_name}",
+            fix=f"Run `devteam setup --project {sched_name} --schedule auto` to register daily launchd trigger",
         ))
 
     return checks
 
 
 def format_readiness_report(project: Path, checks: list[ReadinessCheck]) -> tuple[str, bool]:
+    # Name the registered project, not the folder the audit was pointed at: a
+    # worktree audit must not print "dt-<task>" as if it were a different app.
+    try:
+        from .core import profile_of
+
+        audit_name = str((profile_of(project) or {}).get("name") or project.name)
+    except Exception:
+        audit_name = project.name
     lines: list[str] = []
-    lines.append(f"PLAY STORE READINESS AUDIT: {project.name}")
+    lines.append(f"PLAY STORE READINESS AUDIT: {audit_name}")
     lines.append("=" * 60)
 
     categories: dict[str, list[ReadinessCheck]] = {}
