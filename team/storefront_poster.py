@@ -114,12 +114,29 @@ def _batch_script(jobs: list[dict[str, str]]) -> str:
     const gen = () => page.locator("model-response img[src^='blob:'], "
                                  + "model-response img[src^='data:image']");
     const results = [];
+    // The composer keeps the attached render as a blob thumbnail. Counting them is
+    // how the run proves the screen was actually handed to the model: when an
+    // upload silently fails the prompt still sends, and the model — with no
+    // attached screen — paints the PREVIOUS frame's screen again, which is a
+    // wrong-screen listing no downstream gate can see (observed 2026-11-04: the
+    // certificate frame came back showing the defect checklist).
+    const attachedCount = () => page.locator("img[src^='blob:'], img[src^='data:image']").count();
     for (const job of JOBS) {{
       const before = await gen().count();
+      const attachedBefore = await attachedCount();
       await page.locator("[aria-label=\\"Upload & tools\\"]").first().click();
       await page.waitForTimeout(700);
       await page.locator("input[type=file]").first().setInputFiles(job.src);
-      await page.waitForTimeout(3500);
+      let attached = false;
+      for (let i = 0; i < 20; i++) {{
+        if (await attachedCount() > attachedBefore) {{ attached = true; break; }}
+        await page.waitForTimeout(1000);
+      }}
+      if (!attached) {{
+        results.push({{ ok: false, error: "the scene render never attached to the prompt" }});
+        break;
+      }}
+      await page.waitForTimeout(2500);
       const composer = page.locator("rich-textarea [contenteditable=true], [contenteditable=true]").first();
       await composer.click();
       await composer.fill(job.prompt);
