@@ -322,7 +322,8 @@ def run_doctor(project: Path, log) -> dict:
                        f"run: devteam ci {project.name} --write")]
         else:
             same = target.read_text() == ci_mod.render(project)
-            checks = [("the workflow matches the team template", same,
+            checks = [("the workflow matches the team template" if same else
+                       "the workflow has DRIFTED from the team template", same,
                        f"run: devteam ci {project.name} --write (the project copy is generated, "
                        f"never hand-edited)")]
         # The generated copy can only be as good as its generator: a template that
