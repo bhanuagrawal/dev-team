@@ -164,6 +164,22 @@ def _ci_pull(project: Path, profile: dict) -> dict:
     return out
 
 
+def _store_status_pull(project: Path) -> dict:
+    """The store's verdict on the last delivery, as last observed.
+
+    A snapshot, not a feed: Play's policy state is console-only. The planner gets
+    the state, the age and whether it is stale — because "no news" is not
+    "approved", and a rejected update is the product's fire just like a red CI run.
+    """
+    from . import store_status
+
+    snap = store_status.read(project)
+    if not snap:
+        return {"status": "unseen",
+                "reason": "no console snapshot recorded — `devteam store-status <project> --sync`"}
+    return {"status": "ok", **snap}
+
+
 def _ga4_pull(project: Path, profile: dict) -> dict:
     """GA4 via service account — the documented runReport pattern. The project
     DECLARES its connection in profile['connections']['ga4']
@@ -727,6 +743,7 @@ def research_collect(project: Path, log: RunLog) -> dict:
                 "notes": profile.get("notes", ""),
             },
             "ci": _ci_pull(project, profile),
+            "store_status": _store_status_pull(project),
         },
         "constraints": {
             "max_queue": MAX_QUEUE,
@@ -932,6 +949,21 @@ Rules:
   When signals.ci.last_conclusion is "failure", the FIRST queue entry must be
   a bugfix/feature that restores the delivery (grounded in failure_log_tail;
   name the exact files to change). Validation code enforces this ordering.
+- signals.store_status: what PLAY said about the last delivery, as last observed
+  by a human or an agent reading the console — a snapshot with an age, never a
+  live feed. `state` is one of rejected / suspended / review-pending / in-review /
+  approved / published / unknown; `note` carries the console's own words and
+  `age_hours`/`stale` how much to trust it. Read it BEFORE proposing polish:
+  * rejected or suspended (and not stale): the store is the fire. queue[0] must be
+    the bugfix/feature that fixes what Play found (name the policy and the exact
+    surface from `location`), exactly like a red CI run. Validation enforces it.
+  * review-pending: the delivery is committed but NOT sent for review — the fix is
+    a browser step (`devteam store-publish` / Play Console → Publishing overview),
+    not new app code. Do not queue code for it.
+  * stale (age_hours > the configured maximum) or unknown: say so — never treat a
+    stale snapshot as approval, and never claim the store is fine.
+  * unavailable/unseen: nothing was ever read; a cheap `devteam store-status
+    <project> --sync` is an investigation entry at most, never a blocker.
 - repo.recent_runs is the ledger of what was ALREADY executed/blocked/rejected.
   Do NOT repeat those tasks; build on their findings and note outcomes instead.
   A previously proposed item that recent_runs shows blocked/rejected must not
@@ -998,10 +1030,21 @@ def _validate(result: dict, research: dict | None = None) -> str | None:
             return "queue entry missing type/label/reason"
         if research is not None:
             ci_last = (research.get("signals", {}).get("ci", {}) or {}).get("last_conclusion")
+            store_snap = research.get("signals", {}).get("store_status", {}) or {}
+            store_blocked = (store_snap.get("state") in ("rejected", "suspended")
+                             and not store_snap.get("stale"))
             if q is result["queue"][0] and ci_last == "failure" \
                     and q.get("type") not in ("bugfix", "feature"):
                 return ("signals.ci is red — the first queue entry must be the "
                         "bugfix/feature that restores delivery")
+            # A store rejection is the same fire one gate later: git and CI can be
+            # green while Play refuses the update, and the head of the queue is the
+            # only thing a run builds.
+            if q is result["queue"][0] and store_blocked \
+                    and q.get("type") not in ("bugfix", "feature"):
+                return (f"signals.store_status says the last delivery was "
+                        f"{store_snap.get('state')} at the store — the first queue entry "
+                        "must be the bugfix/feature that fixes what Play found")
             # CODE-FIRST HEAD (owner directive 2026-10-23): a run builds only
             # queue[0], so an analysis head while code is queued behind it ships
             # no code. Enforced here because it is the one way the plan can

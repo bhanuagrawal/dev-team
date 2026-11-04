@@ -134,7 +134,9 @@ jobs:
       # Staged on purpose: with no Play service account the build still goes green and
       # the AAB stays as an artifact, so a fresh project ships nothing by accident.
       - name: Upload to Play Console (internal testing)
+        id: play-upload
         if: env.PLAY_JSON != ''
+        continue-on-error: true
         uses: r0adkll/upload-google-play@v1
         with:
           serviceAccountJsonPlainText: ${{ env.PLAY_JSON }}
@@ -143,3 +145,43 @@ jobs:
           tracks: internal
           status: completed
           whatsNewDirectory: __WHATSNEW_DIR__
+
+      # Play refuses to let an edit be "sent for review automatically" while the app
+      # has an open policy issue ("Changes cannot be sent for review automatically.
+      # Please set the query parameter changesNotSentForReview to true"). The build and
+      # the upload were fine — the previous run died here, after the AAB was already
+      # uploaded, so the operator saw a red release with nothing to fix in the code.
+      # Retry the SAME upload committing the edit WITHOUT the automatic review
+      # submission: testers on `internal` get the build, and sending it for review
+      # becomes an explicit, recorded step instead of a silent CI failure. Turned into
+      # a loud warning so nobody reads a green run as "the store has it".
+      - name: Commit the edit without sending it for review (policy hold)
+        id: play-upload-hold
+        if: env.PLAY_JSON != '' && steps.play-upload.outcome == 'failure'
+        uses: r0adkll/upload-google-play@v1
+        with:
+          serviceAccountJsonPlainText: ${{ env.PLAY_JSON }}
+          packageName: __PACKAGE_NAME__
+          releaseFiles: __RELEASE_FILES__
+          tracks: internal
+          status: completed
+          whatsNewDirectory: __WHATSNEW_DIR__
+          changesNotSentForReview: true
+
+      - name: Say what the policy hold means
+        if: env.PLAY_JSON != '' && steps.play-upload-hold.outcome == 'success'
+        run: |
+          cat >> "$GITHUB_STEP_SUMMARY" <<'EOF'
+          ### Delivery: committed to `internal`, NOT sent for review
+          Play refused the automatic review submission (an app policy issue is open),
+          so the edit was committed with `changesNotSentForReview: true`.
+
+          * Testers on the internal track can install this build.
+          * The update will not reach any other track until it is sent for review:
+            Play Console → Publishing overview → **Send for review**.
+          * Record it: `devteam store-status <project> --state review-pending --note "..."`.
+
+          The pipeline reads this from the console, not from this log — a green run
+          here is not proof the store has the change.
+          EOF
+          echo "::warning::The edit was committed WITHOUT an automatic review submission — send it from Play Console → Publishing overview, then record it with devteam store-status."

@@ -1635,6 +1635,12 @@ def cmd_status(args: argparse.Namespace) -> None:
     last = state.get("last_run", {})
     if last:
         print(f"last run:   {last.get('date')} → {last.get('result')} {last.get('note','')[:80]}")
+    # What the STORE says is not visible in git or CI: a delivery can be green and
+    # still rejected by Play policy (2026-11-04). One line, with its age, so the
+    # owner and the next agent know whether anyone has actually looked.
+    from team import store_status as store_status_mod
+
+    print(store_status_mod.line(project))
     # The shipped build's release-candidate call: stated by every
     # shipped run, so it must be visible here too — and visibly answered once the
     # owner has said so (an ask nobody can see the answer to repeats).
@@ -2854,6 +2860,72 @@ def cmd_store_publish(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_store_status(args: argparse.Namespace) -> int:
+    """What Play says about the last delivery — recorded so the planner can see it.
+
+    The store is the one gate the pipeline cannot read from git or CI: a release
+    can be green, uploaded and still rejected by policy (2026-11-04). This writes
+    an explicitly aged snapshot; `research` injects it and treats a stale one as
+    unknown rather than as approval.
+    """
+    project = resolve_project(args.project)
+    from team import store_status as ss
+
+    snapshot = {}
+    if getattr(args, "sync", False):
+        package = _package_of(project)
+        if not package:
+            print("STORE STATUS: no package id in the profile — cannot find the app in the console")
+            return 1
+        conn = ((profile_of(project).get("connections") or {}).get("play_store") or {})
+        res = ss.sync(project, package, account=str(conn.get("developer") or ""))
+        if res.get("status") != "OK":
+            print(f"STORE STATUS: {res.get('status')} — {res.get('reason')}")
+            print("  → record it by hand instead: devteam store-status <project> "
+                  "--state rejected --note \"what Play said\"")
+            return 1
+        snapshot = res["snapshot"]
+    elif getattr(args, "state", None):
+        snapshot = ss.write(project, args.state, note=getattr(args, "note", "") or "",
+                            location=getattr(args, "location", "") or "",
+                            source="agent")
+    else:
+        snapshot = ss.read(project)
+
+    if getattr(args, "json", False):
+        print(json.dumps(snapshot, indent=2))
+        return 0
+    if not snapshot:
+        print("STORE STATUS: no snapshot recorded")
+        print("  → devteam store-status <project> --sync   (reads Play Console in your browser)")
+        return 0
+    print(ss.line(project))
+    for key in ("location", "version", "evidence", "source"):
+        if snapshot.get(key):
+            print(f"  {key}: {snapshot[key]}")
+    if snapshot.get("stale"):
+        print(f"  ⚠ older than {ss.MAX_HOURS:g}h — the planner must not read this as approval")
+    return 0
+
+
+def _package_of(project: Path) -> str:
+    profile = profile_of(project)
+    for conn in (profile.get("connections") or {}).values():
+        if isinstance(conn, dict) and conn.get("package"):
+            return str(conn["package"])
+    # Not declared as a connection yet: the app id in the build file is the same
+    # string Play knows it by, so read it rather than refusing to look.
+    try:
+        from team.store_readiness import _find_gradle_files, _strip_code_comments
+
+        text = "\n".join(f.read_text(errors="ignore") for f in _find_gradle_files(project))
+        m = re.search(r"applicationId\s*=?\s*[\"']([A-Za-z0-9._]+)[\"']",
+                      _strip_code_comments(text))
+        return m.group(1) if m else ""
+    except Exception:
+        return ""
+
+
 def cmd_stitch_prompt(args: argparse.Namespace) -> int:
     project = resolve_project(args.project)
     from team.design import compile_stitch_screen_prompt
@@ -3332,6 +3404,18 @@ def main() -> None:
     spb.add_argument("project")
     spb.add_argument("--yes", action="store_true", help="actually upload and commit the listing edit")
     spb.set_defaults(fn=cmd_store_publish)
+    sts = sub.add_parser("store-status",
+                         help="record what Play says about the last delivery (policy state), "
+                              "read from the console through the browser; the planner reads it")
+    sts.add_argument("project")
+    sts.add_argument("--sync", action="store_true",
+                     help="read Play Console in the owner's browser and record what it says")
+    sts.add_argument("--state", help="record a state directly: " +
+                     ", ".join(__import__("team.store_status", fromlist=["STATES"]).STATES))
+    sts.add_argument("--note", default="", help="one line of context (what Play said, in its words)")
+    sts.add_argument("--location", default="", help="where Play found it (e.g. 'App icon (en-US)')")
+    sts.add_argument("--json", action="store_true", help="print the recorded snapshot as JSON")
+    sts.set_defaults(fn=cmd_store_status)
     cs = sub.add_parser("console", help="plan or drive Google Play Console setup")
     cs.add_argument("project")
     cs.add_argument("--script", action="store_true", help="output automated Playwright JS script")
