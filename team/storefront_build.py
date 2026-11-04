@@ -217,7 +217,7 @@ def _compose_scene(project: Path, scene: dict[str, Any], name: str, *,
 def _record_composition(project: Path, path: str, why: str = "", flags: list[str] | None = None,
                         chat: str | None = None, watermark: dict[str, dict[str, Any]] | None = None,
                         painted: int | None = None, owner_approved: bool = False,
-                        log=None) -> None:
+                        grade: dict[str, Any] | None = None, log=None) -> None:
     """Write HOW the listing's frames were made into the frames registry.
 
     A listing that reaches Play must be able to say whether the image model
@@ -245,6 +245,9 @@ def _record_composition(project: Path, path: str, why: str = "", flags: list[str
         # grant. Recording it here (not only in the command line) is what lets the
         # publish gate and `devteam asks` see whether consent exists.
         "owner_approved": bool(owner_approved),
+        # The tone map applied on the way to Play: without it "why does this frame
+        # look different from the poster in .pipeline" has no answer on disk.
+        "grade": grade or {},
         "at": now_iso(),
     }
     # The two records must not disagree about how the frames were made: a poster
@@ -545,7 +548,9 @@ def build(project: Path, *, frame: str = "auto", plate: str | None = None,
                 "corner_mark": cleaned.get("corner_mark"),
             }
             name = f"{rank:02d}_{sr._slug(str(scene['id']))}.png"
-            sized = spt.to_play_size(Path(cleaned.get("file") or poster_file), listing / name)
+            grade = spt.grade_of(spec)
+            sized = spt.to_play_size(Path(cleaned.get("file") or poster_file), listing / name,
+                                     grade=grade)
             if sized.get("status") != "OK":
                 return _fail("ERROR", sized.get("error", "upscale failed"))
             if log:
@@ -579,7 +584,8 @@ def build(project: Path, *, frame: str = "auto", plate: str | None = None,
                "order": [s["id"] for s in ordered],
                "screenshots": written, "chat": made.get("chat")}
         _record_composition(project, "poster", chat=made.get("chat"), log=log,
-                            watermark=watermark, painted=made.get("painted"))
+                            watermark=watermark, painted=made.get("painted"),
+                            grade=spt.grade_of(spec))
         if publish:
             from .play_listing import publish_listing_assets
             out["publish"] = publish_listing_assets(project, dry_run=False, log=log)

@@ -181,6 +181,11 @@ def plate_brief(direction: dict[str, Any], scene: dict[str, Any] | None = None) 
     mode = str(palette.get("mode") or "").strip()
     if mode and mode != "dark":
         parts.append(f"The listing is {mode}-first.")
+    # The owner's look decision (2026-11-04: frames read flat) applies to the plate
+    # too: it is the light the whole frame sits in.
+    look = str(direction.get("look") or "").strip()
+    if look:
+        parts.append(f"Look: {look}.")
     avoid = [a for a in (direction.get("avoid") or []) if "screen" not in a.lower()]
     if avoid:
         parts.append("Do not imply: " + "; ".join(avoid[:3]) + ".")

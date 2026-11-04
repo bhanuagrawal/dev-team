@@ -117,6 +117,12 @@ def poster_prompt(project: Path, scene: dict[str, Any], direction: dict[str, Any
         f"headline: {scene.get('headline') or ''}",
         f"subtext: {scene.get('sub') or ''}",
     ]
+    # The owner's "phate phate" (flat/washed, 2026-11-04) is a LOOK complaint, and a
+    # look is a brand decision — so it lives in the direction file next to the
+    # palette, not in a constant here. Project data, quoted verbatim.
+    look = str(direction.get("look") or "").strip()
+    if look:
+        parts.append(f"Look: {look}")
     palette = direction.get("palette") or {}
     base = str(palette.get("base") or "").strip()
     accent = str(palette.get("accent") or "").strip()
@@ -404,26 +410,85 @@ def clean_poster(poster: Path, strict: bool = False,
     return plate_clean.clean(poster, strict=strict, half_ratio=half_ratio, out=out)
 
 
-def to_play_size(poster: Path, out: Path, width: int = 1080, height: int = 1920) -> dict[str, Any]:
-    """Upscale the painted poster to a size Play accepts, without inventing pixels.
+# A painted listing comes back FLAT: the model renders a mid-grey-friendly image
+# and the web UI's 572x1024 output is then resampled up, which softens edges twice.
+# The owner's words for it were "phate phate" (washed out). Grading is the last step
+# of OUR pipeline, so it costs no image and is reproducible: one tone curve plus a
+# light unsharp mask, both applied in the same Chrome pass that does the upscale.
+# "Phate phate" (the owner's words, 2026-11-04). Measured in this pipeline, not
+# assumed: a heavy contrast lift plus a vignette turned the source's faint texture
+# into visible blocks, and a 3x3 convolution haloed every glyph. What survives a
+# 572 -> 1080 upscale is a gentle curve and a blurred-copy unsharp; everything
+# stronger is visibly worse than flat.
+DEFAULT_GRADE = {"contrast": 1.06, "saturate": 1.12, "brightness": 1.0,
+                 "sharpen": 0.20, "sharpen_radius": 1.2,
+                 "vignette": 0.0, "vignette_inner": 55}
+
+
+def grade_of(spec: dict[str, Any] | None) -> dict[str, float]:
+    """The tone mapping for this listing: spec `grade` wins, else the default."""
+    base = dict(DEFAULT_GRADE)
+    raw = (spec or {}).get("grade") or {}
+    for k, v in raw.items():
+        if k in base:
+            try:
+                base[k] = float(v)
+            except (TypeError, ValueError):
+                pass
+    return base
+
+
+def to_play_size(poster: Path, out: Path, width: int = 1080, height: int = 1920,
+                 grade: dict[str, float] | None = None) -> dict[str, Any]:
+    """Upscale the painted poster to a size Play accepts, and grade it.
 
     Play's phone screenshots need >= 1080x1920 and an aspect ratio of at most 2:1.
     The web UI returns ~572x1024, so the poster is resampled in Chrome. That is an
-    upscale: the composition survives, small type softens. It is reported as such
-    rather than passed off as a native render.
+    upscale: the composition survives, small type softens — and it is reported as
+    such rather than passed off as a native render.
+
+    The grade is a MEASUREMENT-FREE tone map: contrast, saturation, a touch of black
+    point and a 3x3 unsharp mask. It changes how the pixels look, never what they
+    say, so a graded frame still carries the app's exact text.
     """
     from .marketing_asset_generator import _find_chrome_executable
 
+    grade = grade or dict(DEFAULT_GRADE)
     chrome = _find_chrome_executable()
     if not chrome:
         return {"status": "ERROR", "error": "Google Chrome not found for the upscale"}
     out.parent.mkdir(parents=True, exist_ok=True)
     page = out.with_suffix(".html")
+    k = float(grade.get("sharpen") or 0)
+    # Unsharp mask as original*(1+k) - blur*k. A 3x3 convolution kernel was tried
+    # first and it amplified the source's compression blocks into visible noise on
+    # a flat dark background; a blurred copy as the "low pass" is smooth and only
+    # lifts edges.
+    sharpen_svg = (
+        f'<feGaussianBlur in="SourceGraphic" stdDeviation="{float(grade.get("sharpen_radius") or 1.2)}" result="lo"/>'
+        f'<feComposite in="SourceGraphic" in2="lo" operator="arithmetic" '
+        f'k1="0" k2="{1 + k:.3f}" k3="{-k:.3f}" k4="0"/>'
+        if k > 0 else ""
+    )
     page.write_text(
-        "<!DOCTYPE html><html><body style='margin:0;background:#000'>"
-        f"<img src='{poster.resolve().as_uri()}' "
-        f"style='display:block;width:{width}px;height:{height}px;object-fit:cover;"
-        "image-rendering:auto'>"
+        "<!DOCTYPE html><html><head><style>"
+        "html,body{margin:0;background:#000;width:" + str(width) + "px;height:" + str(height) + "px}"
+        f"#vig{{position:fixed;inset:0;pointer-events:none;"
+        f"background:radial-gradient(ellipse at 50% 40%,rgba(0,0,0,0) {int(grade.get('vignette_inner', 42))}%,"
+        f"rgba(0,0,0,{grade.get('vignette', 0.30)}) 100%)}}"
+        f"#shot{{display:block;width:{width}px;height:{height}px;object-fit:cover;"
+        f"filter:contrast({grade.get('contrast')}) saturate({grade.get('saturate')}) "
+        f"brightness({grade.get('brightness')}) url(#grade)}}"
+        "</style></head><body>"
+        '<svg width="0" height="0" style="position:absolute">'
+        '<filter id="grade" x="0" y="0" width="100%" height="100%">'
+        f"{sharpen_svg}"
+        "</filter></svg>"
+        f"<img id='shot' src='{poster.resolve().as_uri()}'>"
+        # A vignette is depth without noise: it darkens the corners the model leaves
+        # flat and lifts the phone out of the page. Amplifying contrast on a dark
+        # background instead surfaced the source's compression blocks.
+        f'<div id="vig"></div>'
         "</body></html>")
     try:
         subprocess.run([chrome, "--headless", "--disable-gpu", "--hide-scrollbars",
@@ -435,7 +500,7 @@ def to_play_size(poster: Path, out: Path, width: int = 1080, height: int = 1920)
     if not out.is_file():
         return {"status": "ERROR", "error": "the upscale produced no PNG"}
     return {"status": "OK", "file": out, "size": [width, height],
-            "upscaled_from": _png_size(poster)}
+            "upscaled_from": _png_size(poster), "grade": grade}
 
 
 def _poster_name(scene: dict[str, Any]) -> str:
