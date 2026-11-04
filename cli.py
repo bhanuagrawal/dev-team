@@ -1181,6 +1181,14 @@ def cmd_record(args: argparse.Namespace) -> None:
         print_release_handover(project, task,
                               str(args.version or latest_shipped_version(state)),
                               str(args.commit or ""))
+        # The icon chain is a state machine with a `released` step; only a shipped
+        # record knows a release happened, so this is where the step advances.
+        try:
+            from team import brand_change
+
+            brand_change.mark_released(project, str(args.version or ""), str(args.commit or ""))
+        except Exception:
+            pass
     block = goals.review_block(state_of(project))
     if block:
         print("\n" + block)

@@ -608,6 +608,24 @@ def gate(root: Path) -> list[str]:
 # --------------------------------------------------------------------------- #
 # 4. status — what actually happened, step by step
 # --------------------------------------------------------------------------- #
+def mark_released(project: Path, version: str, commit: str) -> dict[str, Any]:
+    """Close the brand chain's `released` step from the release that shipped it.
+
+    The chain has five states and only four commands touched it: `--feedback`,
+    `--design`, `--publish` — so an icon that went out through the normal release
+    loop stayed at `applied` forever and `brand --status` kept asking for a release
+    that had already happened. `record --result shipped` is the moment delivery is
+    known, so it is the moment the state advances.
+    """
+    data = state(project)
+    if not data or data.get("state") in (None, "released", "published"):
+        return data
+    _record(data, "released", f"shipped as v{version} ({commit[:8]})",
+            version=version, commit=commit)
+    _save(project, data)
+    return data
+
+
 def status(project: Path, root: Path | None = None) -> dict[str, Any]:
     data = state(project)
     if not data:
