@@ -482,9 +482,13 @@ def build(project: Path, *, frame: str = "auto", plate: str | None = None,
         listing.mkdir(parents=True, exist_ok=True)
         made = spt.generate_all(project, ordered, direction, log=log, extra=brief, force=force)
         if made.get("status") != "OK":
-            return _fail(made.get("status", "ERROR"), made.get("error", "posters not generated"),
-                         "the poster is a Gemini deliverable: re-run, or drop a finished image at "
-                         ".pipeline/storefront_posters/poster-<scene>.png")
+            missing = made.get("scene") or "<scene>"
+            return _fail(
+                made.get("status", "ERROR"), made.get("error", "posters not generated"),
+                f"repaint ONE frame without spending the others: delete "
+                f".pipeline/storefront_posters/poster-{missing}.png and its .json, then "
+                f"re-run — every other frame is reused from cache; or drop a finished "
+                f"image at .pipeline/storefront_posters/poster-{missing}.png")
         if log and not made.get("painted"):
             log(f"  poster: reused {len(ordered)} cached frame(s) — nothing was painted this run")
         if log and made.get("chat"):
@@ -495,11 +499,13 @@ def build(project: Path, *, frame: str = "auto", plate: str | None = None,
             poster_file = made["posters"].get(scene["id"])
             if not poster_file:
                 return _fail("ERROR", f"no poster for {scene['id']}")
-            # STRICT, always: a vendor mark on a shipping frame is not a warning.
-            # The best-effort default shipped a poster carrying the model's sparkle
-            # while the log said "healed" (observed 2026-11-01), so a frame whose
-            # corner cannot be proved plain is refused and must be re-painted.
-            cleaned = spt.clean_poster(Path(poster_file), strict=True)
+            # The heal is best-effort by default and REFUSING is the caller's choice
+            # (`--strict`): the detector is a heuristic on a painted image, and a
+            # false accusation used to throw away a good frame — a whole repaint out
+            # of a daily image quota (observed 2026-11-04). The verdict is recorded
+            # per frame either way, and the run says so in the log, so the owner is
+            # never asked to trust a "healed" that was not measured.
+            cleaned = spt.clean_poster(Path(poster_file), strict=strict)
             if cleaned.get("status") != "OK":
                 return _fail(cleaned.get("status", "ERROR"),
                              cleaned.get("error", "the model's watermark could not be removed"),

@@ -56,32 +56,64 @@ def _app_name(project: Path) -> str:
 
 
 def poster_prompt(project: Path, scene: dict[str, Any], direction: dict[str, Any],
-                  extra: str = "") -> str:
+                  extra: str = "", index: int = 0, total: int = 0) -> str:
     """The prompt handed to Gemini WITH the real render attached.
 
-    Deliberately says NOTHING about how the image should look — no palette, no glow,
-    no phone styling, no film grain. Creative direction is the model's job; the
-    owner's decision is that Gemini composes the asset. What the prompt does pin is
-    the part that must stay true: which screen to show and which words to print.
-    Everything it prints comes from the scene spec, so the poster cannot advertise
-    a feature or a number the app does not have.
+    Deliberately says NOTHING about creative direction — no glow, no film grain, no
+    phone styling. Composing the asset is the model's job. What the prompt pins is
+    the part that must stay true: WHICH screen, WHICH words, WHICH numbers, and the
+    app's own palette, because four frames painted in different chats must still
+    read as one listing.
+
+    Each instruction below exists because the run got it wrong once, with a real
+    listing (2026-11-04):
+
+    * the frame's position and the screen's own identity — the certificate frame
+      came back painted with the DEFECT screen, copied from the frame before it;
+    * numbers are transcribed, never computed — a progress chip was redrawn as
+      "106%", a figure the app cannot produce;
+    * the app's palette, quoted from the direction — a frame painted in a fresh
+      chat landed on a blue-violet background while its three siblings were dark
+      emerald.
     """
     parts = [
         "Create a vertical 9:16 Google Play Store marketing screenshot for my Android app "
         f"{_app_name(project)}.",
-        "The attached image is the app's real screen: show that screen in the image as the "
-        "app screen, and do not invent or replace the app's interface.",
+    ]
+    if total:
+        parts.append(f"This is frame {index + 1} of {total} of the listing.")
+    parts.append(
+        "The attached image is the ONLY app screen this frame may show. Reproduce it as "
+        "the app screen — do not invent, restyle or replace the app's interface, and do "
+        "not reuse a screen from another image in this conversation.")
+    screen = str(scene.get("screen") or "").strip()
+    if screen:
+        parts.append(f"The attached screen is: {screen}. If the image you are about to "
+                     "draw does not show that, draw it again.")
+    parts += [
+        "Every number and status on that screen (counts, percentages, dates, PASS/FAIL, "
+        "severity) is part of the screenshot: copy each one exactly as it appears. Never "
+        "calculate a new number and never round one.",
         "Print exactly these words, and no other text:",
         f"label: {scene.get('badge') or ''}",
         f"headline: {scene.get('headline') or ''}",
         f"subtext: {scene.get('sub') or ''}",
-        # Soft consistency, not a check: the whole listing is painted in ONE chat, so
-        # the model can see the set it is building. Asking it to match what it already
-        # produced is what makes four frames read as one listing; nothing downstream
-        # verifies this, because "same look" is a judgement, not a measurement.
-        "If you have already produced images in this conversation, match them: the same "
-        "background treatment, the same device framing and the same type scale, so the "
-        "set reads as one listing rather than four unrelated posters.",
+    ]
+    palette = direction.get("palette") or {}
+    base = str(palette.get("base") or "").strip()
+    accent = str(palette.get("accent") or "").strip()
+    if base or accent:
+        bits = []
+        if base:
+            bits.append(f"base {base}")
+        if accent:
+            bits.append(f"accent {accent}")
+        parts.append(
+            "Keep the marketing frame in the app's own palette (" + ", ".join(bits) +
+            "), so every frame of this listing reads as one set. If you have already "
+            "produced images in this conversation, match their background treatment, "
+            "device framing and type scale.")
+    parts += [
         "No watermark, no logos, no price, no rating badges.",
         # Not art direction: a production constraint. The vendor stamps its mark into
         # the bottom-right corner of every image, and the cleaner heals that corner. If
@@ -133,7 +165,7 @@ def _batch_script(jobs: list[dict[str, str]]) -> str:
         await page.waitForTimeout(1000);
       }}
       if (!attached) {{
-        results.push({{ ok: false, error: "the scene render never attached to the prompt" }});
+        results.push({{ ok: false, scene: job.out, error: "the scene render never attached to the prompt" }});
         break;
       }}
       await page.waitForTimeout(2500);
@@ -154,7 +186,7 @@ def _batch_script(jobs: list[dict[str, str]]) -> str:
         }}
         await page.waitForTimeout(3000);
       }}
-      if (!picked) {{ results.push({{ ok: false, error: "no NEW image in the model's answer" }}); break; }}
+      if (!picked) {{ results.push({{ ok: false, scene: job.out, error: "no NEW image in the model's answer" }}); break; }}
       const data = await page.evaluate(async (s) => {{
         const img = new Image(); img.src = s; await img.decode();
         const c = document.createElement("canvas");
@@ -193,13 +225,14 @@ def generate_all(project: Path, scenes: list[dict[str, Any]], direction: dict[st
     out_dir.mkdir(parents=True, exist_ok=True)
     posters: dict[str, Path] = {}
     jobs: list[dict[str, str]] = []
-    for scene in scenes:
+    for order, scene in enumerate(scenes):
         name = _poster_name(scene)
         out = out_dir / f"poster-{name}.png"
         source = project / ".pipeline/storefront_scenes" / f"{scene['id']}.png"
         if not source.is_file():
             return {"status": "BLOCKED", "error": f"no render at {source.relative_to(project)}"}
-        prompt = poster_prompt(project, scene, direction, extra=extra)
+        prompt = poster_prompt(project, scene, direction, extra=extra,
+                               index=order, total=len(scenes))
         sha = _prompt_sha(prompt)
         # The cache key is the prompt AND the render it was painted from. A poster
         # is a depiction of one specific screen; when the app changed and only the
@@ -251,7 +284,8 @@ def generate_all(project: Path, scenes: list[dict[str, Any]], direction: dict[st
     for job, made in zip(jobs, value.get("results") or []):
         if not made.get("ok"):
             return {"status": "BLOCKED", "error": str(made.get("error") or "no image produced"),
-                    "chat": value.get("chat")}
+                    "chat": value.get("chat"),
+                    "scene": _poster_scene_hint(job.get("out") or "")}
         path = Path(made["out"])
         posters[_scene_id_for(Path(job["src"]).stem)] = path
         if log:
@@ -268,6 +302,12 @@ def generate_all(project: Path, scenes: list[dict[str, Any]], direction: dict[st
 
 def _scene_id_for(stem: str) -> str:
     return stem
+
+
+def _poster_scene_hint(path: str) -> str:
+    """The cache name (`poster-<scene>.png`) of the frame that failed, for the hint."""
+    name = Path(path).name
+    return name[len("poster-"):-len(".png")] if name.startswith("poster-") else ""
 
 
 def clean_poster(poster: Path, strict: bool = False,
