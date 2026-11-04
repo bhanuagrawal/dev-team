@@ -172,18 +172,28 @@ if (n > 0) {
 }
 // Open THIS app: the home page links each app as `a[aria-label^="View "]`, and
 // the row around it carries the package id. Reached by matching the package,
-// never by hardcoding one project's console ids.
+// never by hardcoding one project's console ids. Walking up from a link can
+// reach a container that holds EVERY row, so "an ancestor mentions the package"
+// is not enough: seen 2026-11-05 the sync opened the first app on the page
+// (ZenList) while asked for FieldCert, then reported "no status". Take instead
+// the link whose NEAREST package-carrying ancestor holds the fewest View links
+// — a row holds exactly one.
 await page.evaluate((pkg) => {
   const links = [...document.querySelectorAll('a[aria-label^="View "]')];
-  const hit = links.find((a) => {
+  let best = null;
+  let bestCount = Infinity;
+  for (const a of links) {
     let el = a;
-    for (let i = 0; i < 8 && el; i++) {
-      if ((el.innerText || "").includes(pkg)) return true;
+    for (let i = 0; i < 10 && el; i++) {
+      if ((el.innerText || "").includes(pkg)) {
+        const c = el.querySelectorAll('a[aria-label^="View "]').length;
+        if (c < bestCount) { best = a; bestCount = c; }
+        break;
+      }
       el = el.parentElement;
     }
-    return false;
-  });
-  if (hit) hit.click();
+  }
+  if (best) best.click();
 }, "PLAY_PACKAGE");
 await page.waitForTimeout(5000);
 const text = await page.locator("body").innerText();
