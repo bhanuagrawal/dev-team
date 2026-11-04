@@ -412,11 +412,24 @@ def build(project: Path, *, frame: str = "auto", plate: str | None = None,
     if not spec_file.is_file():
         return _fail("BLOCKED", f"no {sp.SPEC_REL}",
                      f"devteam storefront-scenes {project.name} --scaffold")
-    spec = sp.load_spec(project, create=False)
+    # The RENDER comes from origin/main, so the copy, the order and the direction
+    # must come from the same bytes. Reading them from the checkout let a checkout
+    # two commits behind supply scene copy that the render had already renamed —
+    # four fresh renders combined with posters painted from the old words, and the
+    # run reporting success (observed 2026-11-04). A checkout is a cache, never
+    # the source of what a listing says.
+    tree = sp._delivery_tree(project, log=log)
+    spec_source = tree if (tree / sp.SPEC_REL).is_file() else project
+    if spec_source is tree and spec_source != project:
+        local = spec_file.read_bytes()
+        if local != (tree / sp.SPEC_REL).read_bytes():
+            _say(log, f"~ spec: reading {sp.SPEC_REL} from origin/main (the checkout copy "
+                      "differs and is not what this render describes)")
+    spec = sp.load_spec(spec_source, create=False)
     scenes = spec.get("scenes") or []
 
     # 2 — an editorial review decides order and cuts. No review, no listing.
-    review = sr.load_review(project, spec)
+    review = sr.load_review(spec_source, spec)
     if not review:
         return _fail("BLOCKED", "no editorial review",
                      f"devteam storefront-scenes {project.name} --review --apply <review.json>")
@@ -437,9 +450,9 @@ def build(project: Path, *, frame: str = "auto", plate: str | None = None,
     # 2b — the DIRECTION: what the listing is trying to say. Without it the poster
     # is undirected (a generic plate plus whatever the model proposes first), and
     # there is nothing to review the result against.
-    direction = sd.load(project, spec)
+    direction = sd.load(spec_source, spec)
     if direction is None:
-        raw = sd.load_raw(project)
+        raw = sd.load_raw(spec_source)
         if raw is None:
             return _fail("BLOCKED", "no listing direction",
                          f"devteam storefront-direction {project.name} --seed, fill the judgements "
@@ -452,7 +465,7 @@ def build(project: Path, *, frame: str = "auto", plate: str | None = None,
     # 3 — render the app's own composables (from origin/main, never a mock).
     run_step(project, "render")
     _say(log, "~ render: the app's own composables (origin/main)")
-    rendered = sp.render_previews(project, log=log)
+    rendered = sp.render_previews(project, log=log, tree=tree)
     if rendered.get("status") != "OK":
         return _fail(rendered.get("status", "ERROR"), rendered.get("error", "render failed"),
                      rendered.get("hint", ""))

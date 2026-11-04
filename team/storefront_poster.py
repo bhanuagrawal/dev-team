@@ -25,6 +25,7 @@ What it can and cannot promise
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 import subprocess
@@ -147,7 +148,7 @@ def _batch_script(jobs: list[dict[str, str]]) -> str:
       fs.writeFileSync(job.out, Buffer.from(data.data.split(",")[1], "base64"));
       // The cache key travels with the image: which prompt painted it.
       if (job.sidecar) fs.writeFileSync(job.sidecar,
-        JSON.stringify({{ prompt_sha: job.sha, chat: page.url() }}));
+        JSON.stringify({{ prompt_sha: job.sha, source_sha: job.source_sha, chat: page.url() }}));
       results.push({{ ok: true, out: job.out, w: data.w, h: data.h }});
     }}
     return {{ ok: results.length && results.every(r => r.ok), chat: page.url(), results }};
@@ -155,8 +156,6 @@ def _batch_script(jobs: list[dict[str, str]]) -> str:
 
 
 def _prompt_sha(prompt: str) -> str:
-    import hashlib
-
     return hashlib.sha256(prompt.encode("utf-8")).hexdigest()[:16]
 
 
@@ -185,13 +184,25 @@ def generate_all(project: Path, scenes: list[dict[str, Any]], direction: dict[st
             return {"status": "BLOCKED", "error": f"no render at {source.relative_to(project)}"}
         prompt = poster_prompt(project, scene, direction, extra=extra)
         sha = _prompt_sha(prompt)
+        # The cache key is the prompt AND the render it was painted from. A poster
+        # is a depiction of one specific screen; when the app changed and only the
+        # copy stayed the same, reusing on the prompt alone shipped a poster of the
+        # old build (observed 2026-11-04: four fresh renders, four old posters, and
+        # a green critic because the copy matched).
+        try:
+            source_sha = hashlib.sha256(source.read_bytes()).hexdigest()[:16]
+        except Exception:
+            source_sha = ""
         sidecar = out.with_suffix(".json")
         painted_by = ""
+        painted_source = ""
         try:
-            painted_by = (json.loads(sidecar.read_text()) or {}).get("prompt_sha") or ""
+            _side = json.loads(sidecar.read_text()) or {}
+            painted_by = _side.get("prompt_sha") or ""
+            painted_source = _side.get("source_sha") or ""
         except Exception:
             painted_by = ""
-        if out.is_file() and not force and painted_by == sha:
+        if out.is_file() and not force and painted_by == sha and painted_source == source_sha:
             if log:
                 log(f"  poster: reusing {out.name} ({out.stat().st_size // 1024} KB, same prompt)")
             posters[scene["id"]] = out
@@ -200,7 +211,7 @@ def generate_all(project: Path, scenes: list[dict[str, Any]], direction: dict[st
             log(f"  poster: repainting {out.name} — "
                 + ("--force" if force else "the prompt changed since it was painted"))
         jobs.append({"out": str(out), "src": str(source), "prompt": prompt,
-                     "sha": sha, "sidecar": str(sidecar)})
+                     "sha": sha, "source_sha": source_sha, "sidecar": str(sidecar)})
     if not jobs:
         return {"status": "OK", "posters": posters, "chat": None, "painted": 0}
     if log:
