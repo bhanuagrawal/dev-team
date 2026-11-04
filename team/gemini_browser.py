@@ -159,6 +159,71 @@ def release_stale_profile_lock(profile: Path, log: Callable[[str], None] | None 
     return True
 
 
+_HEADLESS_SESSION: tuple[bool, str] | None = None
+
+_SESSION_PROBE = """
+await page.goto("https://gemini.google.com/app", { waitUntil: "domcontentloaded" });
+await page.waitForTimeout(3000);
+const signedIn = await page.locator("button:has-text('Sign in'), a:has-text('Sign in')").count() === 0;
+return { signedIn: signedIn, url: page.url() };
+"""
+
+
+def headless_signed_in(log: Callable[[str], None] | None = None) -> tuple[bool, str]:
+    """Is the persistent Gemini profile actually SIGNED IN?
+
+    `is_headless_ready` only proves a profile directory and a Chrome binary exist,
+    so a profile whose session expired kept reporting "ready" while every prompt
+    produced nothing — and the run waited the full image timeout, then blamed the
+    model ("no NEW image in the model's answer"). Signing in is a credential act:
+    only the owner can do it (`devteam gemini-auth --force`). Everything else — the
+    relay through the owner's own logged-in Chrome — is agent work, and this check
+    is what lets the run take that path immediately instead of stalling.
+    """
+    global _HEADLESS_SESSION
+    if _HEADLESS_SESSION is not None:
+        return _HEADLESS_SESSION
+    ready, reason = is_headless_ready()
+    if not ready:
+        _HEADLESS_SESSION = (False, reason)
+        return _HEADLESS_SESSION
+    profile = gemini_profile_dir()
+    release_stale_profile_lock(profile, log)
+    with tempfile.NamedTemporaryFile("w", suffix=".js", delete=False, encoding="utf-8") as s_file:
+        s_file.write(_SESSION_PROBE)
+        script_path = s_file.name
+    with tempfile.NamedTemporaryFile("w", suffix=".js", delete=False, encoding="utf-8") as r_file:
+        r_file.write(_NODE_RUNNER)
+        runner_path = r_file.name
+    env = os.environ.copy()
+    env["DEVTEAM_GEMINI_PROFILE"] = str(profile)
+    chrome = _find_chrome_executable()
+    if chrome:
+        env["DEVTEAM_CHROME_BIN"] = chrome
+    try:
+        res = subprocess.run(["node", runner_path, script_path], capture_output=True,
+                             text=True, timeout=180, env=env)
+        value = (json.loads(res.stdout or "{}") or {}).get("value") or {}
+    except Exception:
+        value = {}
+    finally:
+        for p in (script_path, runner_path):
+            try:
+                os.unlink(p)
+            except OSError:
+                pass
+    if value.get("signedIn"):
+        _HEADLESS_SESSION = (True, "signed in")
+    else:
+        _HEADLESS_SESSION = (
+            False,
+            "the persistent Gemini profile is SIGNED OUT — every prompt returns "
+            "nothing; re-authenticate once with `devteam gemini-auth --force` "
+            "(owner), or let the run fall back to the relay in the owner's Chrome",
+        )
+    return _HEADLESS_SESSION
+
+
 def execute(script: str, timeout: int = 900,
             log: Callable[[str], None] | None = None,
             fallback: bool = True) -> subprocess.CompletedProcess:
@@ -169,6 +234,12 @@ def execute(script: str, timeout: int = 900,
     ready or encounters an error.
     """
     ready, reason = is_headless_ready()
+    if ready:
+        signed, why = headless_signed_in(log)
+        if not signed:
+            if log:
+                log(f"  gemini: headless profile unusable — {why}")
+            ready, reason = False, why
     if ready:
         release_stale_profile_lock(gemini_profile_dir(), log)
         chrome = _find_chrome_executable()
