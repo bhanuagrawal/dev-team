@@ -83,7 +83,7 @@ def read(project: Path) -> dict[str, Any]:
 
 def write(project: Path, state: str, note: str = "", *, location: str = "",
           source: str = "console", evidence: str = "", version: str = "",
-          extra: dict | None = None) -> dict[str, Any]:
+          decision: str = "", extra: dict | None = None) -> dict[str, Any]:
     state = (state or "unknown").strip().lower()
     if state not in STATES:
         state = "unknown"
@@ -96,6 +96,14 @@ def write(project: Path, state: str, note: str = "", *, location: str = "",
         "evidence": evidence.strip()[:2000],
         "version": version.strip(),
     }
+    if decision.strip():
+        data["decision"] = decision.strip()
+    else:
+        # A decision is a JUDGEMENT, not an observation: re-syncing the console
+        # must not erase what was decided about it.
+        prev = read(project)
+        if prev.get("decision"):
+            data["decision"] = prev["decision"]
     if extra:
         data.update(extra)
     p = _path(project)
@@ -134,6 +142,8 @@ def line(project: Path) -> str:
     if snap.get("production_staged"):
         extra += (f" · production rollout staged for {snap.get('production_staged_version') or '?'}"
                   " (promotion is owner-only)")
+    if snap.get("decision"):
+        extra += f" · decided: {snap['decision'][:120]}"
     return f"store:       {snap.get('state', 'unknown')}{stale} ({when}){note}{extra}"
 
 

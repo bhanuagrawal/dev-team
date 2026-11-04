@@ -2893,9 +2893,12 @@ def cmd_store_status(args: argparse.Namespace) -> int:
                   "--state rejected --note \"what Play said\"")
             return 1
         snapshot = res["snapshot"]
-    elif getattr(args, "state", None):
-        snapshot = ss.write(project, args.state, note=getattr(args, "note", "") or "",
-                            location=getattr(args, "location", "") or "",
+    elif getattr(args, "state", None) or getattr(args, "decision", ""):
+        prev = ss.read(project)
+        snapshot = ss.write(project, getattr(args, "state", None) or prev.get("state", "unknown"),
+                            note=getattr(args, "note", "") or prev.get("note", ""),
+                            location=getattr(args, "location", "") or prev.get("location", ""),
+                            decision=getattr(args, "decision", "") or "",
                             source="agent")
     else:
         snapshot = ss.read(project)
@@ -3422,6 +3425,9 @@ def main() -> None:
                      ", ".join(__import__("team.store_status", fromlist=["STATES"]).STATES))
     sts.add_argument("--note", default="", help="one line of context (what Play said, in its words)")
     sts.add_argument("--location", default="", help="where Play found it (e.g. 'App icon (en-US)')")
+    sts.add_argument("--decision", default="",
+                     help="the judgement taken about it (kept across re-syncs): "
+                          "e.g. 'do not resubmit the rejected build; ship the fixed one'")
     sts.add_argument("--json", action="store_true", help="print the recorded snapshot as JSON")
     sts.set_defaults(fn=cmd_store_status)
     cs = sub.add_parser("console", help="plan or drive Google Play Console setup")
