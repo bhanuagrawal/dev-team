@@ -176,8 +176,20 @@ def load_json(path: Path, default: Any = None) -> Any:
 
 
 def save_json(path: Path, data: Any) -> None:
+    """Write JSON atomically.
+
+    `state.json` is read by every command and written by several, and two agents (or
+    an agent and its own background step) can overlap: a plain `write_text` truncates
+    the file before the new bytes land, so a concurrent reader sees an EMPTY file and
+    dies on `json.loads('')`. Seen 2026-11-04 — `devteam rc` and `devteam asks` run
+    side by side, and the review crashed on a state.json that was valid a second
+    before and after. Writing to a sibling temp file and renaming it into place makes
+    readers see either the old bytes or the new ones, never a hole.
+    """
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(data, indent=2) + "\n")
+    tmp = path.with_name(f".{path.name}.{os.getpid()}.tmp")
+    tmp.write_text(json.dumps(data, indent=2) + "\n")
+    os.replace(tmp, path)
 
 
 def profile_root(path: Path) -> Path:
