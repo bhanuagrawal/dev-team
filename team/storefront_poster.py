@@ -168,7 +168,9 @@ def _batch_script(jobs: list[dict[str, str]]) -> str:
     // attached screen — paints the PREVIOUS frame's screen again, which is a
     // wrong-screen listing no downstream gate can see (observed 2026-11-04: the
     // certificate frame came back showing the defect checklist).
-    const attachedCount = () => page.locator("img[src^='blob:'], img[src^='data:image']").count();
+    const attachedCount = () => page
+      .locator("rich-textarea img[src^='blob:'], rich-textarea img[src^='data:image'], "
+               + ".file-preview-container img").count();
     for (const job of JOBS) {{
       const before = await gen().count();
       const attachedBefore = await attachedCount();
@@ -189,7 +191,31 @@ def _batch_script(jobs: list[dict[str, str]]) -> str:
       await composer.click();
       await composer.fill(job.prompt);
       await page.waitForTimeout(400);
+      const sentBefore = await page.locator("user-query").count();
       await page.keyboard.press("Enter");
+      // The proof that matters: the SENT message carries the render. The composer
+      // thumbnail can belong to an earlier upload (or to the previous frame's
+      // output), so the sent bubble is the only honest witness — and it is what the
+      // model actually sees. Gemini echoes the attachment back under its own URL,
+      // so the check is "a wide image is in the last user message", not a byte
+      // comparison.
+      let delivered = false;
+      for (let i = 0; i < 30; i++) {{
+        const queries = page.locator("user-query");
+        const nq = await queries.count();
+        if (nq > sentBefore) {{
+          const pic = queries.nth(nq - 1).locator("img").first();
+          const w = await pic.evaluate(el => el.naturalWidth).catch(() => 0);
+          if (w >= 500) {{ delivered = true; break; }}
+        }}
+        await page.waitForTimeout(1000);
+      }}
+      if (!delivered) {{
+        results.push({{ ok: false, scene: job.out,
+                       error: "the render is not in the sent message — the model was asked to "
+                              "draw a screen it never received" }});
+        break;
+      }}
       const start = Date.now();
       let picked = null;
       while (Date.now() - start < 300000) {{

@@ -299,12 +299,23 @@ def execute(script: str, timeout: int = 900,
     if log and not ready:
         log(f"  gemini: headless Playwright not active ({reason}) — using browser-control")
 
-    return subprocess.run(
+    res = subprocess.run(
         ["browser-control", "execute", "--json", script],
         capture_output=True,
         text=True,
         timeout=timeout,
     )
+    # The relay prints a session banner ("Session: tidy-tiger-999. Continue with
+    # --session ...") on STDOUT before its JSON document. Handing that concatenation
+    # to json.loads made every relay answer unparseable, and the parse error became
+    # the run's "error" — so a paint that actually happened reported "Session: <id>"
+    # as its failure (observed 2026-11-04). Keep only the JSON document.
+    out = res.stdout or ""
+    start = out.find("{")
+    end = out.rfind("}")
+    if start >= 0 and end > start:
+        res = subprocess.CompletedProcess(res.args, res.returncode, out[start:end + 1], res.stderr)
+    return res
 
 
 def auth_flow(timeout: int = 300, log: Callable[[str], None] | None = None) -> bool:
