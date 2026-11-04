@@ -41,9 +41,10 @@ STATES = ("rejected", "suspended", "review-pending", "in-review", "approved",
 _HINTS = (
     ("suspended", (r"app (has been )?removed", r"suspended", r"blocked by google")),
     ("rejected", (r"update rejected", r"changes rejected", r"app update rejected",
-                  r"violation of .* policy")),
-    ("review-pending", (r"not sent for review", r"ready to send for review",
-                        r"changes ready to publish", r"send for review")),
+                  r"violation of .* policy", r"\bpolicy issue")),
+    ("review-pending", (r"not yet sent for review", r"not sent for review",
+                        r"ready to send for review", r"ready to publish",
+                        r"send for review")),
     ("in-review", (r"in review", r"pending review", r"changes in review")),
 )
 
@@ -127,7 +128,13 @@ def line(project: Path) -> str:
     when = f"{age}h ago" if isinstance(age, (int, float)) else "unknown age"
     stale = " ⚠ STALE" if snap.get("stale") else ""
     note = f" — {snap['note'][:110]}" if snap.get("note") else ""
-    return f"store:       {snap.get('state', 'unknown')}{stale} ({when}){note}"
+    extra = ""
+    if snap.get("submission_rejected") and snap.get("state") != "rejected":
+        extra += " · a submission was REJECTED (policy issue open)"
+    if snap.get("production_staged"):
+        extra += (f" · production rollout staged for {snap.get('production_staged_version') or '?'}"
+                  " (promotion is owner-only)")
+    return f"store:       {snap.get('state', 'unknown')}{stale} ({when}){note}{extra}"
 
 
 # --------------------------------------------------------------------------- #
@@ -153,20 +160,49 @@ if (n > 0) {
   await target.click();
   await page.waitForTimeout(5000);
 }
+// Open THIS app: the home page links each app as `a[aria-label^="View "]`, and
+// the row around it carries the package id. Reached by matching the package,
+// never by hardcoding one project's console ids.
+await page.evaluate((pkg) => {
+  const links = [...document.querySelectorAll('a[aria-label^="View "]')];
+  const hit = links.find((a) => {
+    let el = a;
+    for (let i = 0; i < 8 && el; i++) {
+      if ((el.innerText || "").includes(pkg)) return true;
+      el = el.parentElement;
+    }
+    return false;
+  });
+  if (hit) hit.click();
+}, "PLAY_PACKAGE");
+await page.waitForTimeout(5000);
 const text = await page.locator("body").innerText();
-return JSON.stringify({ url: page.url(), text: text });
+// Publishing overview is one click from the dashboard and its URL carries the
+// account/app ids, so it is reached by CLICKING (the console's own link), never
+// by hardcoding ids that belong to one project.
+let publishing = "";
+try {
+  const link = page.getByText(/Go to Publishing overview/i).first();
+  if (await link.count()) {
+    await link.click();
+    await page.waitForTimeout(5000);
+    publishing = await page.locator("body").innerText();
+  }
+} catch (e) {}
+return JSON.stringify({ url: page.url(), text: text, publishing: publishing });
 """
 
 
-def _console_text(project: Path, account: str = "") -> tuple[str, str]:
-    """(text, why-not) from the Play Console dashboard in the owner's browser."""
+def _console_text(project: Path, account: str = "", package: str = "") -> tuple[dict, str]:
+    """({dashboard, publishing}, why-not) from the Play Console in the owner's browser."""
     from .core import run
 
-    js = _SYNC_JS.replace("PLAY_ACCOUNT", account.replace('"', ""))
-    r = run(["browser-control", "execute", js], project, timeout=180)
+    js = (_SYNC_JS.replace("PLAY_ACCOUNT", account.replace('"', ""))
+                 .replace("PLAY_PACKAGE", package.replace('"', "")))
+    r = run(["browser-control", "execute", js], project, timeout=240)
     out = (r.stdout or "") + (r.stderr or "")
     if r.returncode != 0:
-        return "", out.strip()[-400:] or "browser-control failed"
+        return {}, out.strip()[-400:] or "browser-control failed"
     # The relay prints the returned value verbatim; the script returns one JSON
     # string so the page body (newlines and all) arrives escaped, not as a
     # pretty-printed JS object this module would have to re-parse by eye.
@@ -174,10 +210,10 @@ def _console_text(project: Path, account: str = "") -> tuple[str, str]:
         line = line.strip()
         if line.startswith('{"url"'):
             try:
-                return json.loads(line).get("text", ""), ""
+                return json.loads(line), ""
             except Exception:
                 break
-    return "", "browser-control returned no readable page body"
+    return {}, "browser-control returned no readable page body"
 
 
 def _row_state(text: str, package: str) -> dict[str, str]:
@@ -187,24 +223,72 @@ def _row_state(text: str, package: str) -> dict[str, str]:
     if idx is None:
         return {}
     # A card is: name, [chip], [status], package, last updated — the status sits in
-    # the <=4 lines above the package id.
+    # the <=4 lines above the package id. Classified as ONE string: a card can say
+    # both "1 policy issue" and "changes not yet sent for review", and the open
+    # issue is the fact that matters.
     window = [l for l in lines[max(0, idx - 4):idx] if l]
-    for line in reversed(window):
-        state, phrase = classify(line)
-        if state != "unknown":
-            return {"state": state, "phrase": phrase, "card": " | ".join(window)}
-    return {"state": "unknown", "phrase": "", "card": " | ".join(window)}
+    state, phrase = classify(" | ".join(window))
+    if state == "unknown":
+        return {}
+    return {"state": state, "phrase": phrase, "card": " | ".join(window)}
+
+
+def _status_block(text: str) -> dict[str, str]:
+    """The app DASHBOARD's "Update status" panel — the same verdict, closer up.
+
+    The home page's card and the app dashboard say the same thing in different
+    words ("1 policy issue / Changes rejected" vs "Update status / Update
+    rejected"). Reading both means a sync works from whichever page the browser
+    happens to open.
+    """
+    lines = [l.strip() for l in text.splitlines() if l.strip()]
+    idx = next((i for i, l in enumerate(lines) if re.fullmatch(r"update status", l, re.I)), None)
+    if idx is None:
+        return {}
+    window = lines[idx:idx + 4]
+    state, phrase = classify(" | ".join(window))
+    if state == "unknown":
+        return {}
+    return {"state": state, "phrase": phrase, "card": " | ".join(window)}
 
 
 def sync(project: Path, package: str, account: str = "") -> dict[str, Any]:
-    text, why = _console_text(project, account)
+    page_text, why = _console_text(project, account, package)
     if why:
         return {"status": "unavailable", "reason": why}
-    row = _row_state(text, package)
+    text = page_text.get("text", "")
+    row = _row_state(text, package) or _status_block(text)
     if not row:
         return {"status": "unavailable",
-                "reason": f"the console dashboard did not show {package} — is the account "
+                "reason": f"the console did not show a status for {package} — is the account "
                           f"logged in and is the app on this developer account?"}
+    extra = _publishing_state(page_text.get("publishing", ""))
     snap = write(project, row["state"], note=row.get("card", ""), source="play-console",
-                 evidence=row.get("phrase", ""))
+                 evidence=row.get("phrase", ""), extra=extra)
     return {"status": "OK", "snapshot": snap}
+
+
+def _publishing_state(text: str) -> dict[str, Any]:
+    """What is staged in Publishing overview — including a PRODUCTION rollout.
+
+    Found live on 2026-11-04: the rejected build sat in Publishing overview as a
+    staged production rollout ("Start full rollout", 1.0.9 (10010)) next to the
+    country changes. Pressing the page's single "Submit N changes for review"
+    would therefore have promoted the very release Play had just rejected, and
+    nothing in the pipeline could see it — git, CI and the run ledger all said
+    "internal testing". Recorded, never acted on: production promotion is the
+    owner's own manual step.
+    """
+    out: dict[str, Any] = {}
+    if not text:
+        return out
+    m = re.search(r"submit\s+(\d+)\s+changes?\s+for\s+review", text, re.I)
+    if m:
+        out["pending_for_review"] = int(m.group(1))
+    staged = re.findall(r"(\d+\.\d+(?:\.\d+)?(?:-[0-9A-Za-z.-]+)?)\s*\((\d+)\)", text)
+    if staged and re.search(r"start full rollout", text, re.I):
+        out["production_staged"] = True
+        out["production_staged_version"] = f"{staged[0][0]} ({staged[0][1]})"
+    if re.search(r"were rejected|rejected by google", text, re.I):
+        out["submission_rejected"] = True
+    return out

@@ -957,6 +957,12 @@ Rules:
   * rejected or suspended (and not stale): the store is the fire. queue[0] must be
     the bugfix/feature that fixes what Play found (name the policy and the exact
     surface from `location`), exactly like a red CI run. Validation enforces it.
+  * `submission_rejected: true` counts as rejected even while the top-line state
+    reads review-pending: Play rejected the last submission and the open policy
+    issue must be fixed before anything can be sent again.
+  * `production_staged`: a rollout is sitting in Publishing overview. Promoting it
+    is the OWNER's manual step — never queue it, never imply it is automatic; say
+    which version is staged so a rejected build cannot be promoted by accident.
   * review-pending: the delivery is committed but NOT sent for review — the fix is
     a browser step (`devteam store-publish` / Play Console → Publishing overview),
     not new app code. Do not queue code for it.
@@ -1032,7 +1038,8 @@ def _validate(result: dict, research: dict | None = None) -> str | None:
             ci_last = (research.get("signals", {}).get("ci", {}) or {}).get("last_conclusion")
             store_snap = research.get("signals", {}).get("store_status", {}) or {}
             store_blocked = (store_snap.get("state") in ("rejected", "suspended")
-                             and not store_snap.get("stale"))
+                             or store_snap.get("submission_rejected")
+                             ) and not store_snap.get("stale")
             if q is result["queue"][0] and ci_last == "failure" \
                     and q.get("type") not in ("bugfix", "feature"):
                 return ("signals.ci is red — the first queue entry must be the "
