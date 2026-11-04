@@ -495,6 +495,12 @@ def push_and_deliver(project: Path, worktree: Path, task: dict, new_version: str
             if r.returncode != 0:
                 return {"delivered": False, "error": "push failed twice", "ci": {}}
         log("pushed to origin main")
+        # The rebase REWROTE the commit: `sha` was read before the push, so a
+        # rejected push left it pointing at a commit that no longer exists and
+        # `await_ci` then waited 30 minutes for a CI run that could never appear
+        # (observed 2026-11-04: the run was green, the release hung). Re-read it
+        # from the tree that was actually pushed.
+        sha = git(["rev-parse", "HEAD"], cwd=worktree).stdout.strip() or sha
         # Tag-gated CI: some projects release on `v*` tags only — the bump push
         # alone would never deliver. Push the version tag when profile says so.
         if profile.get("ci_trigger", "bump") == "tag":
