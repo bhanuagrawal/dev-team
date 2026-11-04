@@ -79,7 +79,13 @@ const isHeadless = process.env.DEVTEAM_GEMINI_HEADLESS !== '0';
     const page = pages[0] || context.pages()[0] || await context.newPage();
 
     const AsyncFunction = Object.getPrototypeOf(async function(){}).constructor;
-    const fn = new AsyncFunction('context', 'page', 'fs', userScript);
+    // The user script runs in its own BLOCK so a `const page = ...` (or `context`)
+    // inside it SHADOWS the injected handle instead of colliding with the
+    // parameter name. A parameter collision is a SyntaxError, and a SyntaxError
+    // here kills the whole headless path before Chrome is even asked anything —
+    // which is how every Gemini asset run reported "browser execution failed"
+    // while a script that declared nothing worked (observed 2026-11-04).
+    const fn = new AsyncFunction('context', 'page', 'fs', `{\n${userScript}\n}`);
     const result = await fn(context, page, fs);
     console.log(JSON.stringify({ ok: true, value: result }));
   } catch (err) {
@@ -115,6 +121,44 @@ def is_headless_ready() -> tuple[bool, str]:
     return True, f"ready (profile: {profile}, chrome: {chrome})"
 
 
+def release_stale_profile_lock(profile: Path, log: Callable[[str], None] | None = None) -> bool:
+    """Drop Chrome's singleton files when no process holds the profile.
+
+    A headless run that is killed (timeout, Ctrl-C, a crashed node) leaves
+    `SingletonLock` behind. The next launch then cannot open the profile, the
+    runner reports only "browser execution failed", and the fallback relay is
+    asked to paint with no tab attached — so a single killed run takes the whole
+    asset pipeline down until a human deletes the lock by hand. The lock names
+    its owner (`<host>-<pid>`); if that pid is gone, the lock is not a lock.
+    """
+    lock = profile / "SingletonLock"
+    if not lock.is_symlink() and not lock.exists():
+        return False
+    owner = ""
+    try:
+        owner = os.readlink(lock)
+    except OSError:
+        return False
+    pid = owner.rsplit("-", 1)[-1]
+    alive = False
+    if pid.isdigit():
+        try:
+            os.kill(int(pid), 0)
+            alive = True
+        except OSError:
+            alive = False
+    if alive:
+        return False
+    for name in ("SingletonLock", "SingletonCookie", "SingletonSocket"):
+        try:
+            (profile / name).unlink()
+        except OSError:
+            pass
+    if log:
+        log(f"  gemini: cleared a stale profile lock (owner pid {pid or '?'} is gone)")
+    return True
+
+
 def execute(script: str, timeout: int = 900,
             log: Callable[[str], None] | None = None,
             fallback: bool = True) -> subprocess.CompletedProcess:
@@ -126,6 +170,7 @@ def execute(script: str, timeout: int = 900,
     """
     ready, reason = is_headless_ready()
     if ready:
+        release_stale_profile_lock(gemini_profile_dir(), log)
         chrome = _find_chrome_executable()
         profile = gemini_profile_dir()
         if log:
