@@ -114,24 +114,40 @@ def _log(state: dict) -> list[dict]:
 
 
 def status_of(profile: dict, state: dict) -> dict[str, str]:
-    """milestone id → 'active' | 'done' | 'dropped'. Deterministic: a milestone
-    is done when the owner said so in the profile OR code/LLM recorded a met
-    verdict; otherwise the first not-done milestone in order is the active one."""
+    """milestone id → 'active' | 'pending' | 'done' | 'parked'.
+
+    Deterministic: a milestone is done when the owner said so in the profile OR
+    code/the synthesis recorded a met verdict; a branch the owner set aside is
+    'parked' and can never be promoted. The active milestone is the first branch
+    EXPLICITLY marked active (the owner's live step), and only when none is
+    marked does position decide — the first still-open milestone in order.
+
+    Position alone used to decide, which meant parking a milestone changed its
+    label and nothing else: the very branch the owner set aside stayed the one
+    `status` named as "working on", the planner aimed every cycle at it, and a
+    brand-new active milestone sat unusued at the end of the list.
+    """
     p = plan(profile) or {"milestones": []}
     latest: dict[str, str] = {}
     for e in _log(state):
         if e.get("milestone"):
             latest[str(e["milestone"])] = str(e.get("verdict", ""))
-    owner_done = {str(m.get("id")) for m in (profile.get("goals") or {}).get("milestones", [])
-                  if isinstance(m, dict) and str(m.get("status", "")).lower() in
-                  ("done", "dropped")}
+    raw = {str(m.get("id")): str(m.get("status", "")).lower()
+           for m in (profile.get("goals") or {}).get("milestones", [])
+           if isinstance(m, dict)}
     out: dict[str, str] = {}
     for m in p["milestones"]:
         mid = m["id"]
-        if mid in owner_done or latest.get(mid) in ("done", "dropped"):
+        if raw.get(mid) in ("done", "dropped") or latest.get(mid) in ("done", "dropped"):
             out[mid] = "done"
+        elif raw.get(mid) in ("parked", "retired"):
+            out[mid] = "parked"
         else:
             out[mid] = "pending"
+    for m in p["milestones"]:
+        if raw.get(m["id"]) == "active" and out[m["id"]] == "pending":
+            out[m["id"]] = "active"
+            return out
     for m in p["milestones"]:
         if out[m["id"]] == "pending":
             out[m["id"]] = "active"
