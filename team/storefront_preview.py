@@ -164,7 +164,8 @@ def screenshot_plugin_version(project: Path) -> str:
 
 
 def _agp_version(project: Path) -> tuple[int, int]:
-    """AGP version from the version catalog or the plugins block (0,0 if unknown)."""
+    """AGP version from the version catalog, the plugins block or a legacy
+    buildscript classpath (0,0 if unknown)."""
     for rel in ("gradle/libs.versions.toml", "build.gradle.kts", "build.gradle"):
         f = project / rel
         if not f.is_file():
@@ -176,6 +177,10 @@ def _agp_version(project: Path) -> tuple[int, int]:
         m = re.search(r'com\.android\.(?:application|library)"?\)?\s*version\s*"(\d+)\.(\d+)', text)
         if m:
             return int(m.group(1)), int(m.group(2))
+        # legacy `apply plugin:` projects pin AGP as a buildscript coordinate
+        m = re.search(r"com\.android\.tools\.build:gradle:(\d+)\.(\d+)", text)
+        if m:
+            return int(m.group(1)), int(m.group(2))
     return (0, 0)
 
 
@@ -184,9 +189,12 @@ def _compose_ui_tooling_version(project: Path) -> str:
         f = project / rel
         if not f.is_file():
             continue
-        m = re.search(r'compose-bom\s*=\s*"([^"]+)"', f.read_text(errors="ignore"))
-        if m:
-            return m.group(1)
+        text = f.read_text(errors="ignore")
+        for pattern in (r'compose-bom\s*=\s*"([^"]+)"',
+                        r'composeBomVersion\s*=\s*["\']([^"\']+)["\']'):
+            m = re.search(pattern, text)
+            if m:
+                return m.group(1)
     return COMPOSE_BOM_FALLBACK
 
 
@@ -358,6 +366,96 @@ def ensure_tooling(project: Path, module: Path, dry_run: bool = False) -> list[s
     return changed
 
 
+ROBOLECTRIC_VERSION = "4.14.1"
+
+
+def ensure_robolectric(project: Path, module: Path, dry_run: bool = False) -> list[str]:
+    """Wire the JVM renderer (Robolectric + Compose test) into the module.
+
+    Why this exists: `agp-preview` depends on an alpha AGP plugin that is bound to
+    an AGP range and, outside it, still configures — then discovers ZERO previews
+    and reports a green build with no PNGs (observed: AGP 8.13 + plugin alpha16,
+    "0 tests" and an empty reference dir). A project whose AGP has moved past the
+    plugin's range needs the JVM renderer, and that renderer needs three things
+    the project should not have to guess:
+
+      * the test dependencies (`ui-test-junit4`, Robolectric, `ui-test-manifest`),
+      * Robolectric's Android resources (`includeAndroidResources = true`),
+      * ONE system property naming where the harness writes PNGs, because the
+        orchestrator collects them from `<project>/.pipeline/storefront_scenes`
+        and the test JVM's working dir is the module, not the project root.
+
+    Without that property the harness writes into `app/build/storefront` and the
+    run reports "no reference PNGs" while the renders actually happened.
+    """
+    changed: list[str] = []
+    build = _build_file(module)
+    text = build.read_text()
+    original = text
+    kts = build.suffix == ".kts"
+    bom = _compose_ui_tooling_version(project)
+
+    deps = (
+        [
+            f"    // {MARKER}: renders real composables on the JVM (Robolectric)",
+            f'    testImplementation(platform("androidx.compose:compose-bom:{bom}"))',
+            '    testImplementation("androidx.compose.ui:ui-test-junit4")',
+            f'    testImplementation("org.robolectric:robolectric:{ROBOLECTRIC_VERSION}")',
+            '    debugImplementation("androidx.compose.ui:ui-test-manifest")',
+        ]
+        if kts else
+        [
+            f"    // {MARKER}: renders real composables on the JVM (Robolectric)",
+            f"    testImplementation platform('androidx.compose:compose-bom:{bom}')",
+            "    testImplementation 'androidx.compose.ui:ui-test-junit4'",
+            f"    testImplementation 'org.robolectric:robolectric:{ROBOLECTRIC_VERSION}'",
+            "    debugImplementation 'androidx.compose.ui:ui-test-manifest'",
+        ]
+    )
+    if f"{MARKER}: renders real composables on the JVM" not in text:
+        wrapper = (
+            "\n// " + MARKER + ": the harness writes each scene where the orchestrator collects it\n"
+            "tasks.withType<Test>().configureEach {\n"
+            '    systemProperty("storefront.output", '
+            'File(rootProject.projectDir, ".pipeline/storefront_scenes").absolutePath)\n'
+            "}\n"
+            if kts else
+            "\n// " + MARKER + ": the harness writes each scene where the orchestrator collects it\n"
+            "tasks.withType(Test).configureEach {\n"
+            "    systemProperty 'storefront.output', "
+            "new File(rootProject.projectDir, '.pipeline/storefront_scenes').absolutePath\n"
+            "}\n"
+        )
+        text = text.rstrip("\n") + "\n" + wrapper
+        m = re.search(r"^dependencies\s*\{", text, re.M)
+        block = "\n".join(deps) + "\n"
+        if not m:
+            text += f"\ndependencies {{\n{block}}}\n"
+        else:
+            depth, i = 0, m.end()
+            while i < len(text):
+                if text[i] == "{":
+                    depth += 1
+                elif text[i] == "}":
+                    if depth == 0:
+                        text = text[:i] + block + text[i:]
+                        break
+                    depth -= 1
+                i += 1
+        if "includeAndroidResources" not in text:
+            m = re.search(r"^android\s*\{", text, re.M)
+            if m:
+                opt = (
+                    "    testOptions {\n        unitTests {\n"
+                    "            includeAndroidResources = true\n        }\n    }\n"
+                )
+                text = text[:m.end()] + "\n" + opt + text[m.end():]
+        if not dry_run:
+            build.write_text(text)
+        changed.append(str(build.relative_to(project)) + " (robolectric renderer)")
+    return changed
+
+
 # --------------------------------------------------------------------------- #
 # Kotlin harness generation
 # --------------------------------------------------------------------------- #
@@ -483,7 +581,7 @@ def roborazzi_source(spec: dict[str, Any]) -> str:
         # a composable with fixture data, and a real Application.onCreate (WorkManager,
         # Firebase, DI graphs) turns a screenshot run into an app-boot test that fails
         # for reasons the screenshot does not depend on.
-        '@Config(sdk = [34], qualifiers = "w392dp-h872dp-440dpi", '
+        '@Config(sdk = [34], qualifiers = "w393dp-h873dp-440dpi", '
         "application = android.app.Application::class)",
         "class StorefrontScreenshotsTest {",
         "",
@@ -553,7 +651,7 @@ def robolectric_source(spec: dict[str, Any]) -> str:
         "/** Renders the Play phone screenshots from the app's own composables (JVM). */",
         "@RunWith(RobolectricTestRunner::class)",
         "@GraphicsMode(GraphicsMode.Mode.NATIVE)",
-        '@Config(sdk = [34], qualifiers = "w392dp-h872dp-440dpi")',
+        '@Config(sdk = [34], qualifiers = "w393dp-h873dp-440dpi")',
         "class StorefrontScreenshotsTest {",
         "",
         "    @get:Rule",
@@ -738,10 +836,10 @@ def render_previews(project: Path, log: Any = None, timeout: int = 900,
     # can live only in an unpushed branch). Wiring it HERE keeps "render what ships"
     # true even then — the alternative is a cryptic "task not found".
     module_dir = tree / spec["module"]
-    if spec.get("renderer") != "agp-preview":
-        wired = []
-    else:
+    if spec.get("renderer") == "agp-preview":
         wired = ensure_tooling(tree, module_dir)
+    else:
+        wired = ensure_robolectric(tree, module_dir)
     if wired and log:
         log("  + wired preview tooling in the delivery tree: " + ", ".join(wired))
 
@@ -796,7 +894,27 @@ def render_previews(project: Path, log: Any = None, timeout: int = 900,
             reference = tree / module / "src/debug/screenshotTest/reference"
     pngs = sorted(reference.rglob("*.png"))
     if not pngs:
-        return {"status": "ERROR", "error": f"no reference PNGs under {reference}"}
+        # A green build that produced nothing is the renderer lying, not a project
+        # bug: the AGP preview plugin configures fine on an AGP outside its range
+        # and then discovers no previews ("0 tests"), leaving an empty reference
+        # dir. Name that, or the next agent edits scene code that was never the
+        # problem.
+        if spec.get("renderer") == "agp-preview":
+            return {
+                "status": "ERROR",
+                "error": f"no reference PNGs under {reference} — the preview plugin "
+                         "discovered 0 previews (it is bound to an AGP range and this "
+                         "module's AGP is outside it)",
+                "hint": (f"switch {SPEC_REL} to \"renderer\": \"robolectric-capture\" (renders "
+                         "on the JVM, any AGP) and re-run; the harness is generated from the "
+                         "spec, so no Kotlin changes are needed"),
+            }
+        return {
+            "status": "ERROR",
+            "error": f"no reference PNGs under {reference}",
+            "hint": ("the test ran but wrote nothing — check that the harness's "
+                     "'storefront.output' system property points at .pipeline/storefront_scenes"),
+        }
 
     out_dir = project / ".pipeline/storefront_scenes"
     out_dir.mkdir(parents=True, exist_ok=True)
