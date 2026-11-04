@@ -143,6 +143,13 @@ def poster_prompt(project: Path, scene: dict[str, Any], direction: dict[str, Any
     angle = (direction.get("copy_angle") or {}).get(str(scene.get("id")), "")
     if angle:
         parts.append(f"What this screen is selling: {angle}")
+    # A per-scene composition note, because where the copy sits DECIDES whether the
+    # heal is safe: the model stamps its sparkle into the bottom-right, and when the
+    # caption lives there the cleaner has to smear the owner's own words to remove it
+    # (observed 2026-11-04: "Every audit, d▓▓▓ and certificate stored on the d▓▓▓").
+    hint = str(scene.get("poster_hint") or "").strip()
+    if hint:
+        parts.append(f"Composition note: {hint}")
     if extra.strip():
         parts.append(extra.strip())
     return "\n".join(p for p in parts if p.strip())
