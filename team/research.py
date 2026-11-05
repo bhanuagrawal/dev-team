@@ -264,6 +264,16 @@ def _ga4_pull(project: Path, profile: dict) -> dict:
             if isinstance(cf, dict) and "rows" in cf else None)
         if out["churn_feedback_responses_30d"] == 0:
             out["churn_feedback_responses_30d"] = 0  # genuine zero: rows present, no value
+        # A 403 is not an empty app. The FIRST query's error (usually the missing
+        # Viewer grant) used to be parked in `ga4_error` while the signal still
+        # read `status: ok` and every number was null — a plan could then claim
+        # "analytics: no users yet" from a permission failure. No numbers + an
+        # error = unavailable, and the reason travels.
+        if out.get("ga4_error") and all(
+                out.get(k) is None for k in ("new_users_7d", "active_users_7d",
+                                             "app_remove_events_30d")):
+            return {"status": "unavailable", "property": prop,
+                    "reason": f"GA4 property {prop}: {out['ga4_error']}"}
         return out
     except Exception as e:  # degrade, never crash the nightly
         return {"status": "unavailable", "reason": str(e)[:200]}
