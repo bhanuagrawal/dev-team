@@ -2992,6 +2992,48 @@ def cmd_store_status(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_promote(args: argparse.Namespace) -> int:
+    """The owner's one word, executed — and recorded as his word.
+
+    Production used to be a console-only act. It is now a command because the
+    owner asked for it (2026-11-05), and the command keeps the guarantees that
+    made the old rule safe: it never runs as a side effect of anything, it only
+    promotes a build that is already on internal, and it stores who asked, what
+    note went out and which edit carried it.
+    """
+    project = resolve_project(args.project)
+    from team.core import delivery_notice
+    from team.promote import promote
+    print(delivery_notice(project))
+    res = promote(project, args.version, requested_by=args.requested_by,
+                  notes_file=args.notes_file, dry_run=not getattr(args, "yes", False),
+                  log=print)
+    status = res.get("status")
+    if getattr(args, "json", False):
+        print(json.dumps(res, indent=2))
+        return 0 if status in ("promoted", "already-promoted", "DRY-RUN") else 1
+    if status in ("refused", "ERROR"):
+        print(f"PROMOTE: {status} — {res.get('error')}")
+        return 1
+    if status == "already-promoted":
+        print(f"PROMOTE: v{res.get('version')} is already on production — nothing sent")
+        return 0
+    print(f"PROMOTE: {status} — v{res.get('version')} ({', '.join(res.get('versionCodes') or [])})")
+    print("  note:")
+    for line in str(res.get("note") or "").splitlines():
+        print(f"    {line}")
+    if status == "DRY-RUN":
+        print("  nothing was committed; re-run with --yes to send it for Play review")
+        return 0
+    print(f"  edit: {res.get('edit')} · read back: {res.get('read_back')}")
+    if res.get("managed_publishing"):
+        print("  ⚠ read back as DRAFT — managed publishing is ON: press Publish in Play "
+              "Console, or the release waits there untouched")
+    else:
+        print("  → Google now reviews it; the console's Publishing overview shows the verdict")
+    return 0
+
+
 def _package_of(project: Path) -> str:
     profile = profile_of(project)
     for conn in (profile.get("connections") or {}).values():
@@ -3661,6 +3703,20 @@ def main() -> None:
                           "e.g. 'do not resubmit the rejected build; ship the fixed one'")
     sts.add_argument("--json", action="store_true", help="print the recorded snapshot as JSON")
     sts.set_defaults(fn=cmd_store_status)
+    prm = sub.add_parser("promote",
+                         help="send a build that is already on an internal track to "
+                              "production, on the owner's explicit word (sends for Play review)")
+    prm.add_argument("project")
+    prm.add_argument("--version", required=True,
+                     help="the version name already live on the internal track (e.g. 1.0.12)")
+    prm.add_argument("--notes-file", default=None,
+                     help="release note to publish (default: the repo's whatsnew file)")
+    prm.add_argument("--requested-by", required=True,
+                     help="the owner's own words asking for this launch — recorded with the edit")
+    prm.add_argument("--yes", action="store_true",
+                     help="actually commit the production release (dry run without it)")
+    prm.add_argument("--json", action="store_true", help="machine-readable result")
+    prm.set_defaults(fn=cmd_promote)
     ads_p = sub.add_parser("ads",
                            help="paid acquisition: plan (docs/ads-plan.json) then create — "
                                 "dry run unless --commit, PAUSED unless --enable")

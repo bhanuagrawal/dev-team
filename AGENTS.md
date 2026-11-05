@@ -47,8 +47,15 @@ checklist + release-candidate call) and the two page URLs `record` prints.
 3. **Never hand-edit `.pipeline/state.json`** — write via `devteam record`.
 4. **One canonical CI.** `.github/workflows/release.yml` is generated from
    `team/templates/ci-release.yml` by `devteam ci <project> --write`. Never
-   hand-edit a project's copy; never add a production-promotion workflow.
-   Production promotion is human-only, always.
+   hand-edit a project's copy; CI never reaches production.
+   **Production promotion is a verb, not a side effect (owner directive
+   2026-11-05).** It is `devteam promote <project> --version <v> --requested-by
+   "<the owner's words>" --yes` — run only when the owner has explicitly asked
+   for that launch in this conversation, never by `release`, `record`, `loop`,
+   the nightly, or CI. The command refuses a version that is not already on an
+   internal track, records the requesting words, the note and the Play edit id in
+   `.pipeline/state.json`, and sends the release for Google's review (which no
+   agent can skip). Google's review is the remaining gate — nothing else is.
 5. **Store assets are deliverables.** Screenshots come from the app's own
    composables (`devteam storefront-scenes`), never from hand-drawn HTML. A
    generated artefact a user reads (store note, screenshots, release text) needs
@@ -116,7 +123,8 @@ checklist + release-candidate call) and the two page URLs `record` prints.
    tests. Version/signing/SDK changes and new libraries are the reviewer's diff to
    catch — say so in the handover when a task touches them.
 9. **Ask the owner only what no agent can decide** (freeze-worthy incidents,
-   discard-vs-keep on their WIP, direction). Never ask about promotion. Whether an
+   discard-vs-keep on their WIP, direction). Never ask about promotion — the
+   owner triggers it with their own words; the agent never raises it. Whether an
    ask is even the owner's is **decided by code, not by the agent's judgement**:
    `team/asks.py` classifies every ask/flag against a rule table and the tools this
    machine actually has, and `record`, `doctor` and `alarm` print the verdict
@@ -146,9 +154,10 @@ The trigger for `main` is **the gates passed**, not "a human is about to look".
 | stopped for an owner ask | same as above, **plus** `record --result blocked --note "<the question>"` | yes — the ask itself |
 
 Nothing about a finished change needs a human in the loop; the human only enters
-for promotion (never agent-run), a `risk: supervised` task, a missing direction,
-or a blocker. Never leave a run paused with a dirty worktree: commit, push, then
-ask. A differential that only exists on this disk is not work, it is a rumour.
+for a launch they choose to trigger (`devteam promote`, never raised by an agent),
+a `risk: supervised` task, a missing direction, or a blocker. Never leave a run
+paused with a dirty worktree: commit, push, then ask. A differential that only
+exists on this disk is not work, it is a rumour.
 
 **A command that writes inside a project must end with a commit on a pushed ref.**
 That includes ad-hoc commands (asset regeneration, harness scaffolding, listing
