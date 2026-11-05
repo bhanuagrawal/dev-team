@@ -1061,6 +1061,16 @@ def cmd_release(args: argparse.Namespace) -> int:
     # recorded only after CI had already delivered, which made it impossible to
     # put -rc in the name it was describing. It is asked here, where the agent
     # that wrote the change is holding the diff and the verify result.
+    #
+    # IT IS ASKED, NOT ANSWERED. Owner directive 2026-10-24: the judgement is the
+    # agent's ("let llm decide this, ask this to llm only which made the changes,
+    # that's it, no eval nothing"). `release` can only carry that agent's answer
+    # when it is passed --rc; without it the run used to record a mechanical "NO"
+    # whose note was the version's own derivation ("next patch after 1.0.38"), i.e.
+    # a rule answering a question the contract reserves for a judgement. So an
+    # unpassed --rc records NOTHING: the handover says NOT CALLED YET and the agent
+    # records the call with `devteam rc`.
+    rc_given = args.rc is not None
     is_rc = args.rc == "yes"
     task = json.loads(task_spec_path(project, args.task_spec).read_text())
     state = state_of(project)
@@ -1069,7 +1079,11 @@ def cmd_release(args: argparse.Namespace) -> int:
     code = shipper.next_version_code(state, floor)
     log(f"versionCode floor: {floor_note}" + (f" (max {floor})" if floor else ""))
     log(f"version: {name} (code {code}) — {why}")
-    log(f"release candidate: {'YES' if is_rc else 'NO'} (decided before the tag)")
+    if rc_given:
+        log(f"release candidate: {'YES' if is_rc else 'NO'} (decided before the tag)")
+    else:
+        log("release candidate: NOT CALLED YET — nothing recorded; the agent that made "
+            f"this change calls `devteam rc {project.name} --version {name} --yes|--no`")
 
     # TESTS ARE PART OF THE CHANGE, and release is the second, unavoidable
     # answer for an agent that skipped `verify`. Diff-scoped, no Gradle — it
@@ -1111,13 +1125,16 @@ def cmd_release(args: argparse.Namespace) -> int:
     shipper.write_whatsnew(worktree, task, log)
 
     # The call is recorded BEFORE the build, so the handover and the rc command
-    # read one answer instead of two competing ones.
-    state.setdefault("release_candidates", []).append({
-        "version": name, "rc": is_rc,
-        "note": args.note if hasattr(args, "note") and args.note else why,
-        "why": args.note if hasattr(args, "note") and args.note else why,
-        "date": today(), "by": "agent", "stage": "release", "code": code,
-    })
+    # read one answer instead of two competing ones — and ONLY when the agent
+    # actually gave one (see rc_given above). A mechanical "NO" here would put a
+    # version-derivation string in the owner's handover attributed to the agent.
+    if rc_given:
+        state.setdefault("release_candidates", []).append({
+            "version": name, "rc": is_rc,
+            "note": args.note if hasattr(args, "note") and args.note else why,
+            "why": args.note if hasattr(args, "note") and args.note else why,
+            "date": today(), "by": "agent", "stage": "release", "code": code,
+        })
     state["last_version_code"] = code
     save_state(project, state)
 
@@ -3486,9 +3503,13 @@ def main() -> None:
     wp.set_defaults(fn=cmd_worktree_prune)
     em = sub.add_parser("emulators");  em.add_argument("project"); em.add_argument("--record", action="store_true"); em.add_argument("--reset", action="store_true"); em.set_defaults(fn=cmd_emulators)
     r = sub.add_parser("release");     r.add_argument("project"); r.add_argument("--worktree", required=True); r.add_argument("--task-spec", required=True)
-    r.add_argument("--rc", choices=["yes", "no"], default="no",
+    r.add_argument("--rc", choices=["yes", "no"], default=None,
                    help="is this build a release candidate? Decided HERE, before the tag, "
-                        "so the name can carry -rc.N (it used to be recorded after the build)")
+                        "so the name can carry -rc.N (it used to be recorded after the build). "
+                        "OMIT IT when the agent has not judged the build yet: no verdict is then "
+                        "recorded, because the call belongs to the agent that made the change "
+                        "(`devteam rc <project> --version <v> --yes|--no`) and a version-derived "
+                        "note is not a judgement")
     r.set_defaults(fn=cmd_release)
     rec = sub.add_parser("record"); rec.add_argument("project")
     rec.add_argument("--task"); rec.add_argument("--task-spec"); rec.add_argument("--result", required=True,
