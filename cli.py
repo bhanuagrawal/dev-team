@@ -3067,6 +3067,148 @@ def cmd_console(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_ads(args: argparse.Namespace) -> int:
+    """Paid acquisition for one app: plan first, then create — never the other way.
+
+    The plan (docs/ads-plan.json) carries every judgement: who pays, how much a
+    click may cost, which searches are worth buying, what the ad says. This
+    command carries the mechanics and refuses to invent any of it.
+    """
+    import json as _json
+
+    from team import ads
+
+    project = resolve_project(args.project)
+
+    def fail(message: str) -> int:
+        print(f"ADS: {message}")
+        return 1
+
+    try:
+        if getattr(args, "seed", False):
+            if ads.plan_path(project).is_file():
+                return fail(f"{ads.PLAN_REL} already exists — edit it, or --apply a new one")
+            plan = ads.seed(project)
+            path = ads.save(project, plan)
+            print(f"  + seeded {path.relative_to(project)}")
+            print("  app identity is read from the repo; every judgement is blank on purpose")
+            print(f"  fill account/campaign/ad_groups/negatives, then: "
+                  f"devteam ads {project.name} --check")
+            return 0
+
+        if getattr(args, "apply", None):
+            raw = _json.loads(Path(args.apply).read_text())
+            issues = ads.validate(raw)
+            if issues:
+                print("ADS PLAN: REJECTED")
+                for issue in issues:
+                    print(f"  ✗ {issue}")
+                return 1
+            path = ads.save(project, raw)
+            print(f"ADS PLAN: LOCKED — {path.relative_to(project)} "
+                  f"({raw['campaign']['name']})")
+            return 0
+
+    except ads.AdsError as exc:
+        return fail(str(exc))
+
+    if getattr(args, "status", False):
+        try:
+            st = ads.status(project)
+        except ads.AdsError as exc:
+            return fail(str(exc))
+        if not st["exists"]:
+            print(f"ADS: not created — '{st['name']}' does not exist in {st['customer_id']}")
+            return 0
+        print(f"ADS: {st['name']}")
+        print(f"  campaign  {st['campaign_id']}  {st['status']} ({st['primary_status']})")
+        print(f"  budget    ₹{st['daily_budget']:.0f}/day · account {st['customer_id']}")
+        print(f"  built     {st['ad_groups']} ad groups · {st['ads']} ads · {st['keywords']} keywords")
+        return 0
+
+    plan = ads.load_plan(project)
+    issues = ads.validate(plan)
+    if getattr(args, "check", False):
+        if issues:
+            print("ADS PLAN: cannot create")
+            for issue in issues:
+                print(f"  ✗ {issue}")
+            return 1
+        print(f"ADS PLAN: valid — {plan['campaign']['name']} "
+              f"(₹{plan['campaign']['daily_budget']:.0f}/day, "
+              f"{len(plan['ad_groups'])} ad groups, "
+              f"{sum(len(g['keywords']) for g in plan['ad_groups'])} keywords)")
+        return 0
+
+    if getattr(args, "create", False):
+        if issues:
+            print("ADS PLAN: cannot create")
+            for issue in issues:
+                print(f"  ✗ {issue}")
+            return 1
+        try:
+            result = ads.create(project, plan, commit=bool(args.commit),
+                                enable=bool(args.enable))
+        except ads.AdsError as exc:
+            return fail(str(exc))
+        if result["status"] == "exists":
+            camp = result["campaign"]
+            print(f"ADS: already exists — {camp['id']} {camp['name']} ({camp['status']})")
+            print("  nothing was created; edit campaign.name to build a second campaign")
+            return 0
+        if result["status"] == "dry_run":
+            print(f"ADS DRY RUN: {result['name']} would be created in {result['customer_id']}")
+            print(f"  {result['operations']} operations · status "
+                  f"{'ENABLED' if result['enabled'] else 'PAUSED'} · nothing committed")
+            print(f"  → devteam ads {project.name} --create --commit"
+                  f"{' --enable' if result['enabled'] else ''}")
+            return 0
+        path = ads.record(project, plan, result)
+        camp = next((r.get("resourceName") for r in result["responses"]
+                     if "campaigns" in (r.get("resourceName") or "")), "")
+        print("=" * 60)
+        print("ADS HANDOVER")
+        print("=" * 60)
+        print(f"  campaign   {camp}  ({'ENABLED' if result['enabled'] else 'PAUSED'})")
+        print(f"  account    {result['customer_id']} (₹{plan['campaign']['daily_budget']:.0f}/day)")
+        print(f"  built      {len(plan['ad_groups'])} ad groups · "
+              f"{sum(len(g['keywords']) for g in plan['ad_groups'])} keywords · "
+              f"{result['operations']} operations")
+        print(f"  record     {path.relative_to(project)}")
+        if not result["enabled"]:
+            print(f"  to start   devteam ads {project.name} --create --commit --enable"
+                  f"  (or enable in the Ads UI)")
+        print("  note       new ads sit in policy review for minutes to hours")
+        return 0
+
+    # Default: describe, do not act.
+    exists = None
+    try:
+        exists = ads.find_campaign(str(plan["account"]["customer_id"]).replace("-", ""),
+                                  plan["campaign"]["name"])
+    except ads.AdsError as exc:
+        print(f"  (live check skipped: {exc})")
+    print(f"ADS PLAN: {plan['campaign']['name']}")
+    print(f"  app       {plan['app'].get('title') or plan['app'].get('name')}"
+          f"  {plan['app'].get('store_url', '')}")
+    print(f"  account   {plan['account']['customer_id']}"
+          f"  ₹{plan['campaign']['daily_budget']:.0f}/day  {plan['campaign']['currency']}"
+          f"  geo {plan['campaign']['geo']['country']}"
+          f"  lang {','.join(plan['campaign']['languages'])}")
+    for group in plan["ad_groups"]:
+        print(f"  group     {group['name']:34s} ₹{group['cpc_bid']:.0f} max cpc · "
+              f"{len(group['keywords'])} kw · {len(group['headlines'])} h / "
+              f"{len(group['descriptions'])} d")
+    print(f"  guards    {len(plan['negatives'])} negatives")
+    print(f"  live      {('campaign ' + exists['id'] + ' ' + exists['status']) if exists else 'not created yet'}")
+    if issues:
+        print("  cannot create yet:")
+        for issue in issues:
+            print(f"    ✗ {issue}")
+        return 1
+    return 0
+
+
 def main() -> None:
     ap = argparse.ArgumentParser(prog="devteam")
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -3430,6 +3572,24 @@ def main() -> None:
                           "e.g. 'do not resubmit the rejected build; ship the fixed one'")
     sts.add_argument("--json", action="store_true", help="print the recorded snapshot as JSON")
     sts.set_defaults(fn=cmd_store_status)
+    ads_p = sub.add_parser("ads",
+                           help="paid acquisition: plan (docs/ads-plan.json) then create — "
+                                "dry run unless --commit, PAUSED unless --enable")
+    ads_p.add_argument("project")
+    ads_p.add_argument("--seed", action="store_true",
+                       help="write docs/ads-plan.json with the app's identity and blank judgements")
+    ads_p.add_argument("--apply", metavar="FILE",
+                       help="validate an authored plan and lock it into docs/ads-plan.json")
+    ads_p.add_argument("--check", action="store_true",
+                       help="validate the locked plan against Google's limits (no API call)")
+    ads_p.add_argument("--create", action="store_true",
+                       help="create the campaign from the plan (dry run unless --commit)")
+    ads_p.add_argument("--commit", action="store_true", help="actually create it")
+    ads_p.add_argument("--enable", action="store_true",
+                       help="create it ENABLED (default: PAUSED, ready to start)")
+    ads_p.add_argument("--status", action="store_true",
+                       help="what the plan's campaign looks like live: status, budget, counts")
+    ads_p.set_defaults(fn=cmd_ads)
     cs = sub.add_parser("console", help="plan or drive Google Play Console setup")
     cs.add_argument("project")
     cs.add_argument("--script", action="store_true", help="output automated Playwright JS script")

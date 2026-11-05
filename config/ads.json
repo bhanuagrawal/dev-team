@@ -1,0 +1,16 @@
+{
+  "_comment": "Who dev-team may spend ad money as. Team-general: no project names. The service account must be a user on every listed account (Google Ads → Admin → Access and security).",
+  "key_file": "~/.config/gcloud/ads-agent.json",
+  "accounts": [
+    {
+      "customer_id": "6350476901",
+      "label": "DabblePoint — primary",
+      "currency": "INR"
+    },
+    {
+      "customer_id": "9589533298",
+      "label": "DabblePoint — second",
+      "currency": "INR"
+    }
+  ]
+}
