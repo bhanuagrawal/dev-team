@@ -231,17 +231,25 @@ def _batch_script(jobs: list[dict[str, str]]) -> str:
       // The proof that matters: the SENT message carries the render. The composer
       // thumbnail can belong to an earlier upload (or to the previous frame's
       // output), so the sent bubble is the only honest witness — and it is what the
-      // model actually sees. Gemini echoes the attachment back under its own URL,
-      // so the check is "a wide image is in the last user message", not a byte
-      // comparison.
+      // model actually sees. Gemini echoes the attachment back as a RE-ENCODED
+      // thumbnail whose pixel width is a property of the browser tab (measured
+      // 2026-11-05: 460px in a relay tab, 230px in a saved chat), so a width
+      // threshold is not evidence — it read every real delivery as missing and
+      // blocked four fresh renders for a screen the model had already received.
+      // What the thumbnail CANNOT fake is the render's SHAPE: its width/height
+      // ratio is the scene's own, which no icon and no earlier frame matches.
       let delivered = false;
       for (let i = 0; i < 30; i++) {{
         const queries = page.locator("user-query");
         const nq = await queries.count();
         if (nq > sentBefore) {{
           const pic = queries.nth(nq - 1).locator("img").first();
-          const w = await pic.evaluate(el => el.naturalWidth).catch(() => 0);
-          if (w >= 500) {{ delivered = true; break; }}
+          const dims = await pic.evaluate(
+            el => [el.naturalWidth, el.naturalHeight]).catch(() => [0, 0]);
+          const w = dims[0], h = dims[1];
+          const ratioOk = job.ar > 0 && h > 0 && w >= 96
+            && Math.abs(w / h - job.ar) <= 0.06;
+          if (ratioOk) {{ delivered = true; break; }}
         }}
         await page.waitForTimeout(1000);
       }}
@@ -258,8 +266,11 @@ def _batch_script(jobs: list[dict[str, str]]) -> str:
         const n = await imgs.count();
         if (n > before) {{
           const last = imgs.nth(n - 1);
+          // Same re-encoding as the upload thumbnail: the answer's blob is
+          // ~572px wide in one tab and smaller in another, so "bigger than an
+          // icon" is the honest floor, not a fixed 500px.
           const w = await last.evaluate(el => el.naturalWidth).catch(() => 0);
-          if (w >= 500) {{ picked = await last.getAttribute("src"); break; }}
+          if (w >= 300) {{ picked = await last.getAttribute("src"); break; }}
         }}
         await page.waitForTimeout(3000);
       }}
@@ -301,7 +312,7 @@ def generate_all(project: Path, scenes: list[dict[str, Any]], direction: dict[st
     out_dir = project / ".pipeline/storefront_posters"
     out_dir.mkdir(parents=True, exist_ok=True)
     posters: dict[str, Path] = {}
-    jobs: list[dict[str, str]] = []
+    jobs: list[dict[str, Any]] = []
     for order, scene in enumerate(scenes):
         name = _poster_name(scene)
         out = out_dir / f"poster-{name}.png"
@@ -321,6 +332,16 @@ def generate_all(project: Path, scenes: list[dict[str, Any]], direction: dict[st
         except Exception:
             source_sha = ""
         sidecar = out.with_suffix(".json")
+        # Delivery proof for the upload is the render's SHAPE (see _batch_script):
+        # a job without a measured ratio could only be checked by the width
+        # heuristic that just read every real delivery as missing. Refuse to paint
+        # rather than paint without a witness.
+        size = _png_size(source)
+        if not size or not size[0] or not size[1]:
+            return {"status": "BLOCKED",
+                    "error": f"cannot measure the render at {source.relative_to(project)} — "
+                             "the upload cannot be proved delivered without its shape"}
+        aspect = round(size[0] / size[1], 3)
         painted_by = ""
         painted_source = ""
         try:
@@ -338,7 +359,8 @@ def generate_all(project: Path, scenes: list[dict[str, Any]], direction: dict[st
             log(f"  poster: repainting {out.name} — "
                 + ("--force" if force else "the prompt changed since it was painted"))
         jobs.append({"out": str(out), "src": str(source), "prompt": prompt,
-                     "sha": sha, "source_sha": source_sha, "sidecar": str(sidecar)})
+                     "sha": sha, "source_sha": source_sha, "sidecar": str(sidecar),
+                     "ar": aspect})
     if not jobs:
         return {"status": "OK", "posters": posters, "chat": None, "painted": 0}
     if log:
