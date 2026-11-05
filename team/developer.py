@@ -263,6 +263,35 @@ def _check_targets_are_paths(task_paths: list[str]) -> None:
             "settings.gradle.kts — must be written './settings.gradle.kts').")
 
 
+def _test_contract(project: Path) -> str:
+    """The test requirement the verify gate enforces, with real test paths.
+
+    Appended to every developer prompt instead of a new `{placeholder}`: projects
+    may override prompts/*.md, and a fresh placeholder would KeyError inside an
+    owner's own template. The gate itself is `team/code_tests.py`; this only
+    tells the developer where the gate expects the files.
+    """
+    from . import code_tests
+    unit, ui = code_tests.suggest_test_dirs(project)
+    unit_txt = ", ".join(unit) or "the project's unit-test source set"
+    ui_txt = ", ".join(ui) or "the project's UI-test source set"
+    return f"""
+
+TESTS ARE PART OF THIS DIFF — `devteam verify` REFUSES the change without them:
+  - Every production file you add or change MUST be named by a test file you also
+    add or change in this same task. The gate reads the diff, not your summary.
+  - A UI file (a @Composable, Activity/Fragment/Dialog/View, or layout XML) needs
+    a UI test using createComposeRule/createAndroidComposeRule (Robolectric or
+    on-device) or Espresso/UiAutomator, WITH at least one assertion.
+  - Every other production file needs a unit test with @Test and at least one
+    assertion.
+  - A screenshot/render with no assertion is NOT a test and does not count.
+  - Test files under {unit_txt} (unit) and {ui_txt} (UI) are ALWAYS allowed for
+    this task, in addition to the allow-list above. Never weaken an existing
+    test to make the gate pass.
+"""
+
+
 def build_prompt(project: Path, profile: dict, task: dict, task_paths: list[str],
                  tpl_override: str | None = None) -> str:
     """Deterministic prompt builder — used for BOTH the native-subagent path
@@ -342,4 +371,4 @@ def build_prompt(project: Path, profile: dict, task: dict, task_paths: list[str]
         locales=n_locales,
         research_context=research_ctx or "see research.json constraints",
         project_name=profile["name"],
-    )
+    ) + _test_contract(project)

@@ -435,6 +435,32 @@ def run_doctor(project: Path, log) -> dict:
     except Exception as e:  # a check must never hide the report
         log(f"doctor capabilities: could not check ({e})")
 
+    # Test posture: the verify gate refuses a production change that ships no
+    # test, but a project with ZERO UI tests can still look healthy until that
+    # change happens. WARN (not block) so the debt is visible BEFORE the next
+    # task fails verify — the fix is agent work, never an owner ask.
+    try:
+        from . import code_tests
+        posture = code_tests.posture(project)
+        rows = code_tests.posture_checks(posture)
+        bad = [(r, fix) for r, ok, fix in rows if not ok]
+        if bad:
+            log(f"doctor tests: WARN — {len(bad)} test-posture gap(s): "
+                + "; ".join(r for r, _ in bad))
+            report["tests"] = {
+                "status": "warn", "blocked": [],
+                "checks_passed": len(rows) - len(bad),
+                "note": ("the verify gate refuses a production change with no "
+                         "matching test in the diff — see plan for the fix"),
+            }
+        elif rows:
+            report["tests"] = {"status": "ready", "blocked": [],
+                               "checks_passed": len(rows)}
+            log(f"doctor tests: ready — {posture['unit_tests']} unit / "
+                f"{posture['ui_tests']} UI asserting test file(s)")
+    except Exception as e:  # a check must never hide the report
+        log(f"doctor tests: could not check ({e})")
+
     try:
         state = state_of(project)
         state["doctor"] = {"generated_at": now_iso(), "report": report}

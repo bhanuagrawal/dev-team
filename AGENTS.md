@@ -118,10 +118,14 @@ checklist + release-candidate call) and the two page URLs `record` prints.
    names the branch.
 8. **No automatic guards beyond compile/tests.** Frozen paths, release-knob
    diffing and dependency declaration were retired by the owner (2026-10-31).
-   `verify` runs: team-generic, localization, release-note freshness (the note
-   may not repeat the last shipped one), compile, unit tests, instrumented
-   tests. Version/signing/SDK changes and new libraries are the reviewer's diff to
-   catch — say so in the handover when a task touches them.
+   `verify` runs: team-generic, localization, brand, the diff-scoped **test
+   gate** (every changed production file must be named by a test file in the
+   same diff; a changed UI file must be named by a Compose/Espresso test with an
+   assertion — a screenshot render does not count), release-note freshness (the
+   note may not repeat the last shipped one), compile, unit tests, instrumented
+   tests. `release` re-runs the test gate before the version bump, so skipping
+   `verify` does not skip it. Version/signing/SDK changes and new libraries are
+   the reviewer's diff to catch — say so in the handover when a task touches them.
 9. **Ask the owner only what no agent can decide** (freeze-worthy incidents,
    discard-vs-keep on their WIP, direction). Never ask about promotion — the
    owner triggers it with their own words; the agent never raises it. Whether an

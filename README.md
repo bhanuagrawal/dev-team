@@ -192,11 +192,16 @@ native subagent or run headless (`cli.py run-headless`).
 `cli.py verify <project> --worktree <path>` checks the *actual diff*, not the
 agent's report:
 
-- **scope** — nothing under the project's `frozen_paths`; an empty diff is a
-  failure. Owner-recorded `constraint_lifts` are honoured; the orchestrator
-  cannot invent one;
+- **scope** — an empty diff is a failure; the task's allow-list is the scope
+  the developer prompt renders;
 - **localization** — every newly referenced string resource exists in every
   locale the project ships;
+- **brand** — an icon change carries its recorded provenance;
+- **tests are part of the change** — every changed production file must be named
+  by a test file in the same diff; a changed UI file must be named by a
+  Compose/Espresso test with an assertion (a screenshot render with no assertion
+  does not count). `release` re-runs this gate before the version bump;
+- **store note** — the release note may not repeat the last shipped one;
 - **compile**, then **tests** (a single retry, for the one known flaky suite);
 - **emulator hygiene** (warn-only) — see *Safety rails*.
 

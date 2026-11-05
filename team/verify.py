@@ -450,6 +450,20 @@ def verify_all(project: Path, worktree: Path, base: str, log, gradle: bool = Tru
         failures.append(msg)
         return False, failures
 
+    # TESTS ARE PART OF THE DIFF (owner directive 2026-11-05). A run shipped a
+    # signature field whose only exercise was a screenshot render; compile +
+    # `testDebugUnitTest` were green because nothing asserted anything. The gate
+    # reads the diff: every changed production file must be named by a test file
+    # in the SAME diff, and a changed UI file must be named by a Compose/Espresso
+    # test with an assertion. Cheap (file reads), so it runs before Gradle and
+    # names the exact file the developer must add — never a prose reminder.
+    from . import code_tests
+    ok, msg = code_tests.gate(worktree, files)
+    log("tests: ok — " + msg if ok else "tests: FAIL — " + msg)
+    if not ok:
+        failures.append(msg)
+        return False, failures
+
     # Store note: the text a user sees on the listing is a deliverable too, and
     # a repeated one is a defect the code can detect exactly. Runs before the
     # Gradle gates because it costs nothing and its remedy is a one-line edit.

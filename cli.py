@@ -1071,6 +1071,29 @@ def cmd_release(args: argparse.Namespace) -> int:
     log(f"version: {name} (code {code}) — {why}")
     log(f"release candidate: {'YES' if is_rc else 'NO'} (decided before the tag)")
 
+    # TESTS ARE PART OF THE CHANGE, and release is the second, unavoidable
+    # answer for an agent that skipped `verify`. Diff-scoped, no Gradle — it
+    # reads the worktree against the same dt-base verify uses. Refuse BEFORE the
+    # bump, so a testless change never becomes a tag/CI build.
+    from team import code_tests
+    from team import verify as gates_mod
+    _base = ""
+    for _ref in ("refs/heads/dt-base", "dt-base^{commit}",
+                 "origin/" + profile_of(project)["main_branch"]):
+        _base = subprocess.run(["git", "rev-parse", "--verify", "--quiet", _ref],
+                               cwd=worktree, capture_output=True, text=True).stdout.strip()
+        if _base:
+            break
+    if _base:
+        _ok_tests, _test_msg = code_tests.gate(
+            worktree, gates_mod.changed_files(worktree, _base))
+        if not _ok_tests:
+            log("test gate: BLOCKED — " + _test_msg)
+            print(json.dumps({"delivered": False, "version": name,
+                              "error": "test gate: " + _test_msg, "ci": {}},
+                             indent=2))
+            return 1
+
     # THE STORE-NOTE GATE, BEFORE THE BUMP. The note is the one part a user
     # sees; a build that would repeat the previous release's wording is refused
     # here, while the tree is still clean and the remedy (a `whatsnew` line in

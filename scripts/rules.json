@@ -98,10 +98,17 @@
     },
     {
       "id": "no-auto-guards",
-      "rule": "no frozen paths, release-knob diff or dependency gates; compile/tests are the gates",
+      "rule": "no frozen paths, release-knob diff or dependency gates; compile/tests are the gates — and a production change must carry its own test in the same diff",
       "doc": "AGENTS.md#8",
-      "kind": "reference",
-      "note": "a standing prohibition, not a checkable behaviour"
+      "kind": "code",
+      "enforced_by": "devteam verify (diff-scoped test gate) / devteam release (same gate before the bump)"
+    },
+    {
+      "id": "tests-are-part-of-the-change",
+      "rule": "every changed production file is named by a test file in the same diff; a changed UI file is named by a Compose/Espresso test with an assertion, never a screenshot render",
+      "doc": "AGENTS.md#8",
+      "kind": "code",
+      "enforced_by": "devteam verify (test gate) / devteam release (refuses before the version bump) / devteam doctor (test-posture warn)"
     },
     {
       "id": "ask-only-what-no-agent-can-decide",
