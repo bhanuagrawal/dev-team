@@ -1782,6 +1782,47 @@ def cmd_schedules(args: argparse.Namespace) -> None:
           "`devteam setup --schedule auto [--at HH:MM]`)")
 
 
+def cmd_ux_plan(args: argparse.Namespace) -> int:
+    """Which screens need a UX audit — decided by fingerprints, not by calendar."""
+    project = resolve_project(args.project)
+    from team import ux_audit
+    p = ux_audit.plan(project)
+    if getattr(args, "json", False):
+        print(json.dumps(p, indent=2))
+        return 0
+    print(f"== {project.name} ==")
+    print(ux_audit.report(p))
+    return 0
+
+
+def cmd_ux_audit(args: argparse.Namespace) -> int:
+    """One neutral first-use reaction over the screens this run actually touched."""
+    project = resolve_project(args.project)
+    log = RunLog(project, "ux-audit-" + today())
+    from team import ux_audit
+    res = ux_audit.run_audit(project, only_scene=getattr(args, "scene", None),
+                             everything=getattr(args, "all", False), log=log)
+    if not res["targets"]:
+        print("nothing to audit: no screen changed since its last audit "
+              "(unchanged screens cost nothing)")
+        return 0
+    for r in res["audited"]:
+        print(f"\n== {r['label']} (scene {r['scene']}) ==")
+        for x in r["reactions"]:
+            print(f"  {x.get('at','')}  {x.get('line','')}")
+        if r.get("premium"):
+            print("  premium: " + " · ".join(r["premium"][:3]))
+        for g in r["gripes"]:
+            print(f"  {g['id']} [{g['kind']}] {g['line']}")
+        if r.get("verdict"):
+            print(f"  verdict: {r['verdict']}")
+    for s in res["skipped"]:
+        print(f"~ skipped {s['label']}: {s['reason']}")
+    print(f"\naudited {len(res['audited'])}/{res['targets']} screen(s) · "
+          f"stored in .pipeline/ux_audit.json")
+    return 0 if res["audited"] or not res["targets"] else 1
+
+
 def cmd_market(args: argparse.Namespace) -> int:
     """Tavily web & market research for an app thesis, feature, or design pattern."""
     project = resolve_project(args.project)
@@ -3385,6 +3426,16 @@ def main() -> None:
     sch = sub.add_parser("schedules", help="list or manage registered nightly schedules")
     sch.add_argument("--remove", help="remove a project's nightly schedule, keeping it in manual mode")
     sch.set_defaults(fn=cmd_schedules)
+    up = sub.add_parser("ux-plan", help="which screens need a UX audit now "
+                                        "(fingerprint-driven; unchanged screens cost nothing)")
+    up.add_argument("project"); up.add_argument("--json", action="store_true")
+    up.set_defaults(fn=cmd_ux_plan)
+    ua = sub.add_parser("ux-audit", help="one neutral first-use reaction over the screens "
+                                         "this run touched (renders from the app itself)")
+    ua.add_argument("project")
+    ua.add_argument("--scene", help="audit one rendered scene id (docs/storefront.json)")
+    ua.add_argument("--all", action="store_true", help="audit every screen with a render")
+    ua.set_defaults(fn=cmd_ux_audit)
     tt = sub.add_parser("tree"); tt.add_argument("project")
     tt.add_argument("--html", action="store_true", help="write the html view and print its path")
     tt.add_argument("--open", action="store_true", help="open the html view in the browser")

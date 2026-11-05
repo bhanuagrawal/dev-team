@@ -494,6 +494,10 @@ python3 cli.py vision <project> "one sentence"  # the owner's goal
 python3 cli.py align <project> "<request>" [--apply]
 python3 cli.py emulators <project> [--record [--reset]]
 python3 cli.py alarm <project> ; python3 cli.py poll <project> ; python3 cli.py schedules
+python3 cli.py ux-plan  <project> [--json]     # which screens need a UX audit now
+python3 cli.py ux-audit <project> [--scene ID | --all]
+                                                # one neutral first-use reaction
+                                                # over the screens that changed
 python3 cli.py rc <project> --yes|--no [--version V] [--note "…"] [--owner]
                                                 # record the release-candidate
                                                 # call (the making LLM decides)

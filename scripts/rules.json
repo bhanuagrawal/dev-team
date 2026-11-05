@@ -59,6 +59,14 @@
       "enforced_by": "devteam doctor (orchestrator check) + devteam store-readiness (Automation & Operations category)"
     },
     {
+      "id": "ux-audit-on-change",
+      "rule": "a screen whose look/feel fingerprint changed must get one neutral first-use reaction before a run can claim it polished anything; unchanged screens are never re-audited",
+      "doc": "SKILL.md",
+      "kind": "code",
+      "enforced_by": "devteam ux-plan / ux-audit (fingerprint decides) + team/verify.py warn naming the unaudited screens",
+      "note": "warning, not a gate: the released gates stay compile/tests. Per-screen fingerprints mean the audit is paid on change, never per release"
+    },
+    {
       "id": "ga4-read-is-verified",
       "rule": "a GA4 connection is ready only when the declared property can actually be read; the credential is a reader service account (connections.ga4.key_file or machine-wide $DEVTEAM_GA4_KEY), never the owner's ADC login — Google blocks analytics.readonly for gcloud's default client",
       "doc": "AGENTS.md",

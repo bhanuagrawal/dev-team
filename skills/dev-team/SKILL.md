@@ -424,6 +424,27 @@ never silently blocking.
       ships analysis a user cannot see. Enforced in code (the plan is rejected); an
       investigation may head the queue only when nothing executable exists, and then its
       `reason` says so.
+    - **POLISH IS MEASURED, NOT CLAIMED** (owner 2026-11-05: *"don't dumbly keep adding
+      features — polish a lot"*, and *"look and feel usually doesn't change in one run"*).
+      So the unit is the SCREEN and the trigger is a fingerprint, never a per-release
+      ritual: `devteam ux-plan <project>` compares each screen's **visual** hash (its
+      composables + theme/tokens + `docs/design.md`) and **behaviour** hash (the
+      view-model/state/repository files that feed it) with the last audit.
+      - neither changed → `unchanged`, cost zero — which is the normal case;
+      - visual changed (new screen, new dialog/empty state) → audit **that screen**;
+      - behaviour changed while pixels did not ("looks the same, feels different": a
+        new wait, error state, disabled button) → re-walk that flow;
+      - tokens/theme changed → every screen moved at once, so all are stale.
+      `devteam ux-audit <project>` sends the app's OWN render (the scene rendered from
+      its composables, no emulator) to one neutral evaluator that reacts in a user's
+      words — one line per moment, then premium / annoying / verdict — and stores the
+      gripes (`UX-<scene>-<n>`) in `.pipeline/ux_audit.json`. It is deliberately NOT a
+      1-10 score. A polish entry should name the gripe it removes; re-auditing that
+      screen marks gripes the new pass no longer mentions as `gone`. `verify` WARNS when
+      a run's diff changes a screen nobody has reacted to since (gates stay
+      compile/tests). A surface with no rendered scene reports `no render` — bind it in
+      `docs/storefront.json` (`"surface": "<label>"`); it is never judged from a
+      different screen's picture.
    - Every cycle runs an IMPACT REVIEW: the synthesis must judge each
      already-queued task; the CLI prints a `QUEUE IMPACT` block (added / kept /
      replaced / obsolete / dropped). A queued task can never vanish silently.

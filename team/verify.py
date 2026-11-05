@@ -404,6 +404,20 @@ def verify_all(project: Path, worktree: Path, base: str, log, gradle: bool = Tru
         return False, failures
     log("team generic: ok")
 
+    # UX: a run can change how a screen LOOKS or FEELS without any gate noticing.
+    # This is a WARNING, never a failure — the gates stay compile/tests — but it
+    # names the screens nobody has reacted to since the change, so "we polished it"
+    # cannot be claimed without a reaction on record.
+    try:
+        from . import ux_audit
+        stale = ux_audit.stale_for_files(project, files)
+        if stale:
+            log("ux: " + "; ".join(f"{s['label']} changed ({s['status']}), no audit since"
+                                   for s in stale[:4]))
+            log("ux: run `devteam ux-audit <project>` — unchanged screens cost nothing")
+    except Exception:
+        pass
+
     ok, msg = localization_check(worktree, files)
     log("localization: ok" if ok else "localization: FAIL")
     if not ok:
