@@ -69,6 +69,7 @@ _ASSERT_RE = re.compile(
 _UI_TEST_RE = re.compile(
     r"createAndroidComposeRule|createComposeRule|createEmptyComposeRule"
     r"|runComposeUiTest|ComposeTestRule"
+    r"|\bonNodeWith[A-Za-z]*\s*\(|\bonAllNodes[A-Za-z]*\s*\("
     r"|\bonView\s*\(|\bonData\s*\(|\bEspresso\."
     r"|\bUiDevice\b|\bUiAutomator\b|\bActivityScenario\b"
 )
