@@ -4,10 +4,12 @@ code, not by the agent.
 """
 from __future__ import annotations
 
+import hashlib
 import os
 import re
 import shutil
 import subprocess
+import time
 from pathlib import Path
 
 from . import emulator
@@ -109,6 +111,85 @@ def gradle_env(worktree: Path | None = None) -> dict:
     return {**GRADLE_ENV, **android_sdk_env(worktree), "PATH": tool_path(worktree)}
 
 
+def _base36(number: int) -> str:
+    chars = "0123456789abcdefghijklmnopqrstuvwxyz"
+    out = ""
+    while number:
+        number, rem = divmod(number, 36)
+        out = chars[rem] + out
+    return out or "0"
+
+
+def ensure_wrapper_distribution(worktree: Path, log=None) -> str:
+    """Make the wrapper's OWN Gradle distribution present before it fetches it.
+
+    Why (2026-11-06): the wrapper downloads its distribution with a 10-second
+    connect timeout (`networkTimeout` in gradle-wrapper.properties). A run found
+    this machine's cache empty, the wrapper timed out mid-download, and the
+    compile gate reddened a healthy tree with a socket stack trace — an
+    environment failure wearing a code failure's clothes, one `record --result
+    failed` away from being blamed on the diff. Fetching the zip here, with a
+    real timeout, into the directory the wrapper itself would use (base36 of the
+    MD5 of the distribution URL — Gradle's own scheme) leaves the wrapper to
+    verify and unpack it exactly as before.
+
+    Best-effort by design: a project without a wrapper, a non-http distribution
+    or an offline machine is reported and left to the wrapper's normal path.
+    Returns a one-line status (empty when there was nothing to do).
+    """
+    props = worktree / "gradle/wrapper/gradle-wrapper.properties"
+    try:
+        text = props.read_text(errors="ignore")
+    except OSError:
+        return ""
+    m = re.search(r"^\s*distributionUrl\s*=\s*(.+?)\s*$", text, re.M)
+    if not m:
+        return ""
+    # The properties file escapes ':' and '=' — undo just those.
+    url = m.group(1).replace("\\:", ":").replace("\\=", "=").replace("\\\\", "\\")
+    if not url.lower().startswith(("http://", "https://")):
+        return ""
+    name = url.rstrip("/").rsplit("/", 1)[-1]
+    if not name.endswith(".zip"):
+        return ""
+    user_home = os.environ.get("GRADLE_USER_HOME") or str(Path.home() / ".gradle")
+    digest = hashlib.md5(url.encode("utf-8")).digest()
+    target = (Path(user_home).expanduser() / "wrapper" / "dists" / name[:-4]
+              / _base36(int.from_bytes(digest, "big")))
+    seeded = (target / f"{name}.ok").exists() or (target / name[:-4]).is_dir() \
+        or bool(list(target.glob("*.zip")))
+    if seeded:
+        return ""
+
+    target.mkdir(parents=True, exist_ok=True)
+    part = target / f"{name}.part"
+    dest = target / name
+    line = (f"gradle wrapper: {name} is not cached — fetching it before the gate "
+            f"(the wrapper's own timeout is 10s)")
+    if log:
+        log("~ " + line)
+    try:
+        import urllib.request
+        deadline = time.time() + 900
+        with urllib.request.urlopen(url, timeout=30) as resp, part.open("wb") as out:
+            while True:
+                chunk = resp.read(1 << 20)
+                if not chunk:
+                    break
+                out.write(chunk)
+                if time.time() > deadline:
+                    raise TimeoutError("download exceeded 900s")
+        part.replace(dest)
+        return line + " — cached"
+    except Exception as e:  # an environment problem the wrapper may still survive
+        try:
+            part.unlink(missing_ok=True)
+        except OSError:
+            pass
+        return (f"gradle wrapper: could not pre-fetch {name} ({e}) — "
+                "letting the wrapper try with its own 10s timeout")
+
+
 def changed_files(worktree: Path, base: str) -> list[str]:
     r = subprocess.run(
         ["git", "diff", "--name-only", base, "HEAD"] + ["--", "."],
@@ -179,6 +260,7 @@ def gradle_task(worktree: Path, task: str, timeout: int, log) -> tuple[bool, str
     # so a shared-module unit test used to compile and never run in any gate. One field
     # carries them all; the invocation stays a single gradlew call.
     tasks = [t for t in re.split(r"[,\s]+", task.strip()) if t]
+    ensure_wrapper_distribution(worktree, log)
     log(f"~ gradle {' '.join(tasks)} (≤{timeout}s)")
     r = run(["./gradlew", *tasks], worktree, timeout=timeout, env=gradle_env(worktree))
     if r.returncode == 0:
@@ -360,6 +442,7 @@ def instrumented_check(worktree: Path, profile: dict, log) -> tuple[bool, str]:
         argv = [wrapper, avd, "--", "./gradlew", task]
 
     log(f"~ gradle {task} on the device (≤{timeout}s)")
+    ensure_wrapper_distribution(worktree, log)
     try:
         r = run(argv, worktree, timeout=timeout, env=gradle_env(worktree))
     except subprocess.TimeoutExpired:
