@@ -1,0 +1,5 @@
+{
+  "_comment": "Planner coverage floors, in percent. A project may override its own in profile['coverage'] {unit_floor, ui_floor} — that is a project fact and belongs in the project. Code-enforced in team/research.py (_validate): when either leg is below its floor the plan's queue HEAD must be the executable entry that raises it (its 'target' names src/test/** or src/androidTest/** and friends), unless a delivery fire (red CI or a store rejection) outranks it.",
+  "unit_floor": 60,
+  "ui_floor": 50
+}

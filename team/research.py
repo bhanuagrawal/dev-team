@@ -20,6 +20,7 @@ from pathlib import Path
 from typing import Any
 
 from . import scan
+from . import coverage as coverage_mod
 from .core import (RunLog, git, now_iso, pipeline_dir, profile_of, run, save_json,
                    save_state, state_of, target_looks_like_paths)
 from . import goals
@@ -727,6 +728,7 @@ def research_collect(project: Path, log: RunLog) -> dict:
             "reviews": _play_reviews_pull(project, profile),
             "store_readiness": _store_readiness_pull(project, tree=read_tree),
             "ux": _ux_pull(project, profile),
+            "coverage": coverage_mod.collect(read_tree, profile),
             "competitors": _competitors_pull(project),
             "market": _market_pull(project),
             "codebase": {
@@ -800,6 +802,7 @@ def research_collect(project: Path, log: RunLog) -> dict:
         f"remaining={len(remaining)}, upgrades={len(research['upgrades'])})")
     for u in research["upgrades"]:
         log(f"  upgrade available: {u['title']}")
+    log(coverage_mod.summary_line(research["signals"]["coverage"]))
     return research
 
 
@@ -865,6 +868,7 @@ Rules:
     new feature: the team cannot tell whether anything it ships is polished.
   * NL/2026-11-05: a project shipped four releases of "features" whose controls
     did nothing, because nothing could record what a player actually felt.
+{coverage_block}
 - READING SOURCE CODE: read project files from `signals.repo.read_tree` — that is
   the worktree at origin/main and it is what is actually SHIPPED. The owner's own
   checkout may lag origin/main by many commits or carry unrelated work in
@@ -1118,6 +1122,31 @@ def _validate(result: dict, research: dict | None = None) -> str | None:
                         "head, so put the executable entry first; the "
                         "investigation may stay queued behind it. The head may be "
                         "an investigation only when nothing executable is queued")
+            # TEST COVERAGE IS A GATE, NOT A NUDGE (owner directive 2026-11-05):
+            # "report the percentage of coverage — both UI and unit — to the planner,
+            # and the planner should prioritise coverage", enforced in code. A run
+            # builds exactly one entry, so when the codebase is below its floor that
+            # one build slot goes to raising it. The only exemption is a delivery fire
+            # (red CI / a store rejection), which outranks everything.
+            cov = (research.get("signals", {}).get("coverage") or {})
+            cov_below = [k for k in ("unit", "ui") if k in (cov.get("below_floor") or [])]
+            if q is result["queue"][0] and cov_below and not (
+                    ci_last == "failure" or store_blocked):
+                if q.get("type") not in EXECUTABLE_TYPES or not coverage_mod.targets_tests(
+                        q.get("target")):
+                    floors = cov.get("floor") or {}
+                    detail = ", ".join(
+                        f"{k} {(cov.get(k) or {}).get('percent')}% < {floors.get(k)}%"
+                        for k in cov_below)
+                    return (f"signals.coverage is below its floor ({detail}): the queue "
+                            "HEAD must be the executable entry that raises coverage — a "
+                            "bugfix/feature whose 'target' names the test sources it will "
+                            "write (e.g. 'app/src/test/java/**', "
+                            "'app/src/androidTest/java/**', '.../commonTest/**') plus any "
+                            "production path the tests need. Code rejects a head that "
+                            "does not, because a run builds only the head. The only "
+                            "exemption is a delivery fire (red CI or a store rejection)")
+
             # Competitor evidence is data, not a licence to invent: a reason may
             # cite a rival only when a recon report is actually behind it.
             competitors = (research.get("signals", {}).get("competitors") or {})
@@ -1476,6 +1505,57 @@ apply, and the long-term VISION is still the owner's.
 """
 
 
+def coverage_prompt_block(sig: dict) -> str:
+    """The COVERAGE rule, rendered from the collected numbers.
+
+    The numbers travel in `signals.coverage` anyway; this block exists so the rule
+    that acts on them is unmissable and states the exact floor the code gate uses
+    (`team/coverage.py`, thresholds in config/coverage.json or the project's
+    profile). A plan that ignores it is REJECTED, not merely frowned at.
+    """
+    sig = sig or {}
+    floor = sig.get("floor") or {}
+    unit = sig.get("unit") or {}
+    ui = sig.get("ui") or {}
+    below = sig.get("below_floor") or []
+
+    def pct(leg: dict) -> str:
+        v = leg.get("percent")
+        if v is None:
+            return "not measured"
+        return f"{v}% ({leg.get('measured_by') or 'structural'})"
+
+    lines = [
+        "- TEST COVERAGE IS A SIGNAL AND A GATE (`signals.coverage`): "
+        f"unit {pct(unit)} against a {floor.get('unit')}% floor, "
+        f"ui {pct(ui)} against a {floor.get('ui')}% floor.",
+    ]
+    if below:
+        missing = []
+        for leg in below:
+            ex = ((sig.get(leg) or {}).get("missing_examples") or [])[:3]
+            if ex:
+                missing.append(f"{leg} e.g. " + ", ".join(ex))
+        lines.append(
+            f"  * BELOW THE FLOOR ({', '.join(below)}): queue[0] MUST be the executable "
+            "entry that raises it — a bugfix/feature whose `target` names the test "
+            "sources it will write (`.../src/test/**`, `.../src/androidTest/**`, "
+            "`.../commonTest/**`) plus any production path the tests need. Code "
+            "rejects a plan whose head is not that shape. Aim at the biggest uncovered "
+            "area" + (f" ({'; '.join(missing)})." if missing else "."))
+        lines.append(
+            "  * The ONE exemption: a delivery fire (signals.ci red, or a store "
+            "rejection) outranks coverage — name it in the head's `reason` when you "
+            "take it. A goal milestone does NOT outrank an uncovered codebase: tests "
+            "are how the next change stays shippable.")
+    else:
+        lines.append(
+            "  * At or above both floors: say so in `insights` and spend the run on "
+            "product work. Do not queue a test-only entry for its own sake — coverage "
+            "is a floor to defend, not a score to farm.")
+    return "\n".join(lines)
+
+
 def render_prompt(project: Path, research: dict, log: RunLog | None = None,
                   focus: str | None = None, max_effort: int | None = None) -> str:
     """The exact synthesis prompt (goals + research + rules). Exported by
@@ -1503,7 +1583,9 @@ def render_prompt(project: Path, research: dict, log: RunLog | None = None,
                                 target_effort=eff_target,
                                 min_effort=MIN_EFFORT_MIN,
                                 max_effort=eff_max,
-                                max_queue=MAX_QUEUE)
+                                max_queue=MAX_QUEUE,
+                                coverage_block=coverage_prompt_block(
+                                    (research.get("signals") or {}).get("coverage") or {}))
     if focus_str:
         extra_note = ""
         if is_extended:

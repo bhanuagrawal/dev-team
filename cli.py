@@ -1681,6 +1681,13 @@ def cmd_status(args: argparse.Namespace) -> None:
     last = state.get("last_run", {})
     if last:
         print(f"last run:   {last.get('date')} → {last.get('result')} {last.get('note','')[:80]}")
+    # Test coverage is a plan gate now (team/research.py), so the owner and the next
+    # agent must be able to see the numbers the planner is judged on. Read from the
+    # last collect (cheap); `devteam coverage <project>` re-measures on demand.
+    from team import coverage as coverage_mod
+    cov = coverage_mod.stored(project)
+    if cov:
+        print("coverage:   " + coverage_mod.summary_line(cov).removeprefix("coverage: "))
     # What the STORE says is not visible in git or CI: a delivery can be green and
     # still rejected by Play policy (2026-11-04). One line, with its age, so the
     # owner and the next agent know whether anyone has actually looked.
@@ -1837,6 +1844,33 @@ def cmd_capabilities(args: argparse.Namespace) -> int:
     if all(r["status"] in ("ok", "n/a") for r in rows):
         print("  every capability the team ships is wired for this project")
     return 0 if all(r["status"] in ("ok", "n/a") for r in rows) else 1
+
+
+def cmd_coverage(args: argparse.Namespace) -> int:
+    """Unit and UI test coverage over the SHIPPED tree — the numbers the planner gates on.
+
+    Deterministic and cheap: file-level reach of the test sets, with real JaCoCo line
+    coverage substituted when the project already produces a report. Reads origin/main
+    (the scan worktree), never the owner's checkout.
+    """
+    project = resolve_project(args.project)
+    from team import coverage as coverage_mod
+    from team import scan as scan_mod
+    from team.core import profile_of
+    tree = scan_mod.origin_tree(project)
+    sig = coverage_mod.collect(tree, profile_of(project))
+    if getattr(args, "json", False):
+        print(json.dumps(sig, indent=2))
+        return 0 if not sig.get("below_floor") else 1
+    print(f"== {project.name} ==")
+    print("  " + coverage_mod.summary_line(sig))
+    for leg in ("unit", "ui"):
+        d = sig.get(leg) or {}
+        if d.get("missing_examples"):
+            print(f"  {leg}: not reached by any test (e.g.) " + ", ".join(d["missing_examples"]))
+    if sig.get("status") != "ok":
+        print(f"  status: {sig.get('status')} — {sig.get('note')}")
+    return 0 if not sig.get("below_floor") else 1
 
 
 def cmd_ux_plan(args: argparse.Namespace) -> int:
@@ -3557,6 +3591,11 @@ def main() -> None:
     cp.add_argument("project")
     cp.add_argument("--json", action="store_true")
     cp.set_defaults(fn=cmd_capabilities)
+    cv = sub.add_parser("coverage", help="unit and UI test coverage over the shipped tree "
+                                         "(the numbers the planner gates on)")
+    cv.add_argument("project")
+    cv.add_argument("--json", action="store_true")
+    cv.set_defaults(fn=cmd_coverage)
     up = sub.add_parser("ux-plan", help="which screens need a UX audit now "
                                         "(fingerprint-driven; unchanged screens cost nothing)")
     up.add_argument("project"); up.add_argument("--json", action="store_true")
