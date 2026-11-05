@@ -123,7 +123,7 @@
       "doc": "AGENTS.md#10",
       "kind": "code",
       "note": "warn-only by design: the run commits its own work, it does not commit the owner's",
-      "enforced_by": "devteam doctor / status (checkout_dirty \u2014 reports, never commits the owner's WIP)"
+      "enforced_by": "devteam doctor / status (checkout_dirty — reports, never commits the owner's WIP)"
     },
     {
       "id": "verify-before-release",
@@ -180,6 +180,14 @@
       "doc": "team/takeover.py",
       "kind": "code",
       "enforced_by": "devteam takeover"
+    },
+    {
+      "id": "emulator-boot-zombie-repair",
+      "rule": "a device gate that cannot boot because a dead emulator still holds the AVD must repair the AVD and rerun, never silently degrade to warn-only",
+      "doc": "AGENTS.md#8 / dev-team skill (emulator failure modes)",
+      "kind": "enforcible",
+      "proposal": "devteam verify's instrumented stage: before booting an AVD, if a qemu process holds that AVD's lock while `adb devices` shows no online device AND this run started no emulator, terminate the holder, clear the locks, boot again, and only then fall back to warn-only; record the repair in the run log",
+      "note": "2026-11-05/06: the two touched device classes passed (13 tests), then a zombie qemu from a failed boot kept the AVD lock, every later boot died in ~1s, and verify degraded to 'device test runner could not execute (warn-only)' — the degrade is right for a machine with no emulator, wrong for a repairable lock holder"
     }
   ]
 }
