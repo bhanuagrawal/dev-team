@@ -52,24 +52,23 @@ def agent_requirements(profile: dict, project: Path) -> dict[str, list[tuple[str
     ga4 = conns.get("ga4")
     ga4_checks: list[tuple[str, bool, str]] = []
     if ga4:
-        key_needed = bool(ga4.get("key_file"))
-        if key_needed:
-            ga4_checks.append(("service-account key file exists", _has(ga4.get("key_file", "")),
-                               "place a key file at connections.ga4.key_file (or update the path)"))
-        else:
-            # simple default: owner's shared Google login (one-time gcloud ADC),
-            # no per-project key file — verify the token mints now
-            adc_ok = run(["gcloud", "auth", "application-default", "print-access-token",
-                          "--scopes", "https://www.googleapis.com/auth/analytics.readonly"],
-                         None, timeout=60).returncode == 0
-            ga4_checks += [
-                ("connections.ga4.property declared", bool(ga4.get("property")),
-                 "add the GA4 property id"),
-                ("owner gcloud login can mint analytics.readonly token", adc_ok,
-                 "one-time: gcloud auth application-default login --scopes=https://www.googleapis.com/auth/analytics.readonly"
-                 " (shared across ALL projects)"),
-            ]
-        ga4_checks.append(("gcloud CLI available", bool(shutil.which("gcloud")), "install gcloud SDK"))
+        from . import ga4 as ga4_mod
+        prop = str(ga4.get("property") or "")
+        key = ga4_mod.key_path(ga4.get("key_file"))
+        ga4_checks.append(("connections.ga4.property declared", bool(prop),
+                           "add the GA4 property id"))
+        if key:
+            ga4_checks.append((f"GA4 reader key readable ({key.name})", True, ""))
+        # A declaration is READY only if the property can actually be read: the
+        # old check proved "gcloud can mint a token", which stayed green while
+        # every report returned 403 (or while the login Google now blocks was the
+        # only advice). A real runReport is the only honest gate.
+        probe = ga4_mod.probe(project, ga4)
+        ga4_checks.append((f"GA4 property {prop or '?'} readable with the declared "
+                           f"credential", bool(probe.get("ok")),
+                           ga4_mod.fix_for(project.name, ga4, probe)))
+        ga4_checks.append(("gcloud CLI available", bool(shutil.which("gcloud")),
+                           "install the gcloud SDK (the GA4 collector mints service-account tokens through it)"))
 
     # Play Console connections (vitals + reviews): declared per project, and the
     # COLLECTOR is what silences the upgrade ask — so verify the key file and the

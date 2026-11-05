@@ -190,9 +190,14 @@ def _store_status_pull(project: Path) -> dict:
 
 
 def _ga4_pull(project: Path, profile: dict) -> dict:
-    """GA4 via service account — the documented runReport pattern. The project
-    DECLARES its connection in profile['connections']['ga4']
-    {property, key_file?, exclude_device_models?} — team code holds no paths.
+    """GA4 via a reader service account — the documented runReport pattern.
+
+    The project DECLARES its connection in profile['connections']['ga4']
+    {property, key_file?, exclude_device_models?}; team code holds no paths.
+    `key_file` is optional: when it is not pinned, the machine's shared reader key
+    ($DEVTEAM_GA4_KEY) is used — one credential per MACHINE, because GA4 read
+    access belongs to a reader service account, not to the owner's ADC login
+    (Google blocked gcloud's default client for analytics.readonly, 2026-11-05).
     Degrades loudly: status=unavailable + reason. Never prints the token."""
     conf = (profile.get("connections") or {}).get("ga4") or {}
     prop = conf.get("property")
@@ -200,40 +205,10 @@ def _ga4_pull(project: Path, profile: dict) -> dict:
         return {"status": "unavailable", "reason":
                 "project has not declared connections.ga4.property — "
                 "run `devteam doctor` and answer the owner-ask"}
-    key_src = conf.get("key_file", "")
-    key = Path(key_src).expanduser() if key_src else None
-    if key_src and key and key.exists():
-        # per-project service-account key file (declared per project in its profile)
-        try:
-            account = json.loads(key.read_text()).get("client_email", "")
-        except Exception:
-            return {"status": "unavailable", "reason": f"unreadable key file {key_src}"}
-        run(["gcloud", "auth", "activate-service-account", "--key-file", str(key)],
-            project, timeout=120)
-        tok = run(["gcloud", "auth", "print-access-token", "--account", account,
-                   "--scopes", "https://www.googleapis.com/auth/analytics.readonly"],
-                  project, timeout=120)
-        token = (tok.stdout or "").strip()
-        if tok.returncode != 0 or not token:
-            return {"status": "unavailable", "reason": "gcloud SA token failed"}
-    else:
-        # simple default (owner decision 2026-10-16): ONE shared Google login for
-        # all projects — `gcloud auth application-default login` once on this
-        # machine; every project then declares only its GA4 property id, and
-        # read access follows the owner's account exactly.
-        tok = run(["gcloud", "auth", "application-default", "print-access-token",
-                   "--scopes", "https://www.googleapis.com/auth/analytics.readonly"],
-                  project, timeout=60)
-        if tok.returncode != 0 or not (tok.stdout or "").strip():
-            # login without the analytics scope consented — try the default set
-            tok = run(["gcloud", "auth", "application-default", "print-access-token"],
-                      project, timeout=60)
-        token = (tok.stdout or "").strip()
-        if tok.returncode != 0 or not token:
-            return {"status": "unavailable", "reason":
-                    "GA property declared but no owner auth yet: run "
-                    "`gcloud auth application-default login --scopes=https://www.googleapis.com/auth/analytics.readonly` "
-                    "once (shared across all projects), or place a SA key at connections.ga4.key_file"}
+    from . import ga4 as ga4_mod
+    token, why_not = ga4_mod.mint(project, ga4_mod.key_path(conf.get("key_file")))
+    if not token:
+        return {"status": "unavailable", "reason": why_not}
 
     try:
 

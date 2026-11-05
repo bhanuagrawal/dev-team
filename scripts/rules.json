@@ -59,6 +59,14 @@
       "enforced_by": "devteam doctor (orchestrator check) + devteam store-readiness (Automation & Operations category)"
     },
     {
+      "id": "ga4-read-is-verified",
+      "rule": "a GA4 connection is ready only when the declared property can actually be read; the credential is a reader service account (connections.ga4.key_file or machine-wide $DEVTEAM_GA4_KEY), never the owner's ADC login — Google blocks analytics.readonly for gcloud's default client",
+      "doc": "AGENTS.md",
+      "kind": "code",
+      "enforced_by": "team/ga4.py (one credential resolver + a real runReport probe) used by team/research.py and devteam doctor",
+      "note": "lesson 2026-11-05: doctor tested 'gcloud can mint a token', so a property returning 403 (and a login Google had just blocked) still read as configured; a new project now cannot land there either"
+    },
+    {
       "id": "nightly-slot-spacing",
       "rule": "nightly slots must be at least MIN_GAP_MIN (60) minutes apart; the machine-wide run lock means an overlapping app is SKIPPED, not deferred, so a small gap silently costs an app its night",
       "doc": "AGENTS.md",

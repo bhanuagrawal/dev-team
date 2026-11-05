@@ -42,6 +42,18 @@ Never assume; ask in ONE message:
    → grant "Release to testing tracks" → download JSON), then get a local path
    for the JSON from them. If not today, mark REQUIRED gate pending.
 6. Firebase: default DEFERRED (Noop analytics) — repo learns this later.
+   **When analytics IS wired (now or later), GA4 read access is a reader SERVICE
+   ACCOUNT, not the owner's login.** Google blocks `gcloud auth
+   application-default login --scopes=…analytics.readonly` for its default client
+   ("this app is blocked", 2026-11-05), so:
+   - the new property gets the machine's reader SA added as **Viewer** (GA4 Admin
+     → Property access management) — a browser step, do it in the same session,
+     never relay it as an ask;
+   - the profile declares `connections.ga4.property` (plus `key_file` only if this
+     app needs its own key; otherwise the machine-wide `$DEVTEAM_GA4_KEY` serves);
+   - `devteam doctor <project>` must show the property **readable** before the
+     first plan run — the probe is a real runReport, so a key file that exists but
+     cannot read the property stays BLOCKED.
 Backup ask (one line): after you generate the keystore, they copy it + password
 off-machine (you generate; they never generate).
 
