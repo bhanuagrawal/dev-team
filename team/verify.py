@@ -263,9 +263,18 @@ def available_avds() -> list[str]:
 
 def _is_test_runner_infra_failure(output: str) -> bool:
     """True when failure was an inability to boot/connect an emulator or test runner,
-    rather than an assertion failure in an executed test."""
+    rather than an assertion failure in an executed test.
+
+    Gradle prints "There were failing tests" for BOTH a real assertion and a run whose
+    device vanished mid-suite (2026-11-05: `device 'emulator-5554' not found` +
+    "Test run failed to complete. Expected 99 tests, received 1" was reported as a test
+    failure, blocking a run whose compile/unit gates were green). So the marker alone
+    cannot decide: a named assertion always wins, then a device/runner signature, then
+    an incomplete run, and only a completed run with failures is a real failure.
+    """
     low = output.lower()
-    if any(sig in low for sig in ("there were failing tests", "tests on ", "assertionerror", "comparisonfailure")):
+    # A real assertion is a real failure, whatever else the log says.
+    if any(sig in low for sig in ("assertionerror", "comparisonfailure")):
         return False
     infra_signatures = (
         "no connected devices",
@@ -281,7 +290,17 @@ def _is_test_runner_infra_failure(output: str) -> bool:
         "command not found",
         "missing",
     )
-    return any(sig in low for sig in infra_signatures)
+    # adb words a vanished device as `device 'emulator-5554' not found`, which the
+    # contiguous "device not found" signature above cannot match.
+    if any(sig in low for sig in infra_signatures) or re.search(
+            r"device '[^']+' not found", low):
+        return True
+    # No device was named, but the suite did not finish: no test was reported as failed
+    # with an assertion, so this is the runner giving up rather than the build failing.
+    if "test run failed to complete" in low or re.search(
+            r"expected \d+ tests?, received \d+", low):
+        return True
+    return False
 
 
 def instrumented_check(worktree: Path, profile: dict, log) -> tuple[bool, str]:
