@@ -228,8 +228,13 @@ of this — it stays a human action.
 Release notes are a store artefact, so they get store rules: the generated copy
 names the task's first clause (not the 200-char internal label) and is clamped to
 `profile['whatsnew_max_chars']` (default 500 — Play rejects longer notes). A
-project whose profile sets `whatsnew_curated: true` owns its notes by hand; the
-pipeline then reads that file and **never rewrites it**, and the report says so.
+project whose profile sets `whatsnew_curated: true` never gets the pipeline's
+boilerplate note; the owner's file is read as-is, and the one thing the pipeline
+DOES write is an explicit per-release `"whatsnew"` in the task spec. Curation is
+the owner's last word, not a freeze: a note that would repeat the previous
+release verbatim is refused by `verify` and `release` (and reported by
+`store-readiness`), because "the same What's new every update" is the defect that
+flag used to create — one 2026-10-23 note shipped on 28 consecutive releases.
 
 ### Step 9 — bookkeeping (code, every outcome)
 

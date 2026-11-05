@@ -158,9 +158,11 @@ agentconfig.env`) — without it `doctor` correctly reports the agents blocked
 - **Release notes are a first-class deliverable, not a by-product.** They are
   what a user reads in the store, they are length-limited by the store (Play
   rejects a note over `profile['whatsnew_max_chars']`, default 500), and a
-  project whose profile sets `whatsnew_curated` owns them by hand — the pipeline
-  READS that file and reports it, and must never rewrite it (a curated note was
-  silently replaced by generated boilerplate on 2026-10-23).
+  project whose profile sets `whatsnew_curated` owns the wording — the pipeline
+  reads that file and never invents the boilerplate for it. The one thing it does
+  write is an explicit per-release `"whatsnew"` in the task spec, and a note that
+  repeats the previous release verbatim FAILS `verify` and `release` (the
+  defect that once shipped one note on dozens of releases).
 - Never push with red gates. `devteam verify` must PASS before `devteam release`.
 - **Automatic scope/knob/dependency guards are RETIRED (owner directive
   2026-10-31).** There is no `frozen_paths` check, no release-knob diff and no
@@ -519,9 +521,10 @@ never silently blocking.
    - PASS → `python3 <team>/cli.py release <project> --worktree <WORKTREE_PATH>
      --task-spec .pipeline/tasks/<id>.json`
      This bumps the version, writes release notes (within
-     `profile['whatsnew_max_chars']`, and NOT AT ALL when the project's notes are
-     owner-curated — see "The release handover"), commits, pushes to origin
-     main, and watches CI. CI delivers to Play internal testing.
+     `profile['whatsnew_max_chars']`, never the boilerplate on an owner-curated
+     project, and REFUSES a note that repeats the last shipped one — see "The
+     release handover"), commits, pushes to origin main, and watches CI. CI
+     delivers to Play internal testing.
      (Note: Audit Google Play launch readiness anytime via `python3 <team>/cli.py store-readiness <project>`.)
    - READ "NOTICED BUT NOT FIXED" NOTES — THEY ARE THE
      PIPELINE'S ONLY FEED-FORWARD. Note unrelated defects rather than fixing
@@ -610,10 +613,17 @@ by code (`record`) and quoted verbatim by the orchestrator:
    internal label).
    - **Where the words come from is a project fact.** Default: the pipeline
      generates them from the task. `profile['whatsnew_curated'] = true` means the
-     OWNER writes them: the pipeline reads the file, prints it and never rewrites
-     it (and the report says which of the two it was — an owner must never be
-     shown boilerplate as if it were their own words, nor their words replaced
-     silently).
+     OWNER's wording wins over the boilerplate: the pipeline reads the file and
+     never invents the type-template for it. It DOES write an explicit
+     `"whatsnew"` from the task spec — that is this release's authored copy, and
+     refusing it is what froze one project's note for 28 releases.
+   - **A REPEATED NOTE IS REFUSED, NOT WARNED.** `verify` and `release` compare
+     the note about to ship with the last SHIPPED note (the ledger, not the
+     newest tag: a tag lands before CI, so a failed upload must not count) and
+     fail on a byte-identical repeat. `store-readiness` reports the last two
+     shipped notes being identical as a BLOCKER. Remedy is always the same one
+     line: put this release's user-facing copy in the spec's `"whatsnew"`. Curation
+     is the owner's last word, never a freeze.
    - **THE GENERATED LINE IS ONLY AS GOOD AS THE LABEL, so write one when the
      label is pipeline-shaped.** The fallback note interpolates the task's label
      verbatim (`✓ New in this update: <label>`), and `_short_label` only cuts a

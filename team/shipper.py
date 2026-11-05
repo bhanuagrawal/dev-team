@@ -19,7 +19,8 @@ import re
 import time
 from pathlib import Path
 
-from .core import read_delivery_file, RunLog, git, profile_of, run, target_items, target_matches
+from .core import (read_delivery_file, state_of, RunLog, git, profile_of, run,
+                   target_items, target_matches)
 
 
 SEMVER_RX = re.compile(r"^(\d+)\.(\d+)(?:\.(\d+))?(?:-([0-9A-Za-z][0-9A-Za-z.\-]*))?$")
@@ -320,18 +321,130 @@ def _whatsnew_text(task: dict, max_chars: int = WHATS_NEW_MAX_CHARS) -> str:
     return _trim_whatsnew(text, max_chars)[0]
 
 
+def _normalize_task(task) -> dict:
+    """A task spec dict, or a bare label string (legacy caller shape)."""
+    if isinstance(task, str):
+        return {"type": "motion", "surface": {"label": task}}
+    return task if isinstance(task, dict) else {}
+
+
+def _explicit_whatsnew(task) -> str:
+    return (str(_normalize_task(task).get("whatsnew") or "")).strip()
+
+
+def whatsnew_preview(project: Path, task, root: Path | None = None) -> str:
+    """Exact note a release WOULD ship for `task`, without writing anything.
+
+    Three sources, one order:
+      1. an explicit per-release `whatsnew` in the task spec — always wins,
+         including on an owner-curated project (the spec is this release's
+         authored copy, not the boilerplate template the curation protects
+         against);
+      2. on a curated project with no authored copy, the file on disk
+         (`root`, the worktree when the caller has one);
+      3. otherwise the per-type template.
+
+    Split out of `write_whatsnew` so the release gate can judge the note
+    BEFORE anything is written or bumped: a blocked release must leave the
+    tree exactly as clean as it found it.
+    """
+    profile = profile_of(project)
+    rel = profile.get("whatsnew_file")
+    if not rel:
+        return ""
+    if profile.get("whatsnew_curated") and not _explicit_whatsnew(task):
+        wf = Path(root or project) / rel
+        return wf.read_text() if wf.exists() else ""
+    return _whatsnew_text(_normalize_task(task), whatsnew_max_chars(profile))
+
+
+def shipped_notes(project: Path, rel: str, limit: int = 2) -> list[tuple[str, str]]:
+    """(version, committed note) for the most recent distinct SHIPPED versions,
+    newest first. The ledger, not tags: a tag is pushed before CI runs, so a
+    tag whose upload failed never reached a user and must not count as "the
+    store's current text"."""
+    state = state_of(project)
+    seen: set[str] = set()
+    out: list[tuple[str, str]] = []
+    for entry in reversed(state.get("shipped") or []):
+        version = str(entry.get("version") or "")
+        commit = str(entry.get("commit") or "")
+        if not version or version in seen or not commit:
+            continue
+        r = git(["show", f"{commit}:{rel}"], cwd=project, timeout=60)
+        if r.returncode != 0 or not r.stdout.strip():
+            continue
+        seen.add(version)
+        out.append((version, r.stdout))
+        if len(out) >= limit:
+            break
+    return out
+
+
+def previous_shipped_note(project: Path, rel: str) -> tuple[str, str]:
+    """(version, committed note) of the last release that actually SHIPPED."""
+    tail = shipped_notes(project, rel, limit=1)
+    if tail:
+        return tail[0]
+    # No usable ledger row (fresh clone, a project that records by hand): fall
+    # back to the latest tag, which is still a real user-visible release.
+    latest = remote_latest_release(project)
+    if latest:
+        prefix = profile_of(project).get("tag_prefix", "v")
+        r = git(["show", f"{prefix}{latest['version']}:{rel}"], cwd=project, timeout=60)
+        if r.returncode == 0 and r.stdout.strip():
+            return latest["version"], r.stdout
+    return "", ""
+
+
+def whatsnew_gate(project: Path, task, root: Path | None = None,
+                  log: RunLog | None = None) -> tuple[bool, str]:
+    """Refuse a release whose store note would repeat the previous one verbatim.
+
+    THE DEFECT THIS CLOSES: `whatsnew_curated` was a freeze — the pipeline read
+    the file and never wrote it, and nothing but a warning line in the handover
+    ever looked at it. One project shipped 28 consecutive releases behind a
+    single old note, so every "What's new" on its listing was the same text.
+    A stale note is now a failing gate (verify + release), not a warning: the
+    remedy is one line in the task spec's `whatsnew`, which the orchestrator
+    owns and can write without the owner.
+    """
+    profile = profile_of(project)
+    rel = profile.get("whatsnew_file")
+    if not rel:
+        return True, "no release-note file declared"
+    note = whatsnew_preview(project, task, root=root).strip()
+    if not note:
+        return False, (f"'{rel}' is empty — Play will show no release note for this "
+                       "build. Write this release's line into the task spec's "
+                       '"whatsnew" field (or the note file) before releasing.')
+    prev_version, prev_note = previous_shipped_note(project, rel)
+    if prev_note.strip() and prev_note.strip() == note:
+        return False, (
+            f"this release's note is identical to the one shipped in v{prev_version} — "
+            "the store would show the previous release's words again. Give this release "
+            f'its own line in the task spec\'s "whatsnew" field (or edit {rel}) and re-run. '
+            "A curated note is the owner's last word, not a frozen one.")
+    detail = (f"differs from v{prev_version}'s note" if prev_note.strip()
+              else "no previous shipped note to compare")
+    if log:
+        log(f"whatsnew gate: ok — {detail}")
+    return True, detail
+
+
 def write_whatsnew(worktree: Path, task, log: RunLog | None = None) -> str | None:
     """Write the release note for `task`. Accepts a task spec dict, or a bare
     label string (legacy caller shape → motion template). Returns what the file
     now holds (None when the project ships no note).
 
     A project whose profile sets `whatsnew_curated` owns these notes by hand: the
-    pipeline READS the file for its report but never rewrites it. (A curated note
-    was silently replaced by the generated boilerplate on the 2026-10-23 run —
-    the owner lost their wording to a release they never asked to change it.)
+    pipeline never invents the boilerplate template for it. It DOES write an
+    explicit per-release `whatsnew` from the task spec — that is this release's
+    authored copy, and refusing it is what froze one project's note for 28
+    releases. `whatsnew_gate` runs before this, so the note only lands when it
+    differs from the last shipped one.
     """
-    if isinstance(task, str):
-        task = {"type": "motion", "surface": {"label": task}}
+    task = _normalize_task(task)
     profile = profile_of(worktree)
     wf_rel = profile.get("whatsnew_file")
     if not wf_rel:
@@ -339,12 +452,16 @@ def write_whatsnew(worktree: Path, task, log: RunLog | None = None) -> str | Non
     wf = worktree / wf_rel
     if not wf.exists():
         return None
-    if profile.get("whatsnew_curated"):
+    explicit = _explicit_whatsnew(task)
+    if profile.get("whatsnew_curated") and not explicit:
         text = wf.read_text()
         if log:
-            log(f"whatsnew: '{wf_rel}' is owner-curated — kept as-is "
-                f"({len(text)} chars); the pipeline does not rewrite it")
+            log(f"whatsnew: '{wf_rel}' is owner-curated and this spec carries no "
+                f"authored note — kept as-is ({len(text)} chars)")
         return text
+    if profile.get("whatsnew_curated") and log:
+        log(f"whatsnew: owner-curated project, but this spec carries an explicit "
+            f"note — writing the release's own copy")
     cap = whatsnew_max_chars(profile)
     text = _whatsnew_text(task, cap)
     if log:

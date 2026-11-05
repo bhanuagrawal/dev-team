@@ -587,6 +587,61 @@ def run_store_readiness_audit(project: Path, tree: Path | None = None) -> list[R
                 fix="Create full_description.txt (<= 4000 chars)",
             ))
 
+    # ── 5b. Release Notes ("What's new") ─────────────────────────────────────
+    # Two releases in a row with byte-identical note text is the defect owners
+    # see on the listing ("same what's new for every update"). Static and exact:
+    # compare the last two SHIPPED notes from the ledger, and the length cap the
+    # store enforces. The per-release refusal lives in verify/release; this audit
+    # answers "is the listing text currently repeating itself?".
+    note_rel = profile.get("whatsnew_file")
+    if note_rel:
+        from . import shipper
+
+        cap = shipper.whatsnew_max_chars(profile)
+        note_path = src / note_rel
+        note = note_path.read_text(errors="ignore").strip() if note_path.is_file() else ""
+        if not note:
+            checks.append(ReadinessCheck(
+                category="Storefront Listing Copy",
+                name="Release Notes (What's New)",
+                passed=False,
+                severity="BLOCKER",
+                detail=f"No release note at {note_rel} — Play would show nothing for the next update",
+                fix=f"Write one user-facing line into {note_rel} and commit it",
+            ))
+        elif len(note) > cap:
+            checks.append(ReadinessCheck(
+                category="Storefront Listing Copy",
+                name="Release Notes (What's New)",
+                passed=False,
+                severity="BLOCKER",
+                detail=f"Release note is {len(note)}/{cap} chars — Play rejects over-long notes",
+                fix=f"Trim {note_rel} to <= {cap} chars",
+            ))
+        else:
+            tail = shipper.shipped_notes(project, note_rel, limit=2)
+            repeats = (len(tail) == 2
+                       and tail[0][1].strip() == tail[1][1].strip())
+            if repeats:
+                checks.append(ReadinessCheck(
+                    category="Storefront Listing Copy",
+                    name="Release Notes (What's New)",
+                    passed=False,
+                    severity="BLOCKER",
+                    detail=(f"v{tail[0][0]} shipped the same note as v{tail[1][0]} — every "
+                            "update shows the previous release's words"),
+                    fix="Give the next release its own line in the task spec's "
+                        '"whatsnew"; verify and release now refuse a repeated note',
+                ))
+            else:
+                checks.append(ReadinessCheck(
+                    category="Storefront Listing Copy",
+                    name="Release Notes (What's New)",
+                    passed=True,
+                    severity="INFO",
+                    detail=f"Release note present, {len(note)}/{cap} chars, distinct release to release",
+                ))
+
     # ── 6. Storefront Graphic Assets ──────────────────────────────────────────
     if listing_dir:
         img_dir = listing_dir / "images" if (listing_dir / "images").is_dir() else (listing_dir / "graphics" if (listing_dir / "graphics").is_dir() else listing_dir)

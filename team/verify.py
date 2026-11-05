@@ -360,6 +360,22 @@ def instrumented_check(worktree: Path, profile: dict, log) -> tuple[bool, str]:
 
 
 
+def store_note_check(project: Path, worktree: Path, spec: dict | None) -> tuple[bool, str]:
+    """A build may not ship the previous release's "What's new" text again.
+
+    Cheap (reads files + the ledger, no Gradle), so it sits with the diff-scoped
+    gates: a stale note is caught where the agent can still fix it in one edit —
+    a `whatsnew` line in the task spec — instead of surfacing on the listing
+    after delivery. `whatsnew_gate` explains the failure; this only supplies the
+    worktree so a curated project's edited file counts as the note.
+    """
+    if not spec:
+        return True, "no task spec — release-note gate skipped"
+    from . import shipper
+
+    return shipper.whatsnew_gate(project, spec, root=worktree)
+
+
 def verify_all(project: Path, worktree: Path, base: str, log, gradle: bool = True,
                spec: dict | None = None) -> tuple[bool, list[str]]:
     """Full gate chain. Returns (passed, failure_texts). Set gradle=False to
@@ -396,6 +412,15 @@ def verify_all(project: Path, worktree: Path, base: str, log, gradle: bool = Tru
 
     ok, msg = brand_check(worktree, files)
     log("brand: ok (" + msg + ")" if ok else "brand: FAIL — " + msg)
+    if not ok:
+        failures.append(msg)
+        return False, failures
+
+    # Store note: the text a user sees on the listing is a deliverable too, and
+    # a repeated one is a defect the code can detect exactly. Runs before the
+    # Gradle gates because it costs nothing and its remedy is a one-line edit.
+    ok, msg = store_note_check(project, worktree, spec)
+    log("store note: ok — " + msg if ok else "store note: FAIL — " + msg)
     if not ok:
         failures.append(msg)
         return False, failures

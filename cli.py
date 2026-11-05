@@ -445,8 +445,8 @@ def _handover_text(project: Path, task: dict, version: str, commit: str = "") ->
         cap = shipper.whatsnew_max_chars(profile)
         note = shipper.whatsnew_read(project, commit).rstrip("\n")
         if profile.get("whatsnew_curated"):
-            source = (f"owner-curated in {wf_rel} — the pipeline read it, did not "
-                      "rewrite it")
+            source = (f"owner-curated in {wf_rel} — the pipeline reads it and only "
+                      "writes a per-release `whatsnew` the task spec supplies")
         elif isinstance(task, dict) and (task.get("whatsnew") or "").strip():
             source = f"written by the orchestrator into {wf_rel}"
         else:
@@ -463,9 +463,11 @@ def _handover_text(project: Path, task: dict, version: str, commit: str = "") ->
                 prev_note = (shipper.whatsnew_read(project, prev.get("commit") or "")
                              or "").rstrip("\n")
                 if prev_note and prev_note == note:
-                    line(f"    ⚠ STALE: identical to v{prev.get('version')}'s note — the store will "
-                         "show the previous release's wording again. Owner-curated, so only you can "
-                         f"change it: edit {wf_rel}.")
+                    line(f"    ⚠ STALE: identical to v{prev.get('version')}'s note — this is the "
+                         "defect that once let dozens of releases share one note. `verify` and "
+                         "`release` now REFUSE a repeated note, so a new build cannot ship one: "
+                         "put this release's line in the task spec's `whatsnew` (or edit "
+                         f"{wf_rel}) before releasing.")
 
     areas = shipper.whatsnew_test_areas(task)
     claim = ((task.get("surface", {}) or {}).get("label") or "").strip()
@@ -1068,6 +1070,19 @@ def cmd_release(args: argparse.Namespace) -> int:
     log(f"versionCode floor: {floor_note}" + (f" (max {floor})" if floor else ""))
     log(f"version: {name} (code {code}) — {why}")
     log(f"release candidate: {'YES' if is_rc else 'NO'} (decided before the tag)")
+
+    # THE STORE-NOTE GATE, BEFORE THE BUMP. The note is the one part a user
+    # sees; a build that would repeat the previous release's wording is refused
+    # here, while the tree is still clean and the remedy (a `whatsnew` line in
+    # the task spec) is one edit away. `verify` runs the same gate, so an agent
+    # that skipped it gets the second, unavoidable answer here.
+    ok_note, note_msg = shipper.whatsnew_gate(project, task, root=worktree, log=log)
+    if not ok_note:
+        log("whatsnew gate: BLOCKED — " + note_msg)
+        print(json.dumps({"delivered": False, "version": name,
+                          "error": "release note gate: " + note_msg, "ci": {}},
+                         indent=2))
+        return 1
 
     name = shipper.bump_version_file(worktree, name, log, floor_code=floor, code=code)
     shipper.write_whatsnew(worktree, task, log)

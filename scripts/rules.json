@@ -119,10 +119,10 @@
     },
     {
       "id": "release-notes-curated",
-      "rule": "a whatsnew_curated project owns its release notes; the pipeline reports and never rewrites them",
+      "rule": "a whatsnew_curated project never gets the pipeline's boilerplate note, but an explicit per-release `whatsnew` in the task spec IS written; no release may repeat the previous release's note verbatim",
       "doc": "SKILL.md#hard-rules",
       "kind": "code",
-      "enforced_by": "shipper (reads profile.whatsnew_curated)"
+      "enforced_by": "shipper.whatsnew_gate (verify + release refuse a repeated/empty note) / store-readiness"
     },
     {
       "id": "emulators-torn-down",
