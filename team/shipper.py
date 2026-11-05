@@ -277,6 +277,28 @@ def _short_label(label, limit: int = _WHATS_NEW_LABEL_CHARS) -> str:
     return text or "the app"
 
 
+# A router/queue label is an identifier ("visual-complete-the-testing-and-2026-11-05"),
+# not store copy. Deriving the note from one put that slug in front of testers.
+_INTERNAL_LABEL_RE = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+){2,}$")
+_INTERNAL_KIND_PREFIXES = ("feature-", "bugfix-", "visual-", "brand-", "store-",
+                           "release-", "direction-")
+
+_UNDER_THE_HOOD_NOTE = (
+    "✓ Under-the-hood reliability and performance improvements\n"
+    "✓ Everything you already use keeps working the same way\n"
+)
+
+
+def _is_internal_label(label: str) -> bool:
+    """True when `label` is an internal identifier rather than user-facing copy."""
+    text = (label or "").strip()
+    if not text or " " in text:
+        return False
+    if text.startswith(_INTERNAL_KIND_PREFIXES):
+        return True
+    return bool(_INTERNAL_LABEL_RE.match(text))
+
+
 def _trim_whatsnew(text: str, max_chars: int) -> tuple[str, bool]:
     """Clamp a note to the allowed length, cutting on a line boundary when the
     note is bulleted so no bullet is lost mid-word. Returns (text, trimmed)."""
@@ -308,7 +330,11 @@ def _whatsnew_text(task: dict, max_chars: int = WHATS_NEW_MAX_CHARS) -> str:
     else:
         label = _short_label((task.get("surface", {}) or {}).get("label"))
         ttype = task.get("type", "motion")
-        if ttype == "motion":
+        if _is_internal_label(label):
+            # An id is not a release note: say what actually changed for the user
+            # instead of printing the pipeline's own task slug.
+            text = _UNDER_THE_HOOD_NOTE
+        elif ttype == "motion":
             text = (f"✓ Polished: {label}\n"
                     "✓ No functional changes — everything works exactly as before\n")
         elif ttype == "bugfix":
@@ -464,6 +490,10 @@ def write_whatsnew(worktree: Path, task, log: RunLog | None = None) -> str | Non
             f"note — writing the release's own copy")
     cap = whatsnew_max_chars(profile)
     text = _whatsnew_text(task, cap)
+    if log and not explicit and _is_internal_label(
+            _short_label((task.get("surface", {}) or {}).get("label"))):
+        log("whatsnew: task label is an internal id — shipping the generic "
+            "under-the-hood note; add a user-facing `whatsnew` to the task spec")
     if log:
         raw = _whatsnew_text(task, 10 ** 9)
         if len(raw) > cap:
