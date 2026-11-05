@@ -13,3 +13,6 @@ logs/
 .DS_Store
 .idea/
 site/
+
+# Browser-tool artefacts (Playwright MCP snapshots)
+.playwright-mcp/
