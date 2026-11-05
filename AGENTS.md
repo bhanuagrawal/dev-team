@@ -111,7 +111,8 @@ checklist + release-candidate call) and the two page URLs `record` prints.
    names the branch.
 8. **No automatic guards beyond compile/tests.** Frozen paths, release-knob
    diffing and dependency declaration were retired by the owner (2026-10-31).
-   `verify` runs: team-generic, localization, compile, unit tests, instrumented
+   `verify` runs: team-generic, localization, release-note freshness (the note
+   may not repeat the last shipped one), compile, unit tests, instrumented
    tests. Version/signing/SDK changes and new libraries are the reviewer's diff to
    catch — say so in the handover when a task touches them.
 9. **Ask the owner only what no agent can decide** (freeze-worthy incidents,
