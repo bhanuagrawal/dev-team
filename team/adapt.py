@@ -272,6 +272,39 @@ def run(project: Path, log: RunLog | None = None, apply: bool = True) -> dict:
             "no docs/design.md found — the developer agent builds screens without an enforced design system",
             f"run `devteam design {project.name}` to research category standards and synthesize docs/design.md"))
 
+    # 7c. capabilities the team ships that THIS project is not wired for ------
+    # A new capability used to arrive as a new command, which `adapt` could not
+    # see: it compares data shape (schema, keys), and a command changes neither.
+    # The polish audit therefore sat unwired behind a green doctor for a whole
+    # project. The registry makes "the team improved" and "this project uses it"
+    # two names for the same check.
+    from . import capabilities as cap_mod
+    for row in cap_mod.unwired(project, profile, state):
+        if row["id"] == "polish" and row["status"] == "unwired":
+            draft = cap_mod.write_draft(project, profile)
+            where = (f"review {draft.relative_to(project).as_posix()} and merge it into "
+                     f".pipeline/profile.json['targets']" if draft
+                     else "declare the screens in .pipeline/profile.json['targets']")
+            asks.append(ask(
+                f"{row['detail']} — so the team cannot measure polish: it cannot "
+                f"tell a polished screen from a new feature, and every plan is free "
+                f"to add surface area instead of fixing what a player already feels",
+                f"{where} (owner-approved: the team proposes the draft, it never "
+                f"declares your screens for you), then run "
+                f"`devteam ux-audit {project.name} --all`"))
+        elif row["id"] == "polish":
+            asks.append(ask(
+                f"{row['detail']} — polish is declared but not yet MEASURED, so the "
+                f"team still cannot tell polished work from new surface area",
+                f"give each declared screen a render (a scene in docs/storefront.json "
+                f"with \"surface\" bound to its label, then "
+                f"`devteam storefront-build {project.name} --scenes`) and run "
+                f"`devteam ux-audit {project.name} --all` once"))
+        else:
+            asks.append(ask(f"{row['detail']} ({row['id']})",
+                            "run `devteam capabilities "
+                            f"{project.name}` for the full table"))
+
     # 8. write (only if something changed) + snapshots + mirrors -------------
     # A standing owner ask is NOT "not current": the shape is fine, the question
     # is just unanswered. Re-running must change nothing and stay quiet, but the

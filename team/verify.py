@@ -415,8 +415,9 @@ def verify_all(project: Path, worktree: Path, base: str, log, gradle: bool = Tru
             log("ux: " + "; ".join(f"{s['label']} changed ({s['status']}), no audit since"
                                    for s in stale[:4]))
             log("ux: run `devteam ux-audit <project>` — unchanged screens cost nothing")
-    except Exception:
-        pass
+    except Exception as e:  # a dead check must SAY it is dead, not vanish silently
+        log(f"ux: could not check (no audit signal): {e} — "
+            "`devteam capabilities <project>` names what is missing")
 
     ok, msg = localization_check(worktree, files)
     log("localization: ok" if ok else "localization: FAIL")

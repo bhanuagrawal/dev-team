@@ -128,13 +128,31 @@ def _feature_files(screen: Path) -> list[Path]:
 
 
 def surfaces(project: Path) -> list[dict]:
-    """Every shipped screen with its two fingerprints. Discovery is `scan`'s job."""
+    """Every shipped screen with its two fingerprints. Discovery is `scan`'s job.
+
+    A declared path is resolved against the checkout first and the DELIVERY ref
+    (`origin/<main>`) second. This audit judges what shipped, and the owner's
+    checkout legitimately lags it — resolving only locally made a stale checkout
+    report zero surfaces, so the audit silently had nothing to look at (the same
+    class of failure as an unwired capability: a check that cannot fire).
+    """
     from . import scan
     theme = theme_paths(project)
+    try:
+        tree = scan.origin_tree(project)
+    except Exception:
+        tree = None
     out = []
-    for s in scan.scan_surfaces(project):
-        paths = [project / t for t in (s.get("paths") or s.get("targets") or [])
-                 if (project / t).suffix == ".kt" and (project / t).exists()]
+    for s in scan.scan_surfaces(project, tree=tree):
+        declared = [t for t in (s.get("paths") or s.get("targets") or [])
+                    if Path(t).suffix == ".kt"]
+        paths = []
+        for rel in declared:
+            p = project / rel
+            if not p.exists() and tree is not None and (tree / rel).exists():
+                p = tree / rel
+            if p.exists():
+                paths.append(p)
         if not paths:
             continue
         behaviour = []

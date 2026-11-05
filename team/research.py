@@ -655,6 +655,47 @@ def _recent_commits_pull(project: Path, latest_tag: str | None = None, limit: in
     }
 
 
+def _ux_pull(project: Path, profile: dict) -> dict:
+    """Can this project's look and feel be measured, and what did the last pass
+    actually complain about?
+
+    Cheap and offline by design: it reads the capability check and the stored
+    audit (`.pipeline/ux_audit.json`), and never re-renders or re-hashes screens
+    during a plan. The planner could not previously see polish at all, so the
+    only work it could propose was new surface area — the owner's standing
+    direction is the opposite.
+    """
+    from . import capabilities as cap_mod
+    cap = cap_mod.check_polish(project, profile, {})
+    surfaces: dict = {}
+    stored = pipeline_dir(project) / "ux_audit.json"
+    if stored.exists():
+        try:
+            surfaces = (json.loads(stored.read_text()) or {}).get("surfaces") or {}
+        except Exception:
+            surfaces = {}
+    gripes = []
+    for label, row in surfaces.items():
+        for g in (row.get("gripes") or []):
+            if str(g.get("status") or "open") != "open":
+                continue
+            gripes.append({
+                "id": g.get("id") or "",
+                "screen": label,
+                "line": str(g.get("line") or "")[:200],
+                "kind": g.get("kind") or "",
+            })
+    return {
+        "status": cap["status"],
+        "detail": cap["detail"],
+        "open_gripes": gripes[:15],
+        "open_gripe_count": len(gripes),
+        "audited_surfaces": sum(1 for r in surfaces.values() if r.get("audited_at")),
+        "audited_at": max([str(r.get("audited_at") or "") for r in surfaces.values()]
+                          or [""]),
+    }
+
+
 def research_collect(project: Path, log: RunLog) -> dict:
     """All deterministic collectors → research dict (no LLM)."""
     profile = profile_of(project)
@@ -685,6 +726,7 @@ def research_collect(project: Path, log: RunLog) -> dict:
             "vitals": _play_vitals_pull(project, profile),
             "reviews": _play_reviews_pull(project, profile),
             "store_readiness": _store_readiness_pull(project, tree=read_tree),
+            "ux": _ux_pull(project, profile),
             "competitors": _competitors_pull(project),
             "market": _market_pull(project),
             "codebase": {
@@ -807,6 +849,22 @@ Decide what to BUILD NEXT. Output STRICT JSON only (no prose, no code fence):
 }}
 Rules:
 - STORE READINESS: inspect `signals.store_readiness`. If blockers exist (or `is_ready_for_submission` is false), prioritize resolving those compliance issues (targetSdk, permissions, privacy policy, icons, release signing) before discretionary polish, keeping the app releasable on Google Play.
+- POLISH BEFORE NEW SURFACE (`signals.ux`): the owner's standing direction is
+  "polish a lot — do not dumbly keep adding features", and "look and feel usually
+  does not change in one run". `signals.ux.open_gripes` are complaints a neutral
+  first-use pass recorded against NAMED screens; each is evidence a real player
+  would feel, and each carries an id (`UX-<scene>-<n>`). Read them before
+  proposing anything:
+  * open gripes exist → the queue HEAD must be the entry that removes them (or a
+    named subset), and its `reason` quotes the gripe ids. A feature that adds new
+    surface area may not head the queue while gripes are open.
+  * none open, but `signals.ux.status` is "ok" → you may propose a feature, and
+    its `reason` must say why polish has nothing left worth a run.
+  * `signals.ux.status` is "unwired" or "partial" → polish cannot be measured yet.
+    The deliverable is that wiring (declare the screens / bind a render), never a
+    new feature: the team cannot tell whether anything it ships is polished.
+  * NL/2026-11-05: a project shipped four releases of "features" whose controls
+    did nothing, because nothing could record what a player actually felt.
 - READING SOURCE CODE: read project files from `signals.repo.read_tree` — that is
   the worktree at origin/main and it is what is actually SHIPPED. The owner's own
   checkout may lag origin/main by many commits or carry unrelated work in

@@ -1782,6 +1782,34 @@ def cmd_schedules(args: argparse.Namespace) -> None:
           "`devteam setup --schedule auto [--at HH:MM]`)")
 
 
+def cmd_capabilities(args: argparse.Namespace) -> int:
+    """What the team can do, and whether THIS project is wired for it.
+
+    A capability that lands as a new command is invisible to `adapt` (which
+    compares data shape), so a project can run green for months without it. This
+    is the table that says so out loud.
+    """
+    project = resolve_project(args.project)
+    from team import capabilities as cap_mod
+    rows = cap_mod.review(project)
+    if getattr(args, "json", False):
+        print(json.dumps(rows, indent=2))
+        return 0
+    print(f"== {project.name} ==")
+    for r in rows:
+        mark = {"ok": "✓", "n/a": "·"}.get(r["status"], "!")
+        print(f"  {mark} {r['id']}: {r['status']} — {r['detail']}")
+        if r["status"] not in ("ok", "n/a"):
+            print(f"      what: {r['what']}")
+            print(f"      why:  {r['why']}")
+            print(f"      fix:  see `devteam adapt {project.name}` (it writes the "
+                  f"ask and any draft) "
+                  f"{'— owner-approved' if r['owner_approved'] else ''}")
+    if all(r["status"] in ("ok", "n/a") for r in rows):
+        print("  every capability the team ships is wired for this project")
+    return 0 if all(r["status"] in ("ok", "n/a") for r in rows) else 1
+
+
 def cmd_ux_plan(args: argparse.Namespace) -> int:
     """Which screens need a UX audit — decided by fingerprints, not by calendar."""
     project = resolve_project(args.project)
@@ -3468,6 +3496,13 @@ def main() -> None:
     sch = sub.add_parser("schedules", help="list or manage registered nightly schedules")
     sch.add_argument("--remove", help="remove a project's nightly schedule, keeping it in manual mode")
     sch.set_defaults(fn=cmd_schedules)
+    cp = sub.add_parser(
+        "capabilities",
+        help="what the team can do, and whether this project is wired for it "
+             "(a capability that landed as a new command is invisible to adapt)")
+    cp.add_argument("project")
+    cp.add_argument("--json", action="store_true")
+    cp.set_defaults(fn=cmd_capabilities)
     up = sub.add_parser("ux-plan", help="which screens need a UX audit now "
                                         "(fingerprint-driven; unchanged screens cost nothing)")
     up.add_argument("project"); up.add_argument("--json", action="store_true")

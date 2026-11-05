@@ -410,6 +410,32 @@ def run_doctor(project: Path, log) -> dict:
     except Exception as e:  # a review must never hide the report
         log(f"doctor asks: could not review ({e})")
 
+    # Capability parity: a feature the team ships but this project cannot use is
+    # invisible without this. The polish audit landed as a command, `adapt` could
+    # not see it (its test is data shape, and this added no key), and this check is
+    # the one that would have named it. WARN, never block: the project still
+    # ships, it just cannot tell polished work from new surface area.
+    try:
+        from . import capabilities as cap_mod
+        rows = cap_mod.review(project, profile, state_of(project))
+        cap_bad = [r for r in rows if r["status"] not in ("ok", "n/a")]
+        for r in cap_bad:
+            log(f"doctor capabilities: WARN — {r['id']}: {r['detail']} "
+                f"({cap_mod.summary_line(rows)})")
+        if cap_bad:
+            report["capabilities"] = {
+                "status": "warn", "blocked": [],
+                "checks_passed": len(rows) - len(cap_bad),
+                "note": cap_mod.summary_line(rows) + " — `devteam capabilities "
+                        f"{project.name}` explains each one",
+            }
+        else:
+            report["capabilities"] = {"status": "ready", "blocked": [],
+                                      "checks_passed": len(rows)}
+            log(f"doctor capabilities: ready — {cap_mod.summary_line(rows)}")
+    except Exception as e:  # a check must never hide the report
+        log(f"doctor capabilities: could not check ({e})")
+
     try:
         state = state_of(project)
         state["doctor"] = {"generated_at": now_iso(), "report": report}
