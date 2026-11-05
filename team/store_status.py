@@ -175,7 +175,7 @@ if (n > 0) {
 // never by hardcoding one project's console ids. Walking up from a link can
 // reach a container that holds EVERY row, so "an ancestor mentions the package"
 // is not enough: seen 2026-11-05 the sync opened the first app on the page
-// (ZenList) while asked for FieldCert, then reported "no status". Take instead
+// while asked for another project's, then reported "no status". Take instead
 // the link whose NEAREST package-carrying ancestor holds the fewest View links
 // — a row holds exactly one.
 await page.evaluate((pkg) => {

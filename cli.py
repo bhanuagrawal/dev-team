@@ -1743,8 +1743,26 @@ def cmd_schedules(args: argparse.Namespace) -> None:
     if not installed:
         print("no auto schedules registered — all projects run manually")
         return
-    for s in sorted(installed, key=lambda x: (x["hour"], x["minute"])):
-        print(f"  {s['hour']:02d}:{s['minute']:02d}  {s['label']}")
+    # Read as ONE NIGHT: the owner's window starts at 22:00, so 01:00 sorts after
+    # midnight rather than before 22:00 alphabetically/lexically.
+    slots = sorted(installed,
+                   key=lambda s: ((s["hour"] * 60 + s["minute"]) - 22 * 60) % 1440)
+    gaps = [scheduler.gap_minutes((slots[i]["hour"], slots[i]["minute"]),
+                                  (slots[(i + 1) % len(slots)]["hour"],
+                                   slots[(i + 1) % len(slots)]["minute"]))
+            for i in range(len(slots))]
+    for i, s in enumerate(slots):
+        too_close = len(slots) > 1 and gaps[i] < scheduler.MIN_GAP_MIN
+        print(f"{'  ⚠' if too_close else '   '} {s['hour']:02d}:{s['minute']:02d}  "
+              f"{s['label']}   (next in {gaps[i]} min)")
+    bad = [i for i in range(len(slots))
+           if len(slots) > 1 and gaps[i] < scheduler.MIN_GAP_MIN]
+    if bad:
+        print(f"⚠ {len(bad)} slot(s) are followed by another app inside "
+              f"{scheduler.MIN_GAP_MIN} min: the later app is SKIPPED while the "
+              "earlier run holds the machine-wide lock, so it loses that night.")
+        print("  fix: `devteam setup --project <name> --schedule auto --at HH:MM` "
+              f"(>= {scheduler.MIN_GAP_MIN} min from every other app)")
     print("(default trigger is MANUAL; auto is opt-in per project via "
           "`devteam setup --schedule auto [--at HH:MM]`)")
 
@@ -1846,7 +1864,8 @@ def cmd_loop(args: argparse.Namespace) -> int:
             print("No actionable tasks in queue. Cycle halted.")
             break
         print(f"Next Task: [{task.get('id')}] {task.get('surface', {}).get('label')}")
-        print(f"  Type: {task.get('type')} · Effort: {task.get('effort_min', 150)} min · Priority: {task.get('priority', '-')}")
+        from team import queue as _queue
+        print(f"  Type: {task.get('type')} · Effort: {task.get('effort_min', _queue.DEFAULT_EFFORT_MIN)} min · Priority: {task.get('priority', '-')}")
         print(f"  Targets: {task.get('surface', {}).get('targets')}")
         print(f"  Worktree: dt/{task.get('id')}")
 
@@ -2056,18 +2075,16 @@ def cmd_setup(args: argparse.Namespace) -> None:
         for s in scheduler.list_installed_schedules():
             print(f"    - {s['label']}: {s['hour']:02d}:{s['minute']:02d}")
         return
-    # opt-in auto: clash-checked slot (explicit --at wins if free)
-    proposed = scheduler.pick_free_slot(args.at)
+    # opt-in auto: gap-enforced slot (explicit --at wins only if it clears the gap)
+    proposed = scheduler.pick_free_slot(args.at, exclude_project=project.name)
     hh, mm = proposed
-    conflicts = [s["label"] for s in scheduler.list_installed_schedules()
-                 if s["hour"] == hh and s["minute"] == mm]
-    if conflicts:
-        raise SystemExit(f"slot {hh:02d}:{mm:02d} collides with {conflicts}; choose another --at")
     plist = scheduler.install_launchd(project.name, f"{hh:02d}:{mm:02d}")
     print(f"AUTO schedule installed: {plist.stem} — daily {hh:02d}:{mm:02d}")
     print("  clash-checked against: " + (", ".join(
         f"{s['label']}@{s['hour']:02d}:{s['minute']:02d}"
         for s in scheduler.list_installed_schedules()) or "(none)"))
+    print(f"  spacing enforced: >= {scheduler.MIN_GAP_MIN} min from every other app "
+          "(one nightly holds a machine-wide lock; an overlapping app is skipped)")
     print("  disable with: launchctl bootout gui/$(id -u)/" + plist.stem)
     print(f"  manual-mode alternative remains possible anytime".strip())
 
@@ -3227,8 +3244,11 @@ def main() -> None:
                                              default="head")
     q.add_argument("--advances", help="milestone id this task serves "
                                       "(profile.goals.milestones[].id)")
+    from team import queue as _queue
     q.add_argument("--effort-min", type=int, default=None,
-                   help="minutes of developer work for this entry (target 150, band 90-240)")
+                   help=f"minutes of developer work for this entry "
+                        f"(target {_queue.DEFAULT_EFFORT_MIN}, band "
+                        f"{_queue.EFFORT_BAND[0]}-{_queue.EFFORT_BAND[1]})")
     q.add_argument("--supersedes", action="append", default=[])
     q.set_defaults(fn=cmd_queue)
     rh = sub.add_parser("run-headless"); rh.add_argument("project"); rh.add_argument("--task-spec", required=True); rh.add_argument("--supervised", action="store_true"); rh.set_defaults(fn=cmd_run_headless)
@@ -3343,7 +3363,10 @@ def main() -> None:
     vi.set_defaults(fn=cmd_vision)
     st = sub.add_parser("setup");  st.add_argument("--project", required=True)
     st.add_argument("--schedule", choices=["manual", "auto"], default="manual")
-    st.add_argument("--at", default=None); st.add_argument("--strict", action="store_true"); st.set_defaults(fn=cmd_setup)
+    st.add_argument("--at", default=None,
+                    help=f"HH:MM slot for the nightly (default: first free slot); must "
+                         f"clear every other app by >= {scheduler.MIN_GAP_MIN} min")
+    st.add_argument("--strict", action="store_true"); st.set_defaults(fn=cmd_setup)
     sch = sub.add_parser("schedules", help="list or manage registered nightly schedules")
     sch.add_argument("--remove", help="remove a project's nightly schedule, keeping it in manual mode")
     sch.set_defaults(fn=cmd_schedules)

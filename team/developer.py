@@ -32,6 +32,13 @@ from .core import (
 
 RUN_BASE = ".pipeline/worktrees"
 
+# A developer session may be given more time than roles.developer.timeout_s when
+# the entry is sized large (effort_min > 180 → effort*20 s), but never more than
+# this. The nightly wrapper kills the whole orchestrator at 5400 s
+# (scripts/nightly.sh), so a single session must stay well inside it: a session
+# that outlives the run turns one late entry into a lost night.
+DEV_SESSION_CEILING_S = 4800
+
 # Machine-local build inputs a fresh worktree does not inherit: a git checkout
 # only materializes tracked files, so a worktree has no local.properties (gradle
 # then dies with "SDK location not found") and no signing material. They are
@@ -187,7 +194,7 @@ def execute(project: Path, task: dict, log: RunLog, max_attempts: int = 2) -> di
     cfg = _role_cfg("developer")
     base_timeout = int(cfg.get("timeout_s", 3600))
     effort = int(task.get("effort_min") or task.get("surface", {}).get("effort_min") or 0)
-    timeout = max(base_timeout, effort * 20) if effort > 180 else base_timeout
+    timeout = max(base_timeout, min(effort * 20, DEV_SESSION_CEILING_S)) if effort > 180 else base_timeout
 
     attempts: list[dict] = []
     files: list[str] = []

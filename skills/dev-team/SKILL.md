@@ -394,16 +394,19 @@ never silently blocking.
      by the owner 2026-10-23 (a)**: *"agents take less time to deliver a task … we are
      considering more time … fix this in the code where we are doing the estimate"* —
      **revised again 2026-10-23 (b)**: *"Replan, we are shipping too less code in one
-     workflow run"*):
+     workflow run"* — **and again 2026-11-05**: keep ONE entry per run, raise the
+     entry's size instead):
      every feature/bugfix/investigation entry carries `effort_min` — minutes of
-     developer work, target ~150, hard band 90-240, enforced in code. ONE RUN SHIPS
+     developer work, target ~210, hard band 120-300, enforced in code (canonical
+     values in `team/queue.py`; `team/research.py` renders the prompt from them). ONE RUN SHIPS
      ONE ENTRY, so a head smaller than the run costs the owner the release it paid
      for. The numbers are
      calibrated to what an AGENT session costs, not to human effort: measured here,
      a whole nightly (plan → developer → verify → release incl. the CI watch) runs
      ~12 min, and a developer session that shipped a 1305-line deletion took ~5 min
-     (an `effort_min` : wall-clock ratio of ~6-10x, which is what bounds the 240
-     ceiling against the developer role's 3600 s timeout).
+     (an `effort_min` : wall-clock ratio of ~6-10x, which is what bounds the 300
+     ceiling — and `team/developer.py` caps one session at 80 min so an entry can
+     never outlive the 90-min nightly watchdog).
      The fixed cost of a RUN (verify + version bump + CI + internal-testing build)
      dominates the developer's minutes, so the target moved UP twice — fewer, richer
      entries per release. A plan of 2-4 entries is the healthy shape; the queue is
@@ -463,7 +466,7 @@ never silently blocking.
 4. Compose the task spec JSON:
    {"id": "dt-<label-slug>-<seq>", "type": "motion|bugfix|feature|investigation",
     "surface": {"label": "<label>", "targets": ["<repo-relative path(s)>"]},
-    "risk": "safe", "effort_min": 150, "created": "<iso>"}
+    "risk": "safe", "effort_min": 210, "created": "<iso>"}
    Write it to `.pipeline/tasks/<id>.json`. `effort_min` (from the picked queue
    entry) is the expected size of ONE developer session — the developer prompt
    shows it, so the task is worked at its intended depth rather than gold-plated
@@ -492,7 +495,7 @@ never silently blocking.
        - Test incrementally inside the worktree using the project's verify commands (e.g. `gradle compileDebugKotlinAndroid testDebugUnitTest`). Failure to run an on-device runner (no AVD/emulator) is non-blocking (warn-only), but any failure of the test assertions themselves is a hard blocker.
        - If you encounter a build or test error, diagnose and resolve it directly in the worktree.
    (B) SUBAGENT DELEGATION (Optional fallback when supported and conserving orchestrator context):
-       - Budget the session at the task's `effort_min` (~150 is the norm for a healthy entry, band 90-240).
+       - Budget the session at the task's `effort_min` (~210 is the norm for a healthy entry, band 120-300).
        - Spawn subagent with `cwd = WORKTREE_PATH` using your tool's native mechanism (e.g. `invoke_subagent`).
        - Pass the exact prompt from step 6.
        - Model: read `roles.developer.model` from `<team>/config/runtimes.json` if your tool supports per-subagent models.

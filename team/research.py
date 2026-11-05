@@ -28,7 +28,9 @@ from . import queue as queue_mod
 MAX_QUEUE = 6
 # TASK SIZING — calibrated to what an AGENT session actually costs, not to what
 # the same change would cost a human. Every queued entry is ONE developer
-# session, and the band is a gate (code-validated `effort_min`).
+# session, and the band is a gate (code-validated `effort_min`). The numbers
+# live in `team/queue.py` (DEFAULT_EFFORT_MIN / EFFORT_BAND) and are aliased here
+# so the prompt and the gate can never disagree.
 #
 # Owner decision 2026-10-18 set the first shape ("plan lead task not too small,
 # [the developer] agent might take 20-25 min to complete it") as target 25 /
@@ -47,6 +49,14 @@ MAX_QUEUE = 6
 # not the number of runs (a run per entry multiplies the fixed cost the owner is
 # paying for), so the target moves UP again with the band scaled to match.
 #
+# Owner revision 2026-11-05 ("Yes all" to the sizing/scheduling decision): keep
+# ONE entry per run — do NOT batch three, which would need pick/verify/release/
+# record to carry a task list and would push a night past the 90-minute watchdog —
+# and raise the HEAD instead. Target 150 -> 210, band 90-240 -> 120-300. Measured
+# before the change: nightly runs averaged 16-20 min and peaked at 63
+# (logs/launchd.log), so a 210-minute entry (~21-35 min of agent wall clock at
+# the ratio below) still leaves room for verify + CI inside the watchdog.
+#
 # Measured in this pipeline: the nightly of 2026-10-23 ran plan → developer →
 # verify → release → alarm in 01:00:05–01:11:51 (~12 min wall clock for one
 # shipped release, of which the CI watch is ~7 min); a developer session that
@@ -55,14 +65,13 @@ MAX_QUEUE = 6
 # than taste.
 #
 # The band stays a band: a wide one is the same as none.
-TARGET_EFFORT_MIN = 150
-MIN_EFFORT_MIN = 90
+TARGET_EFFORT_MIN = queue_mod.DEFAULT_EFFORT_MIN
+MIN_EFFORT_MIN, MAX_EFFORT_MIN = queue_mod.EFFORT_BAND
 # The ceiling is bounded because an entry must still finish, verify and release
-# in a SINGLE pass: at the measured ~6-10x ratio, 240 min of sized work is
-# roughly 25-40 min of agent wall clock, comfortably inside the developer role's
-# 3600 s timeout (config/runtimes.json). Beyond that the session risks the
-# timeout and the "one pass" guarantee, which is the whole point of the band.
-MAX_EFFORT_MIN = 240
+# in a SINGLE pass: at the measured ~6-10x ratio, 300 min of sized work is
+# roughly 30-50 min of agent wall clock, and `team/developer.py` caps a session at
+# DEV_SESSION_CEILING_S (80 min) so one entry can never outlive the 90-minute
+# nightly watchdog ("one pass" is the whole point of the band).
 # motion is sized by its surface (one surface per entry, enforced elsewhere), so
 # only these types carry the sizing gate.
 SIZED_TYPES = ("feature", "bugfix", "investigation")

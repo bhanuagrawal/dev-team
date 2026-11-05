@@ -21,6 +21,46 @@ DEFAULT_AT = "23:10"
 NIGHT_WINDOW_HOURS = [22, 23, 0, 1, 2, 3, 4, 5]  # owner's 10pm–6am IST window
 GRID_MIN = [0, 10, 20, 30, 40, 50]
 
+# Minimum distance between two nightly slots, in minutes.
+#
+# A slot is not a point in time. `scripts/nightly.sh` holds ONE machine-wide lock
+# (`.nightly.lock`), so an app that fires while another run is alive is SKIPPED,
+# not deferred — it loses that night entirely. The old rule only rejected two
+# apps on the SAME minute, on a 10-minute grid, which put two of them 20 minutes
+# apart: measured in logs/launchd.log, runs average 16–20 min and peak at 63,
+# and the 22:20 app was skipped on 2026-11-03 AND 2026-11-04 while the 22:00 run
+# was still going. An hour is the smallest gap that survives the observed tail
+# (and still fits five apps inside the owner's 22:00–03:00 window).
+MIN_GAP_MIN = 60
+
+
+def _minutes_of(hour: int, minute: int) -> int:
+    return (int(hour) * 60 + int(minute)) % 1440
+
+
+def gap_minutes(a: tuple[int, int], b: tuple[int, int]) -> int:
+    """Clock distance between two slots, midnight-safe (23:50 vs 00:10 → 20)."""
+    d = abs(_minutes_of(*a) - _minutes_of(*b))
+    return min(d, 1440 - d)
+
+
+def clashes(hour: int, minute: int, installed: list[dict] | None = None,
+            gap: int = MIN_GAP_MIN, exclude: str | None = None) -> list[dict]:
+    """Installed slots closer than `gap` minutes to (hour, minute).
+
+    Returns them with the distance so a refusal can name the neighbour instead of
+    saying "collides" — the useful fact is which app is too close and by how much.
+    """
+    out = []
+    for s in (installed if installed is not None else list_installed_schedules()):
+        if exclude and s["label"] == exclude:
+            continue
+        d = gap_minutes((hour, minute), (s["hour"], s["minute"]))
+        if d < gap:
+            out.append({**s, "gap": d})
+    return out
+
+
 
 def project_label(project_name: str) -> str:
     """/per-project label for NEW installs (legacy com.devteam.nightly is
@@ -67,18 +107,33 @@ def is_project_loaded(project_name: str) -> bool:
 
 
 def pick_free_slot(pref_at: str | None, exclude_project: str | None = None) -> tuple[int, int]:
-    """Choose a slot not colliding with any installed devteam schedule.
-    Explicit pref_at wins if free; otherwise first free slot in the owner's
-    night window on a 10-minute grid."""
-    want = (int(pref_at.split(":")[0]), int(pref_at.split(":")[1])) if pref_at else None
-    installed = {(s["hour"], s["minute"]) for s in list_installed_schedules()}
-    if want and want not in installed:
-        return want
+    """Choose a slot with at least MIN_GAP_MIN minutes of clearance.
+
+    An explicit pref_at wins when it clears every other app; otherwise the first
+    free slot in the owner's night window on the 10-minute grid. Neither path may
+    place an app close enough to lose its night to the machine-wide run lock — the
+    gap is enforced, not advised (owner request 2026-11-05).
+    """
+    installed = list_installed_schedules()
+    exclude = project_label(exclude_project) if exclude_project else None
+    if pref_at:
+        hh, mm = int(pref_at.split(":")[0]), int(pref_at.split(":")[1])
+        close = clashes(hh, mm, installed, exclude=exclude)
+        if close:
+            near = ", ".join(
+                f"{s['label']}@{s['hour']:02d}:{s['minute']:02d} ({s['gap']} min away)"
+                for s in close)
+            raise SystemExit(
+                f"slot {hh:02d}:{mm:02d} is too close to {near}; nightly slots need "
+                f">= {MIN_GAP_MIN} min between apps (one nightly holds a machine-wide "
+                "lock, so an overlapping app is skipped, not deferred). Pick another --at.")
+        return (hh, mm)
     for h in NIGHT_WINDOW_HOURS:
         for m in GRID_MIN:
-            if (h, m) not in installed:
+            if not clashes(h, m, installed, exclude=exclude):
                 return (h, m)
-    raise SystemExit("no free night-window slot; pick an explicit --at off-grid")
+    raise SystemExit(f"no free night-window slot with >= {MIN_GAP_MIN} min spacing; "
+                     "pick an explicit --at off-grid")
 
 
 def env_checks() -> list[str]:

@@ -183,8 +183,11 @@ def impact_block(source: str, added: list[dict], verdicts: list[dict],
 
 
 #: One developer session's target length in minutes — the plan's documented size.
-DEFAULT_EFFORT_MIN = 150
-EFFORT_BAND = (90, 240)
+#: CANONICAL: `team/research.py` renders its prompt from these two values, so the
+#: plan asks for exactly what admission enforces (they used to be duplicated and
+#: could drift apart silently). See the calibration comment in research.py.
+DEFAULT_EFFORT_MIN = 210
+EFFORT_BAND = (120, 300)
 
 
 def normalise_admission(entry: dict) -> list[str]:

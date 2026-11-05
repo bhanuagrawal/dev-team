@@ -130,6 +130,25 @@ def agent_requirements(profile: dict, project: Path) -> dict[str, list[tuple[str
             ("nightly launchd job loaded and active", sched_loaded,
              f"launchd job for {project.name} is not loaded. Run: `devteam setup --project {project.name} --schedule auto`"),
         ]
+        # Spacing is machine-wide, not per project: every nightly shares ONE run
+        # lock (scripts/nightly.sh), so two apps closer than MIN_GAP_MIN mean the
+        # later one is SKIPPED rather than deferred. Judge the slot this project
+        # actually holds against every other app (lesson 2026-11-05: a 20-minute
+        # gap lost one app two consecutive nights and no gate noticed).
+        all_slots = scheduler.list_installed_schedules()
+        mine = next((s for s in all_slots
+                     if s["label"] == scheduler.project_label(project.name)), None)
+        if mine:
+            close = scheduler.clashes(mine["hour"], mine["minute"], all_slots,
+                                      exclude=mine["label"])
+            detail = "; ".join(
+                f"{c['label']}@{c['hour']:02d}:{c['minute']:02d} is {c['gap']} min away"
+                for c in close)
+            sched_checks.append((
+                f"nightly slot clears every other app by >= {scheduler.MIN_GAP_MIN} min",
+                not close,
+                (f"re-space it: `devteam setup --project {project.name} --schedule "
+                 f"auto --at HH:MM` — too close to {detail}") if close else ""))
 
     store_readiness_checks = [
         ("manifest detectable", bool(list(project.glob("**/AndroidManifest.xml"))),
