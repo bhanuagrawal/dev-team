@@ -4,12 +4,14 @@ the Play internal-testing track. Idempotent — safe to re-run.
 What it sets up:
   1. environment checks (git, gh auth, python3, JDK/JBR, android sdk)
   2. project onboarding if missing (.pipeline/profile.json + state.json)
-  3. launchd LaunchAgent running scripts/nightly.sh <project> daily at --at HH:MM
+  3. launchd LaunchAgent running scripts/nightly.sh <project> `RUNS_PER_DAY`
+     times inside the owner's 23:00–11:00 window
   4. global skill symlink so any agent CLI can operate the team (dev-team skill)
 """
 from __future__ import annotations
 
 import os
+import plistlib
 import re
 import subprocess
 from pathlib import Path
@@ -17,25 +19,38 @@ from pathlib import Path
 from .core import TEAM_ROOT, agent_argv, pipeline_dir, role_cfg, run
 
 LAUNCH_LABEL = "com.devteam.nightly"
-DEFAULT_AT = "23:10"
-NIGHT_WINDOW_HOURS = [22, 23, 0, 1, 2, 3, 4, 5]  # owner's 10pm–6am IST window
-GRID_MIN = [0, 10, 20, 30, 40, 50]
+DEFAULT_AT = "23:00"
 
-# Minimum distance between two nightly slots, in minutes.
+# The owner's run window: 23:00 → 11:00 (12 hours). Every app fires
+# RUNS_PER_DAY times inside it (owner request 2026-11-05) so one skipped run
+# never costs an app its whole night.
+WINDOW_START_HOUR = 23
+WINDOW_END_HOUR = 11
+RUNS_PER_DAY = 3
+
+# Best-effort spacing target between any two slots on the machine.
 #
-# A slot is not a point in time. `scripts/nightly.sh` holds ONE machine-wide lock
-# (`.nightly.lock`), so an app that fires while another run is alive is SKIPPED,
-# not deferred — it loses that night entirely. The old rule only rejected two
-# apps on the SAME minute, on a 10-minute grid, which put two of them 20 minutes
-# apart: measured in logs/launchd.log, runs average 16–20 min and peak at 63,
-# and the 22:20 app was skipped on 2026-11-03 AND 2026-11-04 while the 22:00 run
-# was still going. An hour is the smallest gap that survives the observed tail
-# (and still fits five apps inside the owner's 22:00–03:00 window).
-MIN_GAP_MIN = 60
+# `scripts/nightly.sh` holds ONE machine-wide lock (`.nightly.lock`), so an app
+# that fires while another run is alive is SKIPPED, not deferred. The owner
+# accepts an occasional overlap now that every app gets three chances a night;
+# spacing is therefore a target we optimise, not a hard refusal. Apps are
+# interleaved evenly across the window, which keeps consecutive runs as far
+# apart as the number of apps allows (5 apps × 3 runs = 48 min apart).
+MIN_GAP_MIN = 30
 
 
 def _minutes_of(hour: int, minute: int) -> int:
     return (int(hour) * 60 + int(minute)) % 1440
+
+
+def _hour_minute(total: int) -> tuple[int, int]:
+    total %= 1440
+    return total // 60, total % 60
+
+
+def window_span_minutes() -> int:
+    """Length of the owner's run window in minutes (23:00 → 11:00 = 720)."""
+    return (_minutes_of(WINDOW_END_HOUR, 0) - _minutes_of(WINDOW_START_HOUR, 0)) % 1440
 
 
 def gap_minutes(a: tuple[int, int], b: tuple[int, int]) -> int:
@@ -44,12 +59,110 @@ def gap_minutes(a: tuple[int, int], b: tuple[int, int]) -> int:
     return min(d, 1440 - d)
 
 
+def slot_order(hour: int, minute: int) -> int:
+    """Position inside one run window, so 01:00 sorts after 23:00."""
+    return (_minutes_of(hour, minute) - _minutes_of(WINDOW_START_HOUR, 0)) % 1440
+
+
+def in_window(hour: int, minute: int) -> bool:
+    return slot_order(hour, minute) < window_span_minutes()
+
+
+def plan_gap_minutes(project_count: int) -> float:
+    """Minutes between consecutive machine-wide runs for `project_count` apps.
+
+    This is the best achievable spacing: the window is divided evenly into
+    `apps × RUNS_PER_DAY` slots and adjacent slots belong to different apps.
+    """
+    if project_count <= 0:
+        return 0.0
+    return window_span_minutes() / (project_count * RUNS_PER_DAY)
+
+
+def plan_schedule(projects: list[str] | set[str]) -> dict[str, list[tuple[int, int]]]:
+    """Deterministic three-runs-a-night plan, evenly interleaved across apps.
+
+    Slots are computed from the sorted project list, so the same set of apps
+    always yields the same schedule (idempotent re-runs, no drift). Consecutive
+    slots go to different apps, and one app's runs are ~4 h apart.
+    """
+    names = sorted({p for p in projects if p})
+    if not names:
+        return {}
+    total = len(names) * RUNS_PER_DAY
+    start = _minutes_of(WINDOW_START_HOUR, 0)
+    step = window_span_minutes() / total
+    plan: dict[str, list[tuple[int, int]]] = {n: [] for n in names}
+    for i in range(total):
+        slot = _hour_minute(round(start + i * step))
+        plan[names[i % len(names)]].append(slot)
+    return plan
+
+
+def explicit_slots(anchor: str) -> list[tuple[int, int]]:
+    """`--at HH:MM` anchors the first run; the other two follow 4 h later."""
+    try:
+        hh, mm = (int(x) for x in anchor.split(":"))
+    except Exception:
+        raise SystemExit(f"invalid --at {anchor!r}; expected HH:MM")
+    step = window_span_minutes() // RUNS_PER_DAY
+    return [_hour_minute(hh * 60 + mm + k * step) for k in range(RUNS_PER_DAY)]
+
+
+def _job_data(path: Path) -> dict:
+    try:
+        with path.open("rb") as f:
+            data = plistlib.load(f)
+        return data if isinstance(data, dict) else {}
+    except Exception:
+        return {}
+
+
+def _project_from_args(data: dict) -> str:
+    """The project a plist runs, read from its nightly.sh command line."""
+    text = " ".join(str(a) for a in (data.get("ProgramArguments") or []))
+    m = re.search(r'nightly\.sh"?\s+([^\s>&"]+)', text)
+    return m.group(1) if m else ""
+
+
+def list_installed_jobs() -> list[dict]:
+    """Every devteam plist with its project and ALL calendar slots."""
+    out = []
+    for p in sorted((Path.home() / "Library/LaunchAgents").glob(f"{LAUNCH_LABEL}*.plist")):
+        data = _job_data(p)
+        raw = data.get("StartCalendarInterval")
+        items = raw if isinstance(raw, list) else ([raw] if isinstance(raw, dict) else [])
+        slots: list[tuple[int, int]] = []
+        for it in items:
+            if isinstance(it, dict) and it.get("Hour") is not None:
+                slots.append((int(it["Hour"]), int(it.get("Minute", 0))))
+        slots.sort(key=lambda s: slot_order(*s))
+        out.append({
+            "label": str(data.get("Label") or p.stem),
+            "path": p,
+            "project": _project_from_args(data),
+            "slots": slots,
+        })
+    return out
+
+
+def list_installed_schedules() -> list[dict]:
+    """All devteam slots (one row per run) — the clash source."""
+    out = []
+    for job in list_installed_jobs():
+        for h, m in job["slots"]:
+            out.append({"label": job["label"], "project": job["project"],
+                        "hour": h, "minute": m})
+    return out
+
+
 def clashes(hour: int, minute: int, installed: list[dict] | None = None,
             gap: int = MIN_GAP_MIN, exclude: str | None = None) -> list[dict]:
     """Installed slots closer than `gap` minutes to (hour, minute).
 
-    Returns them with the distance so a refusal can name the neighbour instead of
+    Returns them with the distance so a report can name the neighbour instead of
     saying "collides" — the useful fact is which app is too close and by how much.
+    `exclude` is a label and drops every slot belonging to that app.
     """
     out = []
     for s in (installed if installed is not None else list_installed_schedules()):
@@ -61,7 +174,6 @@ def clashes(hour: int, minute: int, installed: list[dict] | None = None,
     return out
 
 
-
 def project_label(project_name: str) -> str:
     """/per-project label for NEW installs (legacy com.devteam.nightly is
     preserved for the first project that ever installed it)."""
@@ -69,18 +181,8 @@ def project_label(project_name: str) -> str:
     return f"{LAUNCH_LABEL}.{slug}"
 
 
-def list_installed_schedules() -> list[dict]:
-    """All devteam plists with their calendar times — the clash source."""
-    import re as _re
-    out = []
-    for p in (Path.home() / "Library/LaunchAgents").glob(f"{LAUNCH_LABEL}*.plist"):
-        text = p.read_text(errors="ignore")
-        h = _re.search(r"<key>Hour</key><integer>(\d+)</integer>", text)
-        m = _re.search(r"<key>Minute</key><integer>(\d+)</integer>", text)
-        if h and m:
-            out.append({"label": p.stem, "hour": int(h.group(1)),
-                        "minute": int(m.group(1))})
-    return out
+def plist_path(project_name: str, label: str | None = None) -> Path:
+    return Path.home() / "Library" / "LaunchAgents" / f"{label or project_label(project_name)}.plist"
 
 
 def is_project_scheduled(project_name: str) -> bool:
@@ -106,34 +208,40 @@ def is_project_loaded(project_name: str) -> bool:
     return (label in r.stdout) or (LAUNCH_LABEL in r.stdout and is_project_scheduled(project_name))
 
 
-def pick_free_slot(pref_at: str | None, exclude_project: str | None = None) -> tuple[int, int]:
-    """Choose a slot with at least MIN_GAP_MIN minutes of clearance.
+def propose_schedule(project_name: str, pref_at: str | None = None,
+                     projects: list[str] | None = None) -> list[tuple[int, int]]:
+    """The three slots this project would get.
 
-    An explicit pref_at wins when it clears every other app; otherwise the first
-    free slot in the owner's night window on the 10-minute grid. Neither path may
-    place an app close enough to lose its night to the machine-wide run lock — the
-    gap is enforced, not advised (owner request 2026-11-05).
+    With no `--at`, the project joins the machine-wide interleaved plan, so it
+    lands as far from every other app's runs as the window allows. An explicit
+    `--at` anchors its first run (the other two follow 4 h later) and leaves the
+    rest of the plan untouched.
     """
-    installed = list_installed_schedules()
-    exclude = project_label(exclude_project) if exclude_project else None
     if pref_at:
-        hh, mm = int(pref_at.split(":")[0]), int(pref_at.split(":")[1])
-        close = clashes(hh, mm, installed, exclude=exclude)
-        if close:
-            near = ", ".join(
-                f"{s['label']}@{s['hour']:02d}:{s['minute']:02d} ({s['gap']} min away)"
-                for s in close)
-            raise SystemExit(
-                f"slot {hh:02d}:{mm:02d} is too close to {near}; nightly slots need "
-                f">= {MIN_GAP_MIN} min between apps (one nightly holds a machine-wide "
-                "lock, so an overlapping app is skipped, not deferred). Pick another --at.")
-        return (hh, mm)
-    for h in NIGHT_WINDOW_HOURS:
-        for m in GRID_MIN:
-            if not clashes(h, m, installed, exclude=exclude):
-                return (h, m)
-    raise SystemExit(f"no free night-window slot with >= {MIN_GAP_MIN} min spacing; "
-                     "pick an explicit --at off-grid")
+        return explicit_slots(pref_at)
+    names = set(projects or [j["project"] for j in list_installed_jobs() if j["project"]])
+    names.add(project_name)
+    return plan_schedule(names)[project_name]
+
+
+def apply_plan(projects: list[str] | set[str], install_missing: bool = True) -> dict[str, list[tuple[int, int]]]:
+    """Install the interleaved plan for every given project (idempotent)."""
+    plan = plan_schedule(projects)
+    jobs = {j["project"]: j for j in list_installed_jobs() if j["project"]}
+    for name, slots in plan.items():
+        job = jobs.get(name)
+        if job:
+            if job["slots"] != slots:
+                install_launchd(name, slots, label=job["label"])
+        elif install_missing:
+            install_launchd(name, slots)
+    return plan
+
+
+def rebalance(projects: list[str] | None = None) -> dict[str, list[tuple[int, int]]]:
+    """Re-space every installed app into the current three-a-night plan."""
+    names = projects or [j["project"] for j in list_installed_jobs() if j["project"]]
+    return apply_plan(names)
 
 
 def env_checks() -> list[str]:
@@ -186,8 +294,16 @@ def _loaded_job_plist(label: str) -> str | None:
     return m.group(1) if m else None
 
 
-def install_launchd(project_name: str, at: str, label: str | None = None) -> Path:
-    hh, mm = [int(x) for x in at.split(":")]
+def install_launchd(project_name: str, at, label: str | None = None) -> Path:
+    """Write a plist that fires `RUNS_PER_DAY` times a night.
+
+    `at` is either "HH:MM" (one legacy slot) or a list of (hour, minute) slots.
+    """
+    if isinstance(at, str):
+        slots = [tuple(int(x) for x in at.split(":"))]
+    else:
+        slots = [(int(h), int(m)) for h, m in at]
+    slots = sorted(slots, key=lambda s: slot_order(*s))
     library = Path.home() / "Library" / "LaunchAgents"
     library.mkdir(parents=True, exist_ok=True)
     # A launchd job's Label must be UNIQUE per schedule: two plists sharing one
@@ -199,22 +315,17 @@ def install_launchd(project_name: str, at: str, label: str | None = None) -> Pat
     nightly = TEAM_ROOT / "scripts" / "nightly.sh"
     logs = TEAM_ROOT / "logs"
     logs.mkdir(parents=True, exist_ok=True)
-    body = f"""<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0"><dict>
-  <key>Label</key><string>{label}</string>
-  <key>ProgramArguments</key><array>
-    <string>/bin/bash</string>
-    <string>-c</string>
-    <string>exec "{nightly}" {project_name} &gt;&gt; "{logs}/launchd.log" 2&gt;&amp;1</string>
-  </array>
-  <key>WorkingDirectory</key><string>{TEAM_ROOT}</string>
-  <key>StartCalendarInterval</key><dict>
-    <key>Hour</key><integer>{hh}</integer>
-    <key>Minute</key><integer>{mm}</integer>
-  </dict>
-</dict></plist>"""
-    plist.write_text(body)
+    body = {
+        "Label": label,
+        "ProgramArguments": [
+            "/bin/bash", "-c",
+            f'exec "{nightly}" {project_name} >> "{logs}/launchd.log" 2>&1',
+        ],
+        "WorkingDirectory": str(TEAM_ROOT),
+        # An array is exactly how launchd expresses "several times a day".
+        "StartCalendarInterval": [{"Hour": h, "Minute": m} for h, m in slots],
+    }
+    plist.write_bytes(plistlib.dumps(body))
     # Boot out our own label, plus any job loaded from THIS exact plist path
     # under a different (legacy) label — a re-install then migrates cleanly and
     # never leaves a duplicate job pointed at the same file.
@@ -236,7 +347,6 @@ def install_launchd(project_name: str, at: str, label: str | None = None) -> Pat
 
 def uninstall_launchd(project_name: str | None = None) -> None:
     """Removes this project's nightly label (or all devteam labels if unspecified)."""
-    import re as _re
     targets = []
     if project_name:
         targets = [project_label(project_name)]

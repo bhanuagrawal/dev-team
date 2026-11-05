@@ -129,25 +129,24 @@ def agent_requirements(profile: dict, project: Path) -> dict[str, list[tuple[str
             ("nightly launchd job loaded and active", sched_loaded,
              f"launchd job for {project.name} is not loaded. Run: `devteam setup --project {project.name} --schedule auto`"),
         ]
-        # Spacing is machine-wide, not per project: every nightly shares ONE run
-        # lock (scripts/nightly.sh), so two apps closer than MIN_GAP_MIN mean the
-        # later one is SKIPPED rather than deferred. Judge the slot this project
-        # actually holds against every other app (lesson 2026-11-05: a 20-minute
-        # gap lost one app two consecutive nights and no gate noticed).
-        all_slots = scheduler.list_installed_schedules()
-        mine = next((s for s in all_slots
-                     if s["label"] == scheduler.project_label(project.name)), None)
-        if mine:
-            close = scheduler.clashes(mine["hour"], mine["minute"], all_slots,
-                                      exclude=mine["label"])
-            detail = "; ".join(
-                f"{c['label']}@{c['hour']:02d}:{c['minute']:02d} is {c['gap']} min away"
-                for c in close)
-            sched_checks.append((
-                f"nightly slot clears every other app by >= {scheduler.MIN_GAP_MIN} min",
-                not close,
-                (f"re-space it: `devteam setup --project {project.name} --schedule "
-                 f"auto --at HH:MM` — too close to {detail}") if close else ""))
+        # Every app must hold RUNS_PER_DAY slots inside the owner's 23:00–11:00
+        # window. Machine-wide spacing is best-effort: the run lock skips an
+        # overlapping app rather than deferring it, but with three runs a night
+        # a skip no longer costs the app its night (owner directive 2026-11-05).
+        job = next((j for j in scheduler.list_installed_jobs()
+                    if j["label"] == scheduler.project_label(project.name)
+                    or j["project"] == project.name), None)
+        slots = job["slots"] if job else []
+        expected = f"{scheduler.RUNS_PER_DAY} runs/night ({scheduler.WINDOW_START_HOUR:02d}:00–{scheduler.WINDOW_END_HOUR:02d}:00)"
+        ok = (len(slots) == scheduler.RUNS_PER_DAY
+              and all(scheduler.in_window(h, m) for h, m in slots))
+        detail = (", ".join(f"{h:02d}:{m:02d}" for h, m in slots) if slots
+                  else "no slots registered")
+        sched_checks.append((
+            f"nightly runs {expected}", ok,
+            "" if ok else
+            (f"re-register: `devteam setup --project {project.name} --schedule auto` "
+             f"(or `devteam schedules --rebalance`); found {detail}")))
 
     store_readiness_checks = [
         ("manifest detectable", bool(list(project.glob("**/AndroidManifest.xml"))),

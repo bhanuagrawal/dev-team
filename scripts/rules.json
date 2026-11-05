@@ -75,12 +75,12 @@
       "note": "lesson 2026-11-05: doctor tested 'gcloud can mint a token', so a property returning 403 (and a login Google had just blocked) still read as configured; a new project now cannot land there either"
     },
     {
-      "id": "nightly-slot-spacing",
-      "rule": "nightly slots must be at least MIN_GAP_MIN (60) minutes apart; the machine-wide run lock means an overlapping app is SKIPPED, not deferred, so a small gap silently costs an app its night",
+      "id": "nightly-three-runs-in-window",
+      "rule": "every scheduled app runs RUNS_PER_DAY (3) times a night inside the owner's 23:00–11:00 window; apps are interleaved evenly so consecutive machine-wide runs are as far apart as the app count allows, and overlap is tolerated because three runs make a skipped one harmless",
       "doc": "AGENTS.md",
       "kind": "code",
-      "enforced_by": "devteam setup (scheduler.pick_free_slot refuses a closer --at) + devteam doctor (per-project clearance check) + devteam schedules (prints gaps, flags pairs)",
-      "note": "lesson 2026-11-05: two apps 20 min apart cost one of them two consecutive nights (logs/launchd.log 'skipped') and no gate noticed"
+      "enforced_by": "devteam setup (scheduler.plan_schedule/apply_plan installs 3 slots per app) + devteam schedules --rebalance (re-spaces every app) + devteam doctor and store-readiness (assert 3 slots inside the window)",
+      "note": "owner directive 2026-11-05: three runs a night, 11pm–11am, overlap tolerated but avoided where possible; MIN_GAP_MIN is now a best-effort target, not a refusal"
     },
     {
       "id": "cleanup-is-part-of-the-run",

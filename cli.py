@@ -1748,38 +1748,44 @@ def cmd_poll(args: argparse.Namespace) -> None:
 
 
 def cmd_schedules(args: argparse.Namespace) -> None:
-    """Owner-visible clash map: every registered devteam schedule."""
+    """Owner-visible schedule map: three runs a night for every registered app."""
     if getattr(args, "remove", None):
         project = resolve_project(args.remove)
         scheduler.uninstall_launchd(project.name)
         print(f"Removed nightly schedule for {project.name} (app remains in dev-team in manual mode).")
         return
-    installed = scheduler.list_installed_schedules()
-    if not installed:
+    if getattr(args, "rebalance", False):
+        jobs = scheduler.list_installed_jobs()
+        before = {j["project"]: j["slots"] for j in jobs}
+        plan = scheduler.rebalance([j["project"] for j in jobs if j["project"]])
+        changed = [n for n, slots in plan.items() if before.get(n) != slots]
+        print(f"Rebalanced {len(plan)} app(s): {scheduler.RUNS_PER_DAY} runs/night each "
+              f"inside {scheduler.WINDOW_START_HOUR:02d}:00–"
+              f"{scheduler.WINDOW_END_HOUR:02d}:00 "
+              f"({len(changed)} schedule(s) updated).")
+    jobs = scheduler.list_installed_jobs()
+    if not jobs:
         print("no auto schedules registered — all projects run manually")
         return
-    # Read as ONE NIGHT: the owner's window starts at 22:00, so 01:00 sorts after
-    # midnight rather than before 22:00 alphabetically/lexically.
-    slots = sorted(installed,
-                   key=lambda s: ((s["hour"] * 60 + s["minute"]) - 22 * 60) % 1440)
-    gaps = [scheduler.gap_minutes((slots[i]["hour"], slots[i]["minute"]),
-                                  (slots[(i + 1) % len(slots)]["hour"],
-                                   slots[(i + 1) % len(slots)]["minute"]))
-            for i in range(len(slots))]
-    for i, s in enumerate(slots):
-        too_close = len(slots) > 1 and gaps[i] < scheduler.MIN_GAP_MIN
-        print(f"{'  ⚠' if too_close else '   '} {s['hour']:02d}:{s['minute']:02d}  "
-              f"{s['label']}   (next in {gaps[i]} min)")
-    bad = [i for i in range(len(slots))
-           if len(slots) > 1 and gaps[i] < scheduler.MIN_GAP_MIN]
-    if bad:
-        print(f"⚠ {len(bad)} slot(s) are followed by another app inside "
-              f"{scheduler.MIN_GAP_MIN} min: the later app is SKIPPED while the "
-              "earlier run holds the machine-wide lock, so it loses that night.")
-        print("  fix: `devteam setup --project <name> --schedule auto --at HH:MM` "
-              f"(>= {scheduler.MIN_GAP_MIN} min from every other app)")
+    gap = scheduler.plan_gap_minutes(len(jobs))
+    print(f"window {scheduler.WINDOW_START_HOUR:02d}:00–{scheduler.WINDOW_END_HOUR:02d}:00 · "
+          f"{scheduler.RUNS_PER_DAY} runs/app/night · "
+          f"{gap:.0f} min between consecutive machine-wide runs")
+    if gap < scheduler.MIN_GAP_MIN:
+        print(f"⚠ {len(jobs)} apps cannot all clear {scheduler.MIN_GAP_MIN} min; an "
+              "overlapping run is skipped (tolerated — each app still gets its "
+              "other runs that night).")
+    for job in sorted(jobs, key=lambda j: (j["project"] or j["label"]).lower()):
+        slots = ", ".join(f"{h:02d}:{m:02d}" for h, m in job["slots"])
+        ok = (len(job["slots"]) == scheduler.RUNS_PER_DAY
+              and all(scheduler.in_window(h, m) for h, m in job["slots"]))
+        print(f"{'  ⚠' if not ok else '   '} {job['project'] or job['label']:<18} {slots}")
+        if not ok:
+            print(f"     needs {scheduler.RUNS_PER_DAY} runs inside the window — "
+                  "`devteam schedules --rebalance` fixes it")
     print("(default trigger is MANUAL; auto is opt-in per project via "
-          "`devteam setup --schedule auto [--at HH:MM]`)")
+          "`devteam setup --schedule auto`; re-space everything with "
+          "`devteam schedules --rebalance`)")
 
 
 def cmd_capabilities(args: argparse.Namespace) -> int:
@@ -2159,16 +2165,37 @@ def cmd_setup(args: argparse.Namespace) -> None:
         for s in scheduler.list_installed_schedules():
             print(f"    - {s['label']}: {s['hour']:02d}:{s['minute']:02d}")
         return
-    # opt-in auto: gap-enforced slot (explicit --at wins only if it clears the gap)
-    proposed = scheduler.pick_free_slot(args.at, exclude_project=project.name)
-    hh, mm = proposed
-    plist = scheduler.install_launchd(project.name, f"{hh:02d}:{mm:02d}")
-    print(f"AUTO schedule installed: {plist.stem} — daily {hh:02d}:{mm:02d}")
-    print("  clash-checked against: " + (", ".join(
-        f"{s['label']}@{s['hour']:02d}:{s['minute']:02d}"
-        for s in scheduler.list_installed_schedules()) or "(none)"))
-    print(f"  spacing enforced: >= {scheduler.MIN_GAP_MIN} min from every other app "
-          "(one nightly holds a machine-wide lock; an overlapping app is skipped)")
+    # opt-in auto: three interleaved runs a night inside the owner's window.
+    # An explicit --at anchors this app's runs and leaves the others alone.
+    if args.at:
+        slots = scheduler.propose_schedule(project.name, args.at)
+        plist = scheduler.install_launchd(project.name, slots)
+        print(f"AUTO schedule installed: {plist.stem} — "
+              + ", ".join(f"{h:02d}:{m:02d}" for h, m in slots)
+              + f" ({scheduler.RUNS_PER_DAY}x/night, anchored at {args.at})")
+        close = [c for h, m in slots for c in scheduler.clashes(
+            h, m, exclude=scheduler.project_label(project.name))]
+        if close:
+            near = ", ".join(sorted({f"{c['label']}@{c['hour']:02d}:{c['minute']:02d}"
+                                     f" ({c['gap']} min)" for c in close}))
+            print(f"  ⚠ close to {near}: the later run may be skipped (tolerated — "
+                  "overlap is no longer fatal) or re-space with "
+                  "`devteam schedules --rebalance`.")
+    else:
+        names = [j["project"] for j in scheduler.list_installed_jobs() if j["project"]]
+        plan = scheduler.apply_plan(names + [project.name])
+        slots = plan[project.name]
+        job = next((j for j in scheduler.list_installed_jobs()
+                    if j["project"] == project.name), None)
+        plist = scheduler.plist_path(project.name,
+                                     label=job["label"] if job else None)
+        print(f"AUTO schedule installed: {plist.stem} — "
+              + ", ".join(f"{h:02d}:{m:02d}" for h, m in slots)
+              + f" ({scheduler.RUNS_PER_DAY}x/night)")
+        print(f"  window {scheduler.WINDOW_START_HOUR:02d}:00–"
+              f"{scheduler.WINDOW_END_HOUR:02d}:00, interleaved across "
+              f"{len(plan)} app(s): {scheduler.plan_gap_minutes(len(plan)):.0f} min "
+              "between consecutive machine-wide runs (overlap tolerated)")
     print("  disable with: launchctl bootout gui/$(id -u)/" + plist.stem)
     print(f"  manual-mode alternative remains possible anytime".strip())
 
@@ -3490,11 +3517,15 @@ def main() -> None:
     st = sub.add_parser("setup");  st.add_argument("--project", required=True)
     st.add_argument("--schedule", choices=["manual", "auto"], default="manual")
     st.add_argument("--at", default=None,
-                    help=f"HH:MM slot for the nightly (default: first free slot); must "
-                         f"clear every other app by >= {scheduler.MIN_GAP_MIN} min")
+                    help=f"HH:MM anchor for the first of {scheduler.RUNS_PER_DAY} "
+                         "nightly runs (default: the interleaved plan)")
     st.add_argument("--strict", action="store_true"); st.set_defaults(fn=cmd_setup)
     sch = sub.add_parser("schedules", help="list or manage registered nightly schedules")
     sch.add_argument("--remove", help="remove a project's nightly schedule, keeping it in manual mode")
+    sch.add_argument("--rebalance", action="store_true",
+                     help=f"re-space every installed app into {scheduler.RUNS_PER_DAY} "
+                          f"runs/night inside "
+                          f"{scheduler.WINDOW_START_HOUR:02d}:00–{scheduler.WINDOW_END_HOUR:02d}:00")
     sch.set_defaults(fn=cmd_schedules)
     cp = sub.add_parser(
         "capabilities",

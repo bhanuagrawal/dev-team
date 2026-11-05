@@ -530,12 +530,16 @@ alarms. Zero LLM, zero project names.
 - **Scheduling:** `setup` installs a launchd job that runs
   `scripts/nightly.sh <Project>`, which boots the orchestrator with
   *"Run workflow for &lt;Project&gt;"*, caps it with a 90-minute watchdog, keeps a
-  single-instance lock, and records/takes down emulators around the run. That lock
-  is machine-wide, so an app that fires while another run is alive is **skipped,
-  not deferred** — therefore slots are kept at least **60 min** apart
-  (`scheduler.MIN_GAP_MIN`, enforced by `setup` and judged by `doctor`), and
-  `devteam schedules` prints every slot with the gap to the next one, flagging
-  any pair that is too close.
+  single-instance lock, and records/takes down emulators around the run. Each app
+  fires **three times a night inside the owner's 23:00–11:00 window**
+  (`scheduler.RUNS_PER_DAY`), and apps are interleaved evenly across it so
+  consecutive machine-wide runs stay as far apart as the app count allows
+  (`scheduler.plan_gap_minutes`). The lock is machine-wide, so an overlapping run
+  is **skipped, not deferred** — tolerated because a second and third run follow
+  the same night, but the plan avoids overlap whenever the window has room.
+  `devteam schedules` prints every app's runs and the spacing;
+  `devteam schedules --rebalance` re-spaces all installed apps to the current
+  plan (use it after changing the app list or the window).
 
 ## Layout
 

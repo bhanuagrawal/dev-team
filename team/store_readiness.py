@@ -885,12 +885,26 @@ def run_store_readiness_audit(project: Path, tree: Path | None = None) -> list[R
             detail="Explicit manual mode declared in profile.json",
         ))
     elif sched_installed:
+        job = next((j for j in scheduler.list_installed_jobs()
+                    if j["label"] == scheduler.project_label(sched_name)
+                    or j["project"] == sched_name), None)
+        slots = job["slots"] if job else []
+        runs_ok = (len(slots) == scheduler.RUNS_PER_DAY
+                   and all(scheduler.in_window(h, m) for h, m in slots))
+        detail = (f"launchd nightly schedule registered "
+                  f"({scheduler.project_label(sched_name)}): "
+                  + ", ".join(f"{h:02d}:{m:02d}" for h, m in slots))
         checks.append(ReadinessCheck(
             category="Automation & Operations",
             name="Nightly Autonomous Execution Loop",
-            passed=True,
-            severity="INFO",
-            detail=f"launchd nightly schedule registered ({scheduler.project_label(sched_name)})",
+            passed=runs_ok,
+            severity="INFO" if runs_ok else "BLOCKER",
+            detail=detail if runs_ok else
+                   (f"{sched_name} does not run {scheduler.RUNS_PER_DAY}x/night inside "
+                    f"{scheduler.WINDOW_START_HOUR:02d}:00–{scheduler.WINDOW_END_HOUR:02d}:00 "
+                    f"(found {detail})"),
+            fix="" if runs_ok else
+                f"Run `devteam schedules --rebalance` (or `devteam setup --project {sched_name} --schedule auto`)",
         ))
     else:
         checks.append(ReadinessCheck(
@@ -899,7 +913,7 @@ def run_store_readiness_audit(project: Path, tree: Path | None = None) -> list[R
             passed=False,
             severity="BLOCKER",
             detail=f"No nightly schedule registered in launchd for {sched_name}",
-            fix=f"Run `devteam setup --project {sched_name} --schedule auto` to register daily launchd trigger",
+            fix=f"Run `devteam setup --project {sched_name} --schedule auto` to register {scheduler.RUNS_PER_DAY}x/night launchd triggers",
         ))
 
     return checks
