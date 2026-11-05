@@ -16,13 +16,29 @@ from pathlib import Path
 CANONICAL_LOCALES = ["ar", "de", "es", "fr", "hi", "in", "it", "ja", "ko", "nl",
                      "pt-rBR", "ru", "tr", "vi", "zh-rCN"]
 
+# Directories that are never the app's own sources, even though they may contain a
+# `res/values/strings.xml`: generated output, pipeline state, and the agent-skill
+# bundles `android skills add --all` drops into the project root (several of them
+# ship their own `references/res/values/strings.xml`, and glob order made ONE OF
+# THOSE the file this gate validated — every real string then read as undefined).
+_SKIP_DIRS = {"build", ".pipeline", ".gradle", "skills", ".claude", ".agents",
+              ".codex", ".gemini", "node_modules"}
+
 
 def find_res_dir(root: Path) -> Path | None:
     """Locate the res dir holding values/strings.xml — layout-agnostic
-    (app/src/main/res for single-module, composeApp/src/androidMain/res for KMP)."""
+    (app/src/main/res for single-module, composeApp/src/androidMain/res for KMP).
+
+    Deterministic: skip vendored/skill/generated trees, then take the SHALLOWEST
+    match, so a bundle's reference copy can never shadow the app's own resources.
+    """
     hits = [p for p in root.glob("**/res/values/strings.xml")
-            if not {"build", ".pipeline", ".gradle"} & set(p.relative_to(root).parts)]
-    return hits[0].parent.parent if hits else None
+            if not _SKIP_DIRS & set(p.relative_to(root).parts)]
+    if not hits:
+        return None
+    hits.sort(key=lambda p: (len(p.relative_to(root).parts), str(p)))
+    return hits[0].parent.parent
+
 
 
 def refs(path: Path) -> list[str]:
