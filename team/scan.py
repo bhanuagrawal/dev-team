@@ -175,6 +175,15 @@ def _queue_task(q: dict, seq: int) -> dict:
         "advances": str(q.get("advances") or ""),
         "reason": str(q.get("reason") or ""),
         "created": now_iso(),
+        # The note this release will show on the store travels with the task.
+        # `verify` and `release` read `whatsnew` off the SPEC, so a note written
+        # into the queue entry used to be dropped right here at pick time and
+        # the release fell back to the per-type template — which put an internal
+        # label in front of users ("✓ Fixed: release note: give the production
+        # build its own what's new line"). The queue is where a task is decided,
+        # so it is where its store copy has to survive.
+        **( {"whatsnew": str(q["whatsnew"]).strip()}
+            if str(q.get("whatsnew") or "").strip() else {} ),
     }
 
 
