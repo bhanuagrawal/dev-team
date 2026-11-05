@@ -412,8 +412,33 @@ def ensure_robolectric(project: Path, module: Path, dry_run: bool = False) -> li
             "    debugImplementation 'androidx.compose.ui:ui-test-manifest'",
         ]
     )
-    if f"{MARKER}: renders real composables on the JVM" not in text:
-        wrapper = (
+    # Add only what is genuinely missing. A project that already declares the
+    # renderer's artifacts (a scaffolded harness does) used to get them a second
+    # time, plus a duplicate `tasks.withType<Test>` block — harmless at runtime,
+    # noise a reviewer has to read around (seen 2026-11-05).
+    coord = re.compile(r"[\"']([\w.\-]+:[\w.\-]+)(?::[^\"']*)?[\"']")
+    real = []
+    for line in deps:
+        if line.strip().startswith("//"):
+            continue
+        m = coord.search(line)
+        if m:
+            g_a = m.group(1)
+            artifact = g_a.rsplit(":", 1)[-1]
+            # Already on the test classpath counts, however it was written: the
+            # literal coordinate, or a version-catalog alias (`libs.robolectric`).
+            # Matching only literals re-added a dependency the project already
+            # declared, once per render (seen 2026-11-05).
+            if g_a in text or re.search(rf"libs\.{re.escape(artifact)}\b", text):
+                continue
+        real.append(line)
+    # The banner comment rides along only when a real dependency is being added,
+    # otherwise a re-run leaves a stranded comment above nothing.
+    missing = ([deps[0]] + real) if real else []
+
+    if "storefront.output" not in text:
+        text = text.rstrip("\n") + "\n"
+        text += (
             "\n// " + MARKER + ": the harness writes each scene where the orchestrator collects it\n"
             "tasks.withType<Test>().configureEach {\n"
             '    systemProperty("storefront.output", '
@@ -426,9 +451,9 @@ def ensure_robolectric(project: Path, module: Path, dry_run: bool = False) -> li
             "new File(rootProject.projectDir, '.pipeline/storefront_scenes').absolutePath\n"
             "}\n"
         )
-        text = text.rstrip("\n") + "\n" + wrapper
+    if missing:
+        block = "\n".join(missing) + "\n"
         m = re.search(r"^dependencies\s*\{", text, re.M)
-        block = "\n".join(deps) + "\n"
         if not m:
             text += f"\ndependencies {{\n{block}}}\n"
         else:
@@ -442,12 +467,19 @@ def ensure_robolectric(project: Path, module: Path, dry_run: bool = False) -> li
                         break
                     depth -= 1
                 i += 1
-        if "includeAndroidResources" not in text:
+        if ("includeAndroidResources" not in text
+                and "IncludeAndroidResources" not in text):
             m = re.search(r"^android\s*\{", text, re.M)
             if m:
+                # The Kotlin DSL spelling is `isIncludeAndroidResources`; writing
+                # the Groovy one into a .kts file fails SCRIPT COMPILATION, so the
+                # render never starts and the whole harness looks "broken" (seen
+                # 2026-11-05: `Unresolved reference 'includeAndroidResources'`).
+                prop = ("isIncludeAndroidResources" if kts
+                        else "includeAndroidResources")
                 opt = (
                     "    testOptions {\n        unitTests {\n"
-                    "            includeAndroidResources = true\n        }\n    }\n"
+                    f"            {prop} = true\n        }}\n    }}\n"
                 )
                 text = text[:m.end()] + "\n" + opt + text[m.end():]
         if not dry_run:

@@ -161,6 +161,8 @@ def surfaces(project: Path) -> list[dict]:
         out.append({
             "label": s.get("label") or paths[0].stem,
             "paths": [str(p) for p in paths],
+            # The files whose mtime decides whether a render is still evidence.
+            "inputs": [str(p) for p in paths + theme],
             "visual": _hash_files(paths + theme, project),
             "behaviour": _hash_files(behaviour, project),
         })
@@ -227,12 +229,38 @@ def store_path(project: Path) -> Path:
     return pipeline_dir(project) / STORE_NAME
 
 
+def _migrate_ids(data: dict) -> dict:
+    """Re-key stored gripes that still carry an ordinal id (see `gripe_id`).
+
+    Deterministic and model-free: the complaint's line is already on disk, so the
+    stable id can be derived from it without spending another reaction pass.
+    """
+    for label, row in (data.get("surfaces") or {}).items():
+        scene = str(row.get("scene") or label[:12])
+        groups = [row.get("gripes") or []]
+        # History snapshots too: an old ordinal id sitting there would later read
+        # as the SAME complaint as a current one, which is exactly the confusion
+        # the stable id removes.
+        groups += [h.get("gripes") or [] for h in (row.get("history") or [])
+                   if isinstance(h, dict)]
+        groups += [h.get("resolved") or [] for h in (row.get("history") or [])
+                   if isinstance(h, dict)]
+        for group in groups:
+            for g in group:
+                if not isinstance(g, dict):
+                    continue
+                gid = str(g.get("id") or "")
+                if gid.startswith("UX-") and LEGACY_ID.search(gid):
+                    g["id"] = gripe_id(scene, g.get("line") or "")
+    return data
+
+
 def load(project: Path) -> dict:
     p = store_path(project)
     if not p.exists():
         return {"audit_version": AUDIT_VERSION, "rubric": RUBRIC, "surfaces": {}}
     try:
-        return json.loads(p.read_text())
+        return _migrate_ids(json.loads(p.read_text()))
     except Exception:
         return {"audit_version": AUDIT_VERSION, "rubric": RUBRIC, "surfaces": {}}
 
@@ -243,6 +271,23 @@ def save(project: Path, data: dict) -> None:
     p.write_text(json.dumps(data, indent=2) + "\n")
 
 
+def _render_is_stale(row: dict, render: str) -> bool:
+    """True when a visual input is newer than the PNG that is supposed to show it."""
+    if not render:
+        return False
+    try:
+        png_mtime = Path(render).stat().st_mtime
+    except OSError:
+        return False
+    for p in row.get("inputs") or []:
+        try:
+            if Path(p).stat().st_mtime > png_mtime:
+                return True
+        except OSError:
+            continue
+    return False
+
+
 def plan(project: Path) -> dict:
     """What needs an audit now — the whole point: the deciding half is free."""
     data = load(project)
@@ -251,26 +296,34 @@ def plan(project: Path) -> dict:
     rows = []
     for s in surfaces(project):
         prev = known.get(s["label"]) or {}
+        sid = _scene_for(s["label"], s["paths"], scene_map)
+        render = (scene_map.get(sid) or {}).get("png", "") if sid else ""
+        # A render older than the code that drew it is not evidence: the audit
+        # would store a fresh fingerprint against stale pixels and hide the very
+        # change it exists to catch. It needs a re-render before a reaction.
+        stale_render = _render_is_stale(s, render)
         if not prev:
             status = "new"
         elif prev.get("rubric") != RUBRIC:
             status = "rubric"
+        elif stale_render:
+            status = "render"
         elif prev.get("visual") != s["visual"]:
             status = "visual"
         elif prev.get("behaviour") != s["behaviour"]:
             status = "behaviour"
         else:
             status = "unchanged"
-        sid = _scene_for(s["label"], s["paths"], scene_map)
         rows.append({
-            **s, "status": status, "scene": sid,
-            "render": (scene_map.get(sid) or {}).get("png", "") if sid else "",
+            **s, "status": status, "scene": sid, "render": render,
+            "stale_render": stale_render,
             "audited_at": prev.get("audited_at", ""),
             "gripes": [g for g in (prev.get("gripes") or []) if g.get("status") == "open"],
         })
     counts = {
         "new": sum(1 for r in rows if r["status"] == "new"),
         "changed": sum(1 for r in rows if r["status"] in ("visual", "behaviour", "rubric")),
+        "stale_render": sum(1 for r in rows if r["status"] == "render"),
         "unchanged": sum(1 for r in rows if r["status"] == "unchanged"),
         "no_render": sum(1 for r in rows if not r["render"]),
     }
@@ -344,6 +397,21 @@ def _norm_line(s: str) -> set[str]:
     return {w for w in re.split(r"[^a-z0-9]+", (s or "").lower()) if len(w) > 3}
 
 
+def gripe_id(scene: str, line: str) -> str:
+    """A STABLE id for one complaint: derived from its words, not its position.
+
+    Ordinal ids (`score-4`) were reused by every pass, so the same id meant a
+    different complaint one audit later and `resolved` was measuring nothing —
+    a queue entry could quote an id whose meaning had already changed under it.
+    A hash of the normalised line moves only when the complaint's words do.
+    """
+    key = " ".join(sorted(_norm_line(line))) or (line or "").strip().lower()
+    return f"UX-{scene}-{hashlib.sha1(key.encode()).hexdigest()[:8]}"
+
+
+LEGACY_ID = re.compile(r"-(\d+|a\d+)$")
+
+
 def _resolved(old: list[dict], new_lines: list[str]) -> list[dict]:
     """Gripes the new pass no longer mentions (naive token overlap).
 
@@ -369,6 +437,20 @@ def audit_surface(project: Path, row: dict, log=None) -> dict:
         raise SystemExit(f"no render for '{row['label']}' at {png} — run "
                          f"`devteam storefront-build {project.name} --scenes` "
                          "(or bind a scene in docs/storefront.json)")
+    # A render is evidence only while it is newer than the code that drew it.
+    # Fingerprints cannot catch this on their own: the hash is taken from the
+    # SOURCE at audit time, so reacting to a stale PNG records a FRESH fingerprint
+    # against OLD pixels — and the change it was supposed to catch becomes
+    # invisible forever (found 2026-11-05: four screens re-audited on renders from
+    # three days and two releases earlier). Refuse; never record.
+    newer = [p for p in (row.get("inputs") or [])
+             if Path(p).exists() and Path(p).stat().st_mtime > png.stat().st_mtime]
+    if newer:
+        raise SystemExit(
+            f"stale render for '{row['label']}': {len(newer)} source file(s) are "
+            f"newer than {png.name} — re-render with "
+            f"`devteam storefront-scenes {project.name}`, then audit again "
+            f"(nothing recorded: an old picture is not evidence)")
     cfg = vision_layout.config()
     if log:
         log(f"~ ux: reacting to '{row['label']}' ({png.name}) via {cfg.get('model','?')}")
@@ -381,12 +463,12 @@ def audit_surface(project: Path, row: dict, log=None) -> dict:
         kind = next((r.get("kind") for r in reactions
                      if isinstance(r, dict) and r.get("line") == line), "")
         if kind in ("confusing", "slow", "cheap", "inconsistent", "frustrating"):
-            gripes.append({"id": f"UX-{row['scene'] or row['label'][:12]}-{i}",
+            gripes.append({"id": gripe_id(row["scene"] or row["label"][:12], line),
                            "line": line, "kind": kind, "status": "open",
                            "at": now_iso()})
     for line in (result.get("annoying") or []):
         if isinstance(line, str) and line.strip():
-            gripes.append({"id": f"UX-{row['scene'] or row['label'][:12]}-a{len(gripes)+1}",
+            gripes.append({"id": gripe_id(row["scene"] or row["label"][:12], line),
                            "line": line.strip(), "kind": "annoying",
                            "status": "open", "at": now_iso()})
     return {
@@ -436,9 +518,11 @@ def run_audit(project: Path, only_scene: str | None = None,
 def report(p: dict) -> str:
     """The owner-facing block: what changed, what it costs, what is open."""
     icon = {"new": "✦", "visual": "◆", "behaviour": "◇", "rubric": "↻",
-            "unchanged": "·"}
+            "render": "⟳", "unchanged": "·"}
     lines = [f"UX PLAN — {p['counts']['new']} new · {p['counts']['changed']} changed · "
-             f"{p['counts']['unchanged']} unchanged · {p['counts']['no_render']} without a render"]
+             f"{p['counts']['unchanged']} unchanged · {p['counts']['no_render']} without a render"
+             + (f" · {p['counts']['stale_render']} with a STALE RENDER (re-render first)"
+                if p["counts"].get("stale_render") else "")]
     for r in p["rows"]:
         if r["status"] == "unchanged":
             continue
