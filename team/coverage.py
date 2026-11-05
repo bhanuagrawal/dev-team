@@ -53,6 +53,23 @@ UI_PATH_SEGMENT = "ui"
 _JACOCO_GLOB = "**/build/reports/jacoco/**/*.xml"
 
 
+def _ui_names(text: str, stem: str) -> set[str]:
+    """The names a test would use to mount this UI file.
+
+    The file's own stem is one (`InsightsScreen`), but a screen's testable entry
+    points are the composables it declares — a test that calls `ManageList` mounts
+    `ManageScreen.kt`, and a stem-only match reported that as untested (2026-11-06:
+    a run added a Robolectric test mounting the Manage screen and the ui signal
+    stayed at 0%, which would have queued a coverage head for work already done).
+    """
+    names = {stem}
+    for m in re.finditer(r"@Composable\b", text):
+        fm = re.search(r"\bfun\s+([A-Za-z_]\w*)", text[m.end(): m.end() + 400])
+        if fm:
+            names.add(fm.group(1))
+    return names
+
+
 def _config() -> dict:
     f = Path(__file__).resolve().parent.parent / "config" / "coverage.json"
     try:
@@ -194,7 +211,13 @@ def collect(tree: Path, profile: dict | None = None) -> dict:
         pattern = re.compile(r"(?<![A-Za-z0-9_])" + re.escape(f.stem) + r"(?![A-Za-z0-9_])")
         if _is_ui(rel):
             ui_tot += 1
-            if pattern.search(all_tests):
+            try:
+                mounted = _ui_names(f.read_text(errors="ignore"), f.stem)
+            except OSError:
+                mounted = {f.stem}
+            if pattern.search(all_tests) or any(
+                    re.search(r"(?<![A-Za-z0-9_])" + re.escape(n) + r"(?![A-Za-z0-9_])", all_tests)
+                    for n in mounted):
                 ui_cov += 1
             elif len(ui_missing) < 6:
                 ui_missing.append(str(rel))
