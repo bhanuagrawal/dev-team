@@ -265,8 +265,16 @@ def apply_plan(state: dict, incoming: list[dict], source: str = "research",
     # did not know about the request replaced the queue and the request simply
     # vanished (2026-11-01).
     carried_labels = {_norm(label_of(q)) for q in new_queue}
+    # "Until it ships" is literal, so the pin is checked against the ledgers.
+    # A delivered owner request that stayed pinned was re-prepended on every
+    # cycle, and the review then announced it as THIS RUN'S task while the
+    # picker refused to serve it (seen 2026-11-05). Shipped work is not a live
+    # request: the pin retires with the release, and the entry is judged like
+    # any other (obsolete / superseded) instead of being resurrected.
+    from . import scan as scan_mod
     pinned = [q for q in existing
-              if q.get("pinned") and _norm(label_of(q)) not in carried_labels]
+              if q.get("pinned") and _norm(label_of(q)) not in carried_labels
+              and not scan_mod.already_delivered(q, state)]
     if pinned:
         new_queue = pinned + new_queue
         carried_labels |= {_norm(label_of(q)) for q in pinned}
