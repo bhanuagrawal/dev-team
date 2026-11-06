@@ -746,6 +746,73 @@ def run_store_readiness_audit(project: Path, tree: Path | None = None) -> list[R
                 fix="Add images/icon.png and mipmap-*/ic_launcher.png, then re-run this audit",
             ))
 
+        # A listing is a promise about a specific build. When the app is rebuilt
+        # but `docs/storefront.json` still names the old screens, the screenshots
+        # on Play depict surfaces the user will never see — the "Misleading
+        # Claims" defect one gate past existence. The scene spec is checked
+        # against the SHIPPED main sources (declarations, not call sites: the
+        # generated capture harness calls the old names and would vouch for them).
+        spec_file = src / "docs" / "storefront.json"
+        if spec_file.is_file():
+            try:
+                scenes = (json.loads(spec_file.read_text()) or {}).get("scenes") or []
+            except (OSError, ValueError):
+                scenes = []
+            _main_sets = {"main", "commonMain", "androidMain", "jvmMain", "desktopMain"}
+            _main_files = []
+            for p in src.glob("**/src/*/**/*.kt"):
+                if not p.is_file():
+                    continue
+                rel = p.relative_to(src).as_posix()
+                if re.search(r"(^|/)(build|\.pipeline|\.git)/", rel):
+                    continue
+                parts = p.relative_to(src).parts
+                if any(parts[i + 1] in _main_sets
+                       for i, seg in enumerate(parts)
+                       if seg == "src" and i + 1 < len(parts)):
+                    _main_files.append(p)
+            main_text = "\n".join(p.read_text(errors="ignore") for p in _main_files)
+            missing: list[str] = []
+            for scene in scenes:
+                call = str(scene.get("composable") or "")
+                m = re.match(r"\s*([A-Za-z_]\w*)\s*(?:\(|$)", call)
+                if not m:
+                    continue
+                name = m.group(1)
+                if not re.search(rf"\b(?:fun|class|object)\s+{re.escape(name)}\b", main_text):
+                    missing.append(f"{scene.get('id') or '?'}:{name}")
+            if not main_text:
+                # No source set resolved (an unfamiliar layout): saying every
+                # scene is missing would be a false blocker, so this is unmeasured.
+                checks.append(ReadinessCheck(
+                    category="Storefront Graphic Assets",
+                    name="Storefront Scenes Match the App",
+                    passed=True,
+                    severity="WARNING",
+                    detail="no main source set found to compare docs/storefront.json against — unmeasured",
+                ))
+            elif missing:
+                checks.append(ReadinessCheck(
+                    category="Storefront Graphic Assets",
+                    name="Storefront Scenes Match the App",
+                    passed=False,
+                    severity="BLOCKER",
+                    detail=(f"{len(missing)} scene(s) in docs/storefront.json name a screen the "
+                            f"shipped app no longer has ({', '.join(missing[:5])}) — the listing "
+                            f"screenshots depict a superseded UI"),
+                    fix=("Re-author docs/storefront.json for the current surfaces and re-render: "
+                         "`devteam storefront-scenes <project> --scaffold` then "
+                         "`devteam storefront-build <project> --poster`"),
+                ))
+            else:
+                checks.append(ReadinessCheck(
+                    category="Storefront Graphic Assets",
+                    name="Storefront Scenes Match the App",
+                    passed=True,
+                    severity="INFO",
+                    detail=f"{len(scenes)} scene(s) in docs/storefront.json resolve to shipped composables",
+                ))
+
         # Visual Asset Quality & ASO Conversion Score
         from .asset_critic import review_store_assets
         critic_rep = review_store_assets(src)
