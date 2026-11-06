@@ -39,13 +39,20 @@ def task_spec_path(project: Path, spec: str) -> Path:
     documented shape: CWD first, then the project, then the team dir.
     """
     p = Path(spec)
-    if p.exists():
-        return p
-    for base in (project, TEAM_ROOT):
-        cand = base / spec
+    candidates = [p, project / spec, TEAM_ROOT / spec]
+    # A bare task id is the shape every command PRINTS (`--task-id <id>`), while
+    # the spec itself lives at <project>/.pipeline/tasks/<id>.json. Resolve that
+    # documented pairing instead of killing the command on its own output
+    # (observed live on `worktree-start`: the tree was prepared, then the probe
+    # below raised SystemExit and the run died before printing WORKTREE_PATH).
+    if "/" not in spec and "\\" not in spec:
+        name = spec if spec.endswith(".json") else spec + ".json"
+        candidates.append(project / ".pipeline" / "tasks" / name)
+    for cand in candidates:
         if cand.exists():
             return cand
-    raise SystemExit(f"task spec not found: {spec} (tried CWD, {project}, {TEAM_ROOT})")
+    tried = ", ".join(str(c) for c in candidates)
+    raise SystemExit(f"task spec not found: {spec} (tried {tried})")
 
 
 def language_conventions(project: Path) -> list[str]:
@@ -847,7 +854,9 @@ def cmd_worktree_start(args: argparse.Namespace) -> None:
                     or any(k in label for k in ("revamp", "rebuild", "delete"))
                     or any(k in req for k in ("revamp", "rebuild", "delete the codebase", "delete codebase", "from scratch"))
                 )
-        except Exception:
+        except (Exception, SystemExit):
+            # This lookup is a probe for the revamp purge, never a gate: a spec
+            # this command cannot find must not kill a worktree it just prepared.
             pass
 
     if is_revamp:
