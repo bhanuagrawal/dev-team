@@ -1478,7 +1478,9 @@ def capability_upgrades(signals: dict, profile: dict, project: Path | None = Non
             "id": "play-store-blockers",
             "title": "Resolve Google Play Store readiness blockers",
             "benefit": f"Submission compliance ({readiness.get('blockers_count', 0)} blockers: {blockers_summary})",
-            "how": "run `devteam store-readiness <project>` to inspect and resolve blockers in manifest/build config",
+            "how": ("; ".join(
+                b.get("fix", "") for b in readiness.get("blockers", []) if b.get("fix")
+            )[:400] or "run `devteam store-readiness <project>` to inspect the blockers"),
         })
     elif readiness.get("status") == "needs_review" and readiness.get("warnings"):
         warnings_summary = "; ".join(w.get("detail", "") for w in readiness.get("warnings", [])[:2])

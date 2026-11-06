@@ -323,6 +323,25 @@ def review(title: str, how: str = "", profile: dict | None = None,
             )
             return row
 
+    # An ask whose own text names a LOCAL devteam command is work the pipeline can
+    # run itself — driving a console for it is a wrong trip. Seen 2026-11-06: a
+    # store-readiness blocker whose fix is `devteam competition` was filed as a
+    # Play Console chore only because its title said "Google Play".
+    local = re.search(r"\bdevteam\s+([a-z][a-z-]+)", text)
+    if local and local.group(1) not in ("promote",):
+        command = local.group(1)
+        row.update(
+            verdict="agent", tool=None,
+            steps=[
+                f"run `devteam {command} <project>` — the ask's own text names this local command",
+                "re-run the collector that raised the flag: a presence-driven flag clears "
+                "itself when the data is there",
+            ],
+            why=(f"the ask names the local command `devteam {command}`, so nothing has "
+                 "to be driven in a console"),
+        )
+        return row
+
     rule = _first(RULES, text)
     if not rule:
         row["why"] = ("no console page, cloud API, OS setting or app dialog is named in "
@@ -553,6 +572,11 @@ SELFTEST: list[tuple[str, str, dict | None, str, str | None]] = [
     # A declaration the profile already holds is a read, not a console trip.
     ("Connect app analytics", "declare profile.connections.ga4 {property: <GA4 property id>}",
      {"connections": {"ga4": {"property": "123"}}}, "agent", None),
+    # A blocker whose own fix is a local command is not a console trip, even when
+    # its title says "Google Play".
+    ("Resolve Google Play Store readiness blockers",
+     "Run `devteam competition <project> --limit 5` to research >= 5 rivals and write docs/COMPETITION_RESEARCH.md",
+     None, "agent", None),
 ]
 
 
