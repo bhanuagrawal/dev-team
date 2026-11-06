@@ -23,7 +23,7 @@ ARCHETYPES: dict[str, dict[str, Any]] = {
     "zen_focus": {
         "key": "zen_focus",
         "domain": "Digital Intentionality, Serenity & Focus",
-        "keywords": ["launcher", "focus", "meditation", "calm", "serenity", "breathe", "breathing", "wellbeing", "detox", "habits", "minimalist phone"],
+        "keywords": ["launcher", "focus", "meditation", "calm", "serenity", "breathe", "breathing", "wellbeing", "detox", "habit", "habits", "routine", "streak", "intention", "minimalist phone"],
         "surface_base": "#0D1117",
         "surface_elevated": "#161C24",
         "surface_highlight": "#212B36",
@@ -86,7 +86,7 @@ ARCHETYPES: dict[str, dict[str, Any]] = {
     "financial_prestige": {
         "key": "financial_prestige",
         "domain": "Swiss Financial & Wealth Intelligence",
-        "keywords": ["finance", "crypto", "wealth", "expense", "budget", "money", "wallet", "investment", "accounting"],
+        "keywords": ["finance", "crypto", "wealth", "expense", "budget", "wallet", "investment", "accounting"],
         "surface_base": "#090D16",
         "surface_elevated": "#131B2E",
         "surface_highlight": "#1E293B",
@@ -160,6 +160,17 @@ def detect_domain_archetype(project: Path, topic: str = "") -> dict[str, Any]:
     prd_snippet = prd_path.read_text(errors="ignore")[:500] if prd_path.is_file() else ""
 
     combined = f"{name} {vision} {topic} {prd_snippet}".lower()
+
+    # The archetype decides a project's palette and typography, so it must not be
+    # chosen by a monetisation sentence: a vision that says it will "earn money"
+    # once classified a habit app as Swiss Financial. A profile may name its
+    # design domain outright, and its declared market counts as evidence too.
+    declared = str(profile.get("design_domain") or "").strip().lower()
+    if declared in ARCHETYPES:
+        return ARCHETYPES[declared]
+    market = str(profile.get("market_term") or "").strip()
+    if market:
+        combined = f"{combined} {market.lower()}"
 
     for _k, arch in ARCHETYPES.items():
         if any(kw in combined for kw in arch["keywords"]):

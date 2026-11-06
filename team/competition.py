@@ -56,6 +56,15 @@ def _derive_search_term(project: Path, explicit_term: str = "") -> str:
     vision = (profile.get("goals") or {}).get("vision", "").strip()
     name = profile.get("name") or project.name
 
+    # A project's market is a project FACT, not something inferred from prose.
+    # A vision sentence may mention money (how the app earns it) without the app
+    # being a finance product — that exact sentence once profiled five expense
+    # trackers as the rivals of a routine app. A profile that names its market
+    # wins over every keyword guess below.
+    declared = str(profile.get("market_term") or "").strip()
+    if declared:
+        return declared
+
     # Check for domain keywords in name or vision
     combined = f"{name} {vision}".lower()
     if any(k in combined for k in ["launcher", "minimalist phone", "screen time", "detox"]):
@@ -70,7 +79,7 @@ def _derive_search_term(project: Path, explicit_term: str = "") -> str:
         return "pickleball scorekeeper"
     if any(k in combined for k in ["scoreboard", "tennis", "court"]):
         return "sports scorekeeper"
-    if any(k in combined for k in ["budget", "finance", "expense tracker", "money"]):
+    if any(k in combined for k in ["budget", "finance", "expense tracker"]):
         return "expense tracker budget"
     if any(k in combined for k in ["habit", "routine", "tracker"]):
         return "habit tracker"
