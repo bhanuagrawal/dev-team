@@ -458,6 +458,45 @@ def record(project: Path, plan: dict[str, Any], result: dict[str, Any]) -> Path:
     return path
 
 
+def set_status(project: Path, *, enable: bool) -> dict[str, Any]:
+    """Start or stop the plan's campaign. The verb `--create` never had.
+
+    A campaign created PAUSED can only be started by something that holds the
+    plan — the plan already names the budget, so starting it is a state change
+    on a decided thing, not a new decision. Idempotent: asking for the state a
+    campaign is already in changes nothing and says so. Records the run like a
+    create, because spending is the one edit that must never hang on memory.
+    """
+    plan = load_plan(project)
+    cid = str(plan["account"]["customer_id"]).replace("-", "")
+    name = plan["campaign"]["name"]
+    rows = gaql(cid, "SELECT campaign.id, campaign.name, campaign.status, "
+                     "campaign_budget.amount_micros FROM campaign "
+                     f"WHERE campaign.name = '{name}' AND campaign.status != 'REMOVED'")
+    if not rows:
+        raise AdsError(f"'{name}' does not exist in {cid} — run "
+                       f"`devteam ads {project.name} --create --commit` first")
+    camp = rows[0]["campaign"]
+    want = "ENABLED" if enable else "PAUSED"
+    result: dict[str, Any] = {
+        "customer_id": cid, "name": name, "campaign_id": camp["id"],
+        "before": camp["status"], "after": want,
+        "daily_budget": int(rows[0]["campaignBudget"]["amountMicros"]) / 1e6,
+    }
+    if camp["status"] == want:
+        result["status"] = "unchanged"
+        return result
+    _post(f"customers/{cid}/campaigns:mutate",
+          {"operations": [{"update": {
+              "resourceName": f"customers/{cid}/campaigns/{camp['id']}",
+              "status": want}, "updateMask": "status"}]}, token())
+    live = gaql(cid, "SELECT campaign.status FROM campaign "
+                     f"WHERE campaign.id = {camp['id']}")
+    result["status"] = "enabled" if enable else "paused"
+    result["live_status"] = (live[0]["campaign"]["status"] if live else "?")
+    return result
+
+
 def status(project: Path) -> dict[str, Any]:
     """What exists live for this plan's campaign, and in what state."""
     plan = load_plan(project)

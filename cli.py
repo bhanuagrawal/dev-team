@@ -3413,6 +3413,28 @@ def cmd_ads(args: argparse.Namespace) -> int:
               f"{sum(len(g['keywords']) for g in plan['ad_groups'])} keywords)")
         return 0
 
+    if getattr(args, "start", False) or getattr(args, "pause", False):
+        try:
+            result = ads.set_status(project, enable=bool(args.start))
+        except ads.AdsError as exc:
+            return fail(str(exc))
+        if result["status"] == "unchanged":
+            print(f"ADS: '{result['name']}' is already {result['after']} — nothing changed")
+            return 0
+        path = ads.record(project, plan, result)
+        print("=" * 60)
+        print("ADS HANDOVER")
+        print("=" * 60)
+        print(f"  campaign   {result['campaign_id']}  {result['before']} → "
+              f"{result['live_status']}")
+        print(f"  budget     ₹{result['daily_budget']:.0f}/day · account {result['customer_id']}")
+        print(f"  record     {path.relative_to(project)}")
+        if args.start:
+            print(f"  to stop    devteam ads {project.name} --pause")
+        print("  note       spend starts on the next auction; ads already approved go live "
+              "immediately, new ones wait for policy review")
+        return 0
+
     if getattr(args, "create", False):
         if issues:
             print("ADS PLAN: cannot create")
@@ -3912,6 +3934,10 @@ def main() -> None:
                        help="create it ENABLED (default: PAUSED, ready to start)")
     ads_p.add_argument("--status", action="store_true",
                        help="what the plan's campaign looks like live: status, budget, counts")
+    ads_p.add_argument("--start", action="store_true",
+                       help="enable the plan's existing campaign (spends its daily budget)")
+    ads_p.add_argument("--pause", action="store_true",
+                       help="pause the plan's existing campaign again")
     ads_p.set_defaults(fn=cmd_ads)
     cs = sub.add_parser("console", help="plan or drive Google Play Console setup")
     cs.add_argument("project")
