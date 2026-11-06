@@ -2775,12 +2775,20 @@ def cmd_storefront_build(args: argparse.Namespace) -> int:
     # The pass writes deliverables; a pass that ends with them uncommitted is not a
     # pass (rule 10). Committed here, after the critic gate, so only a listing that
     # actually passed the gate can land on main.
+    # docs/storefront-assets.json is the PROVENANCE of the brand files this commit
+    # carries. A pass that REUSES a banner an earlier `storefront-brand` run painted
+    # must still publish that record: the baseline marks it "not written by this
+    # command", so the listing image landed on origin without the provenance that
+    # makes it shippable, and store-readiness reported source: none for an approved
+    # asset (observed 2026-11-06). This pass certifies the brand gate, so it always
+    # commits the record it certified.
+    certified = {k: v for k, v in baseline.items() if k != sbf.BRAND_REL}
     landed = commit_paths(
         project,
         deliverables,
         f"store: storefront assets (composition: {res.get('frame')}, critic {res.get('score')})",
         log=print,
-        baseline=baseline,
+        baseline=certified,
     )
     if not landed.get("pushed"):
         print(f"  ! not committed: {landed.get('why')}")
@@ -2875,6 +2883,16 @@ def cmd_storefront_brand(args: argparse.Namespace) -> int:
     project = resolve_project(args.project)
     from team.core import delivery_notice
     from team import storefront_brand as sbf
+    from team.publish import commit_paths, snapshot_paths
+
+    # The brand files ARE the listing's art plus the record of where it came from.
+    # Neither used to be committed here: the record only reached origin if a later
+    # `storefront-build` happened to write it, and when the build reused the banner
+    # it explicitly skipped it — leaving an approved asset on origin with no
+    # provenance (observed 2026-11-06). Snapshot first, commit what this command
+    # wrote after the gate passes.
+    deliverables = [sbf.BRAND_REL, "distribution/listing"]
+    baseline = snapshot_paths(project, deliverables)
 
     print(delivery_notice(project))
 
@@ -2930,7 +2948,20 @@ def cmd_storefront_brand(args: argparse.Namespace) -> int:
               + (f"  reused: {', '.join(res.get('reused') or [])}" if res.get("reused") else ""))
 
     print(sbf.format_status(project))
-    return 0 if not sbf.gate(project) else 1
+    issues = sbf.gate(project)
+    if issues:
+        return 1
+    # Rule 10: a command that writes into a project ends with a commit on a pushed
+    # ref. Committed only after the gate, so a listing that is not shippable cannot
+    # land on main.
+    landed = commit_paths(
+        project, deliverables,
+        "store: brand assets (icon/feature graphic + provenance)",
+        log=print, baseline=baseline,
+    )
+    if not landed.get("pushed"):
+        print(f"  ! not committed: {landed.get('why')}")
+    return 0
 
 
 def cmd_route(args: argparse.Namespace) -> int:
