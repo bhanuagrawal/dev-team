@@ -26,6 +26,7 @@ Zero project names — generic across all Android / KMP projects.
 from __future__ import annotations
 
 import json
+import os
 import re
 import shutil
 import struct
@@ -960,6 +961,17 @@ def render_previews(project: Path, log: Any = None, timeout: int = 900,
         dest = out_dir / f"{sid}.png"
         if match.resolve() != dest.resolve():
             shutil.copy2(match, dest)
+        # A skipped (UP-TO-DATE) Gradle task does not rewrite its PNGs, and copy2
+        # preserves the old mtime. Gradle's up-to-date check is content-based, so
+        # the picture still depicts the sources as of THIS render — but every
+        # consumer that ages a render against its inputs (`ux-audit`) then calls a
+        # fresh render stale forever, and a checkout synced after the render makes
+        # it look older than code it already shows. Stamp the collection time, so
+        # "stale" keeps its one honest meaning: an input changed AFTER we looked.
+        try:
+            os.utime(dest, None)
+        except OSError:
+            pass
         collected.append({"id": sid, "file": str(dest.relative_to(project)),
                           "bytes": dest.stat().st_size, "source": str(match.relative_to(project))})
 
