@@ -288,6 +288,28 @@ _UNDER_THE_HOOD_NOTE = (
     "✓ Everything you already use keeps working the same way\n"
 )
 
+# A queue label may be perfectly readable English and still be pipeline
+# vocabulary: v1.5.40 shipped the play note "Fixed: Every declared screen is
+# rendered and its honest states are asserted", which tells a user nothing about
+# what changed and exposes the team's own test machinery. A note is judged by a
+# different standard from a label, so the derived line is checked for engineering
+# terms the storefront must never carry; a hit falls back to the honest generic
+# note, and a task spec that wants specific user copy supplies the `whatsnew`
+# field (which always wins).
+_INTERNAL_COPY_RE = re.compile(
+    r"\b(declared|assertion|assertions|asserted|asserts?|composables?|harness|"
+    r"scenes?|renders?|rendered|rendering|unit[- ]tests?|instrumented|"
+    r"roborazzi|robolectric|coverage|refactor(?:ed|ing)?|codegen|"
+    r"gradle|kotlin|versionCode|version code|api level|lint|"
+    r"smoke tests?|test suite|test file|diff)\b",
+    re.IGNORECASE,
+)
+
+
+def _is_internal_copy(text: str) -> bool:
+    """True when a derived note line describes the pipeline, not the product."""
+    return bool(_INTERNAL_COPY_RE.search(str(text or "")))
+
 
 def _is_internal_label(label: str) -> bool:
     """True when `label` is an internal identifier rather than user-facing copy."""
@@ -330,9 +352,10 @@ def _whatsnew_text(task: dict, max_chars: int = WHATS_NEW_MAX_CHARS) -> str:
     else:
         label = _short_label((task.get("surface", {}) or {}).get("label"))
         ttype = task.get("type", "motion")
-        if _is_internal_label(label):
-            # An id is not a release note: say what actually changed for the user
-            # instead of printing the pipeline's own task slug.
+        if _is_internal_label(label) or _is_internal_copy(label):
+            # An id — or a sentence about declared screens, scenes and assertions —
+            # is not a release note: say what actually changed for the user instead
+            # of printing the pipeline's own vocabulary.
             text = _UNDER_THE_HOOD_NOTE
         elif ttype == "motion":
             text = (f"✓ Polished: {label}\n"
