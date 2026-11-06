@@ -165,6 +165,25 @@ def _discard(package: str, edit: str, token: str, project: Path) -> None:
          f"{API}/applications/{package}/edits/{edit}"], project, timeout=60)
 
 
+def _commit_edit(package: str, edit: str, token: str, project: Path) -> dict:
+    """Commit a Play edit, letting the app's OWN review setting decide.
+
+    `changesNotSentForReview=true` was hardcoded, and an app whose console is set
+    to "Changes are sent for review automatically" REJECTS that flag outright
+    (INVALID_ARGUMENT: the query parameter changesNotSentForReview must not be
+    set — observed 2026-11-07: six images uploaded, then the commit died and the
+    listing did not change). A listing change is meant to reach the store, so the
+    default commit (sent for review) is the right call; the flag is retried only
+    when the API explicitly insists on it.
+    """
+    committed = _post(f"{API}/applications/{package}/edits/{edit}:commit", project, token)
+    err = str((committed or {}).get("_error") or "").lower()
+    if committed.get("_error") and "must be set" in err and "must not be set" not in err:
+        committed = _post(f"{API}/applications/{package}/edits/{edit}:commit"
+                          "?changesNotSentForReview=true", project, token)
+    return committed
+
+
 def _live_images(package: str, edit: str, token: str, project: Path,
                  locale: str, image_type: str) -> list[dict]:
     from .research import _play_get
@@ -233,8 +252,7 @@ def publish_icon(project: Path, dry_run: bool = True, log: Any = None) -> dict[s
         live = _live_images(package, edit_id, token, project, plan["locale"], "icon")
         if not live or live[0].get("sha256") != want:
             raise RuntimeError("the uploaded icon did not verify in the edit")
-        committed = _post(f"{API}/applications/{package}/edits/{edit_id}:commit"
-              "?changesNotSentForReview=true", project, token)
+        committed = _commit_edit(package, edit_id, token, project)
         if committed.get("_error") or not committed.get("id"):
             raise RuntimeError(f"commit rejected: {committed.get('_error') or committed}")
         fresh = _post(f"{API}/applications/{package}/edits", project, token)
@@ -436,8 +454,7 @@ def publish_listing_assets(project: Path, dry_run: bool = True, log: Any = None)
                                                      if a["type"] == "phoneScreenshots"]:
             raise RuntimeError("screenshot ORDER after upload does not match the editorial order")
 
-        committed = _post(f"{API}/applications/{package}/edits/{edit_id}:commit"
-              "?changesNotSentForReview=true", project, token)
+        committed = _commit_edit(package, edit_id, token, project)
         # A commit must come back as the edit object; anything else (an error
         # payload, a permission denial, an empty body) means the listing did NOT
         # change. Treating "no _error key" as success is what shipped a stale
