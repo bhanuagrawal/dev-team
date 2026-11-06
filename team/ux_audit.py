@@ -130,11 +130,14 @@ def _feature_files(screen: Path) -> list[Path]:
 def surfaces(project: Path) -> list[dict]:
     """Every shipped screen with its two fingerprints. Discovery is `scan`'s job.
 
-    A declared path is resolved against the checkout first and the DELIVERY ref
-    (`origin/<main>`) second. This audit judges what shipped, and the owner's
-    checkout legitimately lags it — resolving only locally made a stale checkout
-    report zero surfaces, so the audit silently had nothing to look at (the same
-    class of failure as an unwired capability: a check that cannot fire).
+    A declared path is resolved against the DELIVERY ref (`origin/<main>`) first
+    and the owner's checkout second. This audit judges what shipped, and the
+    checkout legitimately lags it. Preferring the checkout while it merely HAD the
+    file was not enough: a checkout one release behind still holds the old bytes,
+    so both fingerprints matched the last audit and the screen it had just changed
+    reported "unchanged" (seen 2026-11-07 — the audit skipped exactly the release
+    that needed it). The delivery ref wins whenever it holds the file; the
+    checkout is the fallback for a project whose main is not fetched.
     """
     from . import scan
     theme = theme_paths(project)
@@ -148,10 +151,12 @@ def surfaces(project: Path) -> list[dict]:
                     if Path(t).suffix == ".kt"]
         paths = []
         for rel in declared:
-            p = project / rel
-            if not p.exists() and tree is not None and (tree / rel).exists():
+            p = None
+            if tree is not None and (tree / rel).exists():
                 p = tree / rel
-            if p.exists():
+            elif (project / rel).exists():
+                p = project / rel
+            if p is not None:
                 paths.append(p)
         if not paths:
             continue
