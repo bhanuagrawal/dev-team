@@ -269,7 +269,16 @@ def _short_label(label, limit: int = _WHATS_NEW_LABEL_CHARS) -> str:
     mangled product name in a store listing is worse than a capital letter after
     a colon. The templates below label the line instead of embedding it.
     """
+    raw = re.sub(r"\s+", " ", str(label or "").strip())
     text = _first_clause(label)
+    # A label with no separator is already a single clause. Cutting it at a
+    # width is not shortening a mechanism tail — it is truncating a complete
+    # sentence, which `label_was_truncated` then reads as a fragment and
+    # replaces with the generic "under-the-hood" note (v1.0.18 shipped that
+    # for a 93-char, perfectly readable label). Keep it whole here; the store's
+    # real cap is enforced by _trim_whatsnew afterwards.
+    if not re.search(r"[—–:|]", raw):
+        return text or "the app"
     if len(text) > limit:
         cut = text[:limit].rsplit(" ", 1)[0]
         text = _strip_dangling(cut or text[:limit])
@@ -310,7 +319,14 @@ def label_was_truncated(label, limit: int = _WHATS_NEW_LABEL_CHARS) -> bool:
     A truncated label is a fragment ("…the paywall's honesty"), and a fragment
     is not a release note: the templates below fall back to the honest generic
     note instead of shipping a sentence that stops mid-thought.
+
+    A label with no separator was never cut: it is one complete clause, however
+    long, and `_short_label` keeps it whole. Only a mechanism label (one that a
+    separator trims to its first clause) can leave a fragment.
     """
+    raw = re.sub(r"\s+", " ", str(label or "").strip())
+    if not re.search(r"[—–:|]", raw):
+        return False
     return len(_first_clause(label)) > limit
 
 
