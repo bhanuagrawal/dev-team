@@ -1,193 +1,201 @@
 {
-  "_comment": "Every rule the team enforces, and WHERE it is enforced. This is the conversion backlog, kept as data so it cannot drift the way prose does: `code` = a command already refuses/does it; `enforcible` = a command could, and the proposal is written down; `judgment` = no mechanism can decide it, a person or model must; `reference` = facts/diagnostics that belong in docs, not in the contract. Print the gap with `devteam docs-audit --rules`. When a rule moves to code, change its kind here and delete the prose that restated it.",
-  "rules": [
-    {
-      "id": "worktree-isolation",
-      "rule": "never edit project code on main; every task runs on dt/<task-id> cut from origin/main",
-      "doc": "AGENTS.md#1",
-      "kind": "code",
-      "enforced_by": "devteam worktree-start / release"
-    },
-    {
-      "id": "delivery-ref",
-      "rule": "read project code from origin/main, not the checkout",
-      "doc": "AGENTS.md#2",
-      "kind": "code",
-      "enforced_by": "devteam status (DELIVERY line) / storefront-scenes renders from the scan tree"
-    },
-    {
-      "id": "state-is-written-not-edited",
-      "rule": "never hand-edit .pipeline/state.json; write via devteam record",
-      "doc": "AGENTS.md#3",
-      "kind": "enforcible",
-      "proposal": "doctor: keep a state checksum written by the CLI and BLOCK when the file changed outside it",
-      "note": "today only prose + convention"
-    },
-    {
-      "id": "one-canonical-ci",
-      "rule": ".github/workflows/release.yml is generated from team/templates/ci-release.yml",
-      "doc": "AGENTS.md#4",
-      "kind": "code",
-      "enforced_by": "devteam doctor (renders the template and compares the project workflow)"
-    },
-    {
-      "id": "store-assets-are-deliverables",
-      "rule": "screenshots render from the app's composables; the poster is composed (plate from an image model only), never hand-drawn HTML",
-      "doc": "AGENTS.md#5",
-      "kind": "code",
-      "enforced_by": "devteam storefront-build (refuses without a plate/layout; --builtin must be deliberate) + asset_critic provenance"
-    },
-    {
-      "id": "storefront-direction",
-      "rule": "what the listing says is decided and committed before anything is drawn",
-      "doc": "AGENTS.md#5",
-      "kind": "code",
-      "enforced_by": "devteam storefront-build (refuses without a locked direction) / storefront-direction --apply"
-    },
-    {
-      "id": "listing-publish-ends-in-browser",
-      "rule": "the API uploads and commits a listing edit; permissions and Managed publishing are console-only, so the publish is finished in Play Console",
-      "doc": "AGENTS.md#5",
-      "kind": "reference",
-      "note": "no mechanism can grant console permissions; the skill states the sequence"
-    },
-    {
-      "id": "nightly-schedule-enforced",
-      "rule": "every app must have an active launchd nightly schedule (or explicit manual mode in profile.json) verified by doctor and store-readiness",
-      "doc": "AGENTS.md",
-      "kind": "code",
-      "enforced_by": "devteam doctor (orchestrator check) + devteam store-readiness (Automation & Operations category)"
-    },
-    {
-      "id": "ux-audit-on-change",
-      "rule": "a screen whose look/feel fingerprint changed must get one neutral first-use reaction before a run can claim it polished anything; unchanged screens are never re-audited",
-      "doc": "SKILL.md",
-      "kind": "code",
-      "enforced_by": "devteam ux-plan / ux-audit (fingerprint decides) + team/verify.py warn naming the unaudited screens",
-      "note": "warning, not a gate: the released gates stay compile/tests. Per-screen fingerprints mean the audit is paid on change, never per release"
-    },
-    {
-      "id": "ga4-read-is-verified",
-      "rule": "a GA4 connection is ready only when the declared property can actually be read; the credential is a reader service account (connections.ga4.key_file or machine-wide $DEVTEAM_GA4_KEY), never the owner's ADC login — Google blocks analytics.readonly for gcloud's default client",
-      "doc": "AGENTS.md",
-      "kind": "code",
-      "enforced_by": "team/ga4.py (one credential resolver + a real runReport probe) used by team/research.py and devteam doctor",
-      "note": "lesson 2026-11-05: doctor tested 'gcloud can mint a token', so a property returning 403 (and a login Google had just blocked) still read as configured; a new project now cannot land there either"
-    },
-    {
-      "id": "nightly-three-runs-in-window",
-      "rule": "every scheduled app runs RUNS_PER_DAY (3) times a night inside the owner's 23:00–11:00 window; apps are interleaved evenly so consecutive machine-wide runs are as far apart as the app count allows, and overlap is tolerated because three runs make a skipped one harmless",
-      "doc": "AGENTS.md",
-      "kind": "code",
-      "enforced_by": "devteam setup (scheduler.plan_schedule/apply_plan installs 3 slots per app) + devteam schedules --rebalance (re-spaces every app) + devteam doctor and store-readiness (assert 3 slots inside the window)",
-      "note": "owner directive 2026-11-05: three runs a night, 11pm–11am, overlap tolerated but avoided where possible; MIN_GAP_MIN is now a best-effort target, not a refusal"
-    },
-    {
-      "id": "cleanup-is-part-of-the-run",
-      "rule": "pick and record prune; a tree goes only when its work is safe somewhere else",
-      "doc": "AGENTS.md#6",
-      "kind": "code",
-      "enforced_by": "devteam worktree-prune (dry run by default) / pick / record"
-    },
-    {
-      "id": "worktree-is-not-a-record",
-      "rule": "work is closed when main contains it or origin holds its branch; unfinished work is parked",
-      "doc": "AGENTS.md#7",
-      "kind": "code",
-      "enforced_by": "worktrees.park + devteam takeover (parked list)"
-    },
-    {
-      "id": "no-auto-guards",
-      "rule": "no frozen paths, release-knob diff or dependency gates; compile/tests are the gates — and a production change must carry its own test in the same diff",
-      "doc": "AGENTS.md#8",
-      "kind": "code",
-      "enforced_by": "devteam verify (diff-scoped test gate) / devteam release (same gate before the bump)"
-    },
-    {
-      "id": "tests-are-part-of-the-change",
-      "rule": "every changed production file is named by a test file in the same diff; a changed UI file is named by a Compose/Espresso test with an assertion, never a screenshot render",
-      "doc": "AGENTS.md#8",
-      "kind": "code",
-      "enforced_by": "devteam verify (test gate) / devteam release (refuses before the version bump) / devteam doctor (test-posture warn)"
-    },
-    {
-      "id": "ask-only-what-no-agent-can-decide",
-      "rule": "ask the owner only for what no agent can decide (incidents, WIP, direction); never about promotion",
-      "doc": "AGENTS.md#9",
-      "kind": "judgment",
-      "note": "requires intent; the run banner is where it shows"
-    },
-    {
-      "id": "nothing-uncommitted",
-      "rule": "every change ends in a commit on a pushed ref; a dirty checkout is reported",
-      "doc": "AGENTS.md#10",
-      "kind": "code",
-      "note": "warn-only by design: the run commits its own work, it does not commit the owner's",
-      "enforced_by": "devteam doctor / status (checkout_dirty — reports, never commits the owner's WIP)"
-    },
-    {
-      "id": "verify-before-release",
-      "rule": "never push with red gates",
-      "doc": "SKILL.md#hard-rules",
-      "kind": "code",
-      "enforced_by": "devteam release (refuses on FAIL) / verify"
-    },
-    {
-      "id": "release-notes-curated",
-      "rule": "a whatsnew_curated project never gets the pipeline's boilerplate note, but an explicit per-release `whatsnew` in the task spec IS written; no release may repeat the previous release's note verbatim",
-      "doc": "SKILL.md#hard-rules",
-      "kind": "code",
-      "enforced_by": "shipper.whatsnew_gate (verify + release refuse a repeated/empty note) / store-readiness"
-    },
-    {
-      "id": "emulators-torn-down",
-      "rule": "a run stops only the emulators it started",
-      "doc": "SKILL.md#hard-rules",
-      "kind": "code",
-      "enforced_by": "devteam emulators --record / verify (baseline diff)"
-    },
-    {
-      "id": "emulator-failure-modes",
-      "rule": "three emulator-only failure modes (corrupt snapshot, AVD lock, crash-consent dialog) and how to repair them",
-      "doc": "SKILL.md#hard-rules",
-      "kind": "reference",
-      "note": "diagnostics, not a rule: 20 lines of troubleshooting sitting in the contract"
-    },
-    {
-      "id": "self-improvement-duty",
-      "rule": "a surprise is closed by a change to team code in the same run; nothing is appended to a log",
-      "doc": "SKILL.md#hard-rules",
-      "kind": "judgment",
-      "note": "no mechanism can decide what surprised an agent, but the FIX must be a commit; a fix too large for the run becomes an `enforcible` entry here"
-    },
-    {
-      "id": "generic-team-code",
-      "rule": "team code carries no project names",
-      "doc": "SKILL.md#hard-rules",
-      "kind": "code",
-      "enforced_by": "devteam doctor (greps every registered project name)"
-    },
-    {
-      "id": "docs-newest-wins",
-      "rule": "the newest text is the source of truth; overlapping copies are removed, not kept",
-      "doc": "scripts/hooks/pre-commit",
-      "kind": "code",
-      "enforced_by": "devteam docs-audit --check --new-only (pre-commit hook)"
-    },
-    {
-      "id": "resume-from-state",
-      "rule": "a run's starting position (delivery ref, dirty files, trees, queue head, open asks, next command) is read, not inferred from prose",
-      "doc": "team/takeover.py",
-      "kind": "code",
-      "enforced_by": "devteam takeover"
-    },
-    {
-      "id": "emulator-boot-zombie-repair",
-      "rule": "a device gate that cannot boot because a dead emulator still holds the AVD must repair the AVD and rerun, never silently degrade to warn-only",
-      "doc": "AGENTS.md#8 / dev-team skill (emulator failure modes)",
-      "kind": "enforcible",
-      "proposal": "devteam verify's instrumented stage: before booting an AVD, if a qemu process holds that AVD's lock while `adb devices` shows no online device AND this run started no emulator, terminate the holder, clear the locks, boot again, and only then fall back to warn-only; record the repair in the run log",
-      "note": "2026-11-05/06: the two touched device classes passed (13 tests), then a zombie qemu from a failed boot kept the AVD lock, every later boot died in ~1s, and verify degraded to 'device test runner could not execute (warn-only)' — the degrade is right for a machine with no emulator, wrong for a repairable lock holder"
-    }
-  ]
+ "_comment": "Every rule the team enforces, and WHERE it is enforced. This is the conversion backlog, kept as data so it cannot drift the way prose does: `code` = a command already refuses/does it; `enforcible` = a command could, and the proposal is written down; `judgment` = no mechanism can decide it, a person or model must; `reference` = facts/diagnostics that belong in docs, not in the contract. Print the gap with `devteam docs-audit --rules`. When a rule moves to code, change its kind here and delete the prose that restated it.",
+ "rules": [
+  {
+   "id": "worktree-isolation",
+   "rule": "never edit project code on main; every task runs on dt/<task-id> cut from origin/main",
+   "doc": "AGENTS.md#1",
+   "kind": "code",
+   "enforced_by": "devteam worktree-start / release"
+  },
+  {
+   "id": "delivery-ref",
+   "rule": "read project code from origin/main, not the checkout",
+   "doc": "AGENTS.md#2",
+   "kind": "code",
+   "enforced_by": "devteam status (DELIVERY line) / storefront-scenes renders from the scan tree"
+  },
+  {
+   "id": "state-is-written-not-edited",
+   "rule": "never hand-edit .pipeline/state.json; write via devteam record",
+   "doc": "AGENTS.md#3",
+   "kind": "enforcible",
+   "proposal": "doctor: keep a state checksum written by the CLI and BLOCK when the file changed outside it",
+   "note": "today only prose + convention"
+  },
+  {
+   "id": "one-canonical-ci",
+   "rule": ".github/workflows/release.yml is generated from team/templates/ci-release.yml",
+   "doc": "AGENTS.md#4",
+   "kind": "code",
+   "enforced_by": "devteam doctor (renders the template and compares the project workflow)"
+  },
+  {
+   "id": "store-assets-are-deliverables",
+   "rule": "screenshots render from the app's composables; the poster is composed (plate from an image model only), never hand-drawn HTML",
+   "doc": "AGENTS.md#5",
+   "kind": "code",
+   "enforced_by": "devteam storefront-build (refuses without a plate/layout; --builtin must be deliberate) + asset_critic provenance"
+  },
+  {
+   "id": "storefront-direction",
+   "rule": "what the listing says is decided and committed before anything is drawn",
+   "doc": "AGENTS.md#5",
+   "kind": "code",
+   "enforced_by": "devteam storefront-build (refuses without a locked direction) / storefront-direction --apply"
+  },
+  {
+   "id": "listing-publish-ends-in-browser",
+   "rule": "the API uploads and commits a listing edit; permissions and Managed publishing are console-only, so the publish is finished in Play Console",
+   "doc": "AGENTS.md#5",
+   "kind": "reference",
+   "note": "no mechanism can grant console permissions; the skill states the sequence"
+  },
+  {
+   "id": "nightly-schedule-enforced",
+   "rule": "every app must have an active launchd nightly schedule (or explicit manual mode in profile.json) verified by doctor and store-readiness",
+   "doc": "AGENTS.md",
+   "kind": "code",
+   "enforced_by": "devteam doctor (orchestrator check) + devteam store-readiness (Automation & Operations category)"
+  },
+  {
+   "id": "ux-audit-on-change",
+   "rule": "a screen whose look/feel fingerprint changed must get one neutral first-use reaction before a run can claim it polished anything; unchanged screens are never re-audited",
+   "doc": "SKILL.md",
+   "kind": "code",
+   "enforced_by": "devteam ux-plan / ux-audit (fingerprint decides) + team/verify.py warn naming the unaudited screens",
+   "note": "warning, not a gate: the released gates stay compile/tests. Per-screen fingerprints mean the audit is paid on change, never per release"
+  },
+  {
+   "id": "ga4-read-is-verified",
+   "rule": "a GA4 connection is ready only when the declared property can actually be read; the credential is a reader service account (connections.ga4.key_file or machine-wide $DEVTEAM_GA4_KEY), never the owner's ADC login \u2014 Google blocks analytics.readonly for gcloud's default client",
+   "doc": "AGENTS.md",
+   "kind": "code",
+   "enforced_by": "team/ga4.py (one credential resolver + a real runReport probe) used by team/research.py and devteam doctor",
+   "note": "lesson 2026-11-05: doctor tested 'gcloud can mint a token', so a property returning 403 (and a login Google had just blocked) still read as configured; a new project now cannot land there either"
+  },
+  {
+   "id": "nightly-three-runs-in-window",
+   "rule": "every scheduled app runs RUNS_PER_DAY (3) times a night inside the owner's 23:00\u201311:00 window; apps are interleaved evenly so consecutive machine-wide runs are as far apart as the app count allows, and overlap is tolerated because three runs make a skipped one harmless",
+   "doc": "AGENTS.md",
+   "kind": "code",
+   "enforced_by": "devteam setup (scheduler.plan_schedule/apply_plan installs 3 slots per app) + devteam schedules --rebalance (re-spaces every app) + devteam doctor and store-readiness (assert 3 slots inside the window)",
+   "note": "owner directive 2026-11-05: three runs a night, 11pm\u201311am, overlap tolerated but avoided where possible; MIN_GAP_MIN is now a best-effort target, not a refusal"
+  },
+  {
+   "id": "cleanup-is-part-of-the-run",
+   "rule": "pick and record prune; a tree goes only when its work is safe somewhere else",
+   "doc": "AGENTS.md#6",
+   "kind": "code",
+   "enforced_by": "devteam worktree-prune (dry run by default) / pick / record"
+  },
+  {
+   "id": "worktree-is-not-a-record",
+   "rule": "work is closed when main contains it or origin holds its branch; unfinished work is parked",
+   "doc": "AGENTS.md#7",
+   "kind": "code",
+   "enforced_by": "worktrees.park + devteam takeover (parked list)"
+  },
+  {
+   "id": "no-auto-guards",
+   "rule": "no frozen paths, release-knob diff or dependency gates; compile/tests are the gates \u2014 and a production change must carry its own test in the same diff",
+   "doc": "AGENTS.md#8",
+   "kind": "code",
+   "enforced_by": "devteam verify (diff-scoped test gate) / devteam release (same gate before the bump)"
+  },
+  {
+   "id": "tests-are-part-of-the-change",
+   "rule": "every changed production file is named by a test file in the same diff; a changed UI file is named by a Compose/Espresso test with an assertion, never a screenshot render",
+   "doc": "AGENTS.md#8",
+   "kind": "code",
+   "enforced_by": "devteam verify (test gate) / devteam release (refuses before the version bump) / devteam doctor (test-posture warn)"
+  },
+  {
+   "id": "ask-only-what-no-agent-can-decide",
+   "rule": "ask the owner only for what no agent can decide (incidents, WIP, direction); never about promotion",
+   "doc": "AGENTS.md#9",
+   "kind": "judgment",
+   "note": "requires intent; the run banner is where it shows"
+  },
+  {
+   "id": "nothing-uncommitted",
+   "rule": "every change ends in a commit on a pushed ref; a dirty checkout is reported",
+   "doc": "AGENTS.md#10",
+   "kind": "code",
+   "note": "warn-only by design: the run commits its own work, it does not commit the owner's",
+   "enforced_by": "devteam doctor / status (checkout_dirty \u2014 reports, never commits the owner's WIP)"
+  },
+  {
+   "id": "verify-before-release",
+   "rule": "never push with red gates",
+   "doc": "SKILL.md#hard-rules",
+   "kind": "code",
+   "enforced_by": "devteam release (refuses on FAIL) / verify"
+  },
+  {
+   "id": "release-notes-curated",
+   "rule": "a whatsnew_curated project never gets the pipeline's boilerplate note, but an explicit per-release `whatsnew` in the task spec IS written; no release may repeat the previous release's note verbatim",
+   "doc": "SKILL.md#hard-rules",
+   "kind": "code",
+   "enforced_by": "shipper.whatsnew_gate (verify + release refuse a repeated/empty note) / store-readiness"
+  },
+  {
+   "id": "emulators-torn-down",
+   "rule": "a run stops only the emulators it started",
+   "doc": "SKILL.md#hard-rules",
+   "kind": "code",
+   "enforced_by": "devteam emulators --record / verify (baseline diff)"
+  },
+  {
+   "id": "emulator-failure-modes",
+   "rule": "three emulator-only failure modes (corrupt snapshot, AVD lock, crash-consent dialog) and how to repair them",
+   "doc": "SKILL.md#hard-rules",
+   "kind": "reference",
+   "note": "diagnostics, not a rule: 20 lines of troubleshooting sitting in the contract"
+  },
+  {
+   "id": "self-improvement-duty",
+   "rule": "a surprise is closed by a change to team code in the same run; nothing is appended to a log",
+   "doc": "SKILL.md#hard-rules",
+   "kind": "judgment",
+   "note": "no mechanism can decide what surprised an agent, but the FIX must be a commit; a fix too large for the run becomes an `enforcible` entry here"
+  },
+  {
+   "id": "generic-team-code",
+   "rule": "team code carries no project names",
+   "doc": "SKILL.md#hard-rules",
+   "kind": "code",
+   "enforced_by": "devteam doctor (greps every registered project name)"
+  },
+  {
+   "id": "docs-newest-wins",
+   "rule": "the newest text is the source of truth; overlapping copies are removed, not kept",
+   "doc": "scripts/hooks/pre-commit",
+   "kind": "code",
+   "enforced_by": "devteam docs-audit --check --new-only (pre-commit hook)"
+  },
+  {
+   "id": "resume-from-state",
+   "rule": "a run's starting position (delivery ref, dirty files, trees, queue head, open asks, next command) is read, not inferred from prose",
+   "doc": "team/takeover.py",
+   "kind": "code",
+   "enforced_by": "devteam takeover"
+  },
+  {
+   "id": "emulator-boot-zombie-repair",
+   "rule": "a device gate that cannot boot because a dead emulator still holds the AVD must repair the AVD and rerun, never silently degrade to warn-only",
+   "doc": "AGENTS.md#8 / dev-team skill (emulator failure modes)",
+   "kind": "enforcible",
+   "proposal": "devteam verify's instrumented stage: before booting an AVD, if a qemu process holds that AVD's lock while `adb devices` shows no online device AND this run started no emulator, terminate the holder, clear the locks, boot again, and only then fall back to warn-only; record the repair in the run log",
+   "note": "2026-11-05/06: the two touched device classes passed (13 tests), then a zombie qemu from a failed boot kept the AVD lock, every later boot died in ~1s, and verify degraded to 'device test runner could not execute (warn-only)' \u2014 the degrade is right for a machine with no emulator, wrong for a repairable lock holder"
+  },
+  {
+   "id": "store-screenshots-track-the-shipped-ui",
+   "rule": "a listing frame must be painted from a render that contains the screen it depicts; a poster older than the newest change to its scene's composables is stale, not current",
+   "doc": "AGENTS.md#5",
+   "kind": "enforcible",
+   "proposal": "store-readiness/store-publish compare the source commit recorded for the painted frames (.pipeline/storefront_run.json + docs/storefront-frames.json composition) with the newest commit that touched each scene's bound composables in docs/storefront.json: a frame whose scene changed after the paint is reported as STALE and store-publish refuses it until `devteam storefront-build <project> --poster` repaints it.",
+   "note": "run-derived 2026-11-06 (Paddle v1.0.40): verify warned 'History changed (render), no audit since' while the listing's 03_summary/04_history posters still depicted the previous build, and every readiness check passed 25/25 because nothing compares the frames' source commit with the shipped screens."
+  }
+ ]
 }
