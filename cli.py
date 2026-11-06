@@ -1732,10 +1732,23 @@ def cmd_status(args: argparse.Namespace) -> None:
     if last:
         print(f"last run:   {last.get('date')} → {last.get('result')} {last.get('note','')[:80]}")
     # Test coverage is a plan gate now (team/research.py), so the owner and the next
-    # agent must be able to see the numbers the planner is judged on. Read from the
-    # last collect (cheap); `devteam coverage <project>` re-measures on demand.
+    # agent must be able to see the numbers the planner is judged on. The stored
+    # number is a snapshot from the LAST plan review, so a shipped run makes it
+    # visibly wrong (v3.13.74 took unit 41% → 82% and status still said 41% — below
+    # floor). Re-measure structurally over the delivery tree when the scan worktree
+    # is exactly at origin/main (cheap: no Gradle); fall back to the snapshot when
+    # it is not, rather than reporting a number from a different revision.
     from team import coverage as coverage_mod
     cov = coverage_mod.stored(project)
+    scan_tree = project / ".pipeline" / "scan"
+    ref_sha = ref.get("ref_sha")
+    if scan_tree.is_dir() and ref_sha:
+        from team.core import git
+        head = git(["rev-parse", "HEAD"], cwd=scan_tree, timeout=30)
+        if head.returncode == 0 and head.stdout.strip().startswith(ref_sha):
+            fresh = coverage_mod.collect(scan_tree, profile)
+            if fresh.get("status") == "ok":
+                cov = fresh
     if cov:
         print("coverage:   " + coverage_mod.summary_line(cov).removeprefix("coverage: "))
     # What the STORE says is not visible in git or CI: a delivery can be green and
