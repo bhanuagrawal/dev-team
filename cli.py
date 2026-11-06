@@ -589,7 +589,7 @@ def cmd_rc(args: argparse.Namespace) -> None:
              "why": args.note or "", "date": today(), "by": by}
     state.setdefault("release_candidates", []).append(entry)
     save_state(project, state)
-    _refresh_site(project)
+    _print_report_url(project)
     verdict = "a RELEASE CANDIDATE (✅)" if entry["rc"] else "NOT a release candidate"
     print(f"recorded ({by}): v{version} is {verdict}"
           + (f" — {entry['note']}" if entry["note"] else ""))
@@ -645,16 +645,14 @@ def print_page(project: Path, note: str = "", file=None,
 # orchestrator-facing deterministic commands
 # --------------------------------------------------------------------------- #
 
-def _refresh_site(project: Path) -> None:
-    """Rebuild the local report page after a ledger change.
+def _print_report_url(project: Path) -> None:
+    """Name the report page after a ledger change — the page itself was already
+    rebuilt by `save_state`, which every ledger writer goes through.
 
-    Never fatal: the page is a view of the ledger, and a broken view must not fail
-    the thing it describes. It prints its own URL so the owner can open it from the
-    phone without remembering a port.
+    Never fatal: the page is a view of the ledger, and a view that cannot name its
+    own URL must not fail the thing it describes.
     """
     try:
-        from team import report
-        report.build()
         port = 8788
         urls = _site_urls(port)
         tail = next((u for u in urls if "ts.net" in u), urls[0] if urls else "")
@@ -1209,7 +1207,7 @@ def cmd_record(args: argparse.Namespace) -> None:
     save_state(project, state)
     scribe.update(project)
     print(f"recorded: {entry['result']} {entry['task_id']}")
-    _refresh_site(project)
+    _print_report_url(project)
     # A shipped run recorded WITHOUT its task-spec writes no shipped-ledger rows,
     # so the queue entry it delivered cannot later be recognised as delivered
     # (lesson 2026-10-18: exactly this let a delivered entry stay at the head of

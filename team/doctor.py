@@ -461,6 +461,35 @@ def run_doctor(project: Path, log) -> dict:
     except Exception as e:  # a check must never hide the report
         log(f"doctor tests: could not check ({e})")
 
+    # The report page answers "what shipped, what do I test?" on the owner's phone.
+    # Every ledger write rebuilds it (`core.save_state`), so a page older than the
+    # ledger means a rebuild FAILED or a writer bypassed the ledger — and the page
+    # keeps reading as current while it describes an older release. Checked BEFORE
+    # this run's own state write (itself a rebuild), so the warn names exactly what
+    # the last reader was shown; a successful run clears it.
+    try:
+        from . import report as report_mod
+        st = report_mod.status()
+        if not st["built"]:
+            log("doctor report-page: WARN — the report page was never built")
+            report["report-page"] = {
+                "status": "warn", "blocked": [], "checks_passed": 0,
+                "note": "run: python3 cli.py site",
+            }
+        elif st["stale"]:
+            log(f"doctor report-page: WARN — built {st['built']} but the ledger moved "
+                f"since: {', '.join(st['stale'])}")
+            report["report-page"] = {
+                "status": "warn", "blocked": [], "checks_passed": 0,
+                "note": ("a ledger write rebuilds the page, so this is a rebuild that "
+                         "failed — see that command's stderr; fix: python3 cli.py site"),
+            }
+        else:
+            report["report-page"] = {"status": "ready", "blocked": [], "checks_passed": 1}
+            log(f"doctor report-page: ready (built {st['built']})")
+    except Exception as e:  # a check must never hide the report
+        log(f"doctor report-page: could not check ({e})")
+
     try:
         state = state_of(project)
         state["doctor"] = {"generated_at": now_iso(), "report": report}

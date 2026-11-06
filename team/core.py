@@ -230,7 +230,30 @@ def state_of(project: Path) -> dict:
 
 
 def save_state(project: Path, state: dict) -> None:
+    """Write the ledger, then refresh the page that describes it.
+
+    The report page is a VIEW of the ledger, so the refresh belongs to the WRITE,
+    not to the two commands (`record`, `rc`) that happened to remember it. It used
+    to be attached there only, which left `doctor`, `plan`, `refill`, `promote` and
+    `research` writing state that the page never saw, and left the rebuild itself
+    wrapped in `except Exception: pass` — a stale page and a silent one.
+
+    Never fatal: a broken view must not fail the thing it describes. Never silent:
+    a view nobody rebuilt is an answer the owner reads as current when it is not.
+    """
     save_json(pipeline_dir(project) / "state.json", state)
+    _refresh_report(project)
+
+
+def _refresh_report(project: Path) -> None:
+    """Rebuild the report page; report a failure where it happens, don't swallow it."""
+    try:
+        from . import report  # local import: report reads the ledger through this module
+        report.build()
+    except Exception as exc:
+        print(f"report: rebuild FAILED after writing {project.name} — the page is now "
+              f"stale ({exc.__class__.__name__}: {exc}); fix: python3 cli.py site",
+              file=sys.stderr)
 
 
 def runtimes() -> dict:
