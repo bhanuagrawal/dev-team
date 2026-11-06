@@ -330,7 +330,17 @@ def generate(project: Path, kinds: tuple[str, ...] = GEMINI_KINDS,
                 return {"status": "BLOCKED", "error": f"no reference image for the {kind}",
                         "hint": "run `devteam storefront-scenes <project> --render` first"}
             prompt = icon_prompt(project) if kind == "icon" else feature_prompt(project)
-            jobs.append({"kind": kind, "out": str(raw), "src": str(ref), "prompt": prompt})
+            # The shared browser script proves delivery by the SENT message's
+            # attachment SHAPE (see storefront_poster._batch_script): the model
+            # re-encodes the thumbnail, but its width/height ratio is the
+            # reference's own and cannot be faked. A job without `ar` made that
+            # proof impossible — every brand paint failed with "the render is not
+            # in the sent message" while the upload had actually worked
+            # (observed 2026-11-06). Carry the reference's measured shape.
+            size = _png_size(ref)
+            aspect = round(size[0] / size[1], 3) if size and size[1] else 0
+            jobs.append({"kind": kind, "out": str(raw), "src": str(ref),
+                         "prompt": prompt, "ar": aspect})
 
     chat = None
     painted: dict[str, list[int] | None] = {}
