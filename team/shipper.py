@@ -269,12 +269,49 @@ def _short_label(label, limit: int = _WHATS_NEW_LABEL_CHARS) -> str:
     mangled product name in a store listing is worse than a capital letter after
     a colon. The templates below label the line instead of embedding it.
     """
-    text = re.split(r"\s*[—–:|]\s*", str(label or "").strip())[0].strip()
-    text = re.sub(r"\s+", " ", text)
+    text = _first_clause(label)
     if len(text) > limit:
         cut = text[:limit].rsplit(" ", 1)[0]
-        text = (cut or text[:limit]).rstrip(" ,;.")
+        text = _strip_dangling(cut or text[:limit])
     return text or "the app"
+
+
+def _first_clause(label) -> str:
+    """The label up to its first separator, whitespace-collapsed."""
+    text = re.split(r"\s*[—–:|]\s*", str(label or "").strip())[0].strip()
+    return re.sub(r"\s+", " ", text)
+
+
+# A word that cannot end a sentence: cutting a label at a width and leaving one
+# of these behind ships copy like "Fixed: Pin the untested spine and the
+# paywall's honesty a" (v3.13.74 did exactly this — the article was part of the
+# next noun, which the cut had removed).
+_DANGLING_TAIL = {
+    "a", "an", "the", "and", "or", "but", "nor", "of", "to", "for", "with",
+    "in", "on", "at", "by", "from", "into", "onto", "over", "under", "as",
+    "than", "that", "which", "while", "when", "its", "their", "his", "her",
+}
+
+
+def _strip_dangling(text: str) -> str:
+    """Drop trailing separators and any function word left with no noun after it."""
+    out = str(text or "").rstrip(" ,;.-")
+    while out:
+        head, _, last = out.rpartition(" ")
+        if last.lower() not in _DANGLING_TAIL:
+            break
+        out = head
+    return out.rstrip(" ,;.-")
+
+
+def label_was_truncated(label, limit: int = _WHATS_NEW_LABEL_CHARS) -> bool:
+    """True when the derived storefront phrase is not the label's own clause.
+
+    A truncated label is a fragment ("…the paywall's honesty"), and a fragment
+    is not a release note: the templates below fall back to the honest generic
+    note instead of shipping a sentence that stops mid-thought.
+    """
+    return len(_first_clause(label)) > limit
 
 
 # A router/queue label is an identifier ("visual-complete-the-testing-and-2026-11-05"),
@@ -298,6 +335,7 @@ _UNDER_THE_HOOD_NOTE = (
 # field (which always wins).
 _INTERNAL_COPY_RE = re.compile(
     r"\b(declared|assertion|assertions|asserted|asserts?|composables?|harness|"
+    r"tests?|"
     r"scenes?|renders?|rendered|rendering|unit[- ]tests?|instrumented|"
     r"roborazzi|robolectric|coverage|refactor(?:ed|ing)?|codegen|"
     r"gradle|kotlin|versionCode|version code|api level|lint|"
@@ -351,11 +389,14 @@ def _whatsnew_text(task: dict, max_chars: int = WHATS_NEW_MAX_CHARS) -> str:
         text = explicit if explicit.endswith("\n") else explicit + "\n"
     else:
         label = _short_label((task.get("surface", {}) or {}).get("label"))
+        raw_label = (task.get("surface", {}) or {}).get("label")
         ttype = task.get("type", "motion")
-        if _is_internal_label(label) or _is_internal_copy(label):
-            # An id — or a sentence about declared screens, scenes and assertions —
-            # is not a release note: say what actually changed for the user instead
-            # of printing the pipeline's own vocabulary.
+        if (_is_internal_label(label) or _is_internal_copy(label)
+                or label_was_truncated(raw_label)):
+            # An id — or a sentence about declared screens, scenes and assertions,
+            # or a label cut to a fragment — is not a release note: say what
+            # actually changed for the user instead of printing the pipeline's
+            # own vocabulary.
             text = _UNDER_THE_HOOD_NOTE
         elif ttype == "motion":
             text = (f"✓ Polished: {label}\n"
