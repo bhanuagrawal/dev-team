@@ -244,6 +244,55 @@ def brand_check(worktree: Path, files: list[str]) -> tuple[bool, str]:
     return True, f"{len(triggers)} icon file(s), provenance matches"
 
 
+def storefront_decision_check(worktree: Path, files: list[str]) -> tuple[bool, str]:
+    """A listing change carries the DECISION about what the listing says.
+
+    `docs/storefront.json` is the scene spec; the editorial review (which frames
+    ship, in what order) and the direction (what the listing sells) are both
+    stamped with a fingerprint of that spec. When the spec moves and the stamps
+    do not, the shipping copy is decided by nobody — and `storefront-build`
+    refuses it later, AFTER the release has already gone out (observed
+    2026-11-07: verify PASS, then the poster pass BLOCKED on a fingerprint that
+    changed when a scene's composable changed after the review was authored).
+    Cheap file reads, so it runs before Gradle and names the remedy.
+    """
+    touched = {"docs/storefront.json", "docs/storefront-review.json",
+               "docs/storefront-direction.json"}
+    if not (touched & set(files)):
+        return True, ""
+    from . import storefront_direction as sd, storefront_review as sr
+    from . import storefront_preview as sp
+
+    spec_path = worktree / sp.SPEC_REL
+    if not spec_path.is_file():
+        return True, ""
+    try:
+        import json as _json
+        spec = _json.loads(spec_path.read_text())
+        sha = sr.spec_fingerprint(spec)
+        stale: list[str] = []
+        review_file = worktree / sr.REVIEW_REL
+        if review_file.is_file():
+            if _json.loads(review_file.read_text()).get("spec_sha") != sha:
+                stale.append(sr.REVIEW_REL)
+        direction_file = worktree / sd.DIRECTION_REL
+        if direction_file.is_file():
+            if _json.loads(direction_file.read_text()).get("spec_sha") != sha:
+                stale.append(sd.DIRECTION_REL)
+    except Exception as exc:  # a check that cannot read the file says so
+        return False, f"storefront decision unreadable: {exc}"
+    if stale:
+        return False, (
+            f"STOREFRONT DECISION IS STALE: {sp.SPEC_REL} changed after "
+            f"{' and '.join(stale)} was recorded (spec {sha}). The frames' order and the "
+            f"listing's argument now describe different words than the ones shipping. "
+            f"Re-apply the decision against the new spec — "
+            f"`devteam storefront-scenes <project> --review --apply <review.json>` and "
+            f"`devteam storefront-direction <project> --apply <direction.json>`, or restamp "
+            f"their spec_sha if the decision itself did not change.")
+    return True, "review and direction match the scene spec"
+
+
 def localization_check(project_root: Path, files: list[str]) -> tuple[bool, str]:
     """Expertise-as-script: every NEW R.string reference in Kotlin changes must
     exist in every locale's strings.xml (this app ships 15 locales)."""
@@ -592,6 +641,15 @@ def verify_all(project: Path, worktree: Path, base: str, log, gradle: bool = Tru
     # Gradle gates because it costs nothing and its remedy is a one-line edit.
     ok, msg = store_note_check(project, worktree, spec)
     log("store note: ok — " + msg if ok else "store note: FAIL — " + msg)
+    if not ok:
+        failures.append(msg)
+        return False, failures
+
+    # Storefront decision: a scene spec that moved without its review/direction
+    # being restamped is a listing nobody decided — and the poster pass blocks on
+    # it only AFTER the release has shipped.
+    ok, msg = storefront_decision_check(worktree, files)
+    log("storefront: ok — " + msg if ok else "storefront: FAIL — " + msg)
     if not ok:
         failures.append(msg)
         return False, failures
