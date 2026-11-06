@@ -916,6 +916,40 @@ def run_store_readiness_audit(project: Path, tree: Path | None = None) -> list[R
             fix=f"Run `devteam setup --project {sched_name} --schedule auto` to register {scheduler.RUNS_PER_DAY}x/night launchd triggers",
         ))
 
+    # ── 10. Discovery & Product Architecture ──────────────────────────────
+    from . import competition
+    comp_ok, comp_summary, _ = competition.verify_competition_research(project)
+    checks.append(ReadinessCheck(
+        category="Discovery & Product Architecture",
+        name="Competitive Market Recon (docs/COMPETITION_RESEARCH.md)",
+        passed=comp_ok,
+        severity="BLOCKER" if not comp_ok else "INFO",
+        detail=comp_summary,
+        fix="Run `devteam competition <project> --limit 5` to research >= 5 competitors and write docs/COMPETITION_RESEARCH.md",
+    ))
+
+    prd_file = src / "docs/PRD.md"
+    has_prd = prd_file.is_file() and len(prd_file.read_text(errors="ignore").strip()) >= 500
+    checks.append(ReadinessCheck(
+        category="Discovery & Product Architecture",
+        name="Product Requirements Document (docs/PRD.md)",
+        passed=has_prd,
+        severity="BLOCKER" if not has_prd else "INFO",
+        detail=f"PRD present ({len(prd_file.read_text(errors='ignore')) if prd_file.is_file() else 0} chars)" if has_prd else "docs/PRD.md is missing or empty",
+        fix="Run `devteam revamp <project>` to synthesize a comprehensive docs/PRD.md anchored to profile vision",
+    ))
+
+    design_file = src / "docs/design.md"
+    has_design = design_file.is_file() and len(design_file.read_text(errors="ignore").strip()) >= 500
+    checks.append(ReadinessCheck(
+        category="Discovery & Product Architecture",
+        name="Design System Specification (docs/design.md)",
+        passed=has_design,
+        severity="BLOCKER" if not has_design else "INFO",
+        detail="Authoritative design tokens & typography specification present" if has_design else "docs/design.md is missing or incomplete",
+        fix="Run `devteam design <project>` to synthesize domain-differentiated design tokens",
+    ))
+
     return checks
 
 

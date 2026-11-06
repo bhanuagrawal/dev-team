@@ -155,10 +155,17 @@ def agent_requirements(profile: dict, project: Path) -> dict[str, list[tuple[str
          "ensure build.gradle or build.gradle.kts exists"),
     ]
 
+    from . import competition, tavily
+    has_recon = bool(competition.resolve_recon_bin()) or tavily.is_available()
+    comp_checks = [
+        ("competitor recon engine available (recon / tavily)", has_recon,
+         "install recon-agent at ~/recon-agent or set TAVILY_API_KEY in environment"),
+    ]
+
     return {
         "orchestrator": dev_checks + synthesis_checks + sched_checks,
         "developer": dev_checks,
-        "research-agent": ga4_checks + play_checks + synthesis_checks,
+        "research-agent": ga4_checks + play_checks + synthesis_checks + comp_checks,
         "release-agent": ship_checks + synthesis_checks,
         "alarm-agent": ship_checks[:1],
         "store-readiness-agent": store_readiness_checks,

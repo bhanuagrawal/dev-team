@@ -1975,6 +1975,64 @@ def cmd_design(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_competition(args: argparse.Namespace) -> int:
+    """Execute competitive intelligence and market reconnaissance for an app."""
+    project = resolve_project(args.project)
+    log = RunLog(project, "competition-" + today())
+    from team import competition
+    res = competition.research_competitors(
+        project,
+        term=getattr(args, "term", "") or "",
+        limit=getattr(args, "limit", 5) or 5,
+        force=getattr(args, "force", False),
+        log=log,
+    )
+    print(f"\nCompetitive Intelligence: {res.get('status')}")
+    print(f"  Query Term: {res.get('term')}")
+    print(f"  Competitors Analyzed: {res.get('count')}")
+    print(f"  Document: {res.get('doc')}")
+    print(f"  Summary: {res.get('summary')}")
+    for c in res.get("competitors", [])[:5]:
+        print(f"    • {c.get('title')} ({c.get('package')} - {c.get('rating')}★) -> {c.get('pricing_model')}")
+    return 0 if res.get("status") == "ok" else 1
+
+
+def cmd_revamp(args: argparse.Namespace) -> int:
+    """Coordinate full-spectrum app revamp, PRD re-imagination, and legacy UI purging."""
+    project = resolve_project(args.project)
+    log = RunLog(project, "revamp-" + today())
+    from team import revamp
+
+    wt = Path(args.worktree) if getattr(args, "worktree", None) else None
+
+    if getattr(args, "purge_ui", False):
+        purged = revamp.purge_legacy_ui(project, target_tree=wt, log=log)
+        print(f"\nLegacy UI Purge Complete:")
+        print(f"  Target: {wt or project}")
+        print(f"  Archived Screens: {len(purged)}")
+        for p in purged[:10]:
+            print(f"    - {p}")
+        return 0
+
+    res = revamp.run_revamp(
+        project,
+        focus=getattr(args, "focus", "") or "",
+        target_tree=wt,
+        force=not getattr(args, "no_force", False),
+        log=log,
+    )
+    print(f"\nApp Revamp Architecture Ready:")
+    print(f"  PRD: {res.get('prd')}")
+    print(f"  Competition Recon: {res.get('competition')}")
+    print(f"  Design System: {res.get('design')}")
+    print(f"  Invalidated Stale Assets: {res.get('invalidated_assets')}")
+    print(f"  Purged Legacy UI Files: {res.get('purged_legacy_ui_count')}")
+    print("\nNext Steps:")
+    for ns in res.get("next_steps", []):
+        print(f"  {ns}")
+    return 0
+
+
 def cmd_refill(args: argparse.Namespace) -> int:
     """Scan market/competitor horizon and refill the queue when active tasks are exhausted."""
     project = resolve_project(args.project)
@@ -3606,6 +3664,19 @@ def main() -> None:
     des.add_argument("--topic", help="focus topic or aesthetic thesis (defaults to app vision)")
     des.add_argument("--force", action="store_true", help="overwrite existing docs/design.md with fresh synthesis")
     des.set_defaults(fn=cmd_design)
+    comp = sub.add_parser("competition", help="run competitive recon on rivals, pricing models, and weakness analysis")
+    comp.add_argument("project")
+    comp.add_argument("--term", help="search term for competitor discovery (defaults to vision-derived domain)")
+    comp.add_argument("--limit", type=int, default=5, help="number of competitors to analyze (default: 5)")
+    comp.add_argument("--force", action="store_true", help="force fresh recon even if report exists")
+    comp.set_defaults(fn=cmd_competition)
+    rvp = sub.add_parser("revamp", help="execute full-spectrum app revamp, PRD re-imagination, and legacy UI purging")
+    rvp.add_argument("project")
+    rvp.add_argument("--focus", help="focus topic or domain thesis (defaults to app vision)")
+    rvp.add_argument("--worktree", help="path to task worktree for isolated development / UI purging")
+    rvp.add_argument("--purge-ui", action="store_true", help="safely purge and archive obsolete legacy UI screens from worktree")
+    rvp.add_argument("--no-force", action="store_true", help="do not force asset invalidation or doc re-synthesis")
+    rvp.set_defaults(fn=cmd_revamp)
     pl = sub.add_parser("plan", help="THE PLANNER — step 2 of every run: review the plan "
                                      "against fresh data, maintain the tree and the queue, "
                                      "and hand this run its task (the queue head)")

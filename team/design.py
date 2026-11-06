@@ -19,6 +19,175 @@ from .core import RunLog, now_iso, pipeline_dir, profile_of, save_json
 
 DESIGN_DOC_REL = "docs/design.md"
 
+ARCHETYPES: dict[str, dict[str, Any]] = {
+    "zen_focus": {
+        "key": "zen_focus",
+        "domain": "Digital Intentionality, Serenity & Focus",
+        "keywords": ["launcher", "focus", "meditation", "calm", "serenity", "breathe", "breathing", "wellbeing", "detox", "habits", "minimalist phone"],
+        "surface_base": "#0D1117",
+        "surface_elevated": "#161C24",
+        "surface_highlight": "#212B36",
+        "primary_accent": "#10B981",       # Tranquil Emerald / Jade
+        "secondary_accent": "#8B5CF6",     # Serene Amethyst
+        "accent_success": "#10B981",
+        "accent_warning": "#F59E0B",
+        "accent_error": "#F43F5E",
+        "text_primary": "#FFFFFF",
+        "text_secondary": "#94A3B8",
+        "text_tertiary": "#64748B",
+        "headline_font": "Plus Jakarta Sans",
+        "body_font": "Inter",
+        "label_font": "JetBrains Mono",
+        "aesthetic": "Tactile warm obsidian zen aesthetic with serene emerald accents, calm geometric breath indicators, and distraction-free micro-typography",
+        "anti_patterns": "NEVER use high-stimulus fluorescent cyan neon glow, chaotic notification badges, or noisy promotional cards. Prioritize sensory tranquility, breath geometry, and 24dp+ spacious margins.",
+    },
+    "court_athletic": {
+        "key": "court_athletic",
+        "domain": "High-Adrenaline Sports & Competition",
+        "keywords": ["scoreboard", "sports", "tennis", "fitness", "workout", "scorekeeper", "athletic", "match", "rally", "court"],
+        "surface_base": "#05080F",
+        "surface_elevated": "#121824",
+        "surface_highlight": "#1D2638",
+        "primary_accent": "#CCFF00",       # Electric Volt Lime
+        "secondary_accent": "#FF3366",     # Flame Coral
+        "accent_success": "#00E676",
+        "accent_warning": "#FFB703",
+        "accent_error": "#FF1744",
+        "text_primary": "#FFFFFF",
+        "text_secondary": "#94A3B8",
+        "text_tertiary": "#64748B",
+        "headline_font": "Anton",
+        "body_font": "Barlow Condensed",
+        "label_font": "JetBrains Mono",
+        "aesthetic": "High-adrenaline stadium LED glanceability with massive score numerals, high outdoor sunlight contrast, and tactile court landmarks",
+        "anti_patterns": "NEVER use pastel low-contrast tones or small touch targets. All numerals must be massive (72sp+), bold, and legible from 10 feet under direct sun.",
+    },
+    "technical_studio": {
+        "key": "technical_studio",
+        "domain": "Precision Technical Workstation & Tools",
+        "keywords": ["pdf", "document", "scanner", "compress", "converter", "merge", "tools", "utility", "workstation", "file"],
+        "surface_base": "#0B0F17",
+        "surface_elevated": "#161E2E",
+        "surface_highlight": "#222F47",
+        "primary_accent": "#38BDF8",       # Precision Sky Cobalt
+        "secondary_accent": "#F59E0B",     # Telemetry Amber
+        "accent_success": "#10B981",
+        "accent_warning": "#F59E0B",
+        "accent_error": "#EF4444",
+        "text_primary": "#FFFFFF",
+        "text_secondary": "#94A3B8",
+        "text_tertiary": "#64748B",
+        "headline_font": "Space Grotesk",
+        "body_font": "Inter",
+        "label_font": "JetBrains Mono",
+        "aesthetic": "High-precision studio workstation with interactive telemetry sliders, page canvas grids, and lossless data indicators",
+        "anti_patterns": "NEVER use unstyled default cards or generic Material 3 containers. Provide concrete technical telemetry (e.g. 'Saved 16.3 MB • -88%').",
+    },
+    "financial_prestige": {
+        "key": "financial_prestige",
+        "domain": "Swiss Financial & Wealth Intelligence",
+        "keywords": ["finance", "crypto", "wealth", "expense", "budget", "money", "wallet", "investment", "accounting"],
+        "surface_base": "#090D16",
+        "surface_elevated": "#131B2E",
+        "surface_highlight": "#1E293B",
+        "primary_accent": "#F59E0B",       # Sovereign Gold
+        "secondary_accent": "#3B82F6",     # Vault Sapphire
+        "accent_success": "#10B981",
+        "accent_warning": "#F59E0B",
+        "accent_error": "#EF4444",
+        "text_primary": "#FFFFFF",
+        "text_secondary": "#94A3B8",
+        "text_tertiary": "#64748B",
+        "headline_font": "Sora",
+        "body_font": "Inter",
+        "label_font": "JetBrains Mono",
+        "aesthetic": "Private wealth carbon prestige with micro-hairline borders and strictly tabular monetary numerals",
+        "anti_patterns": "NEVER use playful cartoon illustrations or non-tabular numerals. Every monetary figure must use tnum formatting.",
+    },
+    "creative_media": {
+        "key": "creative_media",
+        "domain": "Immersive Cinematic Audio & Media",
+        "keywords": ["music", "audio", "video", "player", "podcast", "camera", "photo", "gallery", "creative"],
+        "surface_base": "#08080A",
+        "surface_elevated": "#14141C",
+        "surface_highlight": "#1E1F2C",
+        "primary_accent": "#F43F5E",       # Neon Coral
+        "secondary_accent": "#6366F1",     # Electric Indigo
+        "accent_success": "#10B981",
+        "accent_warning": "#F59E0B",
+        "accent_error": "#F43F5E",
+        "text_primary": "#FFFFFF",
+        "text_secondary": "#A1A1AA",
+        "text_tertiary": "#71717A",
+        "headline_font": "Syne",
+        "body_font": "Inter",
+        "label_font": "JetBrains Mono",
+        "aesthetic": "Deep void OLED canvas with radiant soundwave auras and edge-to-edge media cards",
+        "anti_patterns": "NEVER use bright white backdrops or boxed outlines that break visual immersion.",
+    },
+    "editorial_literary": {
+        "key": "editorial_literary",
+        "domain": "Distraction-Free Literary & Knowledge",
+        "keywords": ["reading", "books", "notes", "journal", "study", "education", "flashcards", "learn", "dictionary"],
+        "surface_base": "#12100E",
+        "surface_elevated": "#1C1917",
+        "surface_highlight": "#292524",
+        "primary_accent": "#D97706",       # Literary Amber
+        "secondary_accent": "#059669",     # Sage Leaf
+        "accent_success": "#10B981",
+        "accent_warning": "#D97706",
+        "accent_error": "#DC2626",
+        "text_primary": "#FDF6E2",
+        "text_secondary": "#A8A29E",
+        "text_tertiary": "#78716C",
+        "headline_font": "Newsreader",
+        "body_font": "Literata",
+        "label_font": "Space Mono",
+        "aesthetic": "Tactile dark espresso warmth with literary serif typography and eye-strain-preventing amber accents",
+        "anti_patterns": "NEVER use cold blue light accents or sharp geometric sans-serif for long-form reading surfaces.",
+    },
+}
+
+
+def detect_domain_archetype(project: Path, topic: str = "") -> dict[str, Any]:
+    """Classify the project's domain to assign an authentic, differentiated design system."""
+    profile = profile_of(project)
+    vision = (profile.get("goals") or {}).get("vision", "").strip()
+    name = profile.get("name") or project.name
+
+    # Check for PRD or plan mentions
+    prd_path = project / "docs/PRD.md"
+    prd_snippet = prd_path.read_text(errors="ignore")[:500] if prd_path.is_file() else ""
+
+    combined = f"{name} {vision} {topic} {prd_snippet}".lower()
+
+    for _k, arch in ARCHETYPES.items():
+        if any(kw in combined for kw in arch["keywords"]):
+            return arch
+
+    # Fallback to modern high-contrast dark surface
+    return {
+        "key": "modern_dark",
+        "domain": "Modern Elevated Dark Surface",
+        "keywords": [],
+        "surface_base": "#0A0E14",
+        "surface_elevated": "#161F2E",
+        "surface_highlight": "#202B3C",
+        "primary_accent": "#00E5FF",
+        "secondary_accent": "#7C4DFF",
+        "accent_success": "#00E676",
+        "accent_warning": "#FFB703",
+        "accent_error": "#FF3D71",
+        "text_primary": "#FFFFFF",
+        "text_secondary": "#94A3B8",
+        "text_tertiary": "#64748B",
+        "headline_font": "Plus Jakarta Sans",
+        "body_font": "Inter",
+        "label_font": "JetBrains Mono",
+        "aesthetic": f"Modern high-contrast dark-first {name} UI",
+        "anti_patterns": "NEVER use default unstyled Android widgets. Maintain minimum 4.5:1 text contrast and minimum 48dp touch targets.",
+    }
+
 
 def _category_query(project: Path, topic: str = "") -> str:
     """Generate search query for Tavily market & UX research."""
@@ -26,20 +195,42 @@ def _category_query(project: Path, topic: str = "") -> str:
         return f"{project.name} {topic.strip()} modern mobile app UI UX design system color tokens typography 2026"
     profile = profile_of(project)
     vision = (profile.get("goals") or {}).get("vision", "").strip()
-    return f"{project.name} {vision} modern mobile app UI UX design system color tokens typography layout dark mode standards 2026"
+    arch = detect_domain_archetype(project, topic)
+    return f"{project.name} {arch['domain']} {vision} modern mobile app UI UX design system color tokens typography layout dark mode standards 2026"
 
 
 def _build_design_template(project_name: str,
                            vision: str,
                            category_summary: str,
-                           sources: list[str]) -> str:
+                           sources: list[str],
+                           archetype: dict[str, Any] | None = None) -> str:
     """Synthesize an authoritative docs/design.md specification."""
     sources_md = "\n".join(f"- {s}" for s in sources[:4]) if sources else "- Official Google Android / Material 3 2026 Guidelines"
+    arch = archetype or {
+        "domain": "Modern Elevated Dark Surface",
+        "surface_base": "#0A0E14",
+        "surface_elevated": "#161F2E",
+        "surface_highlight": "#202B3C",
+        "primary_accent": "#00E5FF",
+        "secondary_accent": "#7C4DFF",
+        "accent_success": "#00E676",
+        "accent_warning": "#FFB703",
+        "accent_error": "#FF3D71",
+        "text_primary": "#FFFFFF",
+        "text_secondary": "#94A3B8",
+        "text_tertiary": "#64748B",
+        "headline_font": "Plus Jakarta Sans",
+        "body_font": "Inter",
+        "label_font": "JetBrains Mono",
+        "aesthetic": f"Modern high-contrast dark-first {project_name} UI",
+        "anti_patterns": "NEVER use default unstyled Android widgets. Maintain minimum 4.5:1 text contrast and minimum 48dp touch targets.",
+    }
 
     return f"""# {project_name} Design System & Visual Specification (2026 Edition)
 
 > **Authority:** This document is registered under `.pipeline/profile.json` `conventions`.  
-> Per pipeline law, this is a **MANDATORY READ** for all developer and UI agents. Doctrine governs new files; for edited files, match and elevate to this standard.
+> Per pipeline law, this is a **MANDATORY READ** for all developer and UI agents. Doctrine governs new files; for edited files, match and elevate to this standard.  
+> **Domain Archetype:** `{arch['domain']}`
 
 ---
 
@@ -47,8 +238,9 @@ def _build_design_template(project_name: str,
 
 **Core Thesis:** {vision or f"Elevate {project_name} to category-defining visual polish and usability."}
 
-- **Visual Metaphor:** The interface is focused, purposeful, and tactile. Every screen must respect the user's attention, eliminating cognitive friction and visual noise.
+- **Visual Personality:** {arch['aesthetic']}
 - **Aesthetic Tone:** High contrast, deliberate spatial hierarchy, polished surfaces, and fluid micro-interactions. No muddy greys, no low-contrast text, no unpadded tap targets.
+- **Negative Directives & Anti-Patterns:** {arch['anti_patterns']}
 - **Category Benchmark & Research Insights:**
 {category_summary or "Modern 2026 mobile design emphasizes dark-first high-contrast palettes, tabular numerals for dynamic metrics, minimum 48dp touch targets, and full-bleed gesture-friendly surfaces."}
 
@@ -60,17 +252,17 @@ The app adopts a **Dark-First, High-Contrast OLED** theme optimized for clarity,
 
 | Token | Hex | Role | Contrast / Usage |
 |---|---|---|---|
-| `SurfaceBase` | `#0A0E14` | True obsidian canvas base | Deep background canvas |
-| `SurfaceElevated` | `#161F2E` | Container surface (Level 1) | Primary content cards / tool panels |
-| `SurfaceElevatedHigh` | `#202B3C` | Highlighted surface (Level 2) | Active cards, dialogs, bottom sheets |
-| `BrandPrimary` | `#00E5FF` | Electric Cyan / Primary accent | Primary CTAs, active selections, focus rings |
-| `BrandSecondary` | `#7C4DFF` | Vivid Violet / Secondary accent | Badges, secondary toggles, progress fills |
-| `AccentSuccess` | `#00E676` | Neon Emerald | Completed states, success confirmations |
-| `AccentWarning` | `#FFB703` | Amber Gold | Destructive confirmations, alerts, limits |
-| `AccentError` | `#FF3D71` | Vivid Coral | Critical errors, validation failures |
-| `TextPrimary` | `#FFFFFF` | Primary numerals & headings | 100% white, maximum contrast (WCAG AAA) |
-| `TextSecondary` | `#94A3B8` | Subtitles, labels, metadata | Slate grey, minimum 4.5:1 contrast (WCAG AA) |
-| `TextTertiary` | `#64748B` | Disabled indicators, dividers | Subtle borders and inactive outlines |
+| `SurfaceBase` | `{arch['surface_base']}` | True canvas base | Deep background canvas |
+| `SurfaceElevated` | `{arch['surface_elevated']}` | Container surface (Level 1) | Primary content cards / tool panels |
+| `SurfaceElevatedHigh` | `{arch['surface_highlight']}` | Highlighted surface (Level 2) | Active cards, dialogs, bottom sheets |
+| `BrandPrimary` | `{arch['primary_accent']}` | Primary brand accent | Primary CTAs, active selections, focus rings |
+| `BrandSecondary` | `{arch['secondary_accent']}` | Secondary brand accent | Badges, secondary toggles, progress fills |
+| `AccentSuccess` | `{arch['accent_success']}` | Success State | Completed states, success confirmations |
+| `AccentWarning` | `{arch['accent_warning']}` | Warning State | Destructive confirmations, alerts, limits |
+| `AccentError` | `{arch['accent_error']}` | Critical Error | Critical errors, validation failures |
+| `TextPrimary` | `{arch['text_primary']}` | Primary numerals & headings | Maximum contrast (WCAG AAA) |
+| `TextSecondary` | `{arch['text_secondary']}` | Subtitles, labels, metadata | Minimum 4.5:1 contrast (WCAG AA) |
+| `TextTertiary` | `{arch['text_tertiary']}` | Disabled indicators, dividers | Subtle borders and inactive outlines |
 
 ---
 
@@ -78,35 +270,45 @@ The app adopts a **Dark-First, High-Contrast OLED** theme optimized for clarity,
 
 All typography must adhere to Jetpack Compose / Material 3 type tokens. Dynamic numerical metrics must always use **Tabular Numbers** (`FontFeatureSettings("tnum")`) to avoid layout jitter during value updates.
 
+- Headline / Display Font: `{arch['headline_font']}`
+- Body / Content Font: `{arch['body_font']}`
+- Labels / Telemetry Font: `{arch['label_font']}`
+
 ```kotlin
 object DesignTypography {{
     // Hero Numerals & Display Metrics
     val heroMetric = TextStyle(
+        fontFamily = FontFamily.SansSerif,
         fontSize = 72.sp,
         fontWeight = FontWeight.Black,
         letterSpacing = (-1.5).sp
     )
     val titleLarge = TextStyle(
+        fontFamily = FontFamily.SansSerif,
         fontSize = 24.sp,
         fontWeight = FontWeight.Bold,
         letterSpacing = 0.sp
     )
     val titleMedium = TextStyle(
+        fontFamily = FontFamily.SansSerif,
         fontSize = 18.sp,
         fontWeight = FontWeight.SemiBold,
         letterSpacing = 0.15.sp
     )
     val bodyLarge = TextStyle(
+        fontFamily = FontFamily.SansSerif,
         fontSize = 16.sp,
         fontWeight = FontWeight.Normal,
         lineHeight = 24.sp
     )
     val bodyMedium = TextStyle(
+        fontFamily = FontFamily.SansSerif,
         fontSize = 14.sp,
         fontWeight = FontWeight.Normal,
         lineHeight = 20.sp
     )
     val labelSmall = TextStyle(
+        fontFamily = FontFamily.Monospace,
         fontSize = 12.sp,
         fontWeight = FontWeight.Medium,
         letterSpacing = 0.5.sp
@@ -163,6 +365,7 @@ object RadiusTokens {{
 - ❌ **No Cramped Touch Targets:** Never place interactive icons or checkboxes in targets smaller than 48dp.
 - ❌ **No Low-Contrast Text:** Secondary text must strictly pass WCAG AA standards (4.5:1 contrast against surface base).
 - ❌ **No Unhandled Error Dead-Ends:** Errors must offer an inline retry or clear path back to the home state.
+- ❌ **No Cookie-Cutter Generic Templates:** {arch['anti_patterns']}
 
 ---
 
@@ -224,12 +427,14 @@ def ensure_design(project: Path,
     answer = market_report.get("answer", "")
     sources = market_report.get("sources", [])
     vision = (profile.get("goals") or {}).get("vision", "").strip()
+    archetype = detect_domain_archetype(project, topic)
 
     content = _build_design_template(
         project_name=project.name,
         vision=vision,
         category_summary=answer,
-        sources=sources
+        sources=sources,
+        archetype=archetype,
     )
 
     design_file.parent.mkdir(parents=True, exist_ok=True)
@@ -265,18 +470,19 @@ def extract_design_tokens(project: Path) -> dict[str, str]:
     `BrandPrimary`, so it overwrote it — every generated poster, icon and Stitch
     prompt was then seeded with a near-black "accent".
     """
+    arch = detect_domain_archetype(project)
     tokens = {
-        "surface_base": "#0A0E14",
-        "surface_elevated": "#161F2E",
-        "surface_highlight": "#202B3C",
-        "primary_accent": "#00E676",
-        "secondary_accent": "#FF3D71",
-        "warning_accent": "#FFB703",
-        "text_primary": "#FFFFFF",
-        "text_secondary": "#8B949E",
-        "headline_font": "Anton",
-        "body_font": "Barlow Condensed",
-        "label_font": "JetBrains Mono",
+        "surface_base": arch["surface_base"],
+        "surface_elevated": arch["surface_elevated"],
+        "surface_highlight": arch["surface_highlight"],
+        "primary_accent": arch["primary_accent"],
+        "secondary_accent": arch["secondary_accent"],
+        "warning_accent": arch["accent_warning"],
+        "text_primary": arch["text_primary"],
+        "text_secondary": arch["text_secondary"],
+        "headline_font": arch["headline_font"],
+        "body_font": arch["body_font"],
+        "label_font": arch["label_font"],
     }
     design_doc = project / "docs/design.md"
     if not design_doc.is_file():
@@ -467,9 +673,12 @@ def compile_stitch_screen_prompt(
     tokens = extract_design_tokens(project)
 
     st = screen_type.lower().strip()
+    arch = detect_domain_archetype(project)
+    arch_key = arch.get("key", "modern_dark")
 
-    is_pdf = "pdf" in name.lower() or "pdf" in vision.lower() or "document" in vision.lower()
-    is_court_sports = "pickleball" in vision.lower() or "scoreboard" in vision.lower() or "tennis" in vision.lower() or "court" in vision.lower()
+    is_pdf = arch_key == "technical_studio" or "pdf" in name.lower() or "document" in vision.lower()
+    is_court_sports = arch_key == "court_athletic" or "scoreboard" in vision.lower() or "tennis" in vision.lower()
+    is_zen_focus = arch_key == "zen_focus" or any(k in vision.lower() for k in ["launcher", "focus", "meditation", "calm", "breathe", "detox"])
 
     if spec:
         screen_title = spec.get("title", f"{name} Screen")
@@ -477,7 +686,69 @@ def compile_stitch_screen_prompt(
         layout_zones = spec.get("zones", [])
         ctas = spec.get("ctas", [])
         telemetry = spec.get("telemetry", {})
-        aesthetic = spec.get("aesthetic", f"High-precision dark-first {name} UI")
+        aesthetic = spec.get("aesthetic", arch["aesthetic"])
+    elif is_zen_focus:
+        aesthetic = arch["aesthetic"]
+        if st in ("main", "home", "hub", "core", "launcher"):
+            screen_title = f"{name} - Intentional Home & Breathing Anchor"
+            context_desc = f"Primary calm launch surface for {name}. Distraction-free, warm obsidian canvas with intentional breathing anchor and essential apps."
+            layout_zones = [
+                f"1. Top Quiet Header: Wordmark '{name.upper()}' in {tokens['headline_font']}, date in muted slate ({tokens['text_secondary']}), and subtle battery percentage.",
+                f"2. Center Breathing Anchor Hero: Tactile geometric breath circle in tranquil emerald ({tokens['primary_accent']}) with soft ambient pulse aura, displaying '38m Intentional Use Left' and daily pickup count '12 Pickups'.",
+                f"3. Essential Apps List: Clean distraction-free vertical list of user-prioritized apps with tabular usage limit badges (e.g. 'Messages', 'Phone', 'Calendar', 'Reading • 25m left').",
+                f"4. Bottom Serenity Dock: Thumb-accessible pill buttons for 'Take a Breath Pause' (with {tokens['primary_accent']} accent glow) and 'All Apps Drawer'.",
+            ]
+            ctas = [
+                "App Item (Launches app or triggers conscious pause friction)",
+                "Breath Pause Button (Primary CTA -> Opens guided conscious breathing circle)",
+                "Apps Drawer Pill (Opens full categorized app list)",
+            ]
+            telemetry = {
+                "Today Screen Time": "42 mins (Down 64%)",
+                "Intentional Pickups": "12",
+                "Active Mode": "Intentional Detox",
+            }
+        elif st in ("pause", "breathe", "limits", "friction"):
+            screen_title = f"{name} - Conscious Friction & Breath Pause"
+            context_desc = f"Calm intentional pause overlay triggered before opening distracting apps, interrupting mindless dopamine loops."
+            layout_zones = [
+                f"1. Top Context Bar: Close 'X' button and subtle prompt 'CONSCIOUS PAUSE'.",
+                f"2. Breathing Meditation Sphere: Concentric pulsating circle in serene emerald ({tokens['primary_accent']}) guiding the user to inhale and exhale.",
+                f"3. Friction Countdown & Intentional Prompt: 'Take 2 deep breaths...' countdown timer in bold {tokens['headline_font']} numerals, followed by 'Opening Instagram'.",
+                f"4. Conscious Choice Action Deck: High-contrast buttons:",
+                f"   - Primary Action: 'OPEN WITH 15M LIMIT' in solid {tokens['primary_accent']} with dark text.",
+                f"   - Secondary Action: 'STEP AWAY (CLOSE)' in elevated slate {tokens['surface_elevated']}.",
+            ]
+            ctas = [
+                "Breathe & Wait (User observes the calming pulse rhythm)",
+                "Open With Limit Button (Primary CTA -> Unlocks app for timed session)",
+                "Step Away Button (Dismisses pause and returns to home screen)",
+            ]
+            telemetry = {
+                "Target App": "Social App",
+                "Pause Duration": "5 seconds remaining",
+                "Session Limit": "15 minutes",
+            }
+        else:
+            screen_title = f"{name} - Digital Wellbeing & Focus Limits"
+            context_desc = f"App limits, bedtime monochrome schedule, and distraction detox settings for {name}."
+            layout_zones = [
+                f"1. Top Navigation Bar: Back button, title 'FOCUS & DETOX', reset defaults pill.",
+                f"2. Usage Telemetry Card: Weekly phone time comparison chart in {tokens['surface_elevated']} with emerald {tokens['primary_accent']} progress bars.",
+                f"3. App Friction Limit Rows: Modular cards with app title, toggle switch, and interactive session duration slider (5m, 15m, 30m).",
+                f"4. Bedtime Grayscale Switch: Elevated card with toggle for automatic evening monochrome mode.",
+                f"5. Save Action Button: Full-width button 'APPLY FOCUS SHIELD' in solid {tokens['primary_accent']}.",
+            ]
+            ctas = [
+                "App Limit Slider (Adjusts allowed minutes per session)",
+                "Grayscale Toggle (Enables night detox)",
+                "Apply Focus Shield (Saves and locks configuration)",
+            ]
+            telemetry = {
+                "Time Saved This Week": "4 hrs 18 mins",
+                "Apps Restricted": "6 apps",
+                "Monochrome Schedule": "10:30 PM - 7:00 AM",
+            }
     elif is_pdf:
         aesthetic = "High-precision OLED dark-first PDF workstation studio UI with glowing neon accents"
         if st in ("main", "home", "hub", "core"):
@@ -677,8 +948,9 @@ Render these exact real-world values into the layout:
 {zones_text}
 
 === SECTION 5: STRICT ANTI-GENERIC VISUAL CRAFT MANDATE ===
-- Canvas Base: True obsidian background ({tokens['surface_base']}) with subtle atmospheric lighting.
-- Card Containers: Elevated dark slate ({tokens['surface_elevated']}) with crisp structural borders ({tokens.get('surface_highlight', '#202B3C')}).
+- Domain Archetype: {arch['domain']}
+- Canvas Base: True background ({tokens['surface_base']}) with subtle atmospheric lighting.
+- Card Containers: Elevated dark surface ({tokens['surface_elevated']}) with crisp structural borders ({tokens.get('surface_highlight', '#202B3C')}).
 - Active Radiant Aura: The currently active action state MUST feature a glowing radiant aura ({tokens['primary_accent']}) so users recognize interactive focus instantly.
 - Secondary Accent: Use secondary accent ({tokens['secondary_accent']}) for badges, progress fills, and status transitions.
 - Warning / Metric Accent: Use warm accent ({tokens['warning_accent']}) for alert confirmations, limits, and telemetry.
@@ -687,6 +959,7 @@ Render these exact real-world values into the layout:
   * Headings & Section Titles: Modern technical {tokens['body_font']}.
   * Status Badges & Pills: Monospaced {tokens['label_font']} with uppercase letter-spacing.
 - ANTI-PATTERNS (STRICTLY FORBIDDEN):
+  * {arch['anti_patterns']}
   * NO generic white card templates or muddy grey backgrounds.
   * NO low-contrast grey-on-dark text (all secondary text must maintain 4.5:1 WCAG AA contrast).
   * NO cramped interactive touch targets (every tap zone must be min 48dp x 48dp).

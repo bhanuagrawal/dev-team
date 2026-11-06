@@ -32,9 +32,13 @@ from typing import Any
 
 STATE_REL = ".pipeline/route.json"
 
-# Ordered: the first kind whose terms match wins. Brand/store/release are
-# narrower than "feature", bugfix is more specific than a visual tweak.
+# Ordered: the first kind whose terms match wins. Revamp is the broadest
+# ground-up rebuild; brand/store/release are narrower; bugfix is specific.
 KINDS: list[tuple[str, str, tuple[str, ...], str]] = [
+    ("revamp", "feature", ("revamp", "rebuild from scratch", "redesign from scratch",
+                           "ground up", "ground-up", "start from scratch", "rebuild",
+                           "reimagining", "reimagine", "complete redesign", "delete the codebase"),
+     "a ground-up app rebuild: PRD re-imagination, competition recon, design tokens, UI purge, native build, fresh assets"),
     ("brand", "feature", ("icon", "logo", "app icon", "launcher icon", "brand mark"),
      "a designed artefact: Stitch first, then the app, then the listing"),
     ("store", "feature", ("screenshot", "store listing", "feature graphic", "play store page",
@@ -60,6 +64,29 @@ KINDS: list[tuple[str, str, tuple[str, ...], str]] = [
 
 _CHAIN: dict[str, list[tuple[str, str, str]]] = {
     # (step label, command template, what it proves / why it is there)
+    "revamp": [
+        ("competition", "devteam competition {p} --limit 5",
+         "deep market and rival recon: >= 5 direct competitors, pricing models, weaknesses"),
+        ("revamp-prep", "devteam revamp {p}",
+         "re-imagine core loop via docs/PRD.md, synthesize docs/design.md tokens, invalidate stale assets"),
+        ("worktree", "devteam worktree-start {p} --task-id revamp-core-loop",
+         "the rebuild happens in an isolated branch dt/revamp-core-loop, never in the checkout"),
+        ("purge-ui", "devteam revamp {p} --purge-ui --worktree {wt}",
+         "mechanically purge and archive obsolete legacy UI screens so no zombie code survives"),
+        ("develop", "devteam developer-prompt {p} .pipeline/tasks/revamp-core-loop.json",
+         "build native Jetpack Compose screens adhering 1:1 to docs/design.md tokens and Stitch designs"),
+        ("verify", "devteam verify {p} --worktree {wt} --task-spec .pipeline/tasks/revamp-core-loop.json",
+         "compile, unit tests, connected emulator tests, and design conformance gate"),
+        ("release", "devteam release {p} --worktree {wt} --task-spec .pipeline/tasks/revamp-core-loop.json",
+         "build signed AAB bundle, push to GitHub Actions release CI, upload to Play Internal Testing"),
+        ("brand", "devteam brand {p} --design --publish --yes",
+         "create new Stitch MCP app icon, adopt to mipmaps, and publish to Play Store"),
+        ("storefront", "devteam storefront-build {p} --poster --force && devteam store-publish {p} --yes",
+         "generate fresh marketing screenshot posters with Gemini heal and publish all listing assets"),
+        ("record", "devteam record {p} --result shipped --task-spec .pipeline/tasks/revamp-core-loop.json "
+                   "--version <v> --commit <sha> --note {q}",
+         "the ledger, handover copy, and release-candidate verdict"),
+    ],
     "brand": [
         ("plan", "devteam plan {p} --focus {q}",
          "the planner reconciles the queue around this request; the pinned task survives"),
