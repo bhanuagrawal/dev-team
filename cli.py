@@ -831,6 +831,32 @@ def cmd_worktree_start(args: argparse.Namespace) -> None:
     if not prepared:
         raise SystemExit("worktree prep failed (see log)")
     wt, base = prepared
+
+    # CODE-ENFORCED PURGE FOR REVAMP / REBUILD TASKS
+    is_revamp = any(k in args.task_id.lower() for k in ("revamp", "rebuild", "ground-up"))
+    if not is_revamp:
+        try:
+            spec = task_spec_path(project, args.task_id)
+            if spec and spec.is_file():
+                task_data = json.loads(spec.read_text())
+                label = str(task_data.get("label", "")).lower()
+                req = str(task_data.get("owner_request", "")).lower()
+                is_revamp = (
+                    task_data.get("kind") == "revamp"
+                    or task_data.get("type") == "revamp"
+                    or any(k in label for k in ("revamp", "rebuild", "delete"))
+                    or any(k in req for k in ("revamp", "rebuild", "delete the codebase", "delete codebase", "from scratch"))
+                )
+        except Exception:
+            pass
+
+    if is_revamp:
+        from team import revamp
+        purged = revamp.purge_codebase(project, target_tree=wt, full_codebase=True, log=log)
+        if purged:
+            log(f"revamp auto-purge: wiped and archived {len(purged)} legacy code files from worktree")
+            print(f"REVAMP AUTO-PURGE: {len(purged)} legacy source/test files archived to .pipeline/archived_codebase and purged from worktree.")
+
     print(f"WORKTREE_PATH={wt}")
     print(f"WORKTREE_BRANCH=dt/{args.task_id}")
     print(f"WORKTREE_BASE={base}")
@@ -1998,20 +2024,22 @@ def cmd_competition(args: argparse.Namespace) -> int:
 
 
 def cmd_revamp(args: argparse.Namespace) -> int:
-    """Coordinate full-spectrum app revamp, PRD re-imagination, and legacy UI purging."""
+    """Coordinate full-spectrum app revamp, PRD re-imagination, and legacy codebase purging."""
     project = resolve_project(args.project)
     log = RunLog(project, "revamp-" + today())
     from team import revamp
 
     wt = Path(args.worktree) if getattr(args, "worktree", None) else None
 
-    if getattr(args, "purge_ui", False):
-        purged = revamp.purge_legacy_ui(project, target_tree=wt, log=log)
-        print(f"\nLegacy UI Purge Complete:")
+    if getattr(args, "purge_ui", False) or getattr(args, "purge_codebase", False):
+        purged = revamp.purge_codebase(project, target_tree=wt, full_codebase=True, log=log)
+        print(f"\nLegacy Codebase Purge Complete:")
         print(f"  Target: {wt or project}")
-        print(f"  Archived Screens: {len(purged)}")
-        for p in purged[:10]:
+        print(f"  Archived Code Files: {len(purged)}")
+        for p in purged[:15]:
             print(f"    - {p}")
+        if len(purged) > 15:
+            print(f"    ... and {len(purged) - 15} more files")
         return 0
 
     res = revamp.run_revamp(
@@ -2026,7 +2054,7 @@ def cmd_revamp(args: argparse.Namespace) -> int:
     print(f"  Competition Recon: {res.get('competition')}")
     print(f"  Design System: {res.get('design')}")
     print(f"  Invalidated Stale Assets: {res.get('invalidated_assets')}")
-    print(f"  Purged Legacy UI Files: {res.get('purged_legacy_ui_count')}")
+    print(f"  Purged Legacy Code Files: {res.get('purged_legacy_code_count')}")
     print("\nNext Steps:")
     for ns in res.get("next_steps", []):
         print(f"  {ns}")
@@ -3670,11 +3698,12 @@ def main() -> None:
     comp.add_argument("--limit", type=int, default=5, help="number of competitors to analyze (default: 5)")
     comp.add_argument("--force", action="store_true", help="force fresh recon even if report exists")
     comp.set_defaults(fn=cmd_competition)
-    rvp = sub.add_parser("revamp", help="execute full-spectrum app revamp, PRD re-imagination, and legacy UI purging")
+    rvp = sub.add_parser("revamp", help="execute full-spectrum app revamp, PRD re-imagination, and legacy codebase purging")
     rvp.add_argument("project")
     rvp.add_argument("--focus", help="focus topic or domain thesis (defaults to app vision)")
-    rvp.add_argument("--worktree", help="path to task worktree for isolated development / UI purging")
+    rvp.add_argument("--worktree", help="path to task worktree for isolated development / codebase purging")
     rvp.add_argument("--purge-ui", action="store_true", help="safely purge and archive obsolete legacy UI screens from worktree")
+    rvp.add_argument("--purge-codebase", action="store_true", help="mechanically purge and archive all legacy Kotlin/Java application code and tests")
     rvp.add_argument("--no-force", action="store_true", help="do not force asset invalidation or doc re-synthesis")
     rvp.set_defaults(fn=cmd_revamp)
     pl = sub.add_parser("plan", help="THE PLANNER — step 2 of every run: review the plan "

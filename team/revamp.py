@@ -66,41 +66,88 @@ def invalidate_storefront_assets(project: Path, log: RunLog | None = None) -> li
 def purge_legacy_ui(project: Path,
                      target_tree: Path | None = None,
                      log: RunLog | None = None) -> list[str]:
-    """Safely discover and archive legacy UI screens and composables.
+    """Backward compatibility alias for purge_codebase."""
+    return purge_codebase(project, target_tree=target_tree, full_codebase=True, log=log)
 
-    Prevents developer agents from lazily modifying existing UI wrappers when
-    a ground-up rebuild or visual revamp was explicitly requested.
+
+def purge_codebase(project: Path,
+                   target_tree: Path | None = None,
+                   full_codebase: bool = True,
+                   log: RunLog | None = None) -> list[str]:
+    """Safely discover and archive legacy application code and tests.
+
+    When an owner requests a revamp, rebuild from scratch, or codebase deletion,
+    this mechanically removes the entire legacy application codebase (main Kotlin/Java,
+    unit tests, and instrumented tests) into .pipeline/archived_codebase/<timestamp>.
+
+    Prevents developer agents from lazily modifying existing wrappers or keeping
+    zombie architectures alive when a ground-up rebuild was ordered.
+    Preserves signing keys, keystore.properties, google-services.json, and build setup.
     """
     root = target_tree if (target_tree and target_tree.is_dir()) else project
     archived = []
     timestamp = now_iso().replace(":", "-").replace(".", "-")
-    archive_dest = pipeline_dir(project) / "archived_ui" / timestamp
+    archive_dest = pipeline_dir(project) / "archived_codebase" / timestamp
 
-    # Common Android UI paths
-    ui_dirs = list(root.glob("app/src/main/java/**/ui"))
-    if not ui_dirs:
-        ui_dirs = list(root.glob("**/ui"))
+    # Search for all source directories across the project
+    search_dirs: list[Path] = []
+    if full_codebase:
+        # Full codebase purge: all main code, unit tests, and instrumented tests
+        for pattern in ("**/src/main/java", "**/src/main/kotlin",
+                        "**/src/test/java", "**/src/test/kotlin",
+                        "**/src/androidTest/java", "**/src/androidTest/kotlin"):
+            search_dirs.extend(root.glob(pattern))
+    else:
+        # UI-only legacy purge fallback
+        search_dirs.extend(root.glob("app/src/main/java/**/ui"))
+        if not search_dirs:
+            search_dirs.extend(root.glob("**/ui"))
 
-    for ui_dir in ui_dirs:
+    seen_files: set[Path] = set()
+    for s_dir in search_dirs:
         # Don't touch build directories or .pipeline
-        if ".pipeline" in str(ui_dir) or "build" in str(ui_dir):
+        if ".pipeline" in str(s_dir) or "build" in str(s_dir):
             continue
-        for kt_file in ui_dir.glob("**/*.kt"):
-            rel_path = kt_file.relative_to(root)
-            # Check if this is a screen/view/component file (preserve Theme/Type/Color)
-            is_theme = any(t in kt_file.name.lower() for t in ["theme", "color", "type", "shape"])
-            if not is_theme and any(s in kt_file.name.lower() for s in ["screen", "view", "page", "dialog", "component", "card", "bar"]):
-                dest_file = archive_dest / rel_path
-                dest_file.parent.mkdir(parents=True, exist_ok=True)
-                shutil.copy2(kt_file, dest_file)
-                archived.append(str(rel_path))
-                try:
-                    kt_file.unlink()
-                except OSError:
-                    pass
+        for src_file in s_dir.glob("**/*"):
+            if not src_file.is_file():
+                continue
+            if src_file in seen_files:
+                continue
+            seen_files.add(src_file)
+
+            # Only purge code files (.kt, .java)
+            if src_file.suffix not in (".kt", ".java"):
+                continue
+
+            rel_path = src_file.relative_to(root)
+
+            # If not full codebase, only target UI/screen/component files
+            if not full_codebase:
+                is_theme = any(t in src_file.name.lower() for t in ["theme", "color", "type", "shape"])
+                if is_theme or not any(s in src_file.name.lower() for s in ["screen", "view", "page", "dialog", "component", "card", "bar"]):
+                    continue
+
+            dest_file = archive_dest / rel_path
+            dest_file.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(src_file, dest_file)
+            archived.append(str(rel_path))
+            try:
+                src_file.unlink()
+            except OSError:
+                pass
+
+    # Clean up empty parent directories
+    for s_dir in search_dirs:
+        if s_dir.is_dir():
+            for dirpath, dirnames, filenames in os.walk(s_dir, topdown=False):
+                if not dirnames and not filenames:
+                    try:
+                        os.rmdir(dirpath)
+                    except OSError:
+                        pass
 
     if log:
-        log(f"~ purged & archived {len(archived)} legacy UI composables to {archive_dest.relative_to(project)}")
+        log(f"~ purged & archived {len(archived)} legacy code files to {archive_dest.relative_to(project)}")
     return archived
 
 
@@ -229,10 +276,10 @@ def run_revamp(project: Path,
     # 4. Invalidate stale marketing assets
     cleared_assets = invalidate_storefront_assets(project, log=log)
 
-    # 5. Purge legacy UI if target tree is supplied
-    purged_ui = []
+    # 5. Purge legacy codebase if target tree is supplied
+    purged_code = []
     if target_tree:
-        purged_ui = purge_legacy_ui(project, target_tree=target_tree, log=log)
+        purged_code = purge_codebase(project, target_tree=target_tree, full_codebase=True, log=log)
 
     # 6. Adapt project to sync pipeline state
     adapt.run(project, log=log)
@@ -244,7 +291,7 @@ def run_revamp(project: Path,
         "competition": comp_report.get("status"),
         "design": design_report.get("status"),
         "invalidated_assets": len(cleared_assets),
-        "purged_legacy_ui_count": len(purged_ui),
+        "purged_legacy_code_count": len(purged_code),
         "next_steps": [
             f"1. Start worktree: `devteam worktree-start {project.name} --task-id revamp-core-loop`",
             f"2. Build native screens following docs/design.md tokens",

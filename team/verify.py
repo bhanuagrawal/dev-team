@@ -462,6 +462,46 @@ def instrumented_check(worktree: Path, profile: dict, log) -> tuple[bool, str]:
 
 
 
+def revamp_gate(project: Path, worktree: Path, spec: dict | None, files: list[str]) -> tuple[bool, str]:
+    """Ensure that a revamp / rebuild task genuinely replaced the legacy codebase.
+
+    Refuses releases that claim to be a 'revamp' or 'rebuild' but only touched
+    minor cosmetic lines or failed to replace the core application code and tests.
+    """
+    if not spec:
+        return True, "no task spec — revamp gate skipped"
+    label = str(spec.get("label", "")).lower()
+    req = str(spec.get("owner_request", "")).lower()
+    spec_id = str(spec.get("id", "")).lower()
+    is_revamp = (
+        spec.get("kind") == "revamp"
+        or spec.get("type") == "revamp"
+        or any(k in spec_id for k in ("revamp", "rebuild", "ground-up"))
+        or any(k in label for k in ("revamp", "rebuild"))
+        or any(k in req for k in ("revamp", "rebuild", "delete the codebase", "delete codebase", "from scratch"))
+    )
+    if not is_revamp:
+        return True, "not a revamp task"
+
+    # Check that new code was actually created/modified in the worktree
+    code_changes = [f for f in files if f.endswith(".kt") or f.endswith(".java")]
+    if len(code_changes) < 3:
+        return False, (
+            f"task is marked as revamp/rebuild, but diff has only {len(code_changes)} code file changes. "
+            "A ground-up rebuild must rewrite the application codebase and its tests, not just tweak single lines."
+        )
+
+    # Check that tests were also written for the new code
+    test_changes = [f for f in files if "Test.kt" in f or "Test.java" in f]
+    if not test_changes:
+        return False, (
+            "task is marked as revamp/rebuild, but diff contains zero new/updated tests. "
+            "Rebuilding from scratch requires fresh test coverage."
+        )
+
+    return True, f"{len(code_changes)} code files rebuilt, {len(test_changes)} tests verified"
+
+
 def store_note_check(project: Path, worktree: Path, spec: dict | None) -> tuple[bool, str]:
     """A build may not ship the previous release's "What's new" text again.
 
@@ -552,6 +592,14 @@ def verify_all(project: Path, worktree: Path, base: str, log, gradle: bool = Tru
     # Gradle gates because it costs nothing and its remedy is a one-line edit.
     ok, msg = store_note_check(project, worktree, spec)
     log("store note: ok — " + msg if ok else "store note: FAIL — " + msg)
+    if not ok:
+        failures.append(msg)
+        return False, failures
+
+    # REVAMP CODEBASE REBUILD GATE: a task claiming to be a revamp or rebuild from scratch
+    # must genuinely replace the legacy codebase and supply fresh tests.
+    ok, msg = revamp_gate(project, worktree, spec, files)
+    log("revamp: ok — " + msg if ok else "revamp: FAIL — " + msg)
     if not ok:
         failures.append(msg)
         return False, failures
