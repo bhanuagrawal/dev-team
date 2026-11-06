@@ -750,8 +750,17 @@ def run_store_readiness_audit(project: Path, tree: Path | None = None) -> list[R
         # but `docs/storefront.json` still names the old screens, the screenshots
         # on Play depict surfaces the user will never see — the "Misleading
         # Claims" defect one gate past existence. The scene spec is checked
-        # against the SHIPPED main sources (declarations, not call sites: the
-        # generated capture harness calls the old names and would vouch for them).
+        # against DECLARATIONS in shipped main sources plus the project-owned
+        # preview wrappers (never call sites: the generated capture harness calls
+        # the old names and would vouch for them).
+        #
+        # The wrappers are a documented part of the scaffolder's design: a scene
+        # is composed from fixture data in a TEST source set so none of it reaches
+        # the APK (see `storefront_preview.write_harness`, which writes the
+        # generated harness into `src/test`, `src/androidUnitTest` or
+        # `src/screenshotTest`). Reading main alone made every such project a
+        # BLOCKER that no honest fix could clear — the only way to satisfy it
+        # would be shipping screenshot fixtures into the app.
         spec_file = src / "docs" / "storefront.json"
         if spec_file.is_file():
             try:
@@ -759,7 +768,13 @@ def run_store_readiness_audit(project: Path, tree: Path | None = None) -> list[R
             except (OSError, ValueError):
                 scenes = []
             _main_sets = {"main", "commonMain", "androidMain", "jvmMain", "desktopMain"}
+            _preview_sets = {"test", "androidTest", "commonTest", "androidUnitTest",
+                             "jvmTest", "desktopTest", "screenshotTest"}
+            # The harness is generated from this very JSON; it must not be able to
+            # certify a name the project never declared.
+            _generated_harness = {"StorefrontScreenshotsTest.kt", "StorefrontScenes.kt"}
             _main_files = []
+            _preview_files = []
             for p in src.glob("**/src/*/**/*.kt"):
                 if not p.is_file():
                     continue
@@ -771,7 +786,13 @@ def run_store_readiness_audit(project: Path, tree: Path | None = None) -> list[R
                        for i, seg in enumerate(parts)
                        if seg == "src" and i + 1 < len(parts)):
                     _main_files.append(p)
+                elif (p.name not in _generated_harness
+                      and any(parts[i + 1] in _preview_sets
+                              for i, seg in enumerate(parts)
+                              if seg == "src" and i + 1 < len(parts))):
+                    _preview_files.append(p)
             main_text = "\n".join(p.read_text(errors="ignore") for p in _main_files)
+            preview_text = "\n".join(p.read_text(errors="ignore") for p in _preview_files)
             missing: list[str] = []
             for scene in scenes:
                 call = str(scene.get("composable") or "")
@@ -779,7 +800,8 @@ def run_store_readiness_audit(project: Path, tree: Path | None = None) -> list[R
                 if not m:
                     continue
                 name = m.group(1)
-                if not re.search(rf"\b(?:fun|class|object)\s+{re.escape(name)}\b", main_text):
+                declared = rf"\b(?:fun|class|object)\s+{re.escape(name)}\b"
+                if not (re.search(declared, main_text) or re.search(declared, preview_text)):
                     missing.append(f"{scene.get('id') or '?'}:{name}")
             if not main_text:
                 # No source set resolved (an unfamiliar layout): saying every
