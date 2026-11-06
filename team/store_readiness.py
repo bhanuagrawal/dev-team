@@ -796,13 +796,26 @@ def run_store_readiness_audit(project: Path, tree: Path | None = None) -> list[R
             missing: list[str] = []
             for scene in scenes:
                 call = str(scene.get("composable") or "")
-                m = re.match(r"\s*([A-Za-z_]\w*)\s*(?:\(|$)", call)
-                if not m:
+                # A scene may WRAP the app's screen: a bottom sheet over the home
+                # screen is a real presentation, so the expression starts with a
+                # layout container (`Box(...) { MindfulHomeScreen(...) }`) — reading
+                # only the first identifier called that a superseded screen and
+                # blocked the listing that had just been rendered from the real one
+                # (2026-11-07). The scene is honest when ANY composable it names is
+                # declared in the project's own source; only a scene naming none is
+                # describing a screen that no longer exists.
+                names = re.findall(r"\b([A-Z][A-Za-z0-9_]*)\s*\(", call)
+                if not names:
                     continue
-                name = m.group(1)
-                declared = rf"\b(?:fun|class|object)\s+{re.escape(name)}\b"
-                if not (re.search(declared, main_text) or re.search(declared, preview_text)):
-                    missing.append(f"{scene.get('id') or '?'}:{name}")
+                declared_any = any(
+                    re.search(rf"\b(?:fun|class|object)\s+{re.escape(name)}\b",
+                              main_text) or
+                    re.search(rf"\b(?:fun|class|object)\s+{re.escape(name)}\b",
+                              preview_text)
+                    for name in names
+                )
+                if not declared_any:
+                    missing.append(f"{scene.get('id') or '?'}:{names[0]}")
             if not main_text:
                 # No source set resolved (an unfamiliar layout): saying every
                 # scene is missing would be a false blocker, so this is unmeasured.
