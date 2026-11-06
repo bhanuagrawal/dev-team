@@ -105,8 +105,9 @@ def purge_codebase(project: Path,
 
     seen_files: set[Path] = set()
     for s_dir in search_dirs:
-        # Don't touch build directories or .pipeline
-        if ".pipeline" in str(s_dir) or "build" in str(s_dir):
+        # Don't touch build directories or .pipeline inside the target root
+        rel_dir = s_dir.relative_to(root)
+        if ".pipeline" in rel_dir.parts or "build" in rel_dir.parts:
             continue
         for src_file in s_dir.glob("**/*"):
             if not src_file.is_file():
