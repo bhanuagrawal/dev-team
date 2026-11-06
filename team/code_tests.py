@@ -182,31 +182,76 @@ def _covered(src: SourceFile, t: TestFile) -> bool:
 # --------------------------------------------------------------------------- #
 # what the developer should create, derived from the project layout
 # --------------------------------------------------------------------------- #
+def _has_sources(directory: Path) -> bool:
+    return any(p.is_file() and p.suffix in SOURCE_EXTS for p in directory.rglob("*"))
+
+
 def suggest_test_dirs(root: Path) -> tuple[list[str], list[str]]:
     """(unit dirs, UI dirs) that EXIST, else the conventional ones.
 
     Derived from the module layout so the message names a real place to put the
     test — never a hard-coded module name. KMP modules get `commonTest` +
     `androidInstrumentedTest`; Android modules get `test` + `androidTest`.
+
+    Two shapes the naive "src/main or src/commonMain" test got wrong, both seen
+    in the wild and both of which point a developer at a directory that does not
+    exist (2026-11-06: a prompt told a developer to put tests in
+    `composeApp/src/commonTest` on a project whose only source module was `app`
+    with `androidMain` + flavour source sets, and hid the `app/src/androidUnitTest`
+    that really existed):
+      * an Android/KMP module whose sources live in `androidMain`/`jvmMain`/
+        `iosMain` (or flavour sets) and has no `src/main` at all — it is still a
+        module, and any test dir it really has must be named;
+      * an EMPTY `src/` tree left behind by a rename (build output, untracked and
+        ignored, with no build file and no sources) — it is not a module, and its
+        conventional dirs must not be recommended.
     """
-    modules = [p.parent.name for p in sorted(root.glob("*/src"))]
     unit: list[str] = []
     ui: list[str] = []
-    for mod in modules:
-        src = root / mod / "src"
-        if (src / "commonMain").is_dir():
-            conventional_unit, conventional_ui = "commonTest", "androidInstrumentedTest"
-        elif (src / "main").is_dir():
-            conventional_unit, conventional_ui = "test", "androidTest"
-        else:
-            continue
+    for src in sorted(root.glob("*/src")):
+        mod = src.parent.name
         found_unit = [f"{mod}/{d}" for d in UNIT_TEST_DIRS
                       if (root / mod / d).is_dir()]
         found_ui = [f"{mod}/{d}" for d in UI_TEST_DIRS
                     if (root / mod / d).is_dir()]
+        declares_itself = any((root / mod / f).is_file()
+                              for f in ("build.gradle", "build.gradle.kts",
+                                        "pom.xml", "Cargo.toml", "package.json"))
+        source_sets = {p.name for p in src.iterdir() if p.is_dir()}
+        real_module = (declares_itself or _has_sources(src)
+                       or any(_has_sources(root / mod / d)
+                              for d in found_unit + found_ui))
+        if not real_module:
+            continue
+        if "commonMain" in source_sets:
+            conventional_unit, conventional_ui = "commonTest", "androidInstrumentedTest"
+        else:
+            conventional_unit, conventional_ui = "test", "androidTest"
         unit += found_unit or [f"{mod}/src/{conventional_unit}"]
         ui += found_ui or [f"{mod}/src/{conventional_ui}"]
     return sorted(dict.fromkeys(unit)), sorted(dict.fromkeys(ui))
+
+
+def _selftest() -> int:
+    """The two layouts that broke suggest_test_dirs (run: python3 -m team.code_tests)."""
+    import tempfile
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        (root / "app/src/androidMain/kotlin/p").mkdir(parents=True)
+        (root / "app/src/androidMain/kotlin/p/A.kt").write_text("class A")
+        (root / "app/src/androidUnitTest/kotlin/p").mkdir(parents=True)
+        (root / "app/src/androidUnitTest/kotlin/p/ATest.kt").write_text("class ATest")
+        # an empty leftover from a rename: no build file, no sources
+        (root / "leftover/src/commonMain").mkdir(parents=True)
+        (root / "leftover/src/androidTest").mkdir(parents=True)
+        unit, ui = suggest_test_dirs(root)
+        assert unit == ["app/src/androidUnitTest"], unit
+        assert ui == ["app/src/androidTest"], ui
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(_selftest())
 
 
 # --------------------------------------------------------------------------- #
