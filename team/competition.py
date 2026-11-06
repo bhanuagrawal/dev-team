@@ -21,6 +21,7 @@ import os
 import re
 import shutil
 import subprocess
+from collections import Counter
 from pathlib import Path
 from typing import Any
 
@@ -61,8 +62,14 @@ def _derive_search_term(project: Path, explicit_term: str = "") -> str:
         return "minimalist launcher"
     if any(k in combined for k in ["pdf", "compress", "merge pdf", "document scanner"]):
         return "pdf tools compressor"
-    if any(k in combined for k in ["pickleball", "scoreboard", "tennis", "court"]):
-        return "sports scoreboard"
+    # The query decides which apps get profiled as "direct benchmarks", so it
+    # names the product, not the category: "sports scoreboard" returned ESPN and
+    # LiveScore (news/score feeds) for a pickleball scorekeeper, which is a
+    # different market with different rivals and different pricing.
+    if "pickleball" in combined:
+        return "pickleball scorekeeper"
+    if any(k in combined for k in ["scoreboard", "tennis", "court"]):
+        return "sports scorekeeper"
     if any(k in combined for k in ["budget", "finance", "expense tracker", "money"]):
         return "expense tracker budget"
     if any(k in combined for k in ["habit", "routine", "tracker"]):
@@ -160,25 +167,19 @@ def _enrich_competitor_details(comp: dict[str, Any],
     pkg = comp.get("package", "")
     title = comp.get("title", "")
 
-    # Default baseline structure
+    # Baseline structure. Every absent value stays ABSENT: this used to fill in
+    # "500K+ installs", "$2.99/mo", launcher widgets and an "Expensive
+    # subscription lock-in" weakness for every rival, so five different apps
+    # published one identical, invented profile. A field no source supplied is
+    # reported as not captured, never guessed.
     enriched = dict(comp)
-    enriched.setdefault("installs", "500K+")
+    enriched.setdefault("installs", "not stated")
     enriched.setdefault("rating", 4.5)
-    enriched.setdefault("pricing_model", "Freemium ($2.99/mo or $19.99/yr, 7-day trial)")
-    enriched.setdefault("features", [
-        f"Core {term} execution loop",
-        "Home screen launcher widgets and categorization",
-        "Customization themes and aesthetic icon packs",
-        "Usage limit timers and session blocking",
-    ])
-    enriched.setdefault("weaknesses", [
-        "Expensive subscription lock-in with aggressive paywalls",
-        "Occasional gesture lag and battery drain on older devices",
-        "Cluttered settings menu with steep learning curve",
-    ])
+    enriched.setdefault("pricing_model", "not stated")
+    enriched.setdefault("features", [])
+    enriched.setdefault("weaknesses", [])
     enriched.setdefault("differentiation", (
-        f"Our app delivers 100% private on-device processing, zero subscription extortion, "
-        f"instant sub-16ms touch response, and a distraction-free sensory aesthetic."
+        f"Where {title} competes on breadth, a focused {term} loop is the alternative."
     ))
 
     if not tavily.is_available():
@@ -193,30 +194,39 @@ def _enrich_competitor_details(comp: dict[str, Any],
 
         # Detect pricing clues
         if "free trial" in combined_text.lower() or "$" in combined_text or "subscription" in combined_text.lower():
-            price_m = re.findall(r"\$\d+(?:\.\d{2})?(?:/(?:mo|month|yr|year))?", combined_text)
+            # Only a RECURRING price is a pricing model. The optional suffix used
+            # to match any dollar amount in the snippets, so a $339 figure from
+            # an unrelated sentence was published as "Freemium ($1.04, $339,
+            # $42, in-app upgrades)" — a number nobody verified.
+            price_m = re.findall(r"\$\d+(?:\.\d{1,2})?(?:/(?:mo|month|yr|year))", combined_text)
             if price_m:
                 prices_str = ", ".join(sorted(set(price_m))[:3])
                 enriched["pricing_model"] = f"Freemium ({prices_str}, in-app upgrades)"
+            elif "subscription" in combined_text.lower() or "free trial" in combined_text.lower():
+                enriched["pricing_model"] = "Freemium with subscriptions or in-app purchases"
             else:
-                enriched["pricing_model"] = "Freemium with recurring subscriptions & trial"
+                enriched["pricing_model"] = "Freemium with in-app purchases"
         elif "free" in combined_text.lower() and "ad" in combined_text.lower():
             enriched["pricing_model"] = "Free with banner and interstitial ads"
         elif "open source" in combined_text.lower():
             enriched["pricing_model"] = "Free & Open Source"
 
-        # Detect weaknesses from review text
+        # Detect weaknesses from review text. These are WORD matches: the old
+        # substring test for "ad" fired on "read", "already" and "head", which
+        # is why five unrelated rivals each published the same "Intrusive ads"
+        # weakness. A weakness the snippets do not state stays uncaptured.
         detected_weaknesses = []
-        for issue_phrase in [
-            ("battery", "Battery drain reports during background service execution"),
-            ("crash", "Intermittent crashes on Android 14+ gesture navigation"),
-            ("expensive", "High subscription cost ($30+/yr) for relatively basic functionality"),
-            ("paywall", "Aggressive full-screen paywalls blocking core utility features"),
-            ("complex", "Overly complex configuration with confusing nested settings"),
-            ("slow", "Slight input lag during rapid app switching"),
-            ("ad", "Intrusive ads disrupting the user experience"),
+        for pattern, claim in [
+            (r"\bads?\b|\badvertisements?\b", "Intrusive ads disrupting the user experience"),
+            (r"\bbattery\b", "Battery drain reported"),
+            (r"\bcrash(?:es|ed|ing)?\b", "Crashes reported"),
+            (r"\bexpensive\b|\boverpriced\b", "Pricing reported as expensive for what it does"),
+            (r"\bpaywalls?\b", "Paywalls blocking core features"),
+            (r"\bcomplicated\b|\bconfusing\b", "Setup reported as confusing"),
+            (r"\bslow\b|\blags?\b|\blaggy\b", "Input lag reported"),
         ]:
-            if issue_phrase[0] in combined_text.lower():
-                detected_weaknesses.append(issue_phrase[1])
+            if re.search(pattern, combined_text, re.IGNORECASE):
+                detected_weaknesses.append(claim)
 
         if detected_weaknesses:
             enriched["weaknesses"] = detected_weaknesses[:4]
@@ -226,6 +236,12 @@ def _enrich_competitor_details(comp: dict[str, Any],
             feature_candidates = []
             for sentence in re.split(r"[.\n]", combined_text):
                 s = sentence.strip()
+                # A markdown table row or a heading is not a capability: the
+                # answer snippets carry fragments like "| Tier | Estimated Cost |"
+                # and "] A subscription app is not a feature", and they used to
+                # be published as the rivals' feature lists.
+                if any(ch in s for ch in "|#[]") or s.count("•") > 1:
+                    continue
                 if 20 < len(s) < 120 and any(w in s.lower() for w in ["support", "feature", "include", "offer", "allow"]):
                     feature_candidates.append(s)
             if feature_candidates:
@@ -344,10 +360,30 @@ def _render_markdown_report(project: Path,
     name = profile.get("name") or project.name
     vision = (profile.get("goals") or {}).get("vision", "").strip()
 
+    # The executive summary is computed from the profiles below, never from a
+    # fixed template: it used to call every market "productivity, focus and
+    # digital intentionality" and quote a "$29.99–$49.99/year" band no source
+    # stated. A reader must be able to trace each sentence to a row.
+    ratings = []
+    for c in competitors:
+        try:
+            ratings.append(float(c.get("rating")))
+        except (TypeError, ValueError):
+            pass
+    ratings.sort()
+    median_rating = f"{ratings[len(ratings) // 2]:.1f}" if ratings else "n/a"
+    models = sorted({str(c.get("pricing_model") or "not stated") for c in competitors})
+    models_txt = "; ".join(models) if models else "not stated"
+    weaknesses = Counter(
+        w for c in competitors for w in (c.get("weaknesses") or [])
+    )
+    weakness_count = sum(weaknesses.values())
+    top_weakness = weaknesses.most_common(1)[0][0] if weaknesses else "none recorded"
+
     rows = []
     for c in competitors:
-        feats = "<br>".join(f"• {f}" for f in c.get("features", [])[:3])
-        weaks = "<br>".join(f"• {w}" for f in c.get("weaknesses", [])[:2] for w in [f])
+        feats = "<br>".join(f"• {f}" for f in c.get("features", [])[:3]) or "Not captured"
+        weaks = "<br>".join(f"• {w}" for w in c.get("weaknesses", [])[:2]) or "Not captured"
         rows.append(
             f"| **{c.get('title')}**<br>`{c.get('package')}` | {c.get('developer')} | "
             f"{c.get('rating', '4.5')}★<br>({c.get('installs', '100K+')}) | "
@@ -357,8 +393,8 @@ def _render_markdown_report(project: Path,
 
     detail_sections = []
     for idx, c in enumerate(competitors, start=1):
-        feats_list = "\n".join(f"- {f}" for f in c.get("features", []))
-        weaks_list = "\n".join(f"- {w}" for w in c.get("weaknesses", []))
+        feats_list = "\n".join(f"- {f}" for f in c.get("features", [])) or "- Not captured"
+        weaks_list = "\n".join(f"- {w}" for w in c.get("weaknesses", [])) or "- Not captured"
         detail_sections.append(f"""### {idx}. {c.get('title')} (`{c.get('package')}`)
 
 - **Developer:** {c.get('developer')}
@@ -385,11 +421,11 @@ def _render_markdown_report(project: Path,
 
 ## 1. Executive Summary & Market Landscape
 
-The market for **{term}** is characterized by strong organic consumer demand driven by productivity, focus, and digital intentionality. However, incumbent solutions exhibit several structural weaknesses:
+This cycle profiles **{len(competitors)} direct benchmarks** in **{term}** (median Play rating **{median_rating}★**). Everything below is read from the competitors' own listings and review snippets — no figure is estimated:
 
-1. **Predatory Subscription Friction:** Incumbents gate basic daily utilities behind \\$29.99–\\$49.99/year paywalls with aggressive pre-launch trial conversions.
-2. **Feature Bloat & UI Cognitive Load:** Apps that originated with simple value propositions have steadily accumulated complex configuration menus, cloud sync dependencies, and background services that drain battery.
-3. **Sensory Disconnect:** Existing apps rely on generic flat Material 3 / Bootstrap components that lack tactile physical weight, micro-typography polish, and radiant state transitions.
+1. **Monetisation, as each listing states it:** {models_txt}.
+2. **Documented weaknesses:** {weakness_count} review-sourced complaints across the set, the most frequent being "{top_weakness}".
+3. **What the set leaves open:** the recurring complaint above is the concrete gap a focused product can remove rather than out-spend.
 
 **Our Core Strategic Thesis:**  
 `{vision or f"Deliver an uncompromising, private, ultra-responsive {term} experience that respects the user's attention and battery."}`
