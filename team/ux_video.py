@@ -1018,6 +1018,35 @@ def store_crash(project: Path, row: dict, reason: str) -> None:
     ux_audit.save(project, data)
 
 
+def retire_driven_gripes(project: Path, row: dict, kinds: set[str], evidence: str) -> int:
+    """Retire gripes that a fresh recording disproves.
+
+    `store_crash` only rewrites crash gripes when a crash HAPPENS AGAIN, so a P0
+    the fix already removed stayed open forever: the planner kept a blunder at the
+    queue head whose build no longer reproduced it, and no later recording could
+    clear it (seen 2026-11-07: the drawer duplicate-key crash was fixed and
+    shipped, yet the audit still reported it P0). A flow that was re-recorded and
+    ran to completion IS the proof — mark the earlier gripes `gone`, keep them in
+    the list as history, and let the plan read only `open` ones.
+    """
+    from . import ux_audit
+    data = ux_audit.load(project)
+    surf = (data.get("surfaces") or {}).get(row["surface"])
+    if surf is None:
+        return 0
+    retired = 0
+    for g in surf.get("gripes") or []:
+        if (g.get("source") == "video" and g.get("flow") == row["id"]
+                and g.get("kind") in kinds and g.get("status") == "open"):
+            g["status"] = "gone"
+            g["gone_at"] = now_iso()
+            g["gone_evidence"] = evidence
+            retired += 1
+    if retired:
+        ux_audit.save(project, data)
+    return retired
+
+
 def store_reaction(project: Path, row: dict, sheet: dict, reaction: dict) -> dict:
     """Attach the flow's result to its declared screen in the UX audit store.
 
@@ -1179,6 +1208,20 @@ def run(project: Path, only: str | None = None, everything: bool = False,
                 recorded.append(rec)
                 if rec.get("dead_taps"):
                     store_dead_taps(project, r, rec["dead_taps"])
+                else:
+                    retire_driven_gripes(
+                        project, r, {"dead-click"},
+                        f"re-recorded '{r['id']}' at {rec['recorded_at']} — every "
+                        f"declared tap changed the screen, so the dead control is gone")
+                # record_flow returns only when the flow ran to completion; a crash
+                # on the way (or on the last frame) raises and lands in store_crash.
+                retired = retire_driven_gripes(
+                    project, r, {"crash"},
+                    f"re-recorded '{r['id']}' at {rec['recorded_at']} — the flow "
+                    f"completed on the delivery build with no crash")
+                if retired and log:
+                    log(f"~ ux-video: retired {retired} earlier crash gripe(s) on "
+                        f"'{r['surface']}' — the fresh recording disproved them")
         finally:
             if started and not keep_emulator:
                 stopped = emulator.stop(serial)
