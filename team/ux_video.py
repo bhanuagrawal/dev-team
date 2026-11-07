@@ -1,11 +1,13 @@
-"""Video pass for the UX audit — the feel a still cannot show.
+"""Video pass for the UX audit — the screens in motion, and how they read.
 
 WHY THIS EXISTS
 ---------------
 `ux-audit` judges one STILL per screen. A still cannot show dead time, jank, an
 abrupt transition, a spinner that flashes for 40 ms or a blank frame that sits
 for three seconds — and it cannot show that a tap did nothing. Those are exactly
-the failures a user calls "slow" or "broken" while the layout looks fine.
+the failures a user calls "slow" or "broken" while the layout looks fine. The pass
+therefore judges BOTH: every screen that appears (hierarchy, spacing, contrast,
+affordance, copy, consistency) and the motion between them.
 
 A FLOW is a short, declared journey (`docs/ux-flows.json`, project-owned), driven
 on a booted emulator while `adb shell screenrecord` records it. Frames are
@@ -50,21 +52,34 @@ DEFAULT_SECONDS = 20
 SAMPLE_EVERY_S = 2.0
 GRID_COLS, GRID_ROWS = 3, 2
 FRAME_W = 380
-RUBRIC = "ux-video-v1"
+RUBRIC = "ux-video-v2"
 
 PROMPT = """You are judging ONE interaction in a mobile app from {evidence}.
 The interaction is {seconds} seconds long and was driven like this:
 {actions}
 {sampling}
 
-Judge the FEEL of this flow, not just the layout:
+Judge TWO things: how every VISIBLE SCREEN reads, and how the flow FEELS in motion.
+
+Screen UI/UX — judge each screen that appears, not only what moves:
+- hierarchy: is the most important thing the most prominent? can I tell what this
+  screen wants me to do?
+- layout: spacing, alignment, dead whitespace, content colliding or clipped, a
+  row that wraps where its neighbours do not, content cut by an edge or a bar
+- readability: contrast, type size, labels that truncate or run off
+- affordance: a control that does not look tappable, or looks tappable but is a
+  status; unexplained icons, dots or badges; an on/off state you cannot read
+- content: marketing fluff or jargon where a plain sentence belongs; a label that
+  does not say what happens; an option that looks missing
+- consistency with the screens around it (chrome, padding, palette, icon style)
+
+Motion — what changes between panels:
 - dead time: a spinner, blank surface or unchanged screen that sits too long
 - jank: a visible stutter, jump, or scroll that snaps
-- abrupt transitions: a hard cut with no animation where the app clearly changes
-  screen state, or content that appears before the chrome around it
+- abrupt transitions: a hard cut where the app clearly changes screen state, or
+  content that appears before the chrome around it
 - a tap that visibly produced NO change in the following panel (a dead control)
 - loading/error states that flash, truncate, or cover the thing they describe
-- anything that looks broken or cheap in motion
 
 Screen: {surface} · flow: {flow}
 
@@ -74,22 +89,24 @@ Return ONLY this JSON:
     {{"at": "00:02", "line": "what a first-time user would think out loud",
       "kind": "slow|jank|abrupt|blank|clear|premium"}}
   ],
-  "motion_defects": [
-    {{"line": "exact description of the motion/usability defect",
-      "element": "the control or region", "severity": "P1_DEGRADED|P2_POLISH"}}
+  "defects": [
+    {{"line": "exact description of the UI, UX or motion defect",
+      "element": "the control or region", "kind": "ui|ux|motion",
+      "severity": "P1_DEGRADED|P2_POLISH"}}
   ],
-  "premium": ["what genuinely feels fast, smooth or well-crafted"],
-  "verdict": "one sentence on whether this flow feels production-grade"
+  "premium": ["what genuinely looks or feels fast, smooth or well-crafted"],
+  "verdict": "one sentence on whether this flow and its screens feel production-grade"
 }}
 
 Rules:
-- Point at what actually CHANGES between panels. Name the panels ("between panel 2
-  and 3 the list appears with no transition").
-- Never invent motion you cannot see: if two panels are identical, say so or stay
+- Name the screen or the panels a defect is on ("on the settings screen ...",
+  "between panel 2 and 3 ..."). A screen that is only seen for a moment still counts.
+- Never invent what you cannot see: if two panels are identical, say so or stay
   silent. Do not guess the app's name or brand.
 - A control that was tapped with no visible response in the next panel is P1.
 - A blank or unstyled frame that persists across panels is P1; a single frame is P2.
-- Cosmetic niceties are P2. Leave the lists empty when the flow is solid.
+- A layout or readability problem that a user would hit on every visit is P1;
+  cosmetic niceties are P2. Leave the lists empty when the flow is solid.
 """
 
 
@@ -199,6 +216,11 @@ def plan(project: Path) -> dict:
             status = "new"
         elif newer:
             status = "stale"
+        elif prev.get("rubric") != RUBRIC:
+            # The question changed shape: a verdict produced by an older rubric is
+            # not comparable, so the flow is owed a fresh reaction (the recording
+            # is reused — only the judgement is redone).
+            status = "unreacted"
         elif prev.get("video_sha") != sha or not prev.get("reacted_at"):
             status = "unreacted"
         else:
@@ -820,17 +842,20 @@ def react(project: Path, row: dict, flow: dict, mp4: Path, sheet: dict,
 def _result(value: dict, row: dict, model: str, evidence: str) -> dict:
     from . import ux_audit
     gripes = []
-    for item in value.get("motion_defects") or []:
+    # `defects` covers the visible screens as well as the motion; `motion_defects`
+    # is the older key and is still read so a stored/older answer is not lost.
+    for item in (value.get("defects") or value.get("motion_defects") or []):
         if not isinstance(item, dict):
             continue
         line = str(item.get("line") or "").strip()
         if not line:
             continue
+        kind = str(item.get("kind") or "motion").strip().lower()
         gripes.append({
             "id": ux_audit.gripe_id(_slug(row["id"])[:12], line),
             "line": line,
             "element": str(item.get("element") or ""),
-            "kind": "motion",
+            "kind": kind if kind in ("ui", "ux", "motion") else "motion",
             "severity": _severity(str(item.get("severity") or ""), line),
             "status": "open",
             "source": "video",
@@ -986,6 +1011,7 @@ def run(project: Path, only: str | None = None, everything: bool = False,
                 man = load_manifest(project)
                 man[r["id"]] = {
                     "video_sha": _sha(Path(rec["mp4"])),
+                    "rubric": RUBRIC,
                     "recorded_at": rec["recorded_at"],
                     "seconds": rec["seconds"],
                     "actions": rec["actions"],
@@ -1041,6 +1067,7 @@ def run(project: Path, only: str | None = None, everything: bool = False,
                 continue
             man = load_manifest(project)
             man.setdefault(r["id"], {})["sheet"] = sheet["sheet"]
+            man[r["id"]]["rubric"] = RUBRIC
             man[r["id"]]["panels"] = sheet["panels"]
             man[r["id"]]["evidence"] = reaction.get("evidence", "")
             if reaction.get("ok"):
