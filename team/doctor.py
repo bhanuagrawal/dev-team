@@ -379,7 +379,8 @@ def run_doctor(project: Path, log) -> dict:
     try:
         from . import goals as goals_mod
         gaps = goals_mod.tree_gaps(profile)
-        why = gaps[0] + (f" (and {len(gaps) - 1} more)" if len(gaps) > 1 else "")
+        why = (gaps[0] + (f" (and {len(gaps) - 1} more)" if len(gaps) > 1 else "")
+               ) if gaps else ""
         checks = [("the plan has a middle tier (vision → goals → milestones)"
                    if not gaps else "the plan has no middle tier: " + why,
                    not gaps,
