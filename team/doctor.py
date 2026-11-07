@@ -199,6 +199,7 @@ GENERIC_TOKENS = {
     "score", "court", "board", "media", "clean", "split", "merge", "convert", "share",
     "image", "images", "document", "documents", "file", "files", "text", "notes",
     "field", "cert", "certificate", "audit", "trade", "check", "inspection",
+    "book", "books", "swap", "read", "reader",
 }
 
 
