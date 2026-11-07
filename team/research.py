@@ -1873,6 +1873,26 @@ def research_apply_file(project: Path, result_path: Path, log: RunLog) -> None:
         research = json.loads((project / ".pipeline" / "research.json").read_text())
     except Exception:
         research = None
+    # COVERAGE FLOORS ARE CONFIG, so a cached signal's measurement cannot be
+    # trusted to still be judged against today's rule: a floor change lands in
+    # config/coverage.json while research.json keeps the old floors and an empty
+    # `below_floor`, and the gate then reads "fine" against a floor that no
+    # longer exists (seen 2026-11-07, the day a 100% floor landed). Re-measure
+    # the cheap deterministic signal before the gates see it — a file scan, no
+    # network and no LLM, so it cannot make the apply slower in any way that
+    # matters.
+    if research is not None:
+        try:
+            signals = research.setdefault("signals", {})
+            read_tree = Path(
+                ((signals.get("repo") or {}).get("read_tree"))
+                or (project / ".pipeline" / "scan")
+            )
+            if read_tree.is_dir():
+                signals["coverage"] = coverage_mod.collect(read_tree, profile_of(project))
+                log(coverage_mod.summary_line(signals["coverage"]))
+        except Exception as e:  # a re-measure that fails says so, never silently
+            log(f"coverage: could not re-measure before validating ({e})")
     log(f"planner: apply-result received ({len(result.get('queue', []))} entries, "
         f"{len(result.get('goal_changes') or [])} plan changes) — validating")
     apply_result(project, result, research, log)
