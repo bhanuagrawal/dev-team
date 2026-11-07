@@ -68,6 +68,48 @@ def _main_source_set(rel: Path) -> str:
 _JACOCO_GLOB = "**/build/reports/jacoco/**/*.xml"
 
 
+# A top-level declaration in the file. Kotlin files often CONTAIN their concepts
+# rather than being one: a `...Calculators.kt` may declare two calculator objects,
+# a `...Models.kt` may declare five enums and three data classes, a `...Typography`
+# helper a single function. Matching only the file stem reported every one of those
+# as untested while the file's own tests exercised each declaration (2026-11-07),
+# which made a 100% floor unreachable by construction — the same class of defect
+# as the iosMain denominator above.
+_TOP_DECL_RE = re.compile(
+    r"^(?:(?:public|internal|private|protected|expect|actual|data|sealed|abstract"
+    r"|open|inline|suspend|operator|value|annotation|const|override|external"
+    r"|tailrec|infix)\s+)*"
+    r"(?:class|object|interface|fun|val|var|typealias)\s+"
+    r"(?:<[^>]*>\s*)?(?:[A-Za-z_][\w.]*\.)?([A-Za-z_]\w*)"
+)
+
+
+def _declared_names(text: str) -> set[str]:
+    """Top-level names a test could use to reach this file's behaviour.
+
+    Unindented declarations only: a nested member is part of its container type,
+    and counting it would let a test of one method claim the whole file. Names
+    shorter than three characters are dropped because a single letter matches
+    almost any body by accident.
+    """
+    names: set[str] = set()
+    for line in text.splitlines():
+        if not line or line[0].isspace():
+            continue
+        m = _TOP_DECL_RE.match(line)
+        if m and len(m.group(1)) >= 3:
+            names.add(m.group(1))
+    return names
+
+
+def _reached(names: set[str], blob: str) -> bool:
+    """True when any of `names` appears in the test sources as a standalone word."""
+    return any(
+        re.search(r"(?<![A-Za-z0-9_])" + re.escape(n) + r"(?![A-Za-z0-9_])", blob)
+        for n in names
+    )
+
+
 def _ui_names(text: str, stem: str) -> set[str]:
     """The names a test would use to mount this UI file.
 
@@ -243,22 +285,27 @@ def collect(tree: Path, profile: dict | None = None) -> dict:
             # 2026-11-07: three iosMain files held one project's unit leg below
             # its floor with no test a JVM could write).
             continue
-        pattern = re.compile(r"(?<![A-Za-z0-9_])" + re.escape(f.stem) + r"(?![A-Za-z0-9_])")
+        try:
+            text = f.read_text(errors="ignore")
+        except OSError:
+            text = ""
+        # The file's stem, the composables it declares and its top-level types are
+        # all evidence a test reached this file — a container file must be judged
+        # by what it declares, never by its filename alone.
+        names = _declared_names(text)
+        if _is_ui(rel):
+            names |= _ui_names(text, f.stem)
+        else:
+            names.add(f.stem)
         if _is_ui(rel):
             ui_tot += 1
-            try:
-                mounted = _ui_names(f.read_text(errors="ignore"), f.stem)
-            except OSError:
-                mounted = {f.stem}
-            if pattern.search(all_tests) or any(
-                    re.search(r"(?<![A-Za-z0-9_])" + re.escape(n) + r"(?![A-Za-z0-9_])", all_tests)
-                    for n in mounted):
+            if _reached(names, all_tests):
                 ui_cov += 1
             elif len(ui_missing) < 6:
                 ui_missing.append(str(rel))
         else:
             unit_tot += 1
-            if pattern.search(unit_tests):
+            if _reached(names, unit_tests):
                 unit_cov += 1
             elif len(unit_missing) < 6:
                 unit_missing.append(str(rel))
