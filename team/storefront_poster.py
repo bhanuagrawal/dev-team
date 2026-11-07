@@ -229,8 +229,6 @@ def _chatgpt_batch_script(jobs: list[dict[str, str]]) -> str:
     """
     return f"""
     const JOBS = {json.dumps(jobs)};
-    // A NEW chat every run: continuing whatever conversation was open let the
-    // previous listing's look leak into the repaint (same defect as Gemini's).
     await page.goto("https://chatgpt.com/", {{ waitUntil: "domcontentloaded" }});
     await page.waitForTimeout(4000);
     const composer = page.locator('[contenteditable="true"]').first();
@@ -240,42 +238,40 @@ def _chatgpt_batch_script(jobs: list[dict[str, str]]) -> str:
     const fileInput = page.locator('input[type=file][aria-label="Attach photos or videos"], '
                                  + 'input[type=file][aria-label="Attach photos"], '
                                  + 'input[type=file][accept="image/*"]').first();
-    const attachments = () => page.locator('[data-composer-attachments] img');
-    const sentImages = () => page.locator('[data-message-author-role="user"] img');
-    const generated = () => page.locator('main img[alt*="Generated" i]');
+    // Every image on the canvas, tagged with whether it is still the composer
+    // thumbnail. ChatGPT's markup has moved twice; this survives both because it
+    // asks the DOM a question (where is it, how big) instead of naming a test id.
+    const imgs = () => page.evaluate(() => Array.from(document.querySelectorAll("main img"))
+      .map(i => ({{ src: i.getAttribute("src") || "", w: i.naturalWidth, h: i.naturalHeight,
+                   composer: !!i.closest("[data-composer-attachments]") }})));
     const results = [];
     for (const job of JOBS) {{
       try {{
-        const attachBefore = await attachments().count();
+        const beforeAttach = (await imgs()).filter(i => i.composer).length;
         await fileInput.setInputFiles(job.src);
-        let attached = false;
+        let attachSrc = null;
         for (let i = 0; i < 25; i++) {{
-          if (await attachments().count() > attachBefore) {{ attached = true; break; }}
+          const comp = (await imgs()).filter(x => x.composer);
+          if (comp.length > beforeAttach) {{ attachSrc = comp[comp.length - 1].src; break; }}
           await page.waitForTimeout(1000);
         }}
-        if (!attached) {{
+        if (!attachSrc) {{
           results.push({{ ok: false, scene: job.out, error: "the scene render never attached to the prompt" }});
           continue;
         }}
         await composer.click();
         await composer.fill(job.prompt);
         await page.waitForTimeout(400);
-        const sentBefore = await sentImages().count();
-        const genBefore = await generated().count();
         await page.keyboard.press("Enter");
 
-        // Delivery proof: the SENT message must carry the render, and its shape
-        // is the one thing a thumbnail cannot fake. Gemini's rule, same reason:
-        // a prompt that ships without its screen makes the model invent a screen.
+        // Delivery proof, Gemini's rule and reason: the SENT message must carry
+        // the render, and its SHAPE is what a thumbnail cannot fake. A prompt that
+        // ships without its screen makes the model invent one.
         let delivered = false;
         for (let i = 0; i < 30; i++) {{
-          const n = await sentImages().count();
-          if (n > sentBefore) {{
-            const pic = sentImages().nth(n - 1);
-            const dims = await pic.evaluate(el => [el.naturalWidth, el.naturalHeight]).catch(() => [0, 0]);
-            const w = dims[0], h = dims[1];
-            if (job.ar > 0 && h > 0 && w >= 96 && Math.abs(w / h - job.ar) <= 0.06) {{ delivered = true; break; }}
-          }}
+          const sent = (await imgs()).filter(x => !x.composer && x.h > 0 && x.w >= 96
+                                                 && Math.abs(x.w / x.h - job.ar) <= 0.06);
+          if (sent.length) {{ delivered = true; break; }}
           await page.waitForTimeout(1000);
         }}
         if (!delivered) {{
@@ -289,16 +285,12 @@ def _chatgpt_batch_script(jobs: list[dict[str, str]]) -> str:
         let picked = null;
         let dims = [0, 0];
         while (Date.now() - start < 240000) {{
-          const g = generated();
-          const n = await g.count();
-          if (n > genBefore) {{
-            const last = g.nth(n - 1);
-            const w = await last.evaluate(el => el.naturalWidth).catch(() => 0);
-            if (w >= 300) {{
-              picked = await last.getAttribute("src");
-              dims = await last.evaluate(el => [el.naturalWidth, el.naturalHeight]).catch(() => [0, 0]);
-              break;
-            }}
+          const fresh = (await imgs()).filter(x => !x.composer && x.src !== attachSrc
+                                                 && x.w >= 600 && x.h >= 600);
+          if (fresh.length) {{
+            const got = fresh[fresh.length - 1];
+            picked = got.src; dims = [got.w, got.h];
+            break;
           }}
           const tail = (await page.locator("body").innerText()).slice(-700);
           if (/(usage cap|limit reached|you've reached|reached your|try again later|quota)/i.test(tail)) {{
