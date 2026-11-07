@@ -871,6 +871,9 @@ PROMPT_TMPL = """You are the research/product agent for app "{project}".
 You are given research collected by deterministic code:
 {research}
 
+DATA SOURCES THIS CYCLE (collected by code, one line each — all of them are yours):
+{sources}
+
 Decide what to BUILD NEXT. Output STRICT JSON only (no prose, no code fence):
 {{
   "insights": {{"headline": "one line", "analysis": "2-5 sentences grounded in the numbers"}},
@@ -880,7 +883,8 @@ Decide what to BUILD NEXT. Output STRICT JSON only (no prose, no code fence):
       "effort_min": {target_effort},
       "priority": 1, "reason": "one line grounded in research",
       "advances": "<milestone id this task serves, or 'none'>",
-      "supersedes": ["<exact label of an already-queued task this makes irrelevant>"]}}
+      "supersedes": ["<exact label of an already-queued task this makes irrelevant>"],
+      "clubs": ["<exact label of another queued entry THIS SAME RUN also builds>"]}}
   ],
   "off_goal": [
     {{"label": "<exact queue label you are keeping even though it advances nothing>", "reason": "one line: why it is still worth a run"}}
@@ -1028,6 +1032,16 @@ Rules:
     finishable, verifiable and releasable in a single pass.
   - Exception: the delivery-restoring entry (signals.ci red, queue[0]) may be
     any size — restoring delivery outranks sizing.
+- ONE RUN = ONE RELEASE, and the BATCH IS YOUR CALL. The run builds queue[0] plus
+  every entry it names in "clubs" — one developer session, one verify, one
+  version bump, one CI run, one internal-testing build. So when the head is under
+  {run_target} min, club it: name the same-milestone entries that belong with it
+  in queue[0].clubs (up to 3; same "advances" only — a run may never carry another
+  branch's work). Code rejects a thin head while a same-milestone entry is left
+  unclubbed, and `pick` carries exactly what you named. Club what is one coherent
+  pass (the same screen family, the same evidence, the same file set); never club
+  unrelated work to hit a number, and never leave a small fix alone while a
+  sibling is queued.
 - 'target' indicates the primary files/entry points for the task (repo-relative PATH(S),
   files, dirs or globs, e.g. 'app/src/main/java/**/ui/Foo.kt'); put the explanation in 'reason'.
   There is NO file blocking: developers have full authority to edit any shared files, viewmodels,
@@ -1295,6 +1309,52 @@ def _validate(result: dict, research: dict | None = None) -> str | None:
                         f"the {effective_max}-minute ceiling: SPLIT it into "
                         "sequential entries that each stand alone and each still "
                         "deliver something verifiable in one session")
+        # ONE RUN = ONE RELEASE, and the RUN is the PLANNER's decision. Code does
+        # not invent a batch: it checks that the plan made the call. A head under
+        # the pay-off target is legal only when nothing else on its milestone
+        # could ride along — otherwise a whole release is spent on one small fix.
+        if q is result["queue"][0] and q.get("type") in SIZED_TYPES:
+            clubs = [str(x) for x in (q.get("clubs") or []) if str(x).strip()]
+            head_eff = _as_int(q.get("effort_min")) or 0
+            if len(clubs) > 3:
+                return ("queue[0] names more than 3 'clubs' — a run is one developer "
+                        "session; split into two runs instead of one oversized batch")
+            if head_eff < scan.RUN_TARGET_MIN and not clubs:
+                same = [o for o in result["queue"][1:]
+                        if o.get("type") in SIZED_TYPES
+                        and str(o.get("advances") or "none")
+                        == str(q.get("advances") or "none")]
+                if same:
+                    labels = ", ".join(repr(o.get("label")) for o in same[:3])
+                    return (f"the run head '{q.get('label')}' is sized {head_eff} min — "
+                            f"under the {scan.RUN_TARGET_MIN}-min pay-off target — and "
+                            f"{len(same)} executable entr"
+                            f"{'y' if len(same) == 1 else 'ies'} on the SAME milestone "
+                            f"{'is' if len(same) == 1 else 'are'} left unclubbed ({labels}). "
+                            "One run ships one release: name them in this entry's "
+                            "\"clubs\" so they ship together, or size the entry up. "
+                            "Clubbing is this plan's call, not the picker's.")
+        if q.get("clubs"):
+            if q is not result["queue"][0]:
+                return (f"only queue[0] may declare 'clubs' — '{q.get('label')}' is not "
+                        "the run head")
+            by_label = {queue_mod._norm(queue_mod.label_of(o)): o
+                        for o in result["queue"][1:]}
+            for c in q.get("clubs") or []:
+                other = by_label.get(queue_mod._norm(str(c)))
+                if other is None:
+                    return (f"queue[0].clubs names '{c}', which is not another entry in "
+                            "this queue — use an exact label from current_queue")
+                if other.get("type") not in SIZED_TYPES and other.get("type") != "motion":
+                    return (f"queue[0].clubs names '{c}' ({other.get('type')}) — only "
+                            "executable work (motion/bugfix/feature) can ride in a run")
+                if (str(other.get("advances") or "none")
+                        != str(q.get("advances") or "none")):
+                    return (f"queue[0].clubs names '{c}', which serves "
+                            f"'{other.get('advances')}' while the head serves "
+                            f"'{q.get('advances')}' — one run may not smuggle another "
+                            "branch's work. Leave it queued for its own run (declared in "
+                            "off_goal if it is off-goal)")
         if q.get("type") in ("feature", "bugfix") and not target_looks_like_paths(q.get("target")):
             return (
                 f"{q.get('type')} queue entry '{q.get('label')}' names no "
@@ -1662,6 +1722,59 @@ def coverage_prompt_block(sig: dict) -> str:
     return "\n".join(lines)
 
 
+def sources_line(research: dict) -> str:
+    """The inventory of what this cycle actually collected — every source, one line.
+
+    The planner used to see only the JSON blob, so a source that quietly returned
+    nothing (reviews, competitors, market) was indistinguishable from one nobody
+    asked for, and the batch/priority call could be made without half the
+    evidence. Generated by code, so a source cannot be forgotten: every collector
+    in `research_collect` has a line here and appears in every prompt.
+    """
+    sig = research.get("signals") or {}
+
+    def st(d: dict, default: str = "n/a") -> str:
+        return str((d or {}).get("status") or default)
+
+    ux = sig.get("ux") or {}
+    lines = [
+        f"- Visual (renders + recorded flows): {ux.get('audited_surfaces', 0)} screen(s) "
+        f"audited · {ux.get('p0_blunder_count', 0)} P0 / {ux.get('p1_degraded_count', 0)} P1"
+        f" / {ux.get('p2_polish_count', 0)} P2 open · "
+        f"{len(ux.get('video_flows') or [])} flow(s) recorded "
+        f"(status: {st(ux)})",
+        f"- {coverage_mod.summary_line(sig.get('coverage') or {})}",
+    ]
+    ci = sig.get("ci") or {}
+    store = sig.get("store_status") or {}
+    lines.append(
+        f"- Delivery: CI {ci.get('last_conclusion') or 'unknown'}"
+        + (f" · store {store.get('state')} ({store.get('age_hours', '?')}h ago: "
+           f"{str(store.get('note') or '')[:70]})" if store.get("state") else "")
+        + f" (snapshot {st(store)})")
+    ready = sig.get("store_readiness") or {}
+    blockers = ready.get("blockers") or ready.get("blockers_count")
+    lines.append(f"- Play readiness: {st(ready)}"
+                 + (f" — {len(blockers)} blocker(s)" if isinstance(blockers, list)
+                    else (f" — {blockers} blocker(s)" if blockers is not None else "")))
+    lines.append(
+        f"- Product signals: GA4 {st(sig.get('ga4'))} · crashes/vitals "
+        f"{st(sig.get('vitals'))} · store reviews {st(sig.get('reviews'))}")
+    lines.append(
+        f"- Market: competitors {st(sig.get('competitors'))} · market "
+        f"{st(sig.get('market'))}")
+    cb = sig.get("codebase") or {}
+    lines.append(f"- Codebase: {cb.get('shipped_count', 0)} shipped · "
+                 f"{cb.get('animated_count', 0)} animated · "
+                 f"{len(cb.get('remaining') or [])} unanimated surface(s)")
+    repo = sig.get("repo") or {}
+    lines.append(f"- Ledger: queue {len(repo.get('current_queue') or [])} · "
+                 f"runs {repo.get('runs_recorded', 0)} · open asks "
+                 f"{len(repo.get('open_asks') or [])} · recent commits "
+                 f"{len((repo.get('commits') or {}).get('recent_commits') or [])}")
+    return "\n".join(lines)
+
+
 def render_prompt(project: Path, research: dict, log: RunLog | None = None,
                   focus: str | None = None, max_effort: int | None = None) -> str:
     """The exact synthesis prompt (goals + research + rules). Exported by
@@ -1686,10 +1799,12 @@ def render_prompt(project: Path, research: dict, log: RunLog | None = None,
     prompt = PROMPT_TMPL.format(project=research["project"],
                                 goals=goals.prompt_block(profile, state),
                                 research=json.dumps(research, indent=2),
+                                sources=sources_line(research),
                                 target_effort=eff_target,
                                 min_effort=MIN_EFFORT_MIN,
                                 max_effort=eff_max,
                                 max_queue=MAX_QUEUE,
+                                run_target=scan.RUN_TARGET_MIN,
                                 coverage_block=coverage_prompt_block(
                                     (research.get("signals") or {}).get("coverage") or {}))
     if focus_str:
@@ -1817,6 +1932,11 @@ def apply_result(project: Path, result: dict, research: dict | None,
                          "tree_changes": len(changes),
                          "changes_count": len(changes),
                          "changes": changes,
+                         # WHICH RUN this plan was made FOR. `pick` can then say
+                         # whether the run it is about to start was actually
+                         # planned in this cycle, instead of "a plan happened
+                         # today" being true for a run the planner never saw.
+                         "for_run": len(st.get("runs") or []) + 1,
                          "by": "planner"}
     save_state(project, st)
     log(f"planner: reviewed — {len(st.get('queue') or [])} waiting, next run "

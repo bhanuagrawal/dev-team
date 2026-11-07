@@ -171,43 +171,42 @@ def _effort_of(q: dict) -> int:
         return 0
 
 
-def run_chain(queue: list[dict], is_buildable) -> list[dict]:
-    """The entries ONE run should carry: the buildable head + same-branch followers.
+def declared_chain(queue: list[dict], is_buildable) -> list[dict]:
+    """The run the PLANNER declared: the buildable head + the entries it named in
+    `clubs`.
 
-    Contiguous and same `advances` on purpose. A follower from another milestone
-    is a different run's job (the goal gate and the off-goal declaration exist so
-    work is never smuggled), and skipping a non-buildable entry to grab a later
-    one would break the planner's execution order.
+    Code does not invent a batch. Prioritisation and batching are the planner's
+    decisions — it is the only component that sees every signal (renders, videos,
+    crashes, reviews, coverage, market, store, ledger) — so `pick` executes the
+    batch the plan named and nothing more. This only checks that what was named
+    is still buildable and not already delivered; the plan-time gate
+    (`research.validate_plan`) is what refuses a thin head that left a
+    same-milestone entry unclubbed.
     """
     start = next((i for i, q in enumerate(queue) if is_buildable(q)), None)
     if start is None:
         return []
     head = queue[start]
     chain = [head]
-    total = _effort_of(head)
-    adv = str(head.get("advances") or "")
-    for q in queue[start + 1:]:
-        if len(chain) >= RUN_MAX_ENTRIES or total >= RUN_TARGET_MIN:
-            break
-        if not is_buildable(q) or str(q.get("advances") or "") != adv:
-            break
-        e = _effort_of(q)
-        if e <= 0 or total + e > RUN_MAX_MIN:
-            break
-        chain.append(q)
-        total += e
+    wanted = {_norm_label(str(x)) for x in (head.get("clubs") or []) if str(x).strip()}
+    if wanted:
+        for q in queue[start + 1:]:
+            if len(chain) >= RUN_MAX_ENTRIES:
+                break
+            if _norm_label(q.get("label")) in wanted and is_buildable(q):
+                chain.append(q)
     return chain
 
 
 def chain_preview(queue: list[dict]) -> list[dict]:
-    """What `pick` would club, judged WITHOUT a surface scan (cheap, for the plan
+    """What `pick` would carry, judged WITHOUT a surface scan (cheap, for the plan
     review block). Only entry type/target/delivery decide here; `pick` is the
     authority and adds the motion-obsolete check."""
     def ok(q: dict) -> bool:
         return (q.get("type") in ("bugfix", "feature", "motion")
                 and bool(q.get("target")))
 
-    return run_chain([q for q in queue], ok) if queue else []
+    return declared_chain(queue, ok) if queue else []
 
 
 def _chain_task(chain: list[dict], seq: int) -> dict:
@@ -234,8 +233,7 @@ def _chain_task(chain: list[dict], seq: int) -> dict:
         } for q in chain[1:]]
         task["reason"] = (
             str(task.get("reason") or "")
-            + f" · ALSO IN THIS RUN (clubbed because the head alone is under the "
-              f"{RUN_TARGET_MIN}-min pay-off target): "
+            + " · ALSO IN THIS RUN (the plan clubbed it into the same release): "
             + "; ".join(f"{c['label']} (~{c['effort_min']} min)" for c in task["closes"]))
     return task
 
@@ -365,7 +363,7 @@ def next_task(project: Path, seq: int, supervised: bool = False) -> dict | None:
     # runner ignored was dead weight (goal-less projects never built a queued
     # task while any polish surface was left).
     surfaces = scan_surfaces(project)
-    chain = run_chain(queue, lambda q: _buildable(q, surfaces))
+    chain = declared_chain(queue, lambda q: _buildable(q, surfaces))
     if chain:
         # ONE run, ONE release: a head that cannot pay for its own release is
         # clubbed with same-milestone followers (see run_chain), and the task

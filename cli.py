@@ -913,10 +913,12 @@ def cmd_run_orchestrator(args: argparse.Namespace) -> int:
     emulator.record_baseline(project, log, reset=True)
     prompt = args.prompt or (
         "You are the dev-team orchestrator. Load and follow the dev-team skill in "
-        "full. Run tonight's pipeline: status → pick the next safe unanimated "
-        "surface → worktree-start → developer-prompt → spawn the developer as a "
-        "native subagent (model from runtimes.json) → verify the worktree → "
-        "release on green → record → alarm. Project: "
+        "full. Run tonight's pipeline: status → asks → PLAN (the planner re-reads "
+        "every signal and decides priority and which entries one run clubs into "
+        "one release) → pick the run it handed over → worktree-start → "
+        "developer-prompt → spawn the developer as a native subagent (model from "
+        "runtimes.json) → verify the worktree → release on green → record → alarm. "
+        "Project: "
         f"{project.name} (absolute path: {project}). Report a compact summary of "
         "what shipped.")
     argv = agent_argv(cfg, prompt)
@@ -1443,8 +1445,8 @@ def cmd_pick(args: argparse.Namespace) -> int:
             and (run_info.get("effort_min") or 0) < scan.RUN_TARGET_MIN)
     if thin:
         print(f"run: THIN — {run_info.get('effort_min')} min of executable work; a release "
-              f"pays for itself at ~{scan.RUN_TARGET_MIN} min. No adjacent entry in the "
-              f"queue serves the same milestone, so there was nothing to club it with.",
+              f"pays for itself at ~{scan.RUN_TARGET_MIN} min. The plan named no clubs and "
+              f"no entry on the same milestone was available to carry with it.",
               file=sys.stderr, flush=True)
     else:
         print(f"run: {run_info['entries']} queue entr"
@@ -1459,12 +1461,18 @@ def cmd_pick(args: argparse.Namespace) -> int:
                       # resolves nowhere (CWD/team dir hold no tasks/).
                       "prompt_cmd": f"python3 cli.py developer-prompt {project.name} .pipeline/tasks/{spec_path.name}"},
                      indent=2))
-    # The pick executes the head the planner marked. If the plan has not been
-    # reviewed today, say so on stderr (the JSON above stays clean for agents) —
-    # step 2 of the run is the fix, and this is a nudge, never a block.
+    # The pick executes what the planner decided. Priority and batching are the
+    # planner's calls (it sees every signal); this only says whether THIS run was
+    # planned in this cycle, using the run number the plan was stamped with.
     from team import research as research_mod
-    if not research_mod.reviewed_today(state):
-        print(f"note: {research_mod.plan_review_line(project)}", file=sys.stderr)
+    lv = state.get("plan_review") or {}
+    if lv.get("for_run") != seq:
+        print(f"note: {research_mod.plan_review_line(project)} — run {seq} was not "
+              "planned in this cycle, so priority and clubbing are the previous "
+              "plan's. Step 2 is `devteam plan <project>`.", file=sys.stderr)
+        if thin:
+            print("note: this run is THIN and unplanned — one small fix for a whole "
+                  "release, with no planner decision behind it.", file=sys.stderr)
     # stdout above is a machine payload (the orchestrator parses it) — but the
     # run should also hand the owner the page. stderr, so the JSON stays clean.
     print_page(project, "the queue this pick came from", file=sys.stderr)
@@ -2270,6 +2278,22 @@ def cmd_loop(args: argparse.Namespace) -> int:
 
     for i in range(1, cycles + 1):
         print(f"\n--- Cycle {i}/{cycles} ---")
+        # THE PLANNER DECIDES EVERY CYCLE. Clubbing and priority are its calls —
+        # it is the only component that sees every signal — so the loop re-runs it
+        # here instead of only refilling an empty queue. When no synthesis path is
+        # configured the collection still happens and the prompt is written for
+        # the host agent; `pick` then serves the queue as it stands.
+        if not getattr(args, "no_plan", False):
+            print("Plan review (priority + batching)...")
+            try:
+                from team import research as _research
+                _research.research_run(project, log,
+                                       use_llm=not getattr(args, "no_llm", False),
+                                       focus=getattr(args, "focus", None))
+            except SystemExit as e:
+                print(f"  planner: {e}")
+            except Exception as e:      # a planner failure must not kill delivery
+                print(f"  planner: could not run ({e}) — the queue stands as planned")
         if auto_refill and refill.needs_refill(project):
             print("Queue empty — triggering auto-refill from market & competitor horizon...")
             r = refill.auto_refill(project, log=log)
@@ -3928,6 +3952,11 @@ def main() -> None:
     lp.add_argument("--cycles", type=int, default=1, help="number of cycles to execute (default: 1)")
     lp.add_argument("--supervised", action="store_true", help="allow picking supervised tasks")
     lp.add_argument("--no-auto-refill", action="store_true", help="do not auto-refill when queue empties")
+    lp.add_argument("--no-plan", action="store_true",
+                    help="skip the per-cycle plan review (priority + batching is then stale)")
+    lp.add_argument("--no-llm", action="store_true",
+                    help="collect signals and write the planner prompt instead of calling a model")
+    lp.add_argument("--focus", help="scoped review request for this cycle's planner")
     lp.set_defaults(fn=cmd_loop)
     des = sub.add_parser("design", help="synthesize or enforce docs/design.md style law for an app")
     des.add_argument("project")
