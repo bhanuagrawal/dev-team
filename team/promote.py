@@ -141,6 +141,20 @@ def promote(project: Path, version: str, *, requested_by: str,
     codes = [str(c) for c in (build.get("versionCodes") or [])]
     if any(code in {str(c) for r in production for c in (r.get("versionCodes") or [])}
            for code in codes):
+        prod_rel = next((r for r in production if any(str(c) in codes for c in (r.get("versionCodes") or []))), {})
+        if not any(p.get("version") == version for p in state.get("promotions", [])):
+            record = {
+                "at": _now(),
+                "version": version,
+                "versionCodes": codes,
+                "edit": "existing",
+                "requested_by": requested_by,
+                "note": _note(project, notes_file),
+                "read_back": prod_rel.get("status") or "completed",
+                "managed_publishing": bool(prod_rel.get("status") == "draft"),
+            }
+            state.setdefault("promotions", []).append(record)
+            save_state(project, state)
         return {"status": "already-promoted", "version": version, "versionCodes": codes}
 
     if build.get("status") not in ("completed", "inProgress"):
@@ -174,6 +188,10 @@ def promote(project: Path, version: str, *, requested_by: str,
         return {"status": "ERROR", "error": f"production track write refused: {put['_error']}"}
 
     committed = _commit(pkg, edit, project, token)
+    if committed.get("_error") and "draft app" in str(committed["_error"]).lower():
+        body["releases"][0]["status"] = "draft"
+        _put_track(pkg, edit, project, token, body)
+        committed = _commit(pkg, edit, project, token)
     if committed.get("_error"):
         _discard(pkg, edit, project, token)
         return {"status": "ERROR", "error": f"commit refused: {committed['_error']}"}
