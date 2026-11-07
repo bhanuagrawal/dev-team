@@ -175,6 +175,60 @@ def surfaces(project: Path) -> list[dict]:
     return out
 
 
+def _blank_render(png: Path) -> bool:
+    """True when the picture is a single flat colour — a render that composed nothing.
+
+    A blank file is not evidence of a blank screen: it usually means the scene did
+    not compose (wrong theme, a composable that drew nothing, a failed capture).
+    Judging it would record an audit against pixels that are not a screen, so the
+    pass reports the capture fault and judges nothing.
+    """
+    from . import pngcmp
+    try:
+        w, h, pixels = pngcmp.decode_png(png)
+    except Exception:
+        return False
+    if not pixels or w < 8 or h < 8:
+        return False
+    x0, x1 = int(w * 0.15), int(w * 0.85)
+    y0, y1 = int(h * 0.15), int(h * 0.85)
+    sx = max(1, (x1 - x0) // 50)
+    sy = max(1, (y1 - y0) // 50)
+    colours = set()
+    for y in range(y0, y1, sy):
+        base = y * w
+        for x in range(x0, x1, sx):
+            colours.add(pixels[base + x][:3])
+            if len(colours) > 2:
+                return False
+    return len(colours) <= 2
+
+
+def _store_capture_issue(data: dict, row: dict, line: str) -> None:
+    """Attach a capture fault to the surface, so it is visible to the planner.
+
+    A capture fault is not a UI defect — it says "this screen was not reviewed".
+    The fingerprints are deliberately NOT written: the surface must stay owed an
+    audit, so the next run retries instead of accepting the blank as current.
+    """
+    label = row["label"]
+    surf = (data.get("surfaces") or {}).get(label) or {}
+    gripes = [g for g in (surf.get("gripes") or []) if g.get("kind") != "capture"]
+    gripes.append({
+        "id": gripe_id(row.get("scene") or label[:12], line),
+        "line": line,
+        "element": "",
+        "kind": "capture",
+        "severity": "P1_DEGRADED",
+        "status": "open",
+        "source": "capture",
+        "at": now_iso(),
+    })
+    surf["gripes"] = gripes
+    surf["capture_issue"] = line
+    data.setdefault("surfaces", {})[label] = surf
+
+
 def capture_emulator_screenshot(project: Path, label: str) -> Path | None:
     """Capture a screenshot from a booted Android emulator via adb.
 
@@ -697,6 +751,15 @@ def run_audit(project: Path, only_scene: str | None = None,
     done, skipped = [], []
     for row in targets:
         prev = (data.get("surfaces") or {}).get(row["label"]) or {}
+        png = Path(row["render"]) if row.get("render") else None
+        if png is not None and png.is_file() and _blank_render(png):
+            reason = ("the render is a flat colour — the scene composed nothing; "
+                      "re-render before judging")
+            _store_capture_issue(data, row, reason)
+            skipped.append({"label": row["label"], "reason": reason})
+            if log:
+                log(f"~ ux: '{row['label']}' — {reason}")
+            continue
         try:
             res = audit_surface(project, row, prev=prev, log=log)
         except SystemExit as e:

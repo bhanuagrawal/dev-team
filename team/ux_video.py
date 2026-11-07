@@ -50,6 +50,7 @@ MANIFEST_NAME = "manifest.json"
 MAX_SECONDS = 180
 DEFAULT_SECONDS = 20
 SAMPLE_EVERY_S = 2.0
+DEAD_TAP_S = 1.1          # how long a tap gets to change the screen
 GRID_COLS, GRID_ROWS = 3, 2
 FRAME_W = 380
 RUBRIC = "ux-video-v2"
@@ -456,24 +457,53 @@ def _wait_for_text(serial: str, needle: str, tries: int = 5, pause: float = 0.6)
     return None
 
 
-def _step(serial: str, step: dict) -> str:
-    """Perform one declared step. Never silently ignores an unknown action."""
+def _screen_sig(serial: str) -> str:
+    """Fingerprint of the live screen — used to prove a tap changed something."""
+    r = _adb(serial, ["exec-out", "screencap", "-p"], timeout=60, binary=True)
+    data = r.stdout if isinstance(r.stdout, bytes) else (r.stdout or "").encode()
+    return hashlib.sha256(data).hexdigest()[:16] if data.startswith(b"\x89PNG") else ""
+
+
+def _step(serial: str, step: dict) -> dict:
+    """Perform one declared step. Never silently ignores an unknown action.
+
+    Returns {"action": <what happened>, "dead": <tap changed nothing>, "needle": ...}.
+    A labelled tap is bracketed by two screen fingerprints: a tap that leaves the
+    screen byte-identical is a DEAD CONTROL (or a target nothing can hit), and it
+    is reported at P1 instead of being passed to the judge as if it worked.
+    """
     if "wait" in step:
         ms = max(0, int(step.get("wait") or 0))
         time.sleep(ms / 1000.0)
-        return f"wait {ms}ms"
+        return {"action": f"wait {ms}ms", "dead": False}
     if "tap" in step:
         needle = str(step["tap"])
         pos = _wait_for_text(serial, needle)
         if not pos:
             raise SystemExit(f"ux-video: no node matching {needle!r} on screen — the flow "
                              f"cannot be driven; fix {FLOWS_REL}")
+        before = _screen_sig(serial)
         _adb(serial, ["shell", "input", "tap", str(pos[0]), str(pos[1])], timeout=30)
-        return f"tap {needle!r} at {pos[0]},{pos[1]}"
+        time.sleep(DEAD_TAP_S)
+        after = _screen_sig(serial)
+        return {"action": f"tap {needle!r} at {pos[0]},{pos[1]}", "needle": needle,
+                "dead": bool(before and after and before == after)}
+    if "long_press" in step:
+        needle = str(step["long_press"])
+        pos = _wait_for_text(serial, needle)
+        if not pos:
+            raise SystemExit(f"ux-video: no node matching {needle!r} on screen — the flow "
+                             f"cannot be driven; fix {FLOWS_REL}")
+        # A long press is a zero-distance swipe held past the long-press timeout.
+        _adb(serial, ["shell", "input", "swipe", str(pos[0]), str(pos[1]),
+                      str(pos[0]), str(pos[1]), "900"], timeout=30)
+        time.sleep(0.8)
+        return {"action": f"long-press {needle!r} at {pos[0]},{pos[1]}", "needle": needle,
+                "dead": False}
     if "tap_xy" in step:
         x, y = (int(v) for v in step["tap_xy"])
         _adb(serial, ["shell", "input", "tap", str(x), str(y)], timeout=30)
-        return f"tap {x},{y}"
+        return {"action": f"tap {x},{y}", "dead": False}
     if "swipe" in step:
         w, h = _screen_size(serial)
         direction = str(step["swipe"]).lower()
@@ -487,16 +517,16 @@ def _step(serial: str, step: dict) -> str:
         else:
             args = [int(w * 0.2), h // 2, int(w * 0.8), h // 2]
         _adb(serial, ["shell", "input", "swipe", *[str(v) for v in args], str(ms)], timeout=30)
-        return f"swipe {direction}"
+        return {"action": f"swipe {direction}", "dead": False}
     if "text" in step:
         value = str(step["text"]).replace(" ", "%s")
         _adb(serial, ["shell", "input", "text", value], timeout=30)
-        return f"type {step['text']!r}"
+        return {"action": f"type {step['text']!r}", "dead": False}
     if "key" in step:
         _adb(serial, ["shell", "input", "keyevent", str(step["key"]).upper()], timeout=30)
-        return f"key {step['key']}"
+        return {"action": f"key {step['key']}", "dead": False}
     raise SystemExit(f"ux-video: unknown step {json.dumps(step)[:120]} — allowed: "
-                     "wait, tap, tap_xy, swipe, text, key")
+                     "wait, tap, tap_xy, long_press, swipe, text, key")
 
 
 def _crash_line(serial: str, pkg: str) -> str:
@@ -557,6 +587,7 @@ def record_flow(project: Path, flow: dict, serial: str, log=None) -> dict:
         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     time.sleep(1.5)
     actions: list[str] = []
+    dead: list[dict] = []
     t0 = time.monotonic()
     # Where the inset check observes: 'start' judges the screen the flow opens
     # on, 'end' (default) the screen it leaves the user on. A project says which
@@ -565,7 +596,10 @@ def record_flow(project: Path, flow: dict, serial: str, log=None) -> dict:
     inset_report = status_bar_collisions(serial, pkg) if check_at == "start" else None
     try:
         for step in flow.get("steps") or []:
-            actions.append(_step(serial, step))
+            res = _step(serial, step)
+            actions.append(res["action"])
+            if res.get("dead"):
+                dead.append({"action": res["action"], "needle": res.get("needle", "")})
         # The declared `seconds` is the screenrecord cap. Driving the taps is slow in
         # real time (each uiautomator dump is a device round-trip), so a cap that is
         # too short cuts the video BEFORE the steps finish — the recording then never
@@ -584,6 +618,10 @@ def record_flow(project: Path, flow: dict, serial: str, log=None) -> dict:
             inset_report = status_bar_collisions(serial, pkg)
         # Hold the settled final state long enough for at least one sampled frame.
         time.sleep(min(3.0, max(1.0, secs - (time.monotonic() - t0) - 0.5)))
+        # A flow can COMPLETE and still have killed the app (the crash lands on the
+        # last frame): the recording is then evidence of a crash, not of a working
+        # flow. Read the buffer before declaring success.
+        crashed = _crash_line(serial, pkg)
     except SystemExit:
         # A flow that cannot be driven because the app DIED is not a spec error:
         # report the crash itself at P0, so the planner sees a blunder instead of
@@ -611,6 +649,9 @@ def record_flow(project: Path, flow: dict, serial: str, log=None) -> dict:
     if not (dest.is_file() and dest.stat().st_size > 12_000):
         raise SystemExit(f"ux-video: screenrecord produced no usable video for '{fid}' "
                          f"({dest.stat().st_size if dest.exists() else 0} bytes)")
+    if crashed:
+        raise SystemExit(f"ux-video: the app CRASHED during '{fid}' — {crashed}")
+
     # `seconds` describes the FILE, not the driver: the contact sheet samples the
     # recording's own duration, and a manifest that claimed the driving time made a
     # truncated video look complete (24s file reported as 30.7s).
@@ -626,7 +667,7 @@ def record_flow(project: Path, flow: dict, serial: str, log=None) -> dict:
             pass
     return {"flow": fid, "mp4": str(dest), "seconds": duration,
             "drive_seconds": elapsed, "bytes": dest.stat().st_size, "actions": actions,
-            "insets": inset_report, "recorded_at": now_iso()}
+            "dead_taps": dead, "insets": inset_report, "recorded_at": now_iso()}
 
 
 # --------------------------------------------------------------------------- #
@@ -701,6 +742,8 @@ def _describe_steps(flow: dict) -> str:
             bits.append(f"type {step['text']!r}")
         elif "key" in step:
             bits.append(f"key {step['key']}")
+        elif "long_press" in step:
+            bits.append(f"long-press {step['long_press']!r}")
         elif "tap_xy" in step:
             bits.append("tap")
     return " → ".join(bits) or "no steps recorded"
@@ -903,6 +946,46 @@ def _result(value: dict, row: dict, model: str, evidence: str) -> dict:
     }
 
 
+def store_dead_taps(project: Path, row: dict, dead: list[dict]) -> None:
+    """Record taps that changed nothing as P1 gripes on the flow's surface.
+
+    The model can only see a dead control if the sampled panels happen to show it;
+    the driver KNOWS, because the screen was byte-identical before and after.
+    """
+    from . import ux_audit
+    if not dead:
+        return
+    data = ux_audit.load(project)
+    surf = (data.get("surfaces") or {}).get(row["surface"])
+    if surf is None:
+        return
+    gripes = [g for g in (surf.get("gripes") or [])
+              if not (g.get("source") == "video" and g.get("flow") == row["id"]
+                      and g.get("kind") == "dead-click")]
+    seen = set()
+    for d in dead:
+        needle = str(d.get("needle") or "")
+        line = (f"tapping {needle!r} changed nothing on screen — the control looks "
+                f"tappable but produced no visible response")
+        key = ux_audit.gripe_id(_slug(row["id"])[:12], line)
+        if key in seen:
+            continue
+        seen.add(key)
+        gripes.append({
+            "id": key,
+            "line": line,
+            "element": needle,
+            "kind": "dead-click",
+            "severity": "P1_DEGRADED",
+            "status": "open",
+            "source": "video",
+            "flow": row["id"],
+            "at": now_iso(),
+        })
+    surf["gripes"] = gripes
+    ux_audit.save(project, data)
+
+
 def store_crash(project: Path, row: dict, reason: str) -> None:
     """Record an app crash observed while driving a flow as a P0 blunder.
 
@@ -966,8 +1049,11 @@ def store_reaction(project: Path, row: dict, sheet: dict, reaction: dict) -> dic
         surf.setdefault("videos", {})[row["id"]] = entry
         ux_audit.save(project, data)
         return surf["videos"][row["id"]]
+    # A reaction replaces the JUDGEMENT of this flow, but never the mechanical
+    # observations (a crash, a dead tap) that the driver proved on the device.
     keep = [g for g in (surf.get("gripes") or [])
-            if not (g.get("source") == "video" and g.get("flow") == row["id"])]
+            if not (g.get("source") == "video" and g.get("flow") == row["id"]
+                    and g.get("kind") not in ("crash", "dead-click"))]
     surf["gripes"] = keep + reaction["gripes"]
     entry.update({
         "reacted_at": now_iso(),
@@ -1029,7 +1115,8 @@ def store_insets(project: Path, surface: str, insets: dict | None) -> dict | Non
 
 def run(project: Path, only: str | None = None, everything: bool = False,
         log=None, avd: str | None = None, keep_emulator: bool = False,
-        record_only: bool = False, via: str = "gemini") -> dict:
+        record_only: bool = False, via: str = "gemini",
+        re_record: bool = False) -> dict:
     """Record what is missing/stale, then react to every recording owed one."""
     from . import emulator
 
@@ -1046,7 +1133,9 @@ def run(project: Path, only: str | None = None, everything: bool = False,
         if log:
             log(f"~ ux-video: skipping '{r['id']}' — surface {r['surface']!r} is not declared")
 
-    to_record = [r for r in rows if r["status"] in ("new", "stale") or (only and r["status"] != "no-surface")]
+    to_record = [r for r in rows
+                 if r["status"] in ("new", "stale")
+                 or (r["status"] != "no-surface" and (only or re_record))]
     skipped: list[dict] = []
     failed: list[dict] = []
     recorded: list[dict] = []
@@ -1088,6 +1177,8 @@ def run(project: Path, only: str | None = None, everything: bool = False,
                         f"{len(insets['collisions'])} label(s) inside the "
                         f"{insets['status_bar_px']}px status bar")
                 recorded.append(rec)
+                if rec.get("dead_taps"):
+                    store_dead_taps(project, r, rec["dead_taps"])
         finally:
             if started and not keep_emulator:
                 stopped = emulator.stop(serial)

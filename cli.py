@@ -2051,11 +2051,14 @@ def cmd_ux_video(args: argparse.Namespace) -> int:
                        avd=getattr(args, "avd", None),
                        keep_emulator=getattr(args, "keep_emulator", False),
                        record_only=getattr(args, "record_only", False),
-                       via=getattr(args, "via", "gemini"))
+                       via=getattr(args, "via", "gemini"),
+                       re_record=getattr(args, "re_record", False))
     for r in res["recorded"]:
         print(f"\n== recorded {r['flow']} — {r['seconds']}s, {r['bytes'] // 1024} KB ==")
         for a in r["actions"]:
             print(f"  · {a}")
+        for d in r.get("dead_taps") or []:
+            print(f"  ⚠ DEAD TAP — {d['action']}: the screen did not change")
         ins = r.get("insets") or {}
         if ins:
             hits = ins.get("collisions") or []
@@ -4059,6 +4062,8 @@ def main() -> None:
     uv.add_argument("--keep-emulator", action="store_true",
                     help="leave the emulator this command started running")
     uv.add_argument("--record-only", action="store_true", help="record, skip the reaction")
+    uv.add_argument("--re-record", action="store_true",
+                    help="re-record every declared flow (default: only new/stale ones)")
     uv.add_argument("--via", choices=["gemini", "api"], default="gemini",
                     help="who judges the motion: browser Gemini (default, same maker as the "
                          "store assets) or the vision API")
