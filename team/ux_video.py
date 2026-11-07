@@ -1126,7 +1126,7 @@ def run(project: Path, only: str | None = None, everything: bool = False,
         rows = [r for r in rows if r["id"] == only]
         if not rows:
             raise SystemExit(f"ux-video: no declared flow {only!r} in {FLOWS_REL}")
-    elif not everything:
+    elif not everything and not re_record:
         rows = [r for r in rows if r["status"] != "unchanged"]
     no_surface = [r for r in rows if r["status"] == "no-surface"]
     for r in no_surface:
@@ -1194,7 +1194,7 @@ def run(project: Path, only: str | None = None, everything: bool = False,
         for r in plan(project)["rows"]:
             if only and r["id"] != only:
                 continue
-            if not only and not everything and r["status"] == "unchanged":
+            if not only and not everything and not re_record and r["status"] == "unchanged":
                 continue
             if r["id"] in fresh:
                 r["status"] = "unreacted"
