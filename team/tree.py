@@ -564,7 +564,7 @@ def url(project) -> str:
     return (pipeline_dir(project) / "goals.html").as_uri()
 
 
-def write(project, open_after: bool = False) -> str:
+def write(project, open_after: bool = False, mirror: bool = False) -> str:
     """Render every view of the plan; returns the local html path.
 
     Two audiences, three files:
@@ -585,9 +585,13 @@ def write(project, open_after: bool = False) -> str:
     dest = pdir / "goals.html"
     html = render_html(model, title)
     dest.write_text(html)
-    docs = project / "docs"
-    docs.mkdir(exist_ok=True)
-    (docs / "goals.html").write_text(html)
+    if mirror:
+        # ONLY the publish path writes the shared copy: a read-only command must
+        # not dirty the owner's checkout, and a mirror rewritten on every `status`
+        # was a permanent uncommitted change nobody asked for.
+        docs = project / "docs"
+        docs.mkdir(exist_ok=True)
+        (docs / "goals.html").write_text(html)
     if open_after:
         import subprocess
         subprocess.run(["open", str(dest)], check=False)

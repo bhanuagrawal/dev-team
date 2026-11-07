@@ -278,6 +278,15 @@ def publish(project: Path, log=None) -> dict:
     """
     profile = profile_of(project)
     branch = str(profile.get("main_branch") or "main")
+    # Render the mirror HERE, from the tree as it stands now: publish is the one
+    # place that owns the shared copy, so it can never commit a page older than
+    # the plan it describes.
+    try:
+        from . import tree as tree_mod
+        tree_mod.write(project, mirror=True)
+    except Exception as e:  # never let bookkeeping fail a run
+        if log:
+            log(f"publish: could not render the plan page ({e})")
     if not (project / FILES[0]).exists():
         return {"pushed": False, "url": None, "sha": "",
                 "why": "no plan mirror to publish yet"}

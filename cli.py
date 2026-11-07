@@ -2384,10 +2384,9 @@ def cmd_publish(args: argparse.Namespace) -> int:
     Every run's bookkeeping (`record`, `research`, `adapt`) does this by itself;
     the command exists so the owner can put the current plan on the repo without
     waiting for a run. Best-effort by design — see team/publish.py."""
-    from team import publish as publish_mod, tree as tree_mod
+    from team import publish as publish_mod
     project = resolve_project(args.project)
-    tree_mod.write(project)            # the mirror must match the tree we publish
-    res = publish_mod.publish(project)
+    res = publish_mod.publish(project)   # renders the mirror from the live tree
     print(publish_mod.line(project, res))
     print_page(project, "the plan this publish committed", published=res)
     return 0 if res.get("pushed") else 1
