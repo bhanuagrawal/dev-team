@@ -360,11 +360,34 @@ def fingerprint(path: Path) -> str:
     return ""
 
 
+def _expand_paths(project: Path, paths: list[str]) -> list[str]:
+    """Expand directory deliverables into their files.
+
+    A directory was fingerprinted as ONE value, so any change inside it marked the
+    whole tree as "written by this command" and commit_paths copied every file in
+    it — including the stale copies a checkout that is behind origin still holds.
+    That is how a banner repaint reverted a shipped icon (observed 2026-11-07).
+    Per-file baselines make the guard work for directories too.
+    """
+    out: list[str] = []
+    for rel in paths:
+        rel = str(rel).strip()
+        if not rel:
+            continue
+        path = project / rel
+        if path.is_dir():
+            out.extend(str(f.relative_to(project)) for f in sorted(path.rglob("*"))
+                       if f.is_file() and ".git" not in f.parts and ".pipeline" not in f.parts)
+        else:
+            out.append(rel)
+    return list(dict.fromkeys(out))
+
+
 def snapshot_paths(project: Path, paths: list[str]) -> dict[str, str]:
     """Take this BEFORE the command writes anything: `commit_paths(baseline=…)`
     then commits only the paths whose bytes changed under the command."""
-    return {str(p).strip(): fingerprint(project / str(p).strip())
-            for p in paths if str(p).strip()}
+    return {rel: fingerprint(project / rel)
+            for rel in _expand_paths(project, paths)}
 
 
 def commit_paths(project: Path, paths: list[str], message: str, log=None,
@@ -396,6 +419,9 @@ def commit_paths(project: Path, paths: list[str], message: str, log=None,
     # commit it, even if a caller passes a path inside it.
     keep = [str(p).strip() for p in paths
             if str(p).strip() and not str(p).strip().startswith(".pipeline/")]
+    # Directories are committed file-by-file against a per-file baseline: copying
+    # a whole tree swept in the stale copies a behind-origin checkout still holds.
+    keep = _expand_paths(project, keep)
     if not keep:
         return {"pushed": False, "sha": "", "why": "no committable paths"}
     if baseline is not None:
