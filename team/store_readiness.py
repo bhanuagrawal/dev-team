@@ -1320,6 +1320,7 @@ def _compile_landing_html(project: Path, title: str, vision: str) -> Path:
     </ul>
     <div class="actions">
       <a class="btn" href="privacy.html">Read Privacy Policy</a>
+      <a class="btn" style="background: rgba(255,255,255,0.10); color: #FFF;" href="goals.html">Project Roadmap</a>
       {"<a class='secondary' href='https://github.com/" + repo_slug + "'>GitHub Repository</a>" if repo_slug else ""}
     </div>
     <div class="footer">
