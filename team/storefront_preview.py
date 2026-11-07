@@ -832,7 +832,14 @@ def _delivery_tree(project: Path, log: Any = None) -> Path:
     local_props = project / "local.properties"
     if local_props.is_file() and not (tree / "local.properties").is_file():
         shutil.copy2(local_props, tree / "local.properties")  # gitignored, needed by AGP
-    if not (tree / SPEC_REL).is_file() and (project / SPEC_REL).is_file():
+    # The spec is a project-owned dev-team output, not app code: it is the INPUT to
+    # the harness, so the checkout's current copy always wins. Copying only when the
+    # delivery tree lacked one meant a corrected scene spec was silently ignored —
+    # the renderer re-ran the OLD harness, the corrected spec was committed after,
+    # and the screenshots (and the UX audit over them) described a picture the
+    # committed spec no longer draws (seen 2026-11-07: a paywall scene still named
+    # a deleted constant, so re-rendering could never recover).
+    if (project / SPEC_REL).is_file():
         shutil.copy2(project / SPEC_REL, tree / SPEC_REL)
     return tree
 
