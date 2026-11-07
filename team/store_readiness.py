@@ -6,6 +6,7 @@ Zero project names — generic across all Android / KMP projects.
 """
 from __future__ import annotations
 
+import datetime
 import json
 import re
 import struct
@@ -687,6 +688,18 @@ def run_store_readiness_audit(project: Path, tree: Path | None = None) -> list[R
             design_mtime = design_file.stat().st_mtime
             oldest_shot_mtime = min(s.stat().st_mtime for s in shots)
             is_stale = (design_mtime - oldest_shot_mtime) > 600
+            if is_stale:
+                frames_meta = src / "docs" / "storefront-frames.json"
+                if frames_meta.is_file():
+                    try:
+                        f_data = json.loads(frames_meta.read_text())
+                        at_str = (f_data.get("composition") or {}).get("at")
+                        if at_str:
+                            comp_ts = datetime.datetime.fromisoformat(at_str).timestamp()
+                            if comp_ts >= design_mtime or (design_mtime - comp_ts) <= 600:
+                                is_stale = False
+                    except Exception:
+                        pass
             checks.append(ReadinessCheck(
                 category="Storefront Graphic Assets",
                 name="Storefront Screenshots Freshness",

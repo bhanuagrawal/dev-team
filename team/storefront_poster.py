@@ -217,15 +217,20 @@ def _providers() -> list[str]:
 
 
 def _chatgpt_batch_script(jobs: list[dict[str, str]]) -> str:
-    """The same batch, painted in the owner's signed-in ChatGPT session.
+    """The same batch, painted in ONE signed-in ChatGPT chat.
 
-    ChatGPT's composer is a contenteditable, the upload is a plain hidden file
-    input, and a generated image arrives as an <img> with a files.oaiusercontent
-    src (not a same-origin blob), so the bytes are fetched with the session's own
-    request context — drawing it into a canvas would taint and fail.
+    Mirrors the Gemini path deliberately (owner directive 2026-11-07: "use the
+    same session of chatgpt like we do in gemini, follow other things as well"):
+    one fresh chat for the whole set so the frames match, the render attached to
+    every prompt, the SENT message proved to carry that render (by its shape), a
+    bounded wait, a per-frame sidecar, and a limit that is NAMED rather than
+    waited out. A frame that fails does not abort the rest — losing three good
+    frames to one bad turn is what made the first batch unusable.
     """
     return f"""
     const JOBS = {json.dumps(jobs)};
+    // A NEW chat every run: continuing whatever conversation was open let the
+    // previous listing's look leak into the repaint (same defect as Gemini's).
     await page.goto("https://chatgpt.com/", {{ waitUntil: "domcontentloaded" }});
     await page.waitForTimeout(4000);
     const composer = page.locator('[contenteditable="true"]').first();
@@ -236,66 +241,94 @@ def _chatgpt_batch_script(jobs: list[dict[str, str]]) -> str:
                                  + 'input[type=file][aria-label="Attach photos"], '
                                  + 'input[type=file][accept="image/*"]').first();
     const attachments = () => page.locator('[data-composer-attachments] img');
+    const sentImages = () => page.locator('[data-message-author-role="user"] img');
     const generated = () => page.locator('main img[alt*="Generated" i]');
     const results = [];
     for (const job of JOBS) {{
-      const attachBefore = await attachments().count();
-      await fileInput.setInputFiles(job.src);
-      let attached = false;
-      for (let i = 0; i < 25; i++) {{
-        if (await attachments().count() > attachBefore) {{ attached = true; break; }}
-        await page.waitForTimeout(1000);
-      }}
-      if (!attached) {{
-        results.push({{ ok: false, scene: job.out, error: "the scene render never attached to the prompt" }});
-        break;
-      }}
-      await composer.click();
-      await composer.fill(job.prompt);
-      await page.waitForTimeout(400);
-      const genBefore = await generated().count();
-      await page.keyboard.press("Enter");
-      const start = Date.now();
-      let picked = null;
-      let dims = [0, 0];
-      while (Date.now() - start < 300000) {{
-        const g = generated();
-        const n = await g.count();
-        if (n > genBefore) {{
-          const last = g.nth(n - 1);
-          const w = await last.evaluate(el => el.naturalWidth).catch(() => 0);
-          if (w >= 300) {{
-            picked = await last.getAttribute("src");
-            dims = await last.evaluate(el => [el.naturalWidth, el.naturalHeight]).catch(() => [0, 0]);
-            break;
+      try {{
+        const attachBefore = await attachments().count();
+        await fileInput.setInputFiles(job.src);
+        let attached = false;
+        for (let i = 0; i < 25; i++) {{
+          if (await attachments().count() > attachBefore) {{ attached = true; break; }}
+          await page.waitForTimeout(1000);
+        }}
+        if (!attached) {{
+          results.push({{ ok: false, scene: job.out, error: "the scene render never attached to the prompt" }});
+          continue;
+        }}
+        await composer.click();
+        await composer.fill(job.prompt);
+        await page.waitForTimeout(400);
+        const sentBefore = await sentImages().count();
+        const genBefore = await generated().count();
+        await page.keyboard.press("Enter");
+
+        // Delivery proof: the SENT message must carry the render, and its shape
+        // is the one thing a thumbnail cannot fake. Gemini's rule, same reason:
+        // a prompt that ships without its screen makes the model invent a screen.
+        let delivered = false;
+        for (let i = 0; i < 30; i++) {{
+          const n = await sentImages().count();
+          if (n > sentBefore) {{
+            const pic = sentImages().nth(n - 1);
+            const dims = await pic.evaluate(el => [el.naturalWidth, el.naturalHeight]).catch(() => [0, 0]);
+            const w = dims[0], h = dims[1];
+            if (job.ar > 0 && h > 0 && w >= 96 && Math.abs(w / h - job.ar) <= 0.06) {{ delivered = true; break; }}
           }}
+          await page.waitForTimeout(1000);
         }}
-        const tail = (await page.locator("body").innerText()).slice(-700);
-        if (/(usage cap|limit reached|you've reached|reached your|try again later|quota)/i.test(tail)) {{
-          return {{ ok: false, limit: true, error: tail.slice(-180) }};
+        if (!delivered) {{
+          results.push({{ ok: false, scene: job.out,
+                         error: "the render is not in the sent message — the model was asked to "
+                                + "draw a screen it never received" }});
+          continue;
         }}
-        await page.waitForTimeout(3000);
+
+        const start = Date.now();
+        let picked = null;
+        let dims = [0, 0];
+        while (Date.now() - start < 240000) {{
+          const g = generated();
+          const n = await g.count();
+          if (n > genBefore) {{
+            const last = g.nth(n - 1);
+            const w = await last.evaluate(el => el.naturalWidth).catch(() => 0);
+            if (w >= 300) {{
+              picked = await last.getAttribute("src");
+              dims = await last.evaluate(el => [el.naturalWidth, el.naturalHeight]).catch(() => [0, 0]);
+              break;
+            }}
+          }}
+          const tail = (await page.locator("body").innerText()).slice(-700);
+          if (/(usage cap|limit reached|you've reached|reached your|try again later|quota)/i.test(tail)) {{
+            return {{ ok: false, limit: true, error: tail.slice(-180) }};
+          }}
+          await page.waitForTimeout(3000);
+        }}
+        if (!picked) {{
+          results.push({{ ok: false, scene: job.out, error: "no NEW image in the model's answer" }});
+          continue;
+        }}
+        if (picked.startsWith("blob:")) {{
+          const data = await page.evaluate(async (s) => {{
+            const img = new Image(); img.src = s; await img.decode();
+            const c = document.createElement("canvas");
+            c.width = img.naturalWidth; c.height = img.naturalHeight;
+            c.getContext("2d").drawImage(img, 0, 0);
+            return c.toDataURL("image/png");
+          }}, picked);
+          fs.writeFileSync(job.out, Buffer.from(data.split(",")[1], "base64"));
+        }} else {{
+          const resp = await context.request.get(picked);
+          fs.writeFileSync(job.out, await resp.body());
+        }}
+        if (job.sidecar) fs.writeFileSync(job.sidecar,
+          JSON.stringify({{ prompt_sha: job.sha, source_sha: job.source_sha, chat: page.url() }}));
+        results.push({{ ok: true, out: job.out, w: dims[0], h: dims[1] }});
+      }} catch (err) {{
+        results.push({{ ok: false, scene: job.out, error: String(err && err.message || err) }});
       }}
-      if (!picked) {{
-        results.push({{ ok: false, scene: job.out, error: "no NEW image in the model's answer" }});
-        break;
-      }}
-      if (picked.startsWith("blob:")) {{
-        const data = await page.evaluate(async (s) => {{
-          const img = new Image(); img.src = s; await img.decode();
-          const c = document.createElement("canvas");
-          c.width = img.naturalWidth; c.height = img.naturalHeight;
-          c.getContext("2d").drawImage(img, 0, 0);
-          return c.toDataURL("image/png");
-        }}, picked);
-        fs.writeFileSync(job.out, Buffer.from(data.split(",")[1], "base64"));
-      }} else {{
-        const resp = await context.request.get(picked);
-        fs.writeFileSync(job.out, await resp.body());
-      }}
-      if (job.sidecar) fs.writeFileSync(job.sidecar,
-        JSON.stringify({{ prompt_sha: job.sha, source_sha: job.source_sha, chat: page.url() }}));
-      results.push({{ ok: true, out: job.out, w: dims[0], h: dims[1] }});
     }}
     return {{ ok: results.length && results.every(r => r.ok), chat: page.url(), results }};
     """
@@ -452,7 +485,10 @@ def paint_batch(jobs: list[dict[str, str]], timeout: int = 900,
         if log:
             log(f"  {provider}: painting {len(jobs)} asset(s) in one chat")
         try:
-            res = gemini_browser.execute(script, timeout=timeout, log=log)
+            # A whole listing in one chat can outlast a single frame: ChatGPT's
+            # turns are slower than Gemini's, so its batch gets a longer budget.
+            res = gemini_browser.execute(
+                script, timeout=(1800 if provider == "chatgpt" else timeout), log=log)
         except FileNotFoundError:
             return {"ok": False, "value": {}, "provider": None, "attempts": attempts,
                     "error": "Playwright or browser-control is not installed"}
@@ -486,7 +522,8 @@ def paint_batch(jobs: list[dict[str, str]], timeout: int = 900,
 
 
 def generate_all(project: Path, scenes: list[dict[str, Any]], direction: dict[str, Any],
-                 log=None, extra: str = "", force: bool = False) -> dict[str, Any]:
+                 log=None, extra: str = "", force: bool = False,
+                 only: set[str] | None = None) -> dict[str, Any]:
     """Paint every poster in ONE Gemini chat, one prompt per scene.
 
     Returns {"status", "posters": {scene_id: path}, "chat", "painted"}.
@@ -547,6 +584,13 @@ def generate_all(project: Path, scenes: list[dict[str, Any]], direction: dict[st
         if out.is_file() and log:
             log(f"  poster: repainting {out.name} — "
                 + ("--force" if force else "the prompt changed since it was painted"))
+        # Repaint ONE frame without spending the others: the prompt still says
+        # "frame N of M" for the WHOLE listing (so its hash matches the batch run
+        # and the cache stays valid), but only the named scenes become jobs.
+        if only and scene["id"] not in only:
+            if out.is_file():
+                posters[scene["id"]] = out
+            continue
         jobs.append({"out": str(out), "src": str(source), "prompt": prompt,
                      "sha": sha, "source_sha": source_sha, "sidecar": str(sidecar),
                      "ar": aspect})
