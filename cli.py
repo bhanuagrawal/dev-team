@@ -841,30 +841,36 @@ def cmd_worktree_start(args: argparse.Namespace) -> None:
 
     # CODE-ENFORCED PURGE FOR REVAMP / REBUILD TASKS
     is_revamp = any(k in args.task_id.lower() for k in ("revamp", "rebuild", "ground-up"))
-    if not is_revamp:
-        try:
-            spec = task_spec_path(project, args.task_id)
-            if spec and spec.is_file():
-                task_data = json.loads(spec.read_text())
-                label = str(task_data.get("label", "")).lower()
-                req = str(task_data.get("owner_request", "")).lower()
+    req_text = ""
+    try:
+        spec = task_spec_path(project, args.task_id)
+        if spec and spec.is_file():
+            task_data = json.loads(spec.read_text())
+            label = str(task_data.get("label", "")).lower()
+            req_text = str(task_data.get("owner_request", "") or task_data.get("reason", "")).lower()
+            if not is_revamp:
                 is_revamp = (
                     task_data.get("kind") == "revamp"
                     or task_data.get("type") == "revamp"
                     or any(k in label for k in ("revamp", "rebuild", "delete"))
-                    or any(k in req for k in ("revamp", "rebuild", "delete the codebase", "delete codebase", "from scratch"))
+                    or any(k in req_text for k in ("revamp", "rebuild", "delete the codebase", "delete codebase", "from scratch", "delete ui", "delete the ui"))
                 )
-        except (Exception, SystemExit):
-            # This lookup is a probe for the revamp purge, never a gate: a spec
-            # this command cannot find must not kill a worktree it just prepared.
-            pass
+    except (Exception, SystemExit):
+        # This lookup is a probe for the revamp purge, never a gate: a spec
+        # this command cannot find must not kill a worktree it just prepared.
+        pass
 
     if is_revamp:
         from team import revamp
-        purged = revamp.purge_codebase(project, target_tree=wt, full_codebase=True, log=log)
+        is_ui_only = (
+            any(k in req_text for k in ("ui layer", "delete ui", "delete the ui", "recreate the ui", "recreate ui"))
+            and not any(k in req_text for k in ("delete codebase", "delete the codebase", "entire codebase", "full codebase", "all code"))
+        )
+        purged = revamp.purge_codebase(project, target_tree=wt, full_codebase=not is_ui_only, log=log)
         if purged:
-            log(f"revamp auto-purge: wiped and archived {len(purged)} legacy code files from worktree")
-            print(f"REVAMP AUTO-PURGE: {len(purged)} legacy source/test files archived to .pipeline/archived_codebase and purged from worktree.")
+            scope_str = "legacy UI source/test" if is_ui_only else "legacy source/test"
+            log(f"revamp auto-purge: wiped and archived {len(purged)} {scope_str} files from worktree")
+            print(f"REVAMP AUTO-PURGE: {len(purged)} {scope_str} files archived to .pipeline/archived_codebase and purged from worktree.")
 
     print(f"WORKTREE_PATH={wt}")
     print(f"WORKTREE_BRANCH=dt/{args.task_id}")
@@ -2082,7 +2088,18 @@ def cmd_revamp(args: argparse.Namespace) -> int:
 
     wt = Path(args.worktree) if getattr(args, "worktree", None) else None
 
-    if getattr(args, "purge_ui", False) or getattr(args, "purge_codebase", False):
+    if getattr(args, "purge_ui", False):
+        purged = revamp.purge_codebase(project, target_tree=wt, full_codebase=False, log=log)
+        print(f"\nLegacy UI Purge Complete:")
+        print(f"  Target: {wt or project}")
+        print(f"  Archived UI Files: {len(purged)}")
+        for p in purged[:15]:
+            print(f"    - {p}")
+        if len(purged) > 15:
+            print(f"    ... and {len(purged) - 15} more files")
+        return 0
+
+    if getattr(args, "purge_codebase", False):
         purged = revamp.purge_codebase(project, target_tree=wt, full_codebase=True, log=log)
         print(f"\nLegacy Codebase Purge Complete:")
         print(f"  Target: {wt or project}")

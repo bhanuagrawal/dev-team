@@ -66,8 +66,8 @@ def invalidate_storefront_assets(project: Path, log: RunLog | None = None) -> li
 def purge_legacy_ui(project: Path,
                      target_tree: Path | None = None,
                      log: RunLog | None = None) -> list[str]:
-    """Backward compatibility alias for purge_codebase."""
-    return purge_codebase(project, target_tree=target_tree, full_codebase=True, log=log)
+    """Safely purge and archive legacy UI screens and UI tests."""
+    return purge_codebase(project, target_tree=target_tree, full_codebase=False, log=log)
 
 
 def purge_codebase(project: Path,
@@ -102,6 +102,8 @@ def purge_codebase(project: Path,
         search_dirs.extend(root.glob("app/src/main/java/**/ui"))
         if not search_dirs:
             search_dirs.extend(root.glob("**/ui"))
+        for p in ("app/src/androidTest/java", "app/src/androidTest/kotlin", "**/androidTest/**"):
+            search_dirs.extend(root.glob(p))
 
     seen_files: set[Path] = set()
     for s_dir in search_dirs:
@@ -122,10 +124,12 @@ def purge_codebase(project: Path,
 
             rel_path = src_file.relative_to(root)
 
-            # If not full codebase, only target UI/screen/component files
+            # If not full codebase, only target UI/screen/component files and UI tests
             if not full_codebase:
                 is_theme = any(t in src_file.name.lower() for t in ["theme", "color", "type", "shape"])
-                if is_theme or not any(s in src_file.name.lower() for s in ["screen", "view", "page", "dialog", "component", "card", "bar"]):
+                is_ui_screen = any(s in src_file.name.lower() for s in ["screen", "view", "page", "dialog", "component", "card", "bar"])
+                is_ui_test = "androidtest" in str(src_file).lower() or "screentest" in src_file.name.lower()
+                if is_theme or not (is_ui_screen or is_ui_test):
                     continue
 
             dest_file = archive_dest / rel_path
