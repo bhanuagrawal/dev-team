@@ -44,7 +44,11 @@ run `doctor` and a live probe (`research`, or the collector directly):
   worth stating the single missing step rather than the whole path.
 
 ## MODE SELECTION (do this first, every invocation)
-- Project exists and has .pipeline/profile.json → MODE A (nightly run
+- Owner gives an instruction, request, or prompt for an existing project →
+  Run the PROMPT HANDLER first:
+  `python3 cli.py route <project> --prompt "<the owner's words, verbatim>" --apply`
+  Never freelance or run ad-hoc commands against the project. Follow the resulting execution chain.
+- Project exists and has .pipeline/profile.json (nightly/autonomous run) → MODE A (nightly run
   procedure below). STEP 0 of MODE A is `adapt` — a project onboarded under an
   older team is brought up to date by code before any work is picked; never edit
   `.pipeline/profile.json` by hand to catch up.
@@ -56,6 +60,7 @@ run `doctor` and a live probe (`research`, or the collector directly):
 | Agent | Defined as | How invoked |
 |---|---|---|
 | orchestrator | skill (this file) | the agentic tool you are |
+| prompt-handler | CODE (team/router.py) | `devteam route <project> --prompt "<words>" [--apply]` |
 | create-agent | skill (`skills/new-project/SKILL.md`) | delegated on MODE B |
 | developer | skill (prompts/developer.md + this runbook) | direct orchestrator execution in worktree (default) OR spawned subagent |
 | research (product) | CODE collectors + ONE synthesis (`cli.py plan`, raw: `cli.py research`) | EVERY run, step 2 |

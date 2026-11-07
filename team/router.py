@@ -52,6 +52,10 @@ KINDS: list[tuple[str, str, tuple[str, ...], str]] = [
      "the store page: render, compose, gate, then publish — no app code"),
     ("release", "feature", ("release", "ship it", "push to play", "cut a build", "publish the app"),
      "delivery of work already on the branch"),
+    ("test", "feature", ("test", "testing", "ui test", "ui testing", "unit test", "coverage",
+                         "instrumented test", "device test", "e2e test", "verification",
+                         "verify"),
+     "a test or verification task: writing or exercising unit/UI/device tests to prove behaviour"),
     ("bugfix", "bugfix", ("crash", "broken", "doesn't work", "does not work", "not working",
                           "fails", "failure", "stuck", "bug", "error", "wrong", "won't"),
      "a defect: reproduce, fix, prove it"),
@@ -142,6 +146,20 @@ _CHAIN: dict[str, list[tuple[str, str, str]]] = {
         ("plan", "devteam plan {p} --focus {q}", "the planner re-derives the queue from the new goal"),
     ],
 }
+_CHAIN["test"] = [
+    ("plan", "devteam plan {p} --focus {q}", "the planner reconciles the queue; the task stays pinned"),
+    ("pick", "devteam pick {p}", "the pinned head becomes the task spec"),
+    ("worktree", "devteam worktree-start {p} --task-id {task}", "work happens on a branch"),
+    ("develop", "devteam developer-prompt {p} .pipeline/tasks/{task}.json",
+     "the developer agent writes and exercises tests in the worktree"),
+    ("verify", "devteam verify {p} --worktree {wt} --task-spec .pipeline/tasks/{task}.json",
+     "compile, tests, device, provenance"),
+    ("release", "devteam release {p} --worktree {wt} --task-spec .pipeline/tasks/{task}.json",
+     "version bump, CI, internal testing"),
+    ("record", "devteam record {p} --result shipped --task-spec .pipeline/tasks/{task}.json "
+               "--version <v> --commit <sha> --note {q}",
+     "the ledger and the handover"),
+]
 _CHAIN["bugfix"] = _CHAIN["visual"]
 _CHAIN["feature"] = _CHAIN["visual"]
 
@@ -194,13 +212,32 @@ def _match_surface(project: Path, prompt: str) -> dict[str, Any] | None:
     """The screen/component the owner named, by token overlap with real surfaces."""
     words = {w for w in _norm(prompt).split() if len(w) >= 3}
     best, score = None, 0
-    for surface in _surfaces(project):
+    surfaces = _surfaces(project)
+    for surface in surfaces:
         label = _norm(surface.get("label") or "")
         overlap = len(words & set(label.split()))
         if label and label in _norm(prompt):
             overlap += 2
         if overlap > score:
             best, score = surface, overlap
+    if best is not None and score > 0:
+        return best
+    # Secondary match: scan surface source files for domain keywords in prompt
+    for surface in surfaces:
+        content_hits = 0
+        targets = surface.get("targets") or surface.get("paths") or []
+        for rel in targets:
+            fpath = project / rel
+            if fpath.is_file():
+                try:
+                    text = fpath.read_text(errors="ignore").lower()
+                    for w in words:
+                        if len(w) >= 4 and w in text:
+                            content_hits += min(text.count(w), 10)
+                except Exception:
+                    pass
+        if content_hits > score:
+            best, score = surface, content_hits
     return best
 
 
@@ -257,6 +294,16 @@ def _targets(project: Path, kind: str, prompt: str = "") -> list[str]:
         for e in extra:
             if e not in base:
                 base.append(e)
+    if kind == "test":
+        try:
+            from . import code_tests
+            unit_dirs, ui_dirs = code_tests.suggest_test_dirs(project)
+            for d in unit_dirs + ui_dirs:
+                glob_pat = f"{d}/**"
+                if glob_pat not in base:
+                    base.append(glob_pat)
+        except Exception:
+            pass
     return base
 
 
@@ -352,7 +399,8 @@ def _quote(text: str) -> str:
 def _label(project: Path, prompt: str, kind: str) -> str:
     from .core import today
 
-    words = [w for w in _norm(prompt).split() if len(w) >= 3][:4]
+    stop_words = {"the", "and", "for", "with", "this", "that", "from", "app", "you"}
+    words = [w for w in _norm(prompt).split() if len(w) >= 3 and w not in stop_words][:4]
     slug = "-".join(words) or kind
     return f"{kind}-{slug}-{today()}"[:60].strip("-")
 

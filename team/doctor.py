@@ -550,6 +550,19 @@ def run_doctor(project: Path, log) -> dict:
     except Exception as e:  # a check must never hide the report
         log(f"doctor report-page: could not check ({e})")
 
+    # Prompt Handler (router): verify deterministic intake of owner requests
+    try:
+        from . import router
+        plan_test = router.plan(project, "test core functionality")
+        if plan_test.get("kind") == "test" and not plan_test.get("blocked"):
+            log("doctor router: ready (prompt handler classified and aligned)")
+            report["router"] = {"status": "ready", "blocked": [], "checks_passed": 1}
+        else:
+            log(f"doctor router: WARN — router classification unexpected: {plan_test.get('kind')}")
+            report["router"] = {"status": "warn", "blocked": [], "checks_passed": 0}
+    except Exception as e:
+        log(f"doctor router: could not check ({e})")
+
     try:
         state = state_of(project)
         state["doctor"] = {"generated_at": now_iso(), "report": report}

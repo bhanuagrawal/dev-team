@@ -3273,9 +3273,13 @@ def cmd_route(args: argparse.Namespace) -> int:
     from team.core import delivery_notice
     from team import router
 
+    prompt_text = (args.prompt or " ".join(getattr(args, "prompt_pos", []) or [])).strip()
+    if not prompt_text:
+        raise SystemExit("prompt is required (via --prompt or positional argument)")
+
     print(delivery_notice(project))
-    res = router.apply(project, args.prompt) if getattr(args, "apply", False) \
-        else router.plan(project, args.prompt)
+    res = router.apply(project, prompt_text) if getattr(args, "apply", False) \
+        else router.plan(project, prompt_text)
     if getattr(args, "json", False):
         print(json.dumps(res, indent=2))
     else:
@@ -4153,7 +4157,8 @@ def main() -> None:
                                       "ordered tool plan it implies, judge alignment with the "
                                       "current plan, and pin the task at the queue head")
     rt.add_argument("project")
-    rt.add_argument("--prompt", required=True, help="the owner's words, verbatim")
+    rt.add_argument("prompt_pos", nargs="*", help="the owner's words, verbatim (positional fallback)")
+    rt.add_argument("--prompt", default="", help="the owner's words, verbatim")
     rt.add_argument("--apply", action="store_true",
                     help="admit the task (pinned head) and record the plan; default is a dry run")
     rt.add_argument("--json", action="store_true", help="machine-readable plan")

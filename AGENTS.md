@@ -14,6 +14,15 @@ release, whichever agent runs it.
 
 ## The one loop (any agent, any app)
 
+### Owner Prompts & Instructions: Prompt Handler First
+When the owner provides any instruction, task, or request (in chat or via CLI), **never freelance or run ad-hoc commands**. Run the Prompt Handler first:
+```bash
+cd ~/dev-team
+python3 cli.py route <project> --prompt "<the owner's words, verbatim>" --apply
+```
+The prompt handler (`team/router.py`) deterministically classifies the kind of work (revamp, brand, store, release, test, bugfix, visual, feature, direction), validates alignment against the active goal, pins the task at the queue head (`state.json`), and generates the exact ordered tool execution plan.
+
+### The Pipeline Loop
 ```bash
 cd ~/dev-team
 python3 cli.py adapt   <project>     # make the project match the current team
