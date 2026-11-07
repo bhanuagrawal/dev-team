@@ -1,10 +1,17 @@
-"""Publish the plan: put `docs/plan.md` + `docs/plan.html` on the project's main.
+"""Publish the plan: put `docs/goals.html` on the project's main.
 
 Why this exists: `.pipeline/` is excluded repo-locally (`.git/info/exclude`), so
 the goal tree lived only on the machine that generated it — the owner asked for
-the plan to be *pushed*, shared and viewable where the repo lives. The two files
-under `docs/` are deterministic renders of that same tree (team/tree.py, no LLM),
-so the shared copy can never drift from the local one.
+the plan to be *pushed*, shared and viewable where the repo lives, and for that
+one page to be HOSTED rather than a markdown file read on github.com. The file
+under `docs/` is the deterministic render of that same tree (team/tree.py, no
+LLM), so the shared copy can never drift from the local one, and GitHub Pages
+serves it at the repo's own site when Pages is configured for `/docs`.
+
+The URL is only ever REPORTED after it has been read back (HTTP 200): a push is
+not a page, and Pages builds on its own schedule. The verified URL is recorded
+in `.pipeline/published.json` so `status` (read-only, offline) can print it
+without a network call and without guessing.
 
 Best-effort BY DESIGN: publishing is bookkeeping, not delivery. No network, a
 moved remote, an origin that does not know the branch — each reports WHY and
@@ -22,27 +29,112 @@ owner never got a `shared plan:` link.
 from __future__ import annotations
 
 import hashlib
+import json
 import shutil
+import time
 from pathlib import Path
 
-from .core import git, profile_of, state_of
+from .core import git, load_json, now_iso, profile_of, run, save_json, state_of
 
 # The committed mirror. Order matters only for the commit message.
-FILES = ("docs/plan.md", "docs/plan.html")
+FILES = ("docs/goals.html",)
+
+# Files this mirror replaced. Publishing removes them from main: a stale
+# markdown/HTML copy of the plan that no longer updates is worse than no copy.
+RETIRED = ("docs/plan.md", "docs/plan.html")
+
+# The verified-served record (machine-local): {url, site, sha, verified_at}.
+RECORD = ".pipeline/published.json"
 
 # A throwaway worktree pinned to origin/<main>, where the plan commit is built.
 PUBLISH_TREE = ".pipeline/worktrees/.publish"
 
 
-def github_url(project: Path, profile: dict | None = None) -> str | None:
-    """Where the owner (or anyone) can read the plan on GitHub, or None when the
-    profile has no repo slug to build it from."""
+def _sha(path: Path) -> str:
+    try:
+        return hashlib.sha256(path.read_bytes()).hexdigest()
+    except OSError:
+        return ""
+
+
+def site_root(project: Path, profile: dict | None = None) -> str | None:
+    """The GitHub Pages root this repo is served at, or None without a repo slug.
+
+    GitHub's own answer wins (a custom domain or a Pages source other than
+    `/docs` makes the conventional URL a guess); the convention is only the
+    fallback when `gh` cannot answer.
+    """
     profile = profile or profile_of(project)
     slug = str(profile.get("repo_slug") or "").strip().strip("/")
-    branch = str(profile.get("main_branch") or "main")
     if "/" not in slug:
         return None
-    return f"https://github.com/{slug}/blob/{branch}/docs/plan.md"
+    rec = load_json(project / RECORD) or {}
+    if str(rec.get("site") or "").strip():
+        return str(rec["site"]).rstrip("/")
+    try:
+        r = run(["gh", "api", f"repos/{slug}/pages"], project, timeout=30)
+    except (FileNotFoundError, OSError):
+        r = None  # gh not installed — the convention below is the honest fallback
+    if r is not None and r.returncode == 0 and (r.stdout or "").strip():
+        try:
+            url = str(json.loads(r.stdout).get("html_url") or "").strip()
+            if url.startswith("http"):
+                return url.rstrip("/")
+        except Exception:
+            pass
+    owner, repo = slug.split("/", 1)
+    return f"https://{owner.lower()}.github.io/{repo}"
+
+
+def pages_url(project: Path, profile: dict | None = None) -> str | None:
+    """Where the hosted plan page lives (or will live once Pages builds it)."""
+    root = site_root(project, profile)
+    return f"{root}/goals.html" if root else None
+
+
+def _fetch(url: str, timeout: int = 15) -> tuple[bool, str]:
+    """GET the page. (ok, why-not) — a served page, not a promised one."""
+    from urllib.request import Request, urlopen
+    try:
+        req = Request(url, headers={"User-Agent": "devteam-publish"})
+        with urlopen(req, timeout=timeout) as r:
+            head = r.read(8192)
+            code = int(getattr(r, "status", 200) or 200)
+            return (code == 200 and b"<html" in head.lower()), f"HTTP {code}"
+    except Exception as e:  # 404 while Pages builds, DNS, TLS, timeout — all "not yet"
+        return False, str(e)[:140]
+
+
+def _verify_hosted(project: Path, url: str, sha: str,
+                   attempts: int = 4, delay: float = 10.0) -> tuple[bool, str]:
+    """Read the hosted page back, retrying through a Pages build."""
+    why = ""
+    for i in range(max(1, attempts)):
+        ok, why = _fetch(url)
+        if ok:
+            save_json(project / RECORD, {"url": url, "site": url.rsplit("/", 1)[0],
+                                         "sha": sha, "verified_at": now_iso()})
+            return True, ""
+        if i + 1 < attempts:
+            time.sleep(delay)
+    return False, why
+
+
+def _result(project: Path, pushed: bool, sha: str = "", why: str = "",
+            attempts: int = 4) -> dict:
+    """A publish outcome that reports the URL only when the page answers."""
+    url = pages_url(project)
+    if not pushed:
+        return {"pushed": False, "url": None, "sha": sha, "why": why}
+    if not url:
+        return {"pushed": True, "url": None, "sha": sha,
+                "why": (why + " — " if why else "") + "no Pages URL is known for this repo"}
+    ok, hwhy = _verify_hosted(project, url, _sha(project / FILES[0]), attempts=attempts)
+    if ok:
+        return {"pushed": True, "url": url, "sha": sha, "why": why or "published"}
+    return {"pushed": True, "url": None, "sha": sha,
+            "why": (why + " — " if why else "") +
+                   f"pushed, but GitHub Pages has not served {FILES[0]} yet ({hwhy})"}
 
 
 def _g(args: list[str], project: Path, timeout: int = 60):
@@ -74,7 +166,15 @@ def published_url(project: Path) -> tuple[str | None, str]:
         local = _g(["hash-object", "--", f], project, timeout=30)
         if (local.stdout or "").strip() != (there.stdout or "").strip():
             return None, "the local plan has changes that are not on origin yet"
-    return github_url(project, profile), ""
+    # On origin — but a push is not a page. The URL is reported only for the
+    # build this machine actually read back (see _verify_hosted); anything else
+    # is a guess, and `status` has no network to check it with.
+    rec = load_json(project / RECORD) or {}
+    url = str(rec.get("url") or "").strip()
+    if not url or str(rec.get("sha") or "") != _sha(project / FILES[0]):
+        return None, ("the mirror is on origin; its hosted page has not been read "
+                      "back yet (run `devteam publish`)")
+    return url, ""
 
 
 def _primary_worktree(project: Path) -> Path:
@@ -146,8 +246,8 @@ def _message(project: Path) -> str:
         _subject(project) + "\n\n"
         "The plan the team is working toward, rendered from this project's own\n"
         "records (.pipeline/, machine-local) so it travels with the repo:\n"
-        "  docs/plan.md    — the owner-readable view (this file)\n"
-        "  docs/plan.html  — the same plan as a clickable page\n\n"
+        "  docs/goals.html — the plan as one self-contained page, served by\n"
+        "                    GitHub Pages at the repo's site\n\n"
         f"Goal: {goal[:200]}\n\n"
         "Written by the dev-team pipeline on every run; do not edit by hand.\n"
     )
@@ -176,6 +276,10 @@ def publish(project: Path, log=None) -> dict:
     if url:
         return {"pushed": True, "url": url, "sha": "",
                 "why": "unchanged since the last publish"}
+    # Current on origin but never read back (a lagging Pages build, or the first
+    # publish of this file): check it here rather than pushing again.
+    if _why.startswith("the mirror is on origin"):
+        return _result(project, True, "", "already on origin")
 
     if log:
         log(f"publishing the plan ({FILES[0]} → origin/{branch})")
@@ -187,13 +291,17 @@ def publish(project: Path, log=None) -> dict:
         for f in FILES:
             (wt / f).parent.mkdir(parents=True, exist_ok=True)
             shutil.copyfile(project / f, wt / f)
+        # Retire the files this mirror replaced, in the same commit: a stale
+        # plan.md next to a current goals.html is two plans, one of them a lie.
+        gone = [f for f in RETIRED if (wt / f).exists()]
+        if gone:
+            _g(["rm", "-q", "--", *gone], wt, timeout=60)
+        paths = list(FILES) + gone
         _g(["add", "--", *FILES], wt, timeout=60)
-        if _g(["diff", "--cached", "--quiet", "--", *FILES], wt, timeout=60).returncode == 0:
+        if _g(["diff", "--cached", "--quiet", "--", *paths], wt, timeout=60).returncode == 0:
             # origin already carries exactly this plan (a run published it first).
-            url, why = published_url(project)
-            return {"pushed": True, "url": url or github_url(project, profile),
-                    "sha": "", "why": why or "already on origin"}
-        c = _g(["commit", "-m", note, "--", *FILES], wt, timeout=120)
+            return _result(project, True, "", "already on origin")
+        c = _g(["commit", "-m", note, "--", *paths], wt, timeout=120)
         if c.returncode != 0:
             tail = (c.stderr or c.stdout or "").strip().splitlines()
             return {"pushed": False, "url": None, "sha": "",
@@ -201,13 +309,7 @@ def publish(project: Path, log=None) -> dict:
         sha = (_g(["rev-parse", "--short", "HEAD"], wt, timeout=30).stdout or "").strip()
         r = _g(["push", "origin", f"HEAD:{branch}"], wt, timeout=180)
         if r.returncode == 0:
-            url, why = published_url(project)
-            if url:
-                return {"pushed": True, "url": url, "sha": sha, "why": "published"}
-            # Pushed, but the local check disagrees (a later render landed after
-            # ours). Still honest: the mirror is on origin, its URL is real.
-            return {"pushed": True, "url": github_url(project, profile), "sha": sha,
-                    "why": f"pushed ({why})"}
+            return _result(project, True, sha, "published")
         if log:
             log("push rejected — origin moved; rebuilding the plan commit on the new tip")
     return {"pushed": False, "url": None, "sha": "",
@@ -341,7 +443,14 @@ def commit_paths(project: Path, paths: list[str], message: str, log=None,
 
 
 def line(project: Path, res: dict) -> str:
-    """One owner-facing line about the shared plan."""
+    """One owner-facing line about the shared plan.
+
+    A push and a served page are different facts: the page is claimed only when
+    it was read back, and a push whose build has not landed says so instead of
+    borrowing the failure wording.
+    """
     if res.get("pushed") and res.get("url"):
         return f"shared plan: {res['url']}   ({res.get('why') or 'published'})"
+    if res.get("pushed"):
+        return f"shared plan: pushed, not live yet — {res.get('why') or 'unknown reason'}"
     return f"shared plan: NOT pushed — {res.get('why') or 'unknown reason'}"

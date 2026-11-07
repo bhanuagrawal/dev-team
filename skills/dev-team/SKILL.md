@@ -318,19 +318,26 @@ BLOCKING ask instead of an empty page (and gets no work picked).
 
 **The plan is also PUBLISHED, so it travels with the repo.** `.pipeline/` is
 excluded repo-locally, so a machine-local tree would die with the laptop. The
-same render is written to `docs/plan.md` (GitHub-rendered, business English
-first, technical detail in `<details>`) and `docs/plan.html`, and the run's
-bookkeeping (`record`, `research`, `adapt`) commits those two files to main and
-pushes them — `devteam publish <project>` does the same on demand. Best-effort by
-design: a checkout on another branch, no network or a moved remote reports why
-and retries next run; it never fails a run. Nothing else in the working tree is
-staged, and a local release push that lands mid-run is handled by fetch/rebase.
+same render is written to **`docs/goals.html`** — one self-contained page, the
+SAME file the owner opens locally — and the run's bookkeeping (`record`,
+`research`, `adapt`) commits that one file to main and pushes it —
+`devteam publish <project>` does the same on demand. GitHub Pages serves it from
+the repo's `/docs` source, so the plan has a real URL instead of a markdown blob.
+(Markdown/mirror duplicates — `docs/plan.md`, `docs/plan.html` — are RETIRED and
+removed from main by the publish commit; the owner asked for one hosted page,
+not a second markdown copy to drift.) Best-effort by design: a checkout on
+another branch, no network or a moved remote reports why and retries next run; it
+never fails a run. Nothing else in the working tree is staged, and a local
+release push that lands mid-run is handled by fetch/rebase.
 
 **The page URL is printed — after EVERY change and on EVERY run.** Anything that
 regenerates the page ends with two lines: `goal page: file:///…/goals.html`
-(clickable in a terminal) and, once the mirror is on the repo,
-`shared plan: https://github.com/…/docs/plan.md` — printed ONLY when it is true
-(mirror committed, unchanged, on origin), never a guessed URL. Printed by
+(clickable in a terminal) and, once the mirror is on the repo AND the hosted page
+has been read back (HTTP 200),
+`shared plan: https://<owner>.github.io/<repo>/goals.html` — printed ONLY when it
+is true (mirror committed, unchanged, on origin, and this build verified served;
+the verified URL is recorded in `.pipeline/published.json` so `status` can print
+it offline), never a guessed URL. Printed by
 `adapt`, `status`, `record`, `doctor`, `tree`, `publish`,
 `goal add|park|set-status|retire|reparent|revert|review`, `align --apply`,
 `vision`, and `queue add|--done`. `pick` and `research` print them on **stderr**
@@ -584,7 +591,7 @@ never silently blocking.
     the run-outcome contract.
 10b. **Hand the owner the page, every run.** The banner ENDS with the two URLs
     `status`/`record` printed (`goal page: file:///…/goals.html`, and
-    `shared plan: https://github.com/…/docs/plan.md` once published) — a run that
+    `shared plan: https://<owner>.github.io/<repo>/goals.html` once served) — a run that
     changed the plan, the queue, or shipped anything without pasting them is
     incomplete. They are the owner's one-click "where we are now", and they are
     printed even when a run changes nothing: paste them from the command output,

@@ -250,9 +250,9 @@ When building and shipping a brand-new app MVP in one go, the agent MUST execute
 2. **Initial UI Design & Stitch MCP:**
    - Initial UI is designed via **Stitch MCP** (`generate_screen_from_text` or `create_design_system_from_design_md`), NEVER invented blindly.
    - Design tokens, typography, and color palette written into `docs/design.md`.
-3. **Single Source of Truth Plan (`docs/plan.md`):**
-   - `docs/plan.md` MUST be populated with a multi-milestone roadmap (Milestone 1 Core Loop, Milestones 2–5) with outcomes, measures, and the initial execution queue.
-   - Run `devteam adapt <project>` to sync `docs/plan.md` into `profile.json` and `state.json`. `docs/plan.md` must never be left as an empty skeleton.
+3. **Single Source of Truth Plan (the goal tree, not a file):**
+   - The plan is the tree in `.pipeline/{profile,state}.json`: vision → goals → milestones → the queue. Create it with `devteam vision` + the planner, never by hand-writing a markdown plan — `docs/plan.md` was a second copy that drifted and is retired.
+   - Run `devteam adapt <project>` to sync the tree, and `devteam publish <project>` to put its one published page (`docs/goals.html`, served by GitHub Pages) on `main`.
 4. **Code Implementation:**
    - 100% native platform code (Compose / Kotlin).
    - Real offline persistence, real domain logic (no mocks, no fake static data).

@@ -624,7 +624,7 @@ def print_page(project: Path, note: str = "", file=None,
 
     Two lines, because there are two copies of the same plan:
       goal page:   file://…/.pipeline/goals.html      (this machine, click to open)
-      shared plan: https://github.com/…/docs/plan.md  (the pushed copy)
+      shared plan: https://<owner>.github.io/<repo>/goals.html  (the hosted copy)
     The GitHub line is only printed when it is TRUE (mirror committed, unchanged,
     on origin) — never a guessed URL. `published` is the result of a publish()
     that just ran; without it we check the local refs (no network).
@@ -640,7 +640,10 @@ def print_page(project: Path, note: str = "", file=None,
     lines = [line]
     res = published or {}
     if res and not res.get("url"):
-        lines.append(f"shared plan: NOT pushed — {res.get('why')}")
+        why = str(res.get("why") or "unknown reason")
+        lines.append(f"shared plan: pushed, not live yet — {why}"
+                     if res.get("pushed")
+                     else f"shared plan: NOT pushed — {why}")
     else:
         shared, why = publish_mod.published_url(project)
         lines.append(f"shared plan: {shared}" if shared
@@ -2375,7 +2378,8 @@ def cmd_adapt(args: argparse.Namespace) -> int:
 
 
 def cmd_publish(args: argparse.Namespace) -> int:
-    """Commit the plan mirror (docs/plan.md + docs/plan.html) and push it.
+    """Commit the plan mirror (docs/goals.html) and push it; report the hosted
+    URL only once the page has been read back.
 
     Every run's bookkeeping (`record`, `research`, `adapt`) does this by itself;
     the command exists so the owner can put the current plan on the repo without
@@ -4009,8 +4013,8 @@ def main() -> None:
                     help="report what would change without touching anything")
     ad.set_defaults(fn=cmd_adapt)
     pb = sub.add_parser("publish", add_help=True,
-                        help="commit docs/plan.md + docs/plan.html and push them "
-                             "(every run's bookkeeping does this automatically)")
+                        help="commit docs/goals.html and push it, then check the "
+                             "GitHub Pages URL (every run's bookkeeping does this)")
     pb.add_argument("project")
     pb.set_defaults(fn=cmd_publish)
     vi = sub.add_parser("vision");     vi.add_argument("project")

@@ -368,22 +368,26 @@ with every technical detail collapsed behind a click (`--open` opens it).
 
 `.pipeline/` is excluded from git **repo-locally**, so that page would die with
 the laptop. So the same render is also **published with the project**: the run's
-bookkeeping commits `docs/plan.md` (markdown, rendered by GitHub, business view
-first, technical detail in `<details>`) and `docs/plan.html` to `main`, and
-pushes. `devteam publish <project>` does the same on demand. Publishing is
-best-effort by design — another branch checked out, no network, a moved remote
-each report *why* and retry next run; it never fails a run, and it stages nothing
-but those two files.
+bookkeeping commits **`docs/goals.html`** — the same self-contained page, one
+file — to `main`, and pushes it. GitHub Pages serves it from the repo's `/docs`
+source, so the plan has a hosted URL instead of a markdown file to read on
+github.com; the old `docs/plan.md` / `docs/plan.html` mirrors are retired and
+removed by the publish commit. `devteam publish <project>` does the same on
+demand. Publishing is best-effort by design — another branch checked out, no
+network, a moved remote each report *why* and retry next run; it never fails a
+run, and it stages nothing but that one file.
 
 Every command that regenerates the plan, and every run, prints where the plan is:
 
 ```
 goal page:   file:///…/.pipeline/goals.html                       (this machine)
-shared plan: https://github.com/…/blob/main/docs/plan.md          (the repo)
+shared plan: https://<owner>.github.io/<repo>/goals.html          (hosted)
 ```
 
 The second line is printed **only when it is true** — mirror committed, unchanged,
-on `origin` — never a guessed URL. `pick` and `research` print both to stderr,
+on `origin`, and the hosted page read back with HTTP 200 — never a guessed URL.
+`devteam publish` performs that read-back and records it; `status` reprints the
+recorded URL offline. `pick` and `research` print both to stderr,
 because their stdout is a machine payload.
 
 ## Run-outcome contract
@@ -474,7 +478,7 @@ a human can answer. It is documented in its own repo.
 | project facts, goals, frozen paths, gates, connections | `<project>/.pipeline/profile.json` |
 | source of truth for state (queue, ledger, shipped, plan log) | `<project>/.pipeline/state.json` |
 | run logs, task specs, research, plan mirrors | `<project>/.pipeline/…` (git-excluded, machine-local) |
-| **the published plan** | `<project>/docs/plan.md` + `docs/plan.html` (committed, pushed) |
+| **the published plan** | `<project>/docs/goals.html` (committed, pushed, served by GitHub Pages) |
 | generic craft: skills, prompts, gates, CLI | **this repo** |
 
 ## The deterministic core (`cli.py` + `team/`)
