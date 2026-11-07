@@ -1984,14 +1984,58 @@ def cmd_coverage(args: argparse.Namespace) -> int:
 def cmd_ux_plan(args: argparse.Namespace) -> int:
     """Which screens need a UX audit — decided by fingerprints, not by calendar."""
     project = resolve_project(args.project)
-    from team import ux_audit
+    from team import ux_audit, ux_video
     p = ux_audit.plan(project)
+    v = ux_video.plan(project)
     if getattr(args, "json", False):
-        print(json.dumps(p, indent=2))
+        print(json.dumps({**p, "video": v}, indent=2))
         return 0
     print(f"== {project.name} ==")
     print(ux_audit.report(p))
+    if v["rows"]:
+        print(ux_video.report(v))
     return 0
+
+
+def cmd_ux_video(args: argparse.Namespace) -> int:
+    """Record declared flows on the app and react to the motion, not just the pixels."""
+    project = resolve_project(args.project)
+    log = RunLog(project, "ux-video-" + today())
+    from team import ux_video
+    res = ux_video.run(project, only=getattr(args, "flow", None),
+                       everything=getattr(args, "all", False), log=log,
+                       avd=getattr(args, "avd", None),
+                       keep_emulator=getattr(args, "keep_emulator", False),
+                       record_only=getattr(args, "record_only", False),
+                       via=getattr(args, "via", "gemini"))
+    for r in res["recorded"]:
+        print(f"\n== recorded {r['flow']} — {r['seconds']}s, {r['bytes'] // 1024} KB ==")
+        for a in r["actions"]:
+            print(f"  · {a}")
+    for r in res["reacted"]:
+        print(f"\n== {r['id']} (surface {r['surface']}) — judged from {r.get('evidence','video')}"
+              f" · {r['panels']} panels every {r['sample_every_s']:g}s ==")
+        for x in r.get("reactions") or []:
+            print(f"  {x.get('at', ''):6} {x.get('line', '')}")
+        if r.get("premium"):
+            print("  premium: " + " · ".join(r["premium"][:3]))
+        for g in r.get("gripes") or []:
+            elem = f" [{g.get('element')}]" if g.get("element") else ""
+            print(f"  {'🚨' if g['severity'] == 'P0_BLUNDER' else '⚠️ ' if g['severity'] == 'P1_DEGRADED' else '✦'} "
+                  f"{g['id']} [{g['severity']}]{elem} {g['line']}")
+        if r.get("verdict"):
+            print(f"  verdict: {r['verdict']}")
+    for s in res["skipped"]:
+        print(f"~ skipped {s['id']}: {s['reason']}")
+    for f in res["failed"]:
+        print(f"✗ failed {f['id']}: {f['reason']}")
+    if not res["recorded"] and not res["reacted"] and not res["skipped"] and not res["failed"]:
+        print("nothing to record: every declared flow is current "
+              "(recordings are only re-taken when their screens change)")
+    print(f"\nflow(s) planned {res['planned']} · recorded {len(res['recorded'])} · "
+          f"judged {len(res['reacted'])} · skipped {len(res['skipped'])} · "
+          f"stored in .pipeline/ux_audit.json")
+    return 1 if res["failed"] else 0
 
 
 def cmd_ux_audit(args: argparse.Namespace) -> int:
@@ -3934,6 +3978,19 @@ def main() -> None:
     ua.add_argument("--all", action="store_true", help="audit every screen with a render")
     ua.add_argument("--emulator", action="store_true", help="capture screen directly from running emulator if available")
     ua.set_defaults(fn=cmd_ux_audit)
+    uv = sub.add_parser("ux-video", help="record declared journeys (docs/ux-flows.json) on a device "
+                                         "and react to how they FEEL in motion, not just one still")
+    uv.add_argument("project")
+    uv.add_argument("--flow", help="record/re-act one flow id")
+    uv.add_argument("--all", action="store_true", help="re-act every flow, including current ones")
+    uv.add_argument("--avd", help="AVD to boot when none is running (default: the first installed)")
+    uv.add_argument("--keep-emulator", action="store_true",
+                    help="leave the emulator this command started running")
+    uv.add_argument("--record-only", action="store_true", help="record, skip the reaction")
+    uv.add_argument("--via", choices=["gemini", "api"], default="gemini",
+                    help="who judges the motion: browser Gemini (default, same maker as the "
+                         "store assets) or the vision API")
+    uv.set_defaults(fn=cmd_ux_video)
     tt = sub.add_parser("tree"); tt.add_argument("project")
     tt.add_argument("--html", action="store_true", help="write the html view and print its path")
     tt.add_argument("--open", action="store_true", help="open the html view in the browser")

@@ -610,6 +610,19 @@ def verify_all(project: Path, worktree: Path, base: str, log, gradle: bool = Tru
         log(f"ux: could not check (no audit signal): {e} — "
             "`devteam capabilities <project>` names what is missing")
 
+    # The MOTION half: a changed screen can leave a recorded flow describing an
+    # older build. Same deal — a warning that names the flow, never a gate.
+    try:
+        from . import ux_video
+        stale_flows = ux_video.stale_for_files(project, files)
+        if stale_flows:
+            log("ux video: " + "; ".join(f"{s['id']} predates this change "
+                                         f"(surface {s['surface']})"
+                                         for s in stale_flows[:4]))
+            log("ux video: run `devteam ux-video <project>` — only what moved is re-recorded")
+    except Exception as e:
+        log(f"ux video: could not check (no flow signal): {e}")
+
     ok, msg = localization_check(worktree, files)
     log("localization: ok" if ok else "localization: FAIL")
     if not ok:

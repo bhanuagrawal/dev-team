@@ -119,6 +119,75 @@ def clear_stale_locks(avd: str, log=None) -> list[str]:
     return cleared
 
 
+def emulator_bin() -> str:
+    return (shutil.which("emulator")
+            or str(Path.home() / "Library/Android/sdk/emulator/emulator"))
+
+
+def avds() -> list[str]:
+    """Installed AVD names, or [] when the emulator binary is absent."""
+    try:
+        r = subprocess.run([emulator_bin(), "-list-avds"], capture_output=True,
+                           text=True, timeout=30)
+    except (OSError, subprocess.SubprocessError):
+        return []
+    return [line.strip() for line in (r.stdout or "").splitlines() if line.strip()]
+
+
+def booted(serial: str, timeout: int = 240) -> bool:
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        r = _adb(["-s", serial, "shell", "getprop", "sys.boot_completed"], timeout=15)
+        if r is not None and (r.stdout or "").strip() == "1":
+            return True
+        time.sleep(2.0)
+    return False
+
+
+def ensure_device(avd: str | None = None, log=None, timeout: int = 240) -> tuple[str, bool]:
+    """A booted emulator — the existing one, or one this call starts.
+
+    Returns `(serial, started_by_us)`. The caller MUST stop it when the second
+    value is True: an emulator the agent started is the agent's to tear down, and
+    a pre-existing one is never touched (the owner may have it open on purpose).
+    """
+    live = running()
+    if live:
+        if log:
+            log(f"~ emulator: reusing {_label(live[0])}")
+        return live[0]["serial"], False
+    name = (avd or "").strip()
+    if not name:
+        installed = avds()
+        if not installed:
+            raise SystemExit("no AVD installed — create one (`android emulator create`) "
+                             "or pass --avd <name>")
+        name = installed[0]
+    if not adb_available():
+        raise SystemExit("adb is not available — install Android platform-tools")
+    clear_stale_locks(name, log)
+    if log:
+        log(f"~ emulator: starting {name} (headless)")
+    subprocess.Popen(
+        [emulator_bin(), "-avd", name, "-no-window", "-no-audio", "-no-boot-anim",
+         "-no-snapshot-save", "-gpu", "swiftshader_indirect", "-netdelay", "none",
+         "-netspeed", "full"],
+        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
+    deadline = time.monotonic() + timeout
+    serial = ""
+    while time.monotonic() < deadline:
+        live = running()
+        if live:
+            serial = live[0]["serial"]
+            if booted(serial, timeout=max(10, int(deadline - time.monotonic()))):
+                if log:
+                    log(f"~ emulator: {name} booted as {serial}")
+                return serial, True
+            break
+        time.sleep(2.0)
+    raise SystemExit(f"emulator {name} did not boot within {timeout}s")
+
+
 def baseline_path(project: Path) -> Path:
     return pipeline_dir(project) / "emulators.baseline.json"
 

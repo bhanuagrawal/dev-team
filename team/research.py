@@ -721,10 +721,34 @@ def _ux_pull(project: Path, profile: dict) -> dict:
         "p1_degraded_count": len(p1_degraded),
         "p2_polish": p2_polish[:10],
         "p2_polish_count": len(p2_polish),
+        "video_flows": _video_summary(surfaces),
         "audited_surfaces": sum(1 for r in surfaces.values() if r.get("audited_at")),
         "audited_at": max([str(r.get("audited_at") or "") for r in surfaces.values()]
                           or [""]),
     }
+
+
+def _video_summary(surfaces: dict) -> list[dict]:
+    """Recorded flows and their verdicts — motion evidence exists or it does not.
+
+    The planner needs to know the difference between "nobody watched this flow"
+    and "somebody watched it and it felt fine": with no field for it, a missing
+    recording looked identical to a clean one.
+    """
+    out = []
+    for label, row in (surfaces or {}).items():
+        for fid, v in (row.get("videos") or {}).items():
+            out.append({
+                "flow": fid,
+                "screen": label,
+                "verdict": str(v.get("verdict") or "")[:200],
+                "panels": v.get("panels"),
+                "sample_every_s": v.get("sample_every_s"),
+                "open_gripe_ids": [g.get("id") for g in (v.get("gripes") or [])
+                                   if g.get("status") == "open"],
+                "reacted_at": v.get("reacted_at", ""),
+            })
+    return out[:10]
 
 
 def research_collect(project: Path, log: RunLog) -> dict:
@@ -901,6 +925,12 @@ Rules:
     usability friction and cosmetic polish. These do NOT block high-priority milestone features.
     You may intelligently batch polish tasks together into dedicated polish tasks, resolve them
     opportunistically when modifying that screen for a feature, or queue them behind critical milestones.
+  * MOTION & FEEL (`signals.ux.video_flows`): recorded journeys reacted to as an ordered
+    contact sheet — dead time, jank, abrupt transitions, a control that produced no visible
+    change. Their gripes are already in the lists above (`source="video"`, with a `flow` id),
+    so they queue exactly like a still gripe; cite the flow id when the fix is about timing,
+    a transition, or a loading state. `video_flows` empty while screens are declared means
+    nobody has watched a flow yet — `devteam ux-video <project>` records `docs/ux-flows.json`.
   * none open, but `signals.ux.status` is "ok" → you may propose a feature, and
     its `reason` must say why polish has nothing left worth a run.
   * `signals.ux.status` is "unwired" or "partial" → polish cannot be measured yet.
