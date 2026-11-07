@@ -1176,6 +1176,32 @@ def cmd_release(args: argparse.Namespace) -> int:
     return 0 if res.get("delivered") else 1
 
 
+def _refresh_coverage_signal(project: Path) -> None:
+    """Re-measure coverage against the SHIPPED tree at the end of a released run.
+
+    A release CHANGES the tree, and the stored signal is what `status`, `doctor`
+    and the report page read until the next plan re-collects it. Shipping a run
+    that reached 100% and then telling the owner "unit 86%, below floor" is a
+    reading of work that no longer exists (seen 2026-11-07: the release added the
+    test that closed the gap and every report kept the pre-release number).
+    Best-effort by design: the origin tree may be unreachable offline, and a
+    stale number must never fail a run.
+    """
+    try:
+        from team import coverage as coverage_mod, scan as scan_mod
+        from team.core import profile_of
+
+        sig = coverage_mod.collect(scan_mod.origin_tree(project), profile_of(project))
+        f = project / ".pipeline" / "research.json"
+        data = json.loads(f.read_text())
+        data.setdefault("signals", {})["coverage"] = sig
+        data["coverage_refreshed_at"] = now_iso()
+        f.write_text(json.dumps(data, indent=2) + "\n")
+        print("coverage: " + coverage_mod.summary_line(sig))
+    except Exception as e:  # never fail a record over a report line
+        print(f"coverage: refresh skipped ({e})")
+
+
 def cmd_record(args: argparse.Namespace) -> None:
     project = resolve_project(args.project)
     state = state_of(project)
@@ -1240,6 +1266,9 @@ def cmd_record(args: argparse.Namespace) -> None:
         {k: t[k] for k in ("label", "paths", "risk") if k in t}
         for t in scan.scan_surfaces(project) if t["status"] == "unanimated"]
     save_state(project, state)
+    if args.result == "shipped":
+        # The tree just changed: re-measure before anything reads the old number.
+        _refresh_coverage_signal(project)
     scribe.update(project)
     print(f"recorded: {entry['result']} {entry['task_id']}")
     _print_report_url(project)
