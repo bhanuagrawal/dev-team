@@ -400,6 +400,17 @@ def run_doctor(project: Path, log) -> dict:
     except Exception as e:  # a check must never hide the report
         log(f"doctor goals: could not check ({e})")
 
+    # Release signing keystore: check that an off-repo backup exists in Google Drive or local vault
+    try:
+        from . import keystore_backup
+        has_backup, detail = keystore_backup.verify_backup(project)
+        if has_backup:
+            log("doctor signing-keystore: ready (off-repo backup verified)")
+        else:
+            log(f"doctor signing-keystore: WARN — {detail} (run: python3 cli.py keystore-backup {project.name})")
+    except Exception as e:
+        log(f"doctor signing-keystore: WARN — verification error: {e}")
+
     # Nothing may exist only on this disk (AGENTS.md). `status` reports the same
     # set: it is the detection half of the rule — the writer commits or parks
     # its own work, the team never commits the owner's WIP for them.

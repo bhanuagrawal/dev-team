@@ -66,19 +66,31 @@ window.addEventListener('load', () => {
   const bx1 = Math.min(w - 1, BOX[2] + PAD), by1 = Math.min(h - 1, BOX[3] + PAD);
   const out = g.createImageData(w, h);
   out.data.set(src.data);
-  const leftX = Math.max(0, bx0 - 3), topY = Math.max(0, by0 - 3);
+  const lxI = Math.max(0, bx0 - 3), rxI = Math.min(w - 1, bx1 + 3);
+  const tyI = Math.max(0, by0 - 3), byI = Math.min(h - 1, by1 + 3);
   const bw = bx1 - bx0 + 1, bh = by1 - by0 + 1;
+  const FEATHER = 4;
   for (let y = by0; y <= by1; y++) {
     for (let x = bx0; x <= bx1; x++) {
-      const li = (y * w + leftX) * 4, ti = (topY * w + x) * 4, di = (y * w + x) * 4;
-      // Weight by distance to each edge: the corner fill follows both gradients.
-      const wx = bw > 1 ? (x - bx0) / (bw - 1) : 0.5;
-      const wy = bh > 1 ? (y - by0) / (bh - 1) : 0.5;
-      const wsum = wx + wy || 1;
+      const di = (y * w + x) * 4;
+      const li = (y * w + lxI) * 4, ri = (y * w + rxI) * 4;
+      const ti = (tyI * w + x) * 4, bi = (byI * w + x) * 4;
+      // Weights are offset by 1 so NEITHER can be 0 at the box corner: the old
+      // (x-bx0)/(bw-1) form made both 0 there, divided 0 by the ||1 fallback and
+      // stamped a black pixel into every healed corner (observed 2026-11-07).
+      const wx = bw > 1 ? (x - bx0 + 1) / (bw + 1) : 0.5;
+      const wy = bh > 1 ? (y - by0 + 1) / (bh + 1) : 0.5;
+      // Feather the seam, or the heal reads as a pale rectangle on textured paper.
+      const edge = Math.min(x - bx0, bx1 - x, y - by0, by1 - y);
+      const a = Math.min(1, (edge + 1) / FEATHER);
       for (let ch = 0; ch < 3; ch++) {
-        const v = (src.data[li + ch] * wy + src.data[ti + ch] * wx) / wsum;
-        const grain = (Math.random() - 0.5) * 5;
-        out.data[di + ch] = Math.max(0, Math.min(255, Math.round(v + grain)));
+        // Interpolate from all FOUR edges: left/top alone bias the fill and leave
+        // a tone step where the background has a gradient.
+        const hor = src.data[li + ch] * (1 - wx) + src.data[ri + ch] * wx;
+        const ver = src.data[ti + ch] * (1 - wy) + src.data[bi + ch] * wy;
+        const v = (hor + ver) / 2 + (Math.random() - 0.5) * 2;
+        const mixed = src.data[di + ch] * (1 - a) + v * a;
+        out.data[di + ch] = Math.max(0, Math.min(255, Math.round(mixed)));
       }
       out.data[di + 3] = 255;
     }
@@ -107,6 +119,23 @@ window.addEventListener('load', () => {
   const rx0 = Math.max(0, BOX[0]), ry0 = Math.max(0, BOX[1]);
   const rx1 = Math.min(w - 1, BOX[2]), ry1 = Math.min(h - 1, BOX[3]);
   const residual = contrastIn(rx0, ry0, rx1, ry1);
+
+  // Was there anything in the box BEFORE we healed it? A corner that is one flat
+  // colour carried no mark, and rewriting it only risks artefacts (a 1px black dot
+  // appeared on a clean Stitch icon, 2026-11-07). The span is measured, not guessed:
+  // a real stamp — even a faint white sparkle on cream — leaves a span > 2.
+  let beforeLo = 255, beforeHi = 0;
+  {
+    const data = src.data, bw2 = w;
+    for (let yy = ry0; yy <= ry1; yy++) {
+      for (let xx = rx0; xx <= rx1; xx++) {
+        const i = (yy * bw2 + xx) * 4;
+        const l = 0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2];
+        if (l < beforeLo) beforeLo = l;
+        if (l > beforeHi) beforeHi = l;
+      }
+    }
+  }
 
   // ---- safety net: a second stamp-shaped blob anywhere else -------------------
   const small = document.createElement('canvas');
@@ -137,6 +166,7 @@ window.addEventListener('load', () => {
   document.title = 'PLATE::' + JSON.stringify({
     size: [w, h], box: [bx0, by0, bx1, by1],
     residual: Math.round(residual), elsewhere, elsewhereBox,
+    range: [Math.round(beforeLo), Math.round(beforeHi)],
     remaining: residual > MIN_CONTRAST
   });
   const el = document.createElement('div');
@@ -402,6 +432,7 @@ def clean(plate: Path, out: Path | None = None, chrome: str | None = None,
     work = Path(tempfile.mkdtemp()) / "step.png"
     work.write_bytes(plate.read_bytes())
     healed_any = False
+    flat_corner = False
     healed_boxes: list[list[int]] = []
     last: dict[str, Any] = {}
     detected_at: list[int] | None = None
@@ -421,9 +452,20 @@ def clean(plate: Path, out: Path | None = None, chrome: str | None = None,
             break
         if half:
             box = _rebox(box, half, size)
+        detected_here = bool(found.get("found"))
         info = _heal_once(work, box, chrome, timeout)
         if info.get("status") != "OK":
             return info
+        rng = info.get("range") or []
+        if not detected_here and len(rng) == 2 and (rng[1] - rng[0]) <= 2:
+            # The corner was ONE FLAT COLOUR before the heal: nothing was ever
+            # stamped there, so keep the original pixels. Rewriting a clean corner
+            # risks the cleaner's own artefact (a 1px black dot on a clean Stitch
+            # icon, 2026-11-07); a faint mark — even a white sparkle on cream —
+            # leaves a span well above this, so it still gets healed.
+            flat_corner = True
+            last = info
+            break
         work.write_bytes(info["png"])
         healed_any = True
         healed_boxes.append(box)
@@ -463,6 +505,13 @@ def clean(plate: Path, out: Path | None = None, chrome: str | None = None,
                 "box": leftover, "corner_mark": corner_mark, "size": size,
                 "residual": last.get("residual")}
     if not healed_any:
+        if flat_corner:
+            out.parent.mkdir(parents=True, exist_ok=True)
+            out.write_bytes(plate.read_bytes())
+            return {"status": "OK", "removed": False, "verified": True,
+                    "file": str(out), "box": None, "size": size, "detected": False,
+                    "residual": 0, "elsewhere": 0, "corner_mark": None,
+                    "note": "corner was already flat: no stamp to remove, image untouched"}
         return {"status": "ERROR", "error": "the plate cleaner healed nothing"}
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_bytes(work.read_bytes())

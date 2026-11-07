@@ -921,6 +921,21 @@ def run_store_readiness_audit(project: Path, tree: Path | None = None) -> list[R
         fix="Configure signingConfigs.release with keystore properties for Play App Bundle signing",
     ))
 
+    # Keystore off-repo backup verification
+    try:
+        from . import keystore_backup
+        has_backup, backup_detail = keystore_backup.verify_backup(src)
+        checks.append(ReadinessCheck(
+            category="Release Configuration",
+            name="Off-Repo Keystore Backup",
+            passed=has_backup,
+            severity="WARNING" if not has_backup else "INFO",
+            detail=backup_detail if has_backup else "Release signing keystore has no off-repo backup in Google Drive or ~/.config/devteam/keystores",
+            fix=f"Run: python3 cli.py keystore-backup {src.name}",
+        ))
+    except Exception as _e:
+        pass
+
     # ── 9. Privacy Policy & Public HTTPS Hosting ──────────────────────────────
     conns = profile.get("connections", {})
     privacy_url = (conns.get("play_store", {}).get("privacy_policy_url") or

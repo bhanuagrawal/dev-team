@@ -346,23 +346,14 @@ def generate(project: Path, kinds: tuple[str, ...] = GEMINI_KINDS,
     painted: dict[str, list[int] | None] = {}
     if jobs:
         if log:
-            log(f"  brand: Gemini (browser) painting {len(jobs)} asset(s)")
-        try:
-            from . import gemini_browser
-
-            res = gemini_browser.execute(spt._batch_script(jobs), timeout=900, log=log)
-        except FileNotFoundError:
-            return {"status": "BLOCKED", "error": "Playwright or browser-control is not installed"}
-        except Exception as exc:  # timeout and anything else the browser raises
-            return {"status": "BLOCKED", "error": f"Gemini did not finish: {exc}"}
-        if res.returncode != 0:
+            log(f"  brand: painting {len(jobs)} asset(s)")
+        outcome = spt.paint_batch(jobs, timeout=900, log=log)
+        if not outcome.get("ok"):
             return {"status": "BLOCKED",
-                    "error": (res.stderr or "browser execution failed").strip()[:300]}
-        try:
-            payload = json.loads(res.stdout)
-        except Exception:
-            return {"status": "ERROR", "error": "browser-control returned no JSON"}
-        value = payload.get("value") or {}
+                    "error": (outcome.get("script_invalid") or outcome.get("error")
+                              or "no image model produced the brand asset"),
+                    "detail": "; ".join(outcome.get("attempts") or [])[:300]}
+        value = outcome.get("value") or {}
         chat = value.get("chat")
         results = value.get("results") or []
         for job, result in zip(jobs, results):

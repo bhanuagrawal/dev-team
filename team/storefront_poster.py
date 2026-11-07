@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import re
 import shutil
 import subprocess
@@ -106,6 +107,20 @@ def poster_prompt(project: Path, scene: dict[str, Any], direction: dict[str, Any
         "Every element inside the phone must come from the attachment, in the same order "
         "and position. The frame around it (background, headline, caption) is yours to "
         "compose; the screen is not.")
+    # Composition is a CONTRACT, not a suggestion: the first painted sets read as a
+    # small phone floating in a mostly empty canvas (owner, 2026-11-07: "ratio lot
+    # of empty space and phone not taking enough space"). Naming the proportions is
+    # the only instruction that reliably sizes the device, and the bottom band is
+    # bounded by the watermark corner the cleaner must keep plain.
+    parts.append(
+        "COMPOSITION — this decides whether the frame is usable: the phone is the SUBJECT, "
+        "not a prop. Draw it 68-74% of the canvas height, anchored to the right edge, with "
+        "its ENTIRE DISPLAY VISIBLE — the device body may bleed 0-2% past the edge but never "
+        "the screen's own content (a cropped screen made the model invent what it could not "
+        "see). Its top edge sits at 10-13% and its bottom edge at 82-85%. Put the copy in "
+        "the upper-left, no wider than 44% of the canvas, so it never overlaps the device. "
+        "Fill the space under the phone with its soft contact shadow — no wide blank band, "
+        "no small floating device, no broad empty top margin.")
     parts += [
         "Every number and status on that screen (counts, percentages, dates, PASS/FAIL, "
         "severity) is part of the screenshot: copy each one exactly as it appears. Never "
@@ -181,7 +196,112 @@ def _script_syntax_error(script: str) -> str:
         return lines[0][:200] if lines else "node --check failed"
 
 
-def _batch_script(jobs: list[dict[str, str]]) -> str:
+def _batch_script(jobs: list[dict[str, str]], provider: str = "gemini") -> str:
+    """Build the painter script for one provider.
+
+    The transport is identical (the browser-control relay); only the site's
+    selectors and the definition of "the model finished" differ. Gemini is the
+    default because it keeps a chat-scoped look; ChatGPT is the fallback when
+    Gemini's daily image limit is reached (owner directive 2026-11-07).
+    """
+    if provider == "chatgpt":
+        return _chatgpt_batch_script(jobs)
+    return _gemini_batch_script(jobs)
+
+
+def _providers() -> list[str]:
+    """Painter order. `DEVTEAM_IMAGE_PROVIDERS` overrides (e.g. 'chatgpt')."""
+    raw = (os.environ.get("DEVTEAM_IMAGE_PROVIDERS") or "gemini,chatgpt").strip()
+    order = [p.strip().lower() for p in raw.split(",") if p.strip()]
+    return [p for p in order if p in ("gemini", "chatgpt")] or ["gemini"]
+
+
+def _chatgpt_batch_script(jobs: list[dict[str, str]]) -> str:
+    """The same batch, painted in the owner's signed-in ChatGPT session.
+
+    ChatGPT's composer is a contenteditable, the upload is a plain hidden file
+    input, and a generated image arrives as an <img> with a files.oaiusercontent
+    src (not a same-origin blob), so the bytes are fetched with the session's own
+    request context — drawing it into a canvas would taint and fail.
+    """
+    return f"""
+    const JOBS = {json.dumps(jobs)};
+    await page.goto("https://chatgpt.com/", {{ waitUntil: "domcontentloaded" }});
+    await page.waitForTimeout(4000);
+    const composer = page.locator('[contenteditable="true"]').first();
+    if (!(await composer.count())) {{
+      return {{ ok: false, signin: true, error: "ChatGPT composer not found (signed out?)" }};
+    }}
+    const fileInput = page.locator('input[type=file][aria-label="Attach photos or videos"], '
+                                 + 'input[type=file][aria-label="Attach photos"], '
+                                 + 'input[type=file][accept="image/*"]').first();
+    const attachments = () => page.locator('[data-composer-attachments] img');
+    const generated = () => page.locator('main img[alt*="Generated" i]');
+    const results = [];
+    for (const job of JOBS) {{
+      const attachBefore = await attachments().count();
+      await fileInput.setInputFiles(job.src);
+      let attached = false;
+      for (let i = 0; i < 25; i++) {{
+        if (await attachments().count() > attachBefore) {{ attached = true; break; }}
+        await page.waitForTimeout(1000);
+      }}
+      if (!attached) {{
+        results.push({{ ok: false, scene: job.out, error: "the scene render never attached to the prompt" }});
+        break;
+      }}
+      await composer.click();
+      await composer.fill(job.prompt);
+      await page.waitForTimeout(400);
+      const genBefore = await generated().count();
+      await page.keyboard.press("Enter");
+      const start = Date.now();
+      let picked = null;
+      let dims = [0, 0];
+      while (Date.now() - start < 300000) {{
+        const g = generated();
+        const n = await g.count();
+        if (n > genBefore) {{
+          const last = g.nth(n - 1);
+          const w = await last.evaluate(el => el.naturalWidth).catch(() => 0);
+          if (w >= 300) {{
+            picked = await last.getAttribute("src");
+            dims = await last.evaluate(el => [el.naturalWidth, el.naturalHeight]).catch(() => [0, 0]);
+            break;
+          }}
+        }}
+        const tail = (await page.locator("body").innerText()).slice(-700);
+        if (/(usage cap|limit reached|you've reached|reached your|try again later|quota)/i.test(tail)) {{
+          return {{ ok: false, limit: true, error: tail.slice(-180) }};
+        }}
+        await page.waitForTimeout(3000);
+      }}
+      if (!picked) {{
+        results.push({{ ok: false, scene: job.out, error: "no NEW image in the model's answer" }});
+        break;
+      }}
+      if (picked.startsWith("blob:")) {{
+        const data = await page.evaluate(async (s) => {{
+          const img = new Image(); img.src = s; await img.decode();
+          const c = document.createElement("canvas");
+          c.width = img.naturalWidth; c.height = img.naturalHeight;
+          c.getContext("2d").drawImage(img, 0, 0);
+          return c.toDataURL("image/png");
+        }}, picked);
+        fs.writeFileSync(job.out, Buffer.from(data.split(",")[1], "base64"));
+      }} else {{
+        const resp = await context.request.get(picked);
+        fs.writeFileSync(job.out, await resp.body());
+      }}
+      if (job.sidecar) fs.writeFileSync(job.sidecar,
+        JSON.stringify({{ prompt_sha: job.sha, source_sha: job.source_sha, chat: page.url() }}));
+      results.push({{ ok: true, out: job.out, w: dims[0], h: dims[1] }});
+    }}
+    return {{ ok: results.length && results.every(r => r.ok), chat: page.url(), results }};
+    """
+
+
+def _gemini_batch_script(jobs: list[dict[str, str]]) -> str:
     """One browser session, one Gemini chat, one asset per job.
 
     Every asset of a listing is drawn in the SAME conversation on purpose: the model
@@ -190,9 +310,16 @@ def _batch_script(jobs: list[dict[str, str]]) -> str:
     """
     return f"""
     const JOBS = {json.dumps(jobs)};
-    const pages = context.pages().filter(p => p.url().includes("gemini.google.com"));
-    const page = pages[0] || await context.newPage();
-    if (!pages.length) await page.goto("https://gemini.google.com/app", {{ waitUntil: "domcontentloaded" }});
+    // A run paints its frames in ONE conversation so they read as a set — but it
+    // must be a conversation this run STARTED. Reusing whichever Gemini tab is
+    // already open continued the previous listing's chat, and the prompt's own
+    // "match the images already in this conversation" then carried the OLD look
+    // into every repaint (observed 2026-11-07: a --force repaint of a warm-stone
+    // listing came back dark, matching the chat's previous dark frames).
+    // Navigating the session page to /app opens a NEW chat; it is the one route
+    // both the headless runner and the browser-control relay accept (a fresh
+    // `context.newPage()` is rejected by the relay).
+    await page.goto("https://gemini.google.com/app", {{ waitUntil: "domcontentloaded" }});
     await page.bringToFront();
     const gen = () => page.locator("model-response img[src^='blob:'], "
                                  + "model-response img[src^='data:image']");
@@ -272,6 +399,13 @@ def _batch_script(jobs: list[dict[str, str]]) -> str:
           const w = await last.evaluate(el => el.naturalWidth).catch(() => 0);
           if (w >= 300) {{ picked = await last.getAttribute("src"); break; }}
         }}
+        // Gemini's cap must be NAMED, not waited out: without this the run sits
+        // here until it times out and reports "no image", and the ChatGPT fallback
+        // never fires (owner directive 2026-11-07).
+        const tail = (await page.locator("body").innerText()).slice(-700);
+        if (/(reached your limit|limit reached|daily limit|image limit|quota|too many requests|try again (tomorrow|later))/i.test(tail)) {{
+          return {{ ok: false, limit: true, error: tail.slice(-180) }};
+        }}
         await page.waitForTimeout(3000);
       }}
       if (!picked) {{ results.push({{ ok: false, scene: job.out, error: "no NEW image in the model's answer" }}); break; }}
@@ -294,6 +428,61 @@ def _batch_script(jobs: list[dict[str, str]]) -> str:
 
 def _prompt_sha(prompt: str) -> str:
     return hashlib.sha256(prompt.encode("utf-8")).hexdigest()[:16]
+
+
+def paint_batch(jobs: list[dict[str, str]], timeout: int = 900,
+                log=None) -> dict[str, Any]:
+    """Paint a batch of assets, walking the signed-in image models in order.
+
+    Gemini first (it keeps a chat-scoped look). When it reports its image limit,
+    the SAME jobs go to ChatGPT in the owner's signed-in Chrome (owner directive
+    2026-11-07: "use logged-in chatgpt session like gemini if limit of gemini
+    reaches"). Only a LIMIT moves to the next model — a composition failure is a
+    prompt problem and would burn the second model's quota for nothing.
+    """
+    from . import gemini_browser
+
+    attempts: list[str] = []
+    for provider in _providers():
+        script = _batch_script(jobs, provider=provider)
+        bad = _script_syntax_error(script)
+        if bad:
+            return {"ok": False, "value": {}, "provider": provider, "attempts": attempts,
+                    "script_invalid": f"the generated {provider} browser script is invalid: {bad}"}
+        if log:
+            log(f"  {provider}: painting {len(jobs)} asset(s) in one chat")
+        try:
+            res = gemini_browser.execute(script, timeout=timeout, log=log)
+        except FileNotFoundError:
+            return {"ok": False, "value": {}, "provider": None, "attempts": attempts,
+                    "error": "Playwright or browser-control is not installed"}
+        except subprocess.TimeoutExpired:
+            attempts.append(f"{provider}: timed out")
+            continue
+        if res.returncode != 0:
+            text = ((res.stdout or "") + (res.stderr or "")).strip()[:300]
+            attempts.append(f"{provider}: {text or 'browser execution failed'}")
+            if log:
+                log(f"  {provider}: failed — trying the next signed-in image model")
+            continue
+        try:
+            payload = json.loads(res.stdout)
+        except Exception:
+            attempts.append(f"{provider}: returned no JSON")
+            continue
+        value = payload.get("value") or {}
+        if payload.get("ok") and value.get("ok"):
+            return {"ok": True, "value": value, "provider": provider, "attempts": attempts}
+        if value.get("limit") or re.search(r"\blimit\b|quota|usage cap",
+                                           json.dumps(value), re.I):
+            attempts.append(f"{provider}: image limit reached")
+            if log:
+                log(f"  {provider}: image limit reached — falling back")
+            continue
+        return {"ok": False, "value": value, "provider": provider, "attempts": attempts,
+                "error": "one or more assets were not generated"}
+    return {"ok": False, "value": {}, "provider": None, "attempts": attempts,
+            "error": "no image model produced the assets"}
 
 
 def generate_all(project: Path, scenes: list[dict[str, Any]], direction: dict[str, Any],
@@ -363,32 +552,17 @@ def generate_all(project: Path, scenes: list[dict[str, Any]], direction: dict[st
                      "ar": aspect})
     if not jobs:
         return {"status": "OK", "posters": posters, "chat": None, "painted": 0}
+    outcome = paint_batch(jobs, timeout=900, log=log)
+    value = outcome.get("value") or {}
+    if outcome.get("script_invalid"):
+        return {"status": "ERROR", "error": outcome["script_invalid"],
+                "hint": "this is a team-code bug, not a model one — nothing was painted"}
+    if outcome.get("provider") is None and not outcome.get("ok"):
+        return {"status": "BLOCKED",
+                "error": outcome.get("error") or "no image model produced the frames",
+                "detail": "; ".join(outcome.get("attempts") or [])[:400]}
     if log:
-        log(f"  poster: Gemini (browser) painting {len(jobs)} asset(s) in one chat")
-    script = _batch_script(jobs)
-    # Check our OWN script before spending an image on it. A generated script is
-    # code; a stray Python-style string concatenation made it a SyntaxError, and
-    # the browser then reported a failure that read like Gemini's fault while the
-    # quota paid for it (observed 2026-11-04).
-    bad = _script_syntax_error(script)
-    if bad:
-        return {"status": "ERROR", "error": f"the generated browser script is invalid: {bad}",
-                "hint": "this is a team-code bug, not a Gemini one — nothing was painted"}
-    try:
-        from . import gemini_browser
-
-        res = gemini_browser.execute(script, timeout=900, log=log)
-    except FileNotFoundError:
-        return {"status": "BLOCKED", "error": "Playwright or browser-control is not installed"}
-    except subprocess.TimeoutExpired:
-        return {"status": "BLOCKED", "error": "Gemini did not finish within 15 minutes"}
-    if res.returncode != 0:
-        return {"status": "BLOCKED", "error": (res.stderr or "browser execution failed").strip()[:300]}
-    try:
-        payload = json.loads(res.stdout)
-    except Exception:
-        return {"status": "ERROR", "error": "browser-control returned no JSON"}
-    value = payload.get("value") or {}
+        log(f"  poster: painted by {outcome.get('provider')}")
     for job, made in zip(jobs, value.get("results") or []):
         if not made.get("ok"):
             return {"status": "BLOCKED", "error": str(made.get("error") or "no image produced"),
@@ -401,7 +575,7 @@ def generate_all(project: Path, scenes: list[dict[str, Any]], direction: dict[st
                 f"{path.stat().st_size // 1024} KB)")
         (project / ".pipeline" / f"gemini-poster-{path.stem.replace('poster-', '')}.txt").write_text(
             job["prompt"])
-    if not (payload.get("ok") and value.get("ok")):
+    if not outcome.get("ok"):
         return {"status": "BLOCKED", "error": "one or more posters were not generated",
                 "chat": value.get("chat")}
     return {"status": "OK", "posters": posters, "chat": value.get("chat"),
