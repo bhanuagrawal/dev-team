@@ -143,13 +143,15 @@ def generate_icon(project_id: str, prompt: str, *, device: str = "AGNOSTIC",
     Generation is slow by nature. A timeout is not a failure: the screen keeps
     being produced server-side, so the newest screen of the project is polled
     instead of re-asking (a retry would produce a second, competing icon).
+    Uses GEMINI_3_8_FLASH for maximum precision and layout craft.
     """
     say = log or (lambda *_: None)
     try:
         res = call("generate_screen_from_text", {
             "projectId": project_id, "prompt": prompt, "deviceType": device,
+            "modelId": "GEMINI_3_8_FLASH",
         }, timeout=timeout)
-        screen = _pick_screen(res)
+        screen = _pick_screen(res, prefer_square=True)
         if screen:
             return screen
         say("  stitch: generated but returned no screen reference — polling the project")
@@ -167,7 +169,44 @@ def generate_icon(project_id: str, prompt: str, *, device: str = "AGNOSTIC",
         f"{project_id}; `brand --design` resumes by adopting its newest screen")
 
 
-def _pick_screen(res: dict[str, Any]) -> dict[str, Any] | None:
+def generate_screen(project_id: str, prompt: str, *, device: str = "MOBILE",
+                    model_id: str = "GEMINI_3_8_FLASH",
+                    design_system: str | None = None,
+                    timeout: int = 900, log=None) -> dict[str, Any]:
+    """Ask Stitch for a mobile screen design using Gemini 3.8 Flash.
+
+    Applies the anti-AI craft prompt, calls generate_screen_from_text with
+    modelId=GEMINI_3_8_FLASH, and returns the generated screen metadata.
+    """
+    say = log or (lambda *_: None)
+    params: dict[str, Any] = {
+        "projectId": project_id,
+        "prompt": prompt,
+        "deviceType": device,
+        "modelId": model_id,
+    }
+    if design_system:
+        params["designSystem"] = design_system
+    try:
+        res = call("generate_screen_from_text", params, timeout=timeout)
+        screen = _pick_screen(res, prefer_square=False)
+        if screen:
+            return screen
+        say("  stitch: generated but returned no screen reference — polling the project")
+    except StitchError as exc:
+        say(f"  stitch: generation call did not return ({str(exc)[:160]}) — polling the project")
+    deadline = time.time() + timeout
+    seen = {s.get("name") for s in list_screens(project_id)}
+    while time.time() < deadline:
+        time.sleep(20)
+        for s in list_screens(project_id):
+            if s.get("name") not in seen and s.get("htmlCode"):
+                return s
+    raise StitchError(
+        f"Stitch produced no screen within {timeout}s for project {project_id}")
+
+
+def _pick_screen(res: dict[str, Any], prefer_square: bool = False) -> dict[str, Any] | None:
     designs = []
     for comp in res.get("outputComponents") or []:
         design = (comp or {}).get("design") or {}
@@ -175,10 +214,11 @@ def _pick_screen(res: dict[str, Any]) -> dict[str, Any] | None:
     with_art = [s for s in designs if (s.get("htmlCode") or {}).get("name")]
     if not with_art:
         return None
-    # The icon artboard is square; preference, then the last generated.
-    for s in reversed(with_art):
-        if str(s.get("width")) == str(s.get("height")) and s.get("width"):
-            return s
+    # For icon generation, prefer square artboards.
+    if prefer_square:
+        for s in reversed(with_art):
+            if str(s.get("width")) == str(s.get("height")) and s.get("width"):
+                return s
     return with_art[-1]
 
 

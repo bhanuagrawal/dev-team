@@ -211,7 +211,7 @@ def icon_stitch_prompt(project: Path) -> str:
         f"Design the Google Play store icon for the Android app {name}.",
         "ARTBOARD: a single square 512x512 tile, edge to edge, nothing outside it.",
         f"PALETTE: surface base {base} as the ground, {accent} as the one accent. "
-        f"Dark-first, high contrast, no extra hues.",
+        f"High contrast, crisp geometric silhouette, no extra hues.",
         "SUBJECT: the app's own mark, the same silhouette its launcher icon shows, "
         "rendered flat and geometric. Keep it recognisable at 48 pixels: one "
         "silhouette, generous padding, no fine detail.",

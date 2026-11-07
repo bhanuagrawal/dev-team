@@ -116,8 +116,8 @@ def audit_design_drift(
 
     # 3. Anti-Generic & Brand Token Audit
     anti_pattern_violations = []
-    if "background: #fff" in content_lower or "background: white" in content_lower or "background-color: #ffffff" in content_lower:
-        anti_pattern_violations.append("Generic white background detected (Violates dark-first law)")
+    if re.search(r"box-shadow:[^;]*(?:0\s+0\s+(?:2\d|3\d|4\d|5\d)px|#[0-9a-fA-F]{6}33)", content_lower) or "radiant-aura" in content_lower or "glow-aura" in content_lower:
+        anti_pattern_violations.append("Artificial neon glow / radiant halo detected (Violates human craftsmanship mandate)")
     if "lorem ipsum" in content_lower:
         anti_pattern_violations.append("Lorem Ipsum dummy copy detected (Violates concrete copy law)")
 
@@ -168,7 +168,7 @@ def audit_design_drift(
         remediation_prompt = (
             f"CORRECTION DIRECTIVE FOR {screen_name.upper()}:\n"
             + "\n".join(f"- {d}" for d in remediation_directives)
-            + f"\nEnforce dark-first base ({tokens['surface_base']}) and neon accent ({tokens['primary_accent']})."
+            + f"\nEnforce authoritative base canvas ({tokens['surface_base']}) and primary accent ({tokens['primary_accent']}). Maintain human-grade craft with zero AI glowing neon halos."
         )
 
     return {

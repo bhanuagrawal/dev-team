@@ -3330,6 +3330,61 @@ def cmd_stitch_prompt(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_stitch_screen(args: argparse.Namespace) -> int:
+    project = resolve_project(args.project)
+    from team.design import compile_stitch_screen_prompt
+    from team import stitch_mcp
+    from team.design_validator import audit_design_drift, format_drift_report
+
+    screen_type = getattr(args, "screen", "main")
+    device = getattr(args, "device", "MOBILE")
+    model_id = getattr(args, "model", "GEMINI_3_8_FLASH")
+    prompt = compile_stitch_screen_prompt(project, screen_type=screen_type)
+
+    if getattr(args, "generate", False):
+        profile = profile_of(project)
+        stitch_pid = (profile.get("design") or {}).get("stitch_project_id", "")
+        if not stitch_pid:
+            print(f"  ✗ No stitch_project_id declared in {project.name}/.pipeline/profile.json under 'design'.")
+            print("    Please set 'stitch_project_id' in profile.json first.")
+            return 1
+        clean_pid = stitch_pid.split("/")[-1]
+        print(f"Generating Stitch screen '{screen_type}' for project {clean_pid} using {model_id}...")
+        try:
+            screen = stitch_mcp.generate_screen(clean_pid, prompt, device=device, model_id=model_id, log=print)
+            raw, mime = stitch_mcp.download(screen)
+            out_dir = project / ".pipeline/stitch_screens"
+            out_dir.mkdir(parents=True, exist_ok=True)
+            suffix = ".html" if "html" in mime else ".svg" if "svg" in mime else ".png"
+            out_file = out_dir / f"{screen_type}{suffix}"
+            out_file.write_bytes(raw)
+            print(f"✓ Saved generated Stitch screen -> {out_file.relative_to(project)} ({mime}, {len(raw)} bytes)")
+
+            content = raw.decode(errors="ignore") if ("html" in mime or "svg" in mime) else ""
+            if content:
+                report = audit_design_drift(project, prompt_text=prompt, generated_content=content, screen_name=screen_type)
+                print("\n" + format_drift_report(report))
+                if report.get("verdict") == "FAIL":
+                    print("  ✗ Generated screen drifted or violated anti-AI rules.")
+                    return 1
+            return 0
+        except stitch_mcp.StitchError as exc:
+            print(f"STITCH GENERATION FAILED: {exc}")
+            return 1
+    else:
+        out = project / f".pipeline/stitch-prompt-{screen_type}.txt"
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_text(prompt)
+        print(f"STITCH SCREEN PROMPT ({project.name.upper()} • {screen_type.upper()}):")
+        print("=" * 65)
+        print(prompt)
+        print("=" * 65)
+        print(f"~ prompt saved -> {out.relative_to(project)}")
+        print("  To generate via Stitch MCP using Gemini 3.8 Flash, run:")
+        print(f"  python3 cli.py stitch-screen {project.name} --screen {screen_type} --generate")
+        return 0
+
+
 def cmd_stitch_curate(args: argparse.Namespace) -> int:
     project = resolve_project(args.project)
     from team.design import curate_stitch_manifest
@@ -4069,6 +4124,13 @@ def main() -> None:
     stp.add_argument("project")
     stp.add_argument("--screen", default="main", help="screen type: main, scoreboard, summary, setup")
     stp.set_defaults(fn=cmd_stitch_prompt)
+    sscr = sub.add_parser("stitch-screen", help="generate or compile human-grade anti-AI Stitch screen via Gemini 3.8 Flash")
+    sscr.add_argument("project")
+    sscr.add_argument("--screen", default="main", help="screen type: main, scoreboard, summary, setup")
+    sscr.add_argument("--device", default="MOBILE", help="target device: MOBILE, DESKTOP, TABLET")
+    sscr.add_argument("--model", default="GEMINI_3_8_FLASH", help="model ID (default: GEMINI_3_8_FLASH)")
+    sscr.add_argument("--generate", action="store_true", help="call Stitch MCP to generate screen and download HTML")
+    sscr.set_defaults(fn=cmd_stitch_screen)
     scur = sub.add_parser("stitch-curate", help="inventory and curate Stitch canvas screens into canonical manifest vs stale candidate screens")
     scur.add_argument("project")
     scur.add_argument("--screens-json", help="path to raw Stitch list_screens JSON dump")
