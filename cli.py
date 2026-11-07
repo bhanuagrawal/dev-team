@@ -2613,6 +2613,36 @@ def cmd_store_readiness(args: argparse.Namespace) -> int:
     return 0 if is_ready else 1
 
 
+def _storefront_scenes_message(project, deliverables, baseline, frames: str) -> str:
+    """Commit subject that says what THIS command actually wrote.
+
+    The message used to be hardcoded to "storefront screenshots (compositions:
+    builtin)", so a run that only locked an editorial review landed a commit
+    claiming it built screenshots — history said a listing was composed when
+    nothing was drawn (observed 2026-11-07). Derive the subject from the
+    deliverable fingerprints instead of the command's name.
+    """
+    from team.publish import fingerprint
+
+    wrote = [rel for rel in deliverables
+             if baseline is None or rel not in baseline
+             or fingerprint(project / rel) != baseline.get(rel)]
+    if any(rel.startswith("distribution/listing") for rel in wrote):
+        return f"store: storefront screenshots (compositions: {frames})"
+    labels: list[str] = []
+    if any(rel.endswith("storefront.json") for rel in wrote):
+        labels.append("scene spec")
+    if any(rel.endswith("storefront-direction.json") for rel in wrote):
+        labels.append("direction")
+    if any(rel.endswith("storefront-review.json") for rel in wrote):
+        labels.append("editorial review")
+    if any(rel.endswith("storefront-assets.json") for rel in wrote):
+        labels.append("brand assets")
+    if any(rel.endswith("storefront-frames.json") for rel in wrote):
+        labels.append("frame compositions")
+    return "store: storefront " + (", ".join(labels) or "decision")
+
+
 def cmd_storefront_scenes(args: argparse.Namespace) -> int:
     project = resolve_project(args.project)
     from team import storefront_preview as sp
@@ -2893,7 +2923,7 @@ def cmd_storefront_scenes(args: argparse.Namespace) -> int:
         landed = commit_paths(
             project,
             deliverables,
-            f"store: storefront screenshots (compositions: {frames})",
+            _storefront_scenes_message(project, deliverables, baseline, frames),
             log=print,
             baseline=baseline,
         )
