@@ -51,6 +51,20 @@ SKIP_STEMS = {"R", "BuildConfig"}
 UI_STEM_SUFFIXES = ("Screen", "Sheet", "Card", "Dialog")
 UI_PATH_SEGMENT = "ui"
 
+# Main source sets a JVM test can never reach: the unit proxy is defined as "a
+# JVM test names its type", so their files are not part of its denominator.
+NON_JVM_MAIN_SETS = ("iosMain", "nativeMain", "jsMain", "wasmMain")
+
+
+def _main_source_set(rel: Path) -> str:
+    """The source-set name a repo-relative main file lives in ('', when unknown)."""
+    parts = rel.parts
+    try:
+        i = parts.index("src")
+    except ValueError:
+        return ""
+    return parts[i + 1] if i + 1 < len(parts) else ""
+
 _JACOCO_GLOB = "**/build/reports/jacoco/**/*.xml"
 
 
@@ -193,7 +207,11 @@ def collect(tree: Path, profile: dict | None = None) -> dict:
     all_tests = unit_tests + "\n" + _references(tree, UI_TEST_SETS)
     if not all_tests.strip():
         ui_count = sum(1 for f in main_files if _is_ui(f.relative_to(tree)))
-        unit_count = len(main_files) - ui_count
+        unit_count = sum(
+            1 for f in main_files
+            if not _is_ui(f.relative_to(tree))
+            and _main_source_set(f.relative_to(tree)) not in NON_JVM_MAIN_SETS
+        )
         below = []
         if unit_count > 0 and 0 < unit_floor:
             below.append("unit")
@@ -204,7 +222,7 @@ def collect(tree: Path, profile: dict | None = None) -> dict:
             "floor": {"unit": unit_floor, "ui": ui_floor},
             "unit": {"percent": 0 if unit_count else None, "covered": 0, "total": unit_count,
                      "measured_by": "structural",
-                     "missing_examples": [str(f.relative_to(tree)) for f in main_files if not _is_ui(f.relative_to(tree))][:6]},
+                     "missing_examples": [str(f.relative_to(tree)) for f in main_files if not _is_ui(f.relative_to(tree)) and _main_source_set(f.relative_to(tree)) not in NON_JVM_MAIN_SETS][:6]},
             "ui": {"percent": 0 if ui_count else None, "covered": 0, "total": ui_count,
                    "measured_by": "structural",
                    "missing_examples": [str(f.relative_to(tree)) for f in main_files if _is_ui(f.relative_to(tree))][:6]},
@@ -218,6 +236,13 @@ def collect(tree: Path, profile: dict | None = None) -> dict:
     ui_missing: list[str] = []
     for f in main_files:
         rel = f.relative_to(tree)
+        if not _is_ui(rel) and _main_source_set(rel) in NON_JVM_MAIN_SETS:
+            # The unit proxy is "a JVM test names its type". A file in iosMain /
+            # nativeMain / jsMain can never be reached from the JVM test sets, so
+            # counting it made a 100% floor unreachable by construction (seen
+            # 2026-11-07: three iosMain files held one project's unit leg below
+            # its floor with no test a JVM could write).
+            continue
         pattern = re.compile(r"(?<![A-Za-z0-9_])" + re.escape(f.stem) + r"(?![A-Za-z0-9_])")
         if _is_ui(rel):
             ui_tot += 1
