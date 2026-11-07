@@ -665,8 +665,20 @@ def _ux_pull(project: Path, profile: dict) -> dict:
     during a plan. The planner could not previously see polish at all, so the
     only work it could propose was new surface area — the owner's standing
     direction is the opposite.
+
+    A gripe is evidence only about the code its audit actually looked at. Two
+    releases can ship between an audit and the next plan, so a stored P0 may
+    describe a screen that no longer exists — and because code makes an active
+    P0 outrank everything, a stale one silently forces a duplicate fix and
+    spends a release on work that already landed (found 2026-11-08: four
+    "active" P0s on two screens were the exact defects the two preceding
+    releases had already fixed). Gripes are therefore excluded while the
+    screen's render is older than its sources, or its stored visual/behaviour
+    fingerprint no longer matches the current one; the screens are reported so
+    the run can re-render and re-audit instead of building them again.
     """
     from . import capabilities as cap_mod
+    from . import ux_audit
     cap = cap_mod.check_polish(project, profile, {})
     surfaces: dict = {}
     stored = pipeline_dir(project) / "ux_audit.json"
@@ -675,11 +687,30 @@ def _ux_pull(project: Path, profile: dict) -> dict:
             surfaces = (json.loads(stored.read_text()) or {}).get("surfaces") or {}
         except Exception:
             surfaces = {}
+    # Which stored audits still describe the code they are filed against?
+    try:
+        current = {row["label"]: row for row in ux_audit.plan(project)["rows"]}
+    except Exception:
+        current = {}
+    stale_screens: list[str] = []
+    stale_gripes = 0
     gripes = []
     p0_blunders = []
     p1_degraded = []
     p2_polish = []
     for label, row in surfaces.items():
+        cur = current.get(label) or {}
+        fingerprint_moved = bool(cur) and (
+            (cur.get("visual") and cur.get("visual") != row.get("visual"))
+            or (cur.get("behaviour") and cur.get("behaviour") != row.get("behaviour"))
+        )
+        stale = bool(cur.get("stale_render")) or fingerprint_moved
+        if stale:
+            stale_screens.append(label)
+            stale_gripes += sum(
+                1 for g in (row.get("gripes") or [])
+                if str(g.get("status") or "open") == "open")
+            continue
         for g in (row.get("gripes") or []):
             if str(g.get("status") or "open") != "open":
                 continue
@@ -722,6 +753,8 @@ def _ux_pull(project: Path, profile: dict) -> dict:
         "p2_polish": p2_polish[:10],
         "p2_polish_count": len(p2_polish),
         "video_flows": _video_summary(surfaces),
+        "stale_screens": stale_screens,
+        "stale_gripe_count": stale_gripes,
         "audited_surfaces": sum(1 for r in surfaces.values() if r.get("audited_at")),
         "audited_at": max([str(r.get("audited_at") or "") for r in surfaces.values()]
                           or [""]),
@@ -1737,12 +1770,16 @@ def sources_line(research: dict) -> str:
         return str((d or {}).get("status") or default)
 
     ux = sig.get("ux") or {}
+    stale_screens = ux.get("stale_screens") or []
     lines = [
         f"- Visual (renders + recorded flows): {ux.get('audited_surfaces', 0)} screen(s) "
         f"audited · {ux.get('p0_blunder_count', 0)} P0 / {ux.get('p1_degraded_count', 0)} P1"
         f" / {ux.get('p2_polish_count', 0)} P2 open · "
         f"{len(ux.get('video_flows') or [])} flow(s) recorded "
-        f"(status: {st(ux)})",
+        f"(status: {st(ux)})"
+        + (f" · {len(stale_screens)} screen(s) need a re-render before their "
+           f"{ux.get('stale_gripe_count', 0)} stored gripe(s) count as evidence"
+           if stale_screens else ""),
         f"- {coverage_mod.summary_line(sig.get('coverage') or {})}",
     ]
     ci = sig.get("ci") or {}
