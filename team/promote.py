@@ -102,7 +102,7 @@ def _note(project: Path, notes_file: str | None) -> str:
 
 def promote(project: Path, version: str, *, requested_by: str,
             notes_file: str | None = None, dry_run: bool = False,
-            log=None) -> dict:
+            console: bool = False, log=None) -> dict:
     """Send `version` — already live on an internal track — to production.
 
     Returns a dict whose `status` is one of:
@@ -139,6 +139,48 @@ def promote(project: Path, version: str, *, requested_by: str,
                 "error": f"v{version} is not on the internal track — this door only "
                          "promotes a build a tester has already run"}
     codes = [str(c) for c in (build.get("versionCodes") or [])]
+
+    # Console-driven promotion. The API service account can read tracks but may
+    # lack the permission that writes a production release (seen 2026-11-07:
+    # commit refused PERMISSION_DENIED), and Play's own console is then the only
+    # door. This branch records that launch AFTER the fact — but only when the
+    # production track is read back holding this build, so a claim of promotion
+    # is never a guess. It runs before the already-promoted check so the record
+    # says "console", not the API path that never committed.
+    if console:
+        note = _note(project, notes_file)
+        ready = next((r for r in production
+                      if str(r.get("name") or "") == version
+                      or set(map(str, r.get("versionCodes") or [])) & set(codes)), None)
+        if dry_run:
+            return {"status": "DRY-RUN", "version": version, "versionCodes": codes,
+                    "note": note, "would_record": "console-promotion",
+                    "production_read_back": (ready or {}).get("status") or "not-listed-yet"}
+        if not ready:
+            return {"status": "refused",
+                    "error": f"v{version} is not on the production track yet — finish the "
+                             "launch in Play Console (Internal testing → Promote release → "
+                             "Production → Send for review), then record it with --console"}
+        if not note:
+            return {"status": "refused",
+                    "error": "this release has no store note — Play would show the previous "
+                             "release's words; fix the note first"}
+        record = {
+            "at": _now(),
+            "version": version,
+            "versionCodes": codes,
+            "edit": "console",
+            "requested_by": requested_by,
+            "note": note,
+            "read_back": ready.get("status") or "not-listed-yet",
+            "managed_publishing": bool(ready.get("status") == "draft"),
+        }
+        state.setdefault("promotions", []).append(record)
+        save_state(project, state)
+        say(f"promote: v{version} ({','.join(codes)}) recorded from Play Console — "
+            f"production reads back '{record['read_back']}'")
+        return {"status": "promoted-console", **record}
+
     if any(code in {str(c) for r in production for c in (r.get("versionCodes") or [])}
            for code in codes):
         prod_rel = next((r for r in production if any(str(c) in codes for c in (r.get("versionCodes") or []))), {})

@@ -3498,11 +3498,11 @@ def cmd_promote(args: argparse.Namespace) -> int:
     print(delivery_notice(project))
     res = promote(project, args.version, requested_by=args.requested_by,
                   notes_file=args.notes_file, dry_run=not getattr(args, "yes", False),
-                  log=print)
+                  console=getattr(args, "console", False), log=print)
     status = res.get("status")
     if getattr(args, "json", False):
         print(json.dumps(res, indent=2))
-        return 0 if status in ("promoted", "already-promoted", "DRY-RUN") else 1
+        return 0 if status in ("promoted", "promoted-console", "already-promoted", "DRY-RUN") else 1
     if status in ("refused", "ERROR"):
         print(f"PROMOTE: {status} — {res.get('error')}")
         return 1
@@ -4339,6 +4339,10 @@ def main() -> None:
                      help="the owner's own words asking for this launch — recorded with the edit")
     prm.add_argument("--yes", action="store_true",
                      help="actually commit the production release (dry run without it)")
+    prm.add_argument("--console", action="store_true",
+                     help="record a promotion already sent from Play Console (the API "
+                          "service account cannot write production); refuses unless the "
+                          "production track reads back holding this build")
     prm.add_argument("--json", action="store_true", help="machine-readable result")
     prm.set_defaults(fn=cmd_promote)
     ads_p = sub.add_parser("ads",
