@@ -2466,6 +2466,32 @@ def cmd_asks(args: argparse.Namespace) -> int:
     return 1 if (args.strict and any(r["verdict"] in ("agent", "mixed") for r in rows)) else 0
 
 
+def cmd_keystore_backup(args: argparse.Namespace) -> int:
+    """Copy the release signing keystore to the off-repo vaults, then prove it landed.
+
+    `doctor` and `store-readiness` have always told the owner to run exactly this
+    command when no off-repo backup exists — and for a while no such subcommand was
+    wired, so the advice led to "invalid choice: 'keystore-backup'" and the warning
+    could never clear. The check is presence-driven: a verified backup here clears
+    the WARN on the next doctor/store-readiness read.
+    """
+    project = resolve_project(args.project)
+    from team import keystore_backup
+    res = keystore_backup.backup_keystore(project, github_vault_repo=args.github_vault)
+    if not res.get("ok"):
+        print(f"keystore-backup: FAILED — {res.get('error') or 'no backup destination available'}")
+        return 1
+    print(f"keystore-backup: {project.name} → {len(res['destinations'])} destination(s)")
+    for dest in res["destinations"]:
+        print(f"  · {dest}")
+    cert = res.get("certificate") or {}
+    if cert.get("sha256"):
+        print(f"  certificate SHA-256: {cert['sha256']}")
+    ok, detail = keystore_backup.verify_backup(project)
+    print(f"keystore-backup: verify — {'verified' if ok else 'NOT verified'}: {detail}")
+    return 0 if ok else 1
+
+
 def cmd_doctor(args: argparse.Namespace) -> int:
     project = resolve_project(args.project)
     log = RunLog(project, "doctor-" + today())
@@ -4026,6 +4052,14 @@ def main() -> None:
                     help="extended effort ceiling in minutes (owner request to give a task more time / revamp in one go)")
     pl.set_defaults(fn=cmd_plan)
     do = sub.add_parser("doctor");     do.add_argument("project"); do.set_defaults(fn=cmd_doctor)
+    kb = sub.add_parser(
+        "keystore-backup",
+        help="back up the release signing keystore to the off-repo vaults "
+             "(Google Drive + ~/.config/devteam/keystores) and verify it — the "
+             "exact command doctor/store-readiness print when no backup exists")
+    kb.add_argument("project")
+    kb.add_argument("--github-vault", help="optional private GitHub repo to hold the backup")
+    kb.set_defaults(fn=cmd_keystore_backup)
     ak = sub.add_parser(
         "asks",
         help="review every open owner ask/flag: can browser-control or desktop-use "

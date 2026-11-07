@@ -386,6 +386,10 @@ _COLLECTOR_FLAGS = {
     "vitals": "vitals",
     "store-reviews": "reviews",
     "play-store-blockers": "store_readiness",
+    # The warning branch of the same audit (seen 2026-11-08: the one open warning
+    # was fixed and the collector answered `ready`, but this flag was never in the
+    # table, so `doctor`/`asks`/the banner kept relaying a chore that was done).
+    "play-store-warnings": "store_readiness",
 }
 
 # A collector's "this is handled" word is not spelled "ok" by every collector:
