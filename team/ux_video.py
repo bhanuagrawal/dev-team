@@ -511,6 +511,20 @@ def record_flow(project: Path, flow: dict, serial: str, log=None) -> dict:
     try:
         for step in flow.get("steps") or []:
             actions.append(_step(serial, step))
+        # The declared `seconds` is the screenrecord cap. Driving the taps is slow in
+        # real time (each uiautomator dump is a device round-trip), so a cap that is
+        # too short cuts the video BEFORE the steps finish — the recording then never
+        # shows the screen the flow is named after, yet a contact sheet sampled from
+        # it was still judged (seen 2026-11-07: a 24s cap on a 31s drive judged the
+        # home screen and reported 'the paywall never appears'). A capped recording
+        # must not become evidence: fail and make the author raise `seconds`.
+        spent = time.monotonic() - t0
+        if spent > secs - 1.5:
+            raise SystemExit(
+                f"ux-video: driving '{fid}' took {spent:.1f}s but the recording cap is "
+                f"{secs}s — the video ends before the declared steps do, so it is not "
+                f"evidence of the screen this flow is about. Raise \"seconds\" in "
+                f"{FLOWS_REL} above {int(spent + 5)} and record again.")
         if inset_report is None:
             inset_report = status_bar_collisions(serial, pkg)
         # Hold the settled final state long enough for at least one sampled frame.
@@ -533,8 +547,21 @@ def record_flow(project: Path, flow: dict, serial: str, log=None) -> dict:
     if not (dest.is_file() and dest.stat().st_size > 12_000):
         raise SystemExit(f"ux-video: screenrecord produced no usable video for '{fid}' "
                          f"({dest.stat().st_size if dest.exists() else 0} bytes)")
-    return {"flow": fid, "mp4": str(dest), "seconds": elapsed,
-            "bytes": dest.stat().st_size, "actions": actions,
+    # `seconds` describes the FILE, not the driver: the contact sheet samples the
+    # recording's own duration, and a manifest that claimed the driving time made a
+    # truncated video look complete (24s file reported as 30.7s).
+    duration = elapsed
+    probe = shutil.which("ffprobe")
+    if probe:
+        try:
+            pr = subprocess.run([probe, "-v", "error", "-show_entries", "format=duration",
+                                 "-of", "default=nw=1:nk=1", str(dest)],
+                                capture_output=True, text=True, timeout=30)
+            duration = round(float((pr.stdout or "").strip()), 1)
+        except (ValueError, OSError, subprocess.SubprocessError):
+            pass
+    return {"flow": fid, "mp4": str(dest), "seconds": duration,
+            "drive_seconds": elapsed, "bytes": dest.stat().st_size, "actions": actions,
             "insets": inset_report, "recorded_at": now_iso()}
 
 
