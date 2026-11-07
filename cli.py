@@ -2012,6 +2012,13 @@ def cmd_ux_video(args: argparse.Namespace) -> int:
         print(f"\n== recorded {r['flow']} — {r['seconds']}s, {r['bytes'] // 1024} KB ==")
         for a in r["actions"]:
             print(f"  · {a}")
+        ins = r.get("insets") or {}
+        if ins:
+            hits = ins.get("collisions") or []
+            print(f"  insets: status bar {ins.get('status_bar_px', 0)}px, nav bar "
+                  f"{ins.get('nav_bar_px', 0)}px · "
+                  + (f"{len(hits)} label(s) INSIDE the status bar: "
+                     + ", ".join(h["label"] for h in hits[:3]) if hits else "no content collisions"))
     for r in res["reacted"]:
         print(f"\n== {r['id']} (surface {r['surface']}) — judged from {r.get('evidence','video')}"
               f" · {r['panels']} panels every {r['sample_every_s']:g}s ==")

@@ -361,6 +361,66 @@ def _screen_size(serial: str) -> tuple[int, int]:
     return (int(m.group(1)), int(m.group(2))) if m else (1080, 2400)
 
 
+def system_insets(serial: str) -> dict:
+    """The live system-bar insets in px, from the window manager.
+
+    Not guessed from dp: the device reports `InsetsSource ... type=statusBars
+    frame=[0,0][1080,63]`, which is the only number that describes THIS build
+    on THIS device (a hardcoded 24dp was wrong on every device with a cutout).
+    """
+    out = {"top": 0, "bottom": 0, "source": "none"}
+    r = _adb(serial, ["shell", "dumpsys", "window"], timeout=90)
+    text = r.stdout or ""
+    for kind in ("statusBars", "navigationBars"):
+        m = re.search(rf"type={kind} frame=\[(\d+),(\d+)\]\[(\d+),(\d+)\]", text)
+        if not m:
+            continue
+        _l, t, _r, b = (int(v) for v in m.groups())
+        if kind == "statusBars":
+            # A top-anchored bar's inset is its HEIGHT (frame [0,0][1080,63]).
+            out["top"] = (b - t) if t == 0 else 0
+        else:
+            out["bottom"] = (b - t) if b > t else 0
+        out["source"] = "dumpsys"
+    return out
+
+
+def status_bar_collisions(serial: str, pkg: str, insets: dict | None = None) -> dict:
+    """App labels drawn INSIDE the status bar — the insets bug a still cannot show.
+
+    The still pass renders the app's composables onto a bare canvas, so a screen
+    that never applies `WindowInsets.statusBars` looks perfect in every
+    screenshot and broken on every phone (seen 2026-11-07: the dashboard's brand
+    header sat 37px behind the clock). This reads the live view hierarchy and
+    compares the app's own labelled nodes against the device's real inset.
+    Deterministic: no model, no judgement, just pixel coordinates.
+    """
+    insets = insets or system_insets(serial)
+    top = int(insets.get("top") or 0)
+    xml = _ui_xml(serial)
+    hits = []
+    if top > 0:
+        for m in re.finditer(r"<node\b[^>]*>", xml):
+            attrs = dict(re.findall(r'([\w:-]+)="([^"]*)"', m.group(0)))
+            if attrs.get("package") != pkg:
+                continue
+            label = (attrs.get("text") or "").strip() or (attrs.get("content-desc") or "").strip()
+            if not label:
+                continue          # a background may sit under the bar; a LABEL may not
+            b = re.match(r"\[(\d+),(\d+)\]\[(\d+),(\d+)\]", attrs.get("bounds", ""))
+            if not b:
+                continue
+            x1, y1, x2, y2 = (int(v) for v in b.groups())
+            if y1 < top:
+                hits.append({"label": label[:60], "bounds": [x1, y1, x2, y2],
+                             "overlap_px": min(top, y2) - y1})
+    hits.sort(key=lambda h: (-h["overlap_px"], h["bounds"][1]))
+    return {"status_bar_px": top,
+            "nav_bar_px": int(insets.get("bottom") or 0),
+            "collisions": hits[:6],
+            "checked_at": now_iso()}
+
+
 def _wait_for_text(serial: str, needle: str, tries: int = 5, pause: float = 0.6):
     for _ in range(tries):
         pos = _node_center(_ui_xml(serial), needle)
@@ -443,9 +503,16 @@ def record_flow(project: Path, flow: dict, serial: str, log=None) -> dict:
     time.sleep(1.5)
     actions: list[str] = []
     t0 = time.monotonic()
+    # Where the inset check observes: 'start' judges the screen the flow opens
+    # on, 'end' (default) the screen it leaves the user on. A project says which
+    # because only it knows which screen its flow is ABOUT.
+    check_at = str(flow.get("check") or "end").strip().lower()
+    inset_report = status_bar_collisions(serial, pkg) if check_at == "start" else None
     try:
         for step in flow.get("steps") or []:
             actions.append(_step(serial, step))
+        if inset_report is None:
+            inset_report = status_bar_collisions(serial, pkg)
         # Hold the settled final state long enough for at least one sampled frame.
         time.sleep(min(3.0, max(1.0, secs - (time.monotonic() - t0) - 0.5)))
     finally:
@@ -467,7 +534,8 @@ def record_flow(project: Path, flow: dict, serial: str, log=None) -> dict:
         raise SystemExit(f"ux-video: screenrecord produced no usable video for '{fid}' "
                          f"({dest.stat().st_size if dest.exists() else 0} bytes)")
     return {"flow": fid, "mp4": str(dest), "seconds": elapsed,
-            "bytes": dest.stat().st_size, "actions": actions, "recorded_at": now_iso()}
+            "bytes": dest.stat().st_size, "actions": actions,
+            "insets": inset_report, "recorded_at": now_iso()}
 
 
 # --------------------------------------------------------------------------- #
@@ -790,6 +858,49 @@ def store_reaction(project: Path, row: dict, sheet: dict, reaction: dict) -> dic
 # --------------------------------------------------------------------------- #
 # the run
 # --------------------------------------------------------------------------- #
+def store_insets(project: Path, surface: str, insets: dict | None) -> dict | None:
+    """Attach the device's own inset measurement to the declared screen.
+
+    One gripe per screen, not one per label: the user sees one broken header, so
+    the planner gets one fix. The previous inset gripes for the surface are
+    dropped first — a screen that has been fixed must stop carrying the finding.
+    """
+    from . import ux_audit
+    if not insets:
+        return None
+    data = ux_audit.load(project)
+    surf = (data.get("surfaces") or {}).get(surface)
+    if surf is None:
+        return None                      # not declared/audited: nothing to attach to
+    keep = [g for g in (surf.get("gripes") or [])
+            if not (g.get("source") == "video" and g.get("kind") == "inset")]
+    collisions = insets.get("collisions") or []
+    gripes = []
+    if collisions:
+        worst = collisions[0]
+        others = ", ".join(c["label"] for c in collisions[1:3])
+        line = (f"'{worst['label']}' is drawn {worst['overlap_px']}px inside the "
+                f"{insets['status_bar_px']}px status bar"
+                + (f" (also: {others})" if others else "")
+                + " — this screen never applies status-bar window insets, so the system "
+                  "clock and battery sit on top of it")
+        gripes.append({
+            "id": ux_audit.gripe_id(_slug(surface)[:12], line),
+            "line": line,
+            "element": "top header / status bar",
+            "kind": "inset",
+            "severity": "P0_BLUNDER",
+            "status": "open",
+            "source": "video",
+            "flow": "",
+            "at": now_iso(),
+        })
+    surf["gripes"] = keep + gripes
+    surf["insets"] = {**insets, "gripes": gripes}
+    ux_audit.save(project, data)
+    return surf["insets"]
+
+
 def run(project: Path, only: str | None = None, everything: bool = False,
         log=None, avd: str | None = None, keep_emulator: bool = False,
         record_only: bool = False, via: str = "gemini") -> dict:
@@ -837,9 +948,15 @@ def run(project: Path, only: str | None = None, everything: bool = False,
                     "seconds": rec["seconds"],
                     "actions": rec["actions"],
                     "build": build_info,
+                    "insets": rec.get("insets") or {},
                     "reacted_at": "",
                 }
                 save_manifest(project, man)
+                insets = store_insets(project, r["surface"], rec.get("insets"))
+                if insets and insets.get("collisions") and log:
+                    log(f"~ ux-video: '{r['surface']}' draws "
+                        f"{len(insets['collisions'])} label(s) inside the "
+                        f"{insets['status_bar_px']}px status bar")
                 recorded.append(rec)
         finally:
             if started and not keep_emulator:
