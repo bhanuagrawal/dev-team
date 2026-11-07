@@ -157,6 +157,19 @@ def feedback_kind(text: str) -> str | None:
 # --------------------------------------------------------------------------- #
 # the brief — the app's own identity, and the rejection that started the change
 # --------------------------------------------------------------------------- #
+def _is_light(hex_color: str) -> bool:
+    """True when a #RRGGBB ground is a LIGHT surface (relative luminance)."""
+    raw = (hex_color or "").strip().lstrip("#")
+    if len(raw) != 6:
+        return False
+    try:
+        r, g, b = (int(raw[i:i + 2], 16) / 255.0 for i in (0, 2, 4))
+    except ValueError:
+        return False
+    lin = [c / 12.92 if c <= 0.04045 else ((c + 0.055) / 1.055) ** 2.4 for c in (r, g, b)]
+    return (0.2126 * lin[0] + 0.7152 * lin[1] + 0.0722 * lin[2]) > 0.5
+
+
 def brief(project: Path, feedback: str) -> str:
     """The prompt Stitch receives.
 
@@ -170,17 +183,18 @@ def brief(project: Path, feedback: str) -> str:
     tokens = extract_design_tokens(project)
     name = _app_name(project)
     base, accent = tokens.get("surface_base"), tokens.get("primary_accent")
+    ground = "a light, warm daylight ground" if _is_light(str(base)) else "a dark ground"
     return "\n".join([
         f"Design a NEW Google Play app icon for the Android app {name}.",
         "",
         "WHY THIS EXISTS: the owner rejected the current icon as generic and "
         f"unforgettable-in-a-bad-way. Their words: \"{feedback.strip()}\". Replacing it, "
-        "so the old mark (a power/pause ring) must not appear in any form.",
+        "so the mark the owner rejected must not appear in any form.",
         "",
         "ARTBOARD: exactly 512 x 512, one square tile, edge to edge, nothing outside it, "
         "no phone frame, no screen, no UI, no background scenery.",
-        f"PALETTE: {base} ground and {accent} as the single accent. Dark, high contrast, "
-        "no second hue, no gradient that shifts hue.",
+        f"PALETTE: {base} ground ({ground}) and {accent} as the single accent. "
+        "High contrast between mark and ground, no second hue, no gradient that shifts hue.",
         "",
         "SUBJECT: one symbol that says 'a calmer phone' — protection, focus, a quiet "
         "boundary — expressed as a flat geometric silhouette. It must read as ONE shape "
