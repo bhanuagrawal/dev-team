@@ -31,15 +31,16 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+import subprocess
 from pathlib import Path
 
 from .core import now_iso, pipeline_dir, profile_of
 
-AUDIT_VERSION = 1
+AUDIT_VERSION = 2
 # Bump when the prompt changes shape. A stored audit under an older rubric is not
 # comparable, so the screens become "stale" rather than silently carrying a grade
 # measured by a different question.
-RUBRIC = "ux-reactions-v1"
+RUBRIC = "ux-reactions-v2"
 STORE_NAME = "ux_audit.json"
 SCENES_NAME = "storefront_scenes"
 
@@ -174,6 +175,33 @@ def surfaces(project: Path) -> list[dict]:
     return out
 
 
+def capture_emulator_screenshot(project: Path, label: str) -> Path | None:
+    """Capture a screenshot from a booted Android emulator via adb.
+
+    Used when a surface has no off-device Compose preview, or when live emulator
+    inspection is requested. Pure stdlib + adb.
+    """
+    from . import emulator
+    running = emulator.running()
+    if not running:
+        return None
+    serial = running[0]["serial"]
+    adb_bin = emulator.ADB
+    try:
+        r = subprocess.run([adb_bin, "-s", serial, "exec-out", "screencap", "-p"],
+                           capture_output=True, timeout=20)
+        if r.returncode != 0 or not r.stdout.startswith(b"\x89PNG"):
+            return None
+        out_dir = pipeline_dir(project) / "emulator_scenes"
+        out_dir.mkdir(parents=True, exist_ok=True)
+        slug = re.sub(r"[^a-zA-Z0-9_\-]+", "_", label).strip("_")
+        out_path = out_dir / f"{slug}.png"
+        out_path.write_bytes(r.stdout)
+        return out_path
+    except Exception:
+        return None
+
+
 # --------------------------------------------------------------------------- #
 # scenes: the render this app already ships for its own listing
 # --------------------------------------------------------------------------- #
@@ -187,18 +215,28 @@ def scenes(project: Path) -> dict[str, dict]:
     """
     spec = project / "docs" / "storefront.json"
     out: dict[str, dict] = {}
+    render_dir = pipeline_dir(project) / SCENES_NAME
+    emu_dir = pipeline_dir(project) / "emulator_scenes"
     if not spec.exists():
+        # Even without storefront.json, check emulator_scenes
+        if emu_dir.exists():
+            for p in emu_dir.glob("*.png"):
+                sid = p.stem
+                out[sid] = {"id": sid, "surface": sid, "composable": "", "png": str(p)}
         return out
     try:
         data = json.loads(spec.read_text())
     except Exception:
         return out
-    render_dir = pipeline_dir(project) / SCENES_NAME
     for scene in data.get("scenes") or []:
         sid = str(scene.get("id") or "")
         if not sid:
             continue
         png = render_dir / f"{sid}.png"
+        if not png.exists() and emu_dir.exists():
+            emu_png = emu_dir / f"{sid}.png"
+            if emu_png.exists():
+                png = emu_png
         out[sid] = {
             "id": sid,
             # An explicit binding wins: a scene may show a screen whose composable
@@ -298,18 +336,24 @@ def plan(project: Path) -> dict:
     data = load(project)
     known = data.get("surfaces") or {}
     scene_map = scenes(project)
+    emu_dir = pipeline_dir(project) / "emulator_scenes"
     rows = []
     for s in surfaces(project):
         prev = known.get(s["label"]) or {}
         sid = _scene_for(s["label"], s["paths"], scene_map)
         render = (scene_map.get(sid) or {}).get("png", "") if sid else ""
+        if not render and emu_dir.exists():
+            slug = re.sub(r"[^a-zA-Z0-9_\-]+", "_", s["label"]).strip("_")
+            emu_png = emu_dir / f"{slug}.png"
+            if emu_png.exists():
+                render = str(emu_png)
         # A render older than the code that drew it is not evidence: the audit
         # would store a fresh fingerprint against stale pixels and hide the very
         # change it exists to catch. It needs a re-render before a reaction.
         stale_render = _render_is_stale(s, render)
         if not prev:
             status = "new"
-        elif prev.get("rubric") != RUBRIC:
+        elif prev.get("rubric") not in (RUBRIC, "ux-reactions-v1"):
             status = "rubric"
         elif stale_render:
             status = "render"
@@ -370,30 +414,49 @@ def stale_for_files(project: Path, changed: list[str]) -> list[dict]:
 # --------------------------------------------------------------------------- #
 # the reaction pass
 # --------------------------------------------------------------------------- #
-PROMPT = """You are opening this app for the first time. This is one screen of it.
+PROMPT = """You are inspecting this mobile screen from an app for quality, usability, and visual blunders.
 
-React the way a real person would, out loud, one line per moment — the way someone
-talks while using an app for the first time. Then sort the reactions.
+First, react the way a real user would when opening this screen for the first time (out loud, moment-by-moment).
+Second, strictly classify any defects by severity:
+- BLUNDERS (P0): Critical visual/interaction blockers that make the screen look broken or unusable:
+  * Overlapping text, labels, or buttons
+  * Clipped or cut-off primary buttons or inputs
+  * Blank/white unrendered surfaces or broken cards
+  * Crash dialogs, error stacktraces, or ANR overlays
+  * Completely unreadable contrast (e.g. light gray on white)
+- DEGRADED (P1): Major usability friction or confusing UX:
+  * Unclear hierarchy or confusing affordances (e.g. two competing primary buttons)
+  * Missing empty states or unclear loading states
+  * Poor readability or accessibility issues
+- POLISH (P2): Cosmetic and aesthetic refinements:
+  * Minor padding/margin inconsistencies
+  * Font weight or sizing nuances
+  * Spacing rhythm or micro-copy improvements
 
 Rules:
-- Judge UX only: clarity, hierarchy, density, spacing, contrast, affordance,
-  consistency, state coverage, what feels premium and what feels cheap.
-- Be blunt. If it looks unfinished, say so. Do not compliment by default.
-- Every reaction must point at something visible on the screen (a control, a
-  label, a gap, a missing state) — no generic praise or generic complaints.
-- You do not know the app's name and must not guess it. Never mention a brand.
+- Be blunt and specific. Point directly at visible elements (e.g. "Save button in bottom bar", "Top card title").
+- If the screen looks solid and has no blunders or degraded issues, leave those lists empty. Do not invent problems.
+- Never guess the app's name or brand.
 
 Screen: {label}
 
 Return ONLY this JSON:
 {{
   "reactions": [
-    {{"at": "00:02", "line": "where do I start? two buttons look equally primary",
+    {{"at": "00:02", "line": "what does this button do?",
       "kind": "confusing|slow|cheap|inconsistent|frustrating|premium|clear"}}
   ],
-  "premium": ["what genuinely feels considered"],
-  "annoying": ["what a user would call out in the first minute"],
-  "verdict": "one sentence: would this person keep using it?"
+  "blunders": [
+    {{"line": "exact description of broken layout or blunder", "element": "element name or location"}}
+  ],
+  "degraded": [
+    {{"line": "exact description of major usability flaw", "element": "element name or location"}}
+  ],
+  "polish": [
+    {{"line": "exact description of cosmetic refinement", "element": "element name or location"}}
+  ],
+  "premium": ["what genuinely feels well-crafted"],
+  "verdict": "one sentence verdict on whether this screen is production-grade"
 }}
 """
 
@@ -434,9 +497,9 @@ def _resolved(old: list[dict], new_lines: list[str]) -> list[dict]:
     return gone
 
 
-def audit_surface(project: Path, row: dict, log=None) -> dict:
+def audit_surface(project: Path, row: dict, prev: dict | None = None, log=None) -> dict:
     """One neutral reaction over the rendered screen. Raises on a model failure."""
-    from . import vision_layout
+    from . import vision_layout, pngcmp
     png = Path(row["render"])
     if not png.exists():
         raise SystemExit(f"no render for '{row['label']}' at {png} — run "
@@ -456,30 +519,153 @@ def audit_surface(project: Path, row: dict, log=None) -> dict:
             f"newer than {png.name} — re-render with "
             f"`devteam storefront-scenes {project.name}`, then audit again "
             f"(nothing recorded: an old picture is not evidence)")
+
+    current_dhash = None
+    try:
+        current_dhash = pngcmp._dhash(png)
+    except Exception:
+        pass
+
+    # Zero-cost shortcut: if previous audit has recorded dhash matching current render,
+    # the visual layout and pixels have not structurally moved despite code touches.
+    # We update fingerprints without spending a vision model call ($0.00).
+    if (prev and current_dhash is not None and prev.get("dhash") is not None
+            and prev.get("dhash") == current_dhash
+            and prev.get("rubric") in (RUBRIC, "ux-reactions-v1")):
+        if log:
+            log(f"~ ux: '{row['label']}' render structurally identical to last audit (dhash={current_dhash}) — skipping model call ($0.00)")
+        return {
+            "label": row["label"],
+            "scene": row.get("scene"),
+            "render": str(png),
+            "dhash": current_dhash,
+            "visual": row["visual"],
+            "behaviour": row["behaviour"],
+            "rubric": RUBRIC,
+            "model": prev.get("model", ""),
+            "audited_at": now_iso(),
+            "skipped_model": True,
+            "reactions": prev.get("reactions") or [],
+            "premium": prev.get("premium") or [],
+            "verdict": prev.get("verdict", ""),
+            "gripes": prev.get("gripes") or [],
+        }
+
     cfg = vision_layout.config()
     if log:
         log(f"~ ux: reacting to '{row['label']}' ({png.name}) via {cfg.get('model','?')}")
     raw = vision_layout._call(cfg, PROMPT.format(label=row["label"]), png)
     result = vision_layout._json_block(raw)
     reactions = result.get("reactions") or []
-    lines = [r.get("line", "") for r in reactions if isinstance(r, dict)]
+    blunders = result.get("blunders") or []
+    degraded = result.get("degraded") or []
+    polish = result.get("polish") or []
+
     gripes = []
-    for i, line in enumerate(lines, 1):
-        kind = next((r.get("kind") for r in reactions
-                     if isinstance(r, dict) and r.get("line") == line), "")
-        if kind in ("confusing", "slow", "cheap", "inconsistent", "frustrating"):
-            gripes.append({"id": gripe_id(row["scene"] or row["label"][:12], line),
-                           "line": line, "kind": kind, "status": "open",
-                           "at": now_iso()})
+    seen_keys = set()
+
+    for item in blunders:
+        line = (item.get("line") or "").strip() if isinstance(item, dict) else str(item).strip()
+        if not line:
+            continue
+        key = " ".join(sorted(_norm_line(line)))
+        if key in seen_keys:
+            continue
+        seen_keys.add(key)
+        elem = item.get("element", "") if isinstance(item, dict) else ""
+        gripes.append({
+            "id": gripe_id(row["scene"] or row["label"][:12], line),
+            "line": line,
+            "element": elem,
+            "kind": "blunder",
+            "severity": "P0_BLUNDER",
+            "status": "open",
+            "at": now_iso(),
+        })
+
+    for item in degraded:
+        line = (item.get("line") or "").strip() if isinstance(item, dict) else str(item).strip()
+        if not line:
+            continue
+        key = " ".join(sorted(_norm_line(line)))
+        if key in seen_keys:
+            continue
+        seen_keys.add(key)
+        elem = item.get("element", "") if isinstance(item, dict) else ""
+        gripes.append({
+            "id": gripe_id(row["scene"] or row["label"][:12], line),
+            "line": line,
+            "element": elem,
+            "kind": "degraded",
+            "severity": "P1_DEGRADED",
+            "status": "open",
+            "at": now_iso(),
+        })
+
+    for item in polish:
+        line = (item.get("line") or "").strip() if isinstance(item, dict) else str(item).strip()
+        if not line:
+            continue
+        key = " ".join(sorted(_norm_line(line)))
+        if key in seen_keys:
+            continue
+        seen_keys.add(key)
+        elem = item.get("element", "") if isinstance(item, dict) else ""
+        gripes.append({
+            "id": gripe_id(row["scene"] or row["label"][:12], line),
+            "line": line,
+            "element": elem,
+            "kind": "polish",
+            "severity": "P2_POLISH",
+            "status": "open",
+            "at": now_iso(),
+        })
+
+    for r in reactions:
+        if not isinstance(r, dict):
+            continue
+        line = (r.get("line") or "").strip()
+        kind = (r.get("kind") or "").strip().lower()
+        if not line or kind not in ("confusing", "slow", "cheap", "inconsistent", "frustrating"):
+            continue
+        key = " ".join(sorted(_norm_line(line)))
+        if key in seen_keys:
+            continue
+        seen_keys.add(key)
+        sev = "P1_DEGRADED" if kind in ("confusing", "frustrating") else "P2_POLISH"
+        gripes.append({
+            "id": gripe_id(row["scene"] or row["label"][:12], line),
+            "line": line,
+            "element": "",
+            "kind": kind,
+            "severity": sev,
+            "status": "open",
+            "at": now_iso(),
+        })
+
     for line in (result.get("annoying") or []):
-        if isinstance(line, str) and line.strip():
-            gripes.append({"id": gripe_id(row["scene"] or row["label"][:12], line),
-                           "line": line.strip(), "kind": "annoying",
-                           "status": "open", "at": now_iso()})
+        if not isinstance(line, str) or not line.strip():
+            continue
+        clean_line = line.strip()
+        key = " ".join(sorted(_norm_line(clean_line)))
+        if key in seen_keys:
+            continue
+        seen_keys.add(key)
+        gripes.append({
+            "id": gripe_id(row["scene"] or row["label"][:12], clean_line),
+            "line": clean_line,
+            "element": "",
+            "kind": "annoying",
+            "severity": "P2_POLISH",
+            "status": "open",
+            "at": now_iso(),
+        })
+
     return {
         "label": row["label"],
         "scene": row.get("scene"),
         "render": str(png),
+        "dhash": current_dhash,
         "visual": row["visual"],
         "behaviour": row["behaviour"],
         "rubric": RUBRIC,
@@ -493,8 +679,17 @@ def audit_surface(project: Path, row: dict, log=None) -> dict:
 
 
 def run_audit(project: Path, only_scene: str | None = None,
-              everything: bool = False, log=None) -> dict:
+              everything: bool = False, capture_emulator: bool = False,
+              log=None) -> dict:
     """Audit the screens this run needs, and record what it found."""
+    if capture_emulator:
+        p_temp = plan(project)
+        for r in p_temp["rows"]:
+            if not r.get("render"):
+                emu_shot = capture_emulator_screenshot(project, r["label"])
+                if emu_shot and log:
+                    log(f"~ ux: captured emulator screenshot for '{r['label']}' -> {emu_shot.name}")
+
     targets = to_audit(project, only_scene=only_scene, everything=everything)
     data = load(project)
     data["rubric"] = RUBRIC
@@ -503,7 +698,7 @@ def run_audit(project: Path, only_scene: str | None = None,
     for row in targets:
         prev = (data.get("surfaces") or {}).get(row["label"]) or {}
         try:
-            res = audit_surface(project, row, log=log)
+            res = audit_surface(project, row, prev=prev, log=log)
         except SystemExit as e:
             skipped.append({"label": row["label"], "reason": str(e)[:200]})
             continue
@@ -536,8 +731,24 @@ def report(p: dict) -> str:
                      f"scene={r['scene'] or '—'} · {gripes} open")
     open_gripes = [(r["label"], g) for r in p["rows"] for g in r["gripes"]]
     if open_gripes:
-        lines.append(f"  open gripes: {len(open_gripes)}")
-        for label, g in open_gripes[:6]:
-            lines.append(f"    {g['id']:18} [{g['kind']}] {g['line'][:90]}")
-    lines.append("  audit now: `devteam ux-audit <project>` (unchanged screens cost nothing)")
+        p0_list = [(l, g) for l, g in open_gripes if g.get("severity") == "P0_BLUNDER"]
+        p1_list = [(l, g) for l, g in open_gripes if g.get("severity") == "P1_DEGRADED"]
+        p2_list = [(l, g) for l, g in open_gripes if g.get("severity") not in ("P0_BLUNDER", "P1_DEGRADED")]
+
+        lines.append(f"  open gripes: {len(open_gripes)} "
+                     f"({len(p0_list)} P0 blunders · {len(p1_list)} P1 degraded · {len(p2_list)} P2 polish)")
+        if p0_list:
+            lines.append("  🚨 P0 UI BLUNDERS (BLOCKERS):")
+            for label, g in p0_list[:6]:
+                elem = f" [{g.get('element')}]" if g.get('element') else ""
+                lines.append(f"    {g['id']:18} 🚨 {label}{elem}: {g['line'][:80]}")
+        if p1_list:
+            lines.append("  ⚠️ P1 DEGRADED UX:")
+            for label, g in p1_list[:4]:
+                lines.append(f"    {g['id']:18} [{g.get('kind', 'degraded')}] {g['line'][:80]}")
+        if p2_list:
+            lines.append("  ✦ P2 POLISH:")
+            for label, g in p2_list[:4]:
+                lines.append(f"    {g['id']:18} [{g.get('kind', 'polish')}] {g['line'][:80]}")
+    lines.append("  audit now: `devteam ux-audit <project>` (unchanged screens cost $0.00)")
     return "\n".join(lines)

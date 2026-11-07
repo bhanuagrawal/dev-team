@@ -1990,19 +1990,27 @@ def cmd_ux_audit(args: argparse.Namespace) -> int:
     log = RunLog(project, "ux-audit-" + today())
     from team import ux_audit
     res = ux_audit.run_audit(project, only_scene=getattr(args, "scene", None),
-                             everything=getattr(args, "all", False), log=log)
+                             everything=getattr(args, "all", False),
+                             capture_emulator=getattr(args, "emulator", False), log=log)
     if not res["targets"]:
         print("nothing to audit: no screen changed since its last audit "
-              "(unchanged screens cost nothing)")
+              "(unchanged screens cost $0.00)")
         return 0
     for r in res["audited"]:
-        print(f"\n== {r['label']} (scene {r['scene']}) ==")
-        for x in r["reactions"]:
+        print(f"\n== {r['label']} (scene {r['scene'] or '—'}) ==")
+        for x in r.get("reactions") or []:
             print(f"  {x.get('at','')}  {x.get('line','')}")
         if r.get("premium"):
             print("  premium: " + " · ".join(r["premium"][:3]))
-        for g in r["gripes"]:
-            print(f"  {g['id']} [{g['kind']}] {g['line']}")
+        for g in r.get("gripes") or []:
+            sev = g.get("severity", "")
+            elem = f" [{g.get('element')}]" if g.get("element") else ""
+            if sev == "P0_BLUNDER":
+                print(f"  🚨 {g['id']} [P0 BLUNDER]{elem} {g['line']}")
+            elif sev == "P1_DEGRADED":
+                print(f"  ⚠️  {g['id']} [P1 DEGRADED]{elem} {g['line']}")
+            else:
+                print(f"  ✦ {g['id']} [{g.get('kind', 'polish')}]{elem} {g['line']}")
         if r.get("verdict"):
             print(f"  verdict: {r['verdict']}")
     for s in res["skipped"]:
@@ -3900,6 +3908,7 @@ def main() -> None:
     ua.add_argument("project")
     ua.add_argument("--scene", help="audit one rendered scene id (docs/storefront.json)")
     ua.add_argument("--all", action="store_true", help="audit every screen with a render")
+    ua.add_argument("--emulator", action="store_true", help="capture screen directly from running emulator if available")
     ua.set_defaults(fn=cmd_ux_audit)
     tt = sub.add_parser("tree"); tt.add_argument("project")
     tt.add_argument("--html", action="store_true", help="write the html view and print its path")

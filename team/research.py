@@ -676,21 +676,51 @@ def _ux_pull(project: Path, profile: dict) -> dict:
         except Exception:
             surfaces = {}
     gripes = []
+    p0_blunders = []
+    p1_degraded = []
+    p2_polish = []
     for label, row in surfaces.items():
         for g in (row.get("gripes") or []):
             if str(g.get("status") or "open") != "open":
                 continue
-            gripes.append({
+            sev = str(g.get("severity") or "").upper()
+            kind = str(g.get("kind") or "").lower()
+            line_str = str(g.get("line") or "")
+            if not sev:
+                if kind in ("blunder", "broken", "blocker") or any(k in line_str.lower() for k in ("overlap", "clip", "crash", "blank", "unusable")):
+                    sev = "P0_BLUNDER"
+                elif kind in ("degraded", "confusing", "frustrating"):
+                    sev = "P1_DEGRADED"
+                else:
+                    sev = "P2_POLISH"
+            item = {
                 "id": g.get("id") or "",
                 "screen": label,
-                "line": str(g.get("line") or "")[:200],
-                "kind": g.get("kind") or "",
-            })
+                "line": line_str[:200],
+                "kind": kind,
+                "severity": sev,
+                "element": str(g.get("element") or ""),
+            }
+            gripes.append(item)
+            if sev == "P0_BLUNDER":
+                p0_blunders.append(item)
+            elif sev == "P1_DEGRADED":
+                p1_degraded.append(item)
+            else:
+                p2_polish.append(item)
+
     return {
         "status": cap["status"],
         "detail": cap["detail"],
-        "open_gripes": gripes[:15],
+        "open_gripes": gripes[:20],
         "open_gripe_count": len(gripes),
+        "p0_blunders": p0_blunders,
+        "p0_blunder_count": len(p0_blunders),
+        "has_p0_blunders": bool(p0_blunders),
+        "p1_degraded": p1_degraded[:10],
+        "p1_degraded_count": len(p1_degraded),
+        "p2_polish": p2_polish[:10],
+        "p2_polish_count": len(p2_polish),
         "audited_surfaces": sum(1 for r in surfaces.values() if r.get("audited_at")),
         "audited_at": max([str(r.get("audited_at") or "") for r in surfaces.values()]
                           or [""]),
@@ -852,15 +882,21 @@ Decide what to BUILD NEXT. Output STRICT JSON only (no prose, no code fence):
 }}
 Rules:
 - STORE READINESS: inspect `signals.store_readiness`. If blockers exist (or `is_ready_for_submission` is false), prioritize resolving those compliance issues (targetSdk, permissions, privacy policy, icons, release signing) before discretionary polish, keeping the app releasable on Google Play.
-- POLISH BEFORE NEW SURFACE (`signals.ux`): the owner's standing direction is
+- UI & EXPERIENTIAL QUALITY (`signals.ux`): the owner's standing direction is
   "polish a lot — do not dumbly keep adding features", and "look and feel usually
-  does not change in one run". `signals.ux.open_gripes` are complaints a neutral
-  first-use pass recorded against NAMED screens; each is evidence a real player
-  would feel, and each carries an id (`UX-<scene>-<n>`). Read them before
-  proposing anything:
-  * open gripes exist → the queue HEAD must be the entry that removes them (or a
-    named subset), and its `reason` quotes the gripe ids. A feature that adds new
-    surface area may not head the queue while gripes are open.
+  does not change in one run". Visual reviews inspect real rendered surfaces for
+  broken layouts, usability degradation, and polish. Gripes carry stable ids (`UX-...`).
+  Read them before proposing anything:
+  * P0 UI BLUNDERS ARE FIRES (`signals.ux.p0_blunders`): critical layout breaks,
+    overlapping text/controls, clipped/invisible primary CTA buttons, blank unrendered cards,
+    crash overlays, or unreadable contrast. If ANY P0 blunder exists, resolving it is a
+    TOP PRIORITY (alongside CI failures and Play Store blockers): the queue HEAD (queue[0])
+    must be an executable bugfix or task that fixes that screen, citing the blunder id in its
+    reason. A feature that adds new surface area may NOT head the queue while P0 blunders are open.
+  * P1 DEGRADED UX & P2 POLISH (`signals.ux.p1_degraded`, `signals.ux.p2_polish`): secondary
+    usability friction and cosmetic polish. These do NOT block high-priority milestone features.
+    You may intelligently batch polish tasks together into dedicated polish tasks, resolve them
+    opportunistically when modifying that screen for a feature, or queue them behind critical milestones.
   * none open, but `signals.ux.status` is "ok" → you may propose a feature, and
     its `reason` must say why polish has nothing left worth a run.
   * `signals.ux.status` is "unwired" or "partial" → polish cannot be measured yet.
@@ -1147,6 +1183,31 @@ def _validate(result: dict, research: dict | None = None) -> str | None:
                             "production path the tests need. Code rejects a head that "
                             "does not, because a run builds only the head. The only "
                             "exemption is a delivery fire (red CI or a store rejection)")
+
+            # P0 UI BLUNDERS ARE FIRES (owner directive 2026-11-07):
+            # A broken screen where primary controls are clipped, blank, or text overlaps is a defect
+            # that users encounter immediately. If P0 blunders exist, queue[0] must target
+            # a fix for that screen (or bugfix/test), unless red CI or a store rejection outranks it.
+            ux_sig = (research.get("signals", {}).get("ux") or {})
+            p0_blunders = ux_sig.get("p0_blunders") or []
+            if q is result["queue"][0] and p0_blunders and not (
+                    ci_last == "failure" or store_blocked):
+                blunder_screens = {str(b.get("screen", "")).lower() for b in p0_blunders}
+                blunder_ids = {str(b.get("id", "")).lower() for b in p0_blunders}
+                target_str = str(q.get("target") or "").lower()
+                reason_str = str(q.get("reason") or "").lower()
+                label_str = str(q.get("label") or "").lower()
+                addresses_blunder = (
+                    any(s and (s in target_str or s in reason_str or s in label_str) for s in blunder_screens) or
+                    any(bid and (bid in reason_str or bid in label_str) for bid in blunder_ids) or
+                    q.get("type") in ("bugfix", "motion")
+                )
+                if not addresses_blunder and q.get("type") == "feature":
+                    blunder_summary = ", ".join(f"{b.get('screen')}: {b.get('id')}" for b in p0_blunders[:3])
+                    return (f"signals.ux has {len(p0_blunders)} active P0 UI BLUNDER(S) "
+                            f"({blunder_summary}): a broken or unusable screen is a blocker. "
+                            "The queue HEAD (queue[0]) must address the blunder before new feature "
+                            "surface area is added")
 
             # Competitor evidence is data, not a licence to invent: a reason may
             # cite a rival only when a recon report is actually behind it.
