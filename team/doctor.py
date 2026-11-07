@@ -64,8 +64,8 @@ def agent_requirements(profile: dict, project: Path) -> dict[str, list[tuple[str
         # every report returned 403 (or while the login Google now blocks was the
         # only advice). A real runReport is the only honest gate.
         probe = ga4_mod.probe(project, ga4)
-        ga4_checks.append((f"GA4 property {prop or '?'} readable with the declared "
-                           f"credential", bool(probe.get("ok")),
+        ga4_checks.append((f"GA4 property {prop or '?'} answers a report with the "
+                           f"declared credential", bool(probe.get("ok")),
                            ga4_mod.fix_for(project.name, ga4, probe)))
         ga4_checks.append(("gcloud CLI available", bool(shutil.which("gcloud")),
                            "install the gcloud SDK (the GA4 collector mints service-account tokens through it)"))

@@ -934,17 +934,21 @@ def run_store_readiness_audit(project: Path, tree: Path | None = None) -> list[R
         fix="Configure signingConfigs.release with keystore properties for Play App Bundle signing",
     ))
 
-    # Keystore off-repo backup verification
+    # Keystore off-repo backup verification.
+    # The backup lives beside the PROJECT (vault/Drive are keyed by project
+    # name), while `src` is the tree being audited — often `.pipeline/scan`.
+    # Passing `src` made every project report a missing backup that `doctor`
+    # had just verified: a presence-driven warning that could never clear.
     try:
         from . import keystore_backup
-        has_backup, backup_detail = keystore_backup.verify_backup(src)
+        has_backup, backup_detail = keystore_backup.verify_backup(project)
         checks.append(ReadinessCheck(
             category="Release Configuration",
             name="Off-Repo Keystore Backup",
             passed=has_backup,
             severity="WARNING" if not has_backup else "INFO",
             detail=backup_detail if has_backup else "Release signing keystore has no off-repo backup in Google Drive or ~/.config/devteam/keystores",
-            fix=f"Run: python3 cli.py keystore-backup {src.name}",
+            fix=f"Run: python3 cli.py keystore-backup {project.name}",
         ))
     except Exception as _e:
         pass
