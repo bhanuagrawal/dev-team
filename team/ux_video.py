@@ -499,6 +499,23 @@ def _step(serial: str, step: dict) -> str:
                      "wait, tap, tap_xy, swipe, text, key")
 
 
+def _crash_line(serial: str, pkg: str) -> str:
+    """The FATAL exception the app just hit, or "" (crash buffer is per boot)."""
+    r = _adb(serial, ["logcat", "-d", "-b", "crash"], timeout=45)
+    text = r.stdout if isinstance(r.stdout, str) else (r.stdout or b"").decode("utf-8", "replace")
+    if pkg not in text or "FATAL EXCEPTION" not in text:
+        return ""
+    block = text.rsplit("FATAL EXCEPTION", 1)[-1]
+    for line in block.splitlines():
+        line = line.strip()
+        if line.startswith("Process:") or not line:
+            continue
+        # "AndroidRuntime: java.lang.IllegalArgumentException: ..." -> the message
+        if "Exception" in line or "Error" in line:
+            return re.sub(r"^\d+-\d+ [\d:.]+\s+\d+\s+\d+ E AndroidRuntime:\s*", "", line)[:240]
+    return block.strip().splitlines()[0][:240] if block.strip() else ""
+
+
 def _wake(serial: str) -> None:
     _adb(serial, ["shell", "input", "keyevent", "224"], timeout=20)   # WAKEUP
     _adb(serial, ["shell", "wm", "dismiss-keyguard"], timeout=20)
@@ -513,6 +530,7 @@ def record_flow(project: Path, flow: dict, serial: str, log=None) -> dict:
     secs = max(6, min(int(flow.get("seconds") or DEFAULT_SECONDS), MAX_SECONDS))
     pkg = package_name(project)
     _wake(serial)
+    _adb(serial, ["logcat", "-b", "crash", "-c"], timeout=30)   # only THIS flow's crash
     _adb(serial, ["shell", "am", "force-stop", pkg], timeout=30)
     # A FIRST-RUN flow only exists on a device with no app data. `install -r -d`
     # keeps that data, so without a reset the flow is recordable exactly once per
@@ -566,6 +584,15 @@ def record_flow(project: Path, flow: dict, serial: str, log=None) -> dict:
             inset_report = status_bar_collisions(serial, pkg)
         # Hold the settled final state long enough for at least one sampled frame.
         time.sleep(min(3.0, max(1.0, secs - (time.monotonic() - t0) - 0.5)))
+    except SystemExit:
+        # A flow that cannot be driven because the app DIED is not a spec error:
+        # report the crash itself at P0, so the planner sees a blunder instead of
+        # an unexplained "no node matching ..." (seen 2026-11-07: a drawer scroll
+        # crashed on a duplicate LazyColumn key and read as a broken flow spec).
+        crash = _crash_line(serial, pkg)
+        if crash:
+            raise SystemExit(f"ux-video: the app CRASHED during '{fid}' — {crash}") from None
+        raise
     finally:
         _adb(serial, ["shell", "pkill", "-INT", "screenrecord"], timeout=20)
         try:
@@ -876,6 +903,38 @@ def _result(value: dict, row: dict, model: str, evidence: str) -> dict:
     }
 
 
+def store_crash(project: Path, row: dict, reason: str) -> None:
+    """Record an app crash observed while driving a flow as a P0 blunder.
+
+    The recording is the evidence; without this, a flow that kills the app only
+    appears in the run's `failed` list and never reaches the planner's gripes.
+    """
+    from . import ux_audit
+    line = reason.split("CRASHED", 1)[-1].strip(" —-:.")
+    if not line:
+        return
+    data = ux_audit.load(project)
+    surf = (data.get("surfaces") or {}).get(row["surface"])
+    if surf is None:
+        return
+    fresh = [g for g in (surf.get("gripes") or [])
+             if not (g.get("source") == "video" and g.get("flow") == row["id"]
+                     and g.get("kind") == "crash")]
+    fresh.append({
+        "id": ux_audit.gripe_id(_slug(row["id"])[:12], line),
+        "line": line,
+        "element": "",
+        "kind": "crash",
+        "severity": "P0_BLUNDER",
+        "status": "open",
+        "source": "video",
+        "flow": row["id"],
+        "at": now_iso(),
+    })
+    surf["gripes"] = fresh
+    ux_audit.save(project, data)
+
+
 def store_reaction(project: Path, row: dict, sheet: dict, reaction: dict) -> dict:
     """Attach the flow's result to its declared screen in the UX audit store.
 
@@ -1003,7 +1062,10 @@ def run(project: Path, only: str | None = None, everything: bool = False,
                 try:
                     rec = record_flow(project, flow, serial, log=log)
                 except SystemExit as exc:
-                    failed.append({"id": r["id"], "reason": str(exc)[:300]})
+                    reason = str(exc)[:300]
+                    failed.append({"id": r["id"], "reason": reason})
+                    if "CRASHED" in reason:
+                        store_crash(project, r, reason)
                     continue
                 if log:
                     log(f"~ ux-video: {rec['bytes'] // 1024} KB, {rec['seconds']}s, "
