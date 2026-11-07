@@ -37,8 +37,13 @@ STATE_REL = ".pipeline/route.json"
 KINDS: list[tuple[str, str, tuple[str, ...], str]] = [
     ("revamp", "feature", ("revamp", "rebuild from scratch", "redesign from scratch",
                            "ground up", "ground-up", "start from scratch", "rebuild",
-                           "reimagining", "reimagine", "complete redesign", "delete the codebase"),
-     "a ground-up app rebuild: PRD re-imagination, competition recon, design tokens, UI purge, native build, fresh assets"),
+                           "reimagining", "reimagine", "complete redesign", "delete the codebase",
+                           "recreate the ui", "recreate ui", "scrap the existing design",
+                           "scrap existing design", "scrap design", "delete the ui",
+                           "delete ui", "new design from stitch", "stitch design",
+                           "rebuild the ui", "rebuild ui", "redesign the ui", "redesign ui",
+                           "ui revamp", "design revamp", "ui overhaul"),
+     "a ground-up app rebuild or UI revamp: PRD/design re-imagination, design tokens, UI purge/rebuild, native build, fresh Play Store marketing assets"),
     ("brand", "feature", ("icon", "logo", "app icon", "launcher icon", "brand mark"),
      "a designed artefact: Stitch first, then the app, then the listing"),
     ("store", "feature", ("screenshot", "store listing", "feature graphic", "play store page",
@@ -218,7 +223,24 @@ def _brand_targets(project: Path) -> list[str]:
     return out
 
 
-def _targets(project: Path, kind: str) -> list[str]:
+def requires_storefront_assets(prompt: str, kind: str) -> bool:
+    """Determine whether an owner prompt alters screens, design, or UI enough
+    to require regenerating Play Store screenshot posters and marketing assets."""
+    if kind in ("revamp", "store"):
+        return True
+    low = " " + (prompt or "").lower() + " "
+    terms = (
+        "recreate the ui", "recreate ui", "scrap design", "scrap the existing design",
+        "scrap existing design", "new design", "stitch design", "redesign",
+        "redesign the ui", "redesign ui", "rebuild the ui", "rebuild ui",
+        "ui revamp", "design revamp", "ui overhaul", "theme change",
+        "change the theme", "dark mode", "light mode", "warm mode", "palette",
+        "brand refresh", "new look", "visual overhaul"
+    )
+    return any(t in low for t in terms)
+
+
+def _targets(project: Path, kind: str, prompt: str = "") -> list[str]:
     if kind == "brand":
         return _brand_targets(project)
     try:
@@ -228,7 +250,14 @@ def _targets(project: Path, kind: str) -> list[str]:
     except Exception:
         return []
     allowed = [str(p) for p in (profile.get("allowed_paths") or []) if p]
-    return allowed or ([profile.get("src_root")] if profile.get("src_root") else [])
+    base = list(allowed) if allowed else ([profile.get("src_root")] if profile.get("src_root") else [])
+    if requires_storefront_assets(prompt, kind):
+        extra = ["docs/storefront*.json", "docs/storefront-direction.json",
+                 "distribution/listing/**/images/**"]
+        for e in extra:
+            if e not in base:
+                base.append(e)
+    return base
 
 
 def alignment(project: Path, prompt: str, kind: str) -> dict[str, Any]:
@@ -282,6 +311,7 @@ def plan(project: Path, prompt: str) -> dict[str, Any]:
     align = alignment(project, prompt, kind)
     label = _label(project, prompt, kind)
     task_id = _task_id(label)
+    needs_store = requires_storefront_assets(prompt, kind)
     steps = [{"n": i + 1, "step": s, "cmd": c.format(
                   p=project.name, q=_quote(prompt), task=task_id)
               if "{wt}" not in c else c.format(p=project.name, q=_quote(prompt), task=task_id,
@@ -304,10 +334,11 @@ def plan(project: Path, prompt: str) -> dict[str, Any]:
             "label": label,
             "id": task_id,
             "type": _type_of(kind),
-            "targets": _targets(project, kind),
+            "targets": _targets(project, kind, prompt),
             "pinned": True,
             "priority": "owner",
             "reason": f"Owner request: \"{prompt}\" — {align.get('why')}",
+            "requires_storefront": needs_store,
         },
         "steps": steps,
         "blocked": align["verdict"] in ("BLOCKED", "OWNER"),
@@ -353,15 +384,41 @@ def apply(project: Path, prompt: str) -> dict[str, Any]:
         "pinned": True,
         "priority": "owner",
         "kind": result["kind"],
+        "requires_storefront": result["task"].get("requires_storefront", False),
         "advances": (result.get("alignment") or {}).get("milestone") or "",
     }
     block = qmod.add_task(state, entry, source="prompt-handler", position="head")
-    save_state(project, state)
     if result["kind"] == "brand":
         from . import brand_change
 
         if not brand_change.state(project):
             brand_change.seed(project, prompt, result["task"]["label"])
+
+    # If the change alters the UI or is a revamp, ensure storefront regeneration is also queued
+    if result["task"].get("requires_storefront") and result["kind"] != "store":
+        from .core import today
+        store_entry = {
+            "type": "feature",
+            "label": f"storefront-regenerate-assets-{today()}",
+            "target": "distribution/listing/en-US/images/phoneScreenshots, docs/storefront*.json, docs/storefront-direction.json",
+            "risk": "safe",
+            "reason": f"Regenerate Play Store screenshots and marketing posters to reflect new UI/design for: {prompt}",
+            "owner_request": prompt,
+            "pinned": True,
+            "priority": "owner",
+            "kind": "store",
+            "advances": (result.get("alignment") or {}).get("milestone") or "",
+        }
+        # In state["queue"], entry was placed at head (index 0). Place store_entry at index 1
+        queue = state.get("queue") or []
+        if queue and queue[0].get("label") == entry.get("label"):
+            queue.insert(1, store_entry)
+        else:
+            queue.append(store_entry)
+        state["queue"] = queue
+        block += f"\n  linked storefront task: {store_entry['label']} queued immediately after {entry['label']}"
+
+    save_state(project, state)
     result["queue_impact"] = block
     result["admitted"] = True
     return result
@@ -386,6 +443,8 @@ def format_plan(result: dict[str, Any]) -> str:
     else:
         task = result.get("task") or {}
         lines.append(f"  task:      {task.get('label')}  [{task.get('type')}, pinned head]")
+        if task.get("requires_storefront"):
+            lines.append("  storefront: REQUIRED — Play Store screenshots and marketing posters must be regenerated")
     lines.append("")
     lines.append("EXECUTION PLAN (in order — each step's gate is the next step's precondition):")
     for step in result.get("steps") or []:

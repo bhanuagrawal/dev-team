@@ -681,6 +681,24 @@ def run_store_readiness_audit(project: Path, tree: Path | None = None) -> list[R
             fix="Render composables and compile marketing posters via `devteam storefront-build <project> --poster`",
         ))
 
+        # Storefront Screenshots Freshness Gate: screenshots must not be older than docs/design.md
+        design_file = src / "docs" / "design.md"
+        if design_file.is_file() and shots:
+            design_mtime = design_file.stat().st_mtime
+            oldest_shot_mtime = min(s.stat().st_mtime for s in shots)
+            is_stale = (design_mtime - oldest_shot_mtime) > 600
+            checks.append(ReadinessCheck(
+                category="Storefront Graphic Assets",
+                name="Storefront Screenshots Freshness",
+                passed=not is_stale,
+                severity="BLOCKER" if is_stale else "INFO",
+                detail="Screenshots are fresh relative to docs/design.md" if not is_stale else (
+                    f"Screenshots in {shots_dir.relative_to(src)} are older than docs/design.md — "
+                    "listing depicts obsolete pre-revamp UI/palette"
+                ),
+                fix="Run `devteam storefront-build <project> --poster --force` to regenerate screenshots matching the new design",
+            ))
+
         # Brand Asset Provenance Gate (Rule 5: Stitch icon + Gemini banner)
         from . import storefront_brand as sbf
         brand_issues = sbf.gate(src)
