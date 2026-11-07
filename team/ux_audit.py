@@ -349,6 +349,8 @@ def _migrate_ids(data: dict) -> dict:
                 gid = str(g.get("id") or "")
                 if gid.startswith("UX-") and LEGACY_ID.search(gid):
                     g["id"] = gripe_id(scene, g.get("line") or "")
+        if isinstance(row.get("gripes"), list):
+            row["gripes"] = _demote_unverifiable_still(row["gripes"])
     return data
 
 
@@ -532,6 +534,53 @@ def gripe_id(scene: str, line: str) -> str:
 
 
 LEGACY_ID = re.compile(r"-(\d+|a\d+)$")
+
+# A still render is a static composition with no window and no interaction. Three
+# classes of complaint are therefore UNPROVABLE from one, and on 2026-11-08 all
+# three were filed as P0 blockers against one dashboard render: a header "drawn
+# 37px inside a 63px status bar" (the image contains no status bar at all),
+# "the third card is cut off by the bottom navigation bar" (a scrollable list
+# legitimately continues), and "CERTIFICATES wraps to two lines" (it renders on
+# one). Three releases would have been aimed at a phantom. The device path
+# measures what a picture cannot: `ux_video` reads the device's reported
+# InsetsSource values and records the scroll. So a still-sourced gripe in these
+# classes stays recorded (never silently dropped) but is demoted out of the P0
+# blocker set, with the reason attached for the owner.
+_UNVERIFIABLE_STILL_CLAIMS = (
+    (("status bar", "status-bar", "system bar", "notification bar",
+      "system clock", "battery icon", "notch", "home indicator"),
+     "system chrome is not in a still render — device insets are measured by "
+     "`devteam ux-video`, never judged from a picture"),
+    (("cut off", "clipped", "hidden behind", "below the fold", "off-screen",
+      "offscreen", "cut by the"),
+     "a still cannot tell a scrollable list that continues from content that is "
+     "clipped — `devteam ux-video` records the scroll"),
+    (("floating action button", "fab ", "fab over", "button overlaps the"),
+     "a floating control floats above scrolling content by design; only a "
+     "recorded flow shows whether the content underneath stays reachable"),
+    (("wraps", "wrapped", "two lines", "ellipsis", "truncat"),
+     "text wrapping depends on measured line width, which one still cannot "
+     "prove — a hierarchy test or a recorded flow is the check"),
+)
+
+
+def _demote_unverifiable_still(gripes: list[dict]) -> list[dict]:
+    """Never let a still render's guess about the device block a release."""
+    out: list[dict] = []
+    for g in gripes:
+        if not isinstance(g, dict):
+            out.append(g)
+            continue
+        text = f"{g.get('line', '')} {g.get('element', '')}".lower()
+        if str(g.get("severity") or "") == "P0_BLUNDER" and not g.get("source"):
+            why = next((note for terms, note in _UNVERIFIABLE_STILL_CLAIMS
+                        if any(t in text for t in terms)), "")
+            if why:
+                g = {**g, "severity": "P1_DEGRADED",
+                     "kind": "unverifiable_still", "note": why}
+        out.append(g)
+    return out
+
 
 
 def _resolved(old: list[dict], new_lines: list[str]) -> list[dict]:
@@ -728,7 +777,7 @@ def audit_surface(project: Path, row: dict, prev: dict | None = None, log=None) 
         "reactions": reactions,
         "premium": result.get("premium") or [],
         "verdict": result.get("verdict", ""),
-        "gripes": gripes,
+        "gripes": _demote_unverifiable_still(gripes),
     }
 
 
