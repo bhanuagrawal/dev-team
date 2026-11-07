@@ -1255,15 +1255,29 @@ def cmd_record(args: argparse.Namespace) -> None:
         already = {(s.get("target"), str(s.get("version") or ""))
                    for s in state.get("shipped", [])}
         version_key = str(args.version or "?")
-        for t in targets:
-            if (t, version_key) in already:
-                continue  # concurrent runs may both ship; keep one row per target per release
-            state.setdefault("shipped", []).append({
-                "target": t, "label": label, "version": args.version or "?",
-                "version_code": state.get("last_version_code"),
-                "commit": args.commit or "", "date": today(),
-                "task_id": args.task or task.get("id", ""),
-                "advances": adv})
+        # ONE run may carry several queue entries (pick clubs a thin head with
+        # same-milestone followers). Every delivered entry must land in the
+        # ledger under ITS OWN label, or `already_delivered` cannot recognise it
+        # and the next pick serves the same work again — the run would be paid
+        # for twice.
+        rows = [{"label": label, "targets": targets, "advances": adv}]
+        for c in (task.get("closes") or []):
+            if not isinstance(c, dict):
+                continue
+            c_adv = str(c.get("advances") or adv or "")
+            rows.append({"label": str(c.get("label") or label),
+                         "targets": [t for t in (c.get("targets") or []) if t],
+                         "advances": c_adv})
+        for row in rows:
+            for t in row["targets"]:
+                if (t, version_key) in already:
+                    continue  # concurrent runs may both ship; keep one row per target per release
+                state.setdefault("shipped", []).append({
+                    "target": t, "label": row["label"], "version": args.version or "?",
+                    "version_code": state.get("last_version_code"),
+                    "commit": args.commit or "", "date": today(),
+                    "task_id": args.task or task.get("id", ""),
+                    "advances": row["advances"]})
         state["last_success_date"] = today()
         state["last_run"] = {**entry, "pushed_sha": args.commit or ""}
     elif args.result in ("failed", "blocked") :
@@ -1379,6 +1393,7 @@ def cmd_pick(args: argparse.Namespace) -> int:
         print_owner_asks(project)
         print_page(project, "this project's plan (no goal yet)")
         return 4
+    from team import scan
     from team.scan import next_task, scan_surfaces
     surfaces = scan_surfaces(project)
     unsup_only = (not any(s["status"] == "unanimated" and s.get("risk") != "supervised"
@@ -1416,7 +1431,28 @@ def cmd_pick(args: argparse.Namespace) -> int:
             break
     spec_path = pdir / f"{task['id']}.json"
     spec_path.write_text(json.dumps(task, indent=2) + "\n")
+    run_info = task.get("run") or {"entries": 1,
+                                   "effort_min": int(task.get("effort_min") or 0),
+                                   "target_min": scan.RUN_TARGET_MIN}
+    closes = [c.get("label") for c in (task.get("closes") or [])]
+    # The run's shape is a FACT the orchestrator must relay, not a detail the
+    # owner has to reconstruct from the queue: one release ships one run, so
+    # "how much work is this run carrying" is the number that decides whether
+    # the release paid for itself.
+    thin = (run_info.get("entries", 1) == 1
+            and (run_info.get("effort_min") or 0) < scan.RUN_TARGET_MIN)
+    if thin:
+        print(f"run: THIN — {run_info.get('effort_min')} min of executable work; a release "
+              f"pays for itself at ~{scan.RUN_TARGET_MIN} min. No adjacent entry in the "
+              f"queue serves the same milestone, so there was nothing to club it with.",
+              file=sys.stderr, flush=True)
+    else:
+        print(f"run: {run_info['entries']} queue entr"
+              f"{'y' if run_info['entries'] == 1 else 'ies'} · ~{run_info.get('effort_min')} min"
+              + (" · clubbed: " + " | ".join(closes) if closes else ""),
+              file=sys.stderr, flush=True)
     print(json.dumps({"pick": task, "spec": str(spec_path),
+                      "run": {**run_info, "closes": closes, "thin": thin},
                       "worktree_cmd": f"python3 cli.py worktree-start {project.name} --task-id {task['id']}",
                       # .pipeline/tasks/ is relative to the PROJECT dir, which
                       # developer-prompt already searches — a bare filename

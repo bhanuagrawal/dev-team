@@ -1898,6 +1898,23 @@ def plan_report(project: Path, applied: bool = True) -> str:
     else:
         L.append(f"  left to do:       {len(queue)} waiting")
     L.append(f"  THIS RUN BUILDS:  {head or '— (nothing queued)'}")
+    if queue:
+        # ONE run ships ONE release. What that release actually carries is the
+        # number the owner needs: a run clubbed up to the pay-off target is
+        # healthy, one carrying 120 minutes is a release spent on nearly nothing.
+        live = [q for q in queue if not scan.already_delivered(q, state)]
+        chain = scan.chain_preview(live)
+        if chain:
+            total = sum(int(q.get("effort_min") or 0) for q in chain)
+            if len(chain) > 1:
+                L.append(f"  THE RUN CARRIES:  {len(chain)} entries · ~{total} min — "
+                         + " | ".join(str(q.get("label") or "?")[:44] for q in chain))
+            elif total:
+                thin = total < scan.RUN_TARGET_MIN
+                L.append(f"  THE RUN CARRIES:  1 entry · ~{total} min"
+                         + (" — THIN: one release for under "
+                            f"{scan.RUN_TARGET_MIN} min, and no adjacent entry on the same "
+                            "milestone to club it with" if thin else ""))
     if queue and scan.already_delivered(queue[0], state):
         # The handover is a claim about what the picker will serve. When the head
         # is delivered work the picker skips it — say so here instead of telling

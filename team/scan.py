@@ -149,6 +149,97 @@ def already_delivered(q: dict, state: dict) -> bool:
             or _label_task_slug(q.get("label")) in _delivered_slugs_from_runs(state))
 
 
+# --------------------------------------------------------------------------- #
+# assembling ONE run from the queue
+# --------------------------------------------------------------------------- #
+# A run's fixed cost (verify + version bump + CI + internal-testing build) does
+# not shrink with the task, so a run carrying 20 minutes of work spends the same
+# release to ship almost nothing. The planner sizes each entry at ~210 min, but
+# nothing stopped it filing a legal 120-min entry and paying a full release for
+# it. These constants make the RUN the unit that matters: `pick` clubs the head
+# with the next queue entries — SAME milestone only, so off-goal work and a later
+# goal can never ride along — until the run is worth its release.
+RUN_TARGET_MIN = 180      # below this a single entry is a thin run
+RUN_MAX_MIN = 300         # never club past the hard per-run band
+RUN_MAX_ENTRIES = 3       # beyond this one session stops being one task
+
+
+def _effort_of(q: dict) -> int:
+    try:
+        return int(q.get("effort_min") or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
+def run_chain(queue: list[dict], is_buildable) -> list[dict]:
+    """The entries ONE run should carry: the buildable head + same-branch followers.
+
+    Contiguous and same `advances` on purpose. A follower from another milestone
+    is a different run's job (the goal gate and the off-goal declaration exist so
+    work is never smuggled), and skipping a non-buildable entry to grab a later
+    one would break the planner's execution order.
+    """
+    start = next((i for i, q in enumerate(queue) if is_buildable(q)), None)
+    if start is None:
+        return []
+    head = queue[start]
+    chain = [head]
+    total = _effort_of(head)
+    adv = str(head.get("advances") or "")
+    for q in queue[start + 1:]:
+        if len(chain) >= RUN_MAX_ENTRIES or total >= RUN_TARGET_MIN:
+            break
+        if not is_buildable(q) or str(q.get("advances") or "") != adv:
+            break
+        e = _effort_of(q)
+        if e <= 0 or total + e > RUN_MAX_MIN:
+            break
+        chain.append(q)
+        total += e
+    return chain
+
+
+def chain_preview(queue: list[dict]) -> list[dict]:
+    """What `pick` would club, judged WITHOUT a surface scan (cheap, for the plan
+    review block). Only entry type/target/delivery decide here; `pick` is the
+    authority and adds the motion-obsolete check."""
+    def ok(q: dict) -> bool:
+        return (q.get("type") in ("bugfix", "feature", "motion")
+                and bool(q.get("target")))
+
+    return run_chain([q for q in queue], ok) if queue else []
+
+
+def _chain_task(chain: list[dict], seq: int) -> dict:
+    """One task spec for the whole run — head identity, union scope, every entry named."""
+    task = _queue_task(chain[0], seq)
+    total = sum(_effort_of(q) for q in chain)
+    task["run"] = {"entries": len(chain), "effort_min": total,
+                   "target_min": RUN_TARGET_MIN, "max_min": RUN_MAX_MIN}
+    if len(chain) > 1:
+        targets: list[str] = []
+        for q in chain:
+            for t in target_items(q.get("target")):
+                if t not in targets:
+                    targets.append(t)
+        task["surface"]["targets"] = targets
+        task["effort_min"] = total
+        task["closes"] = [{
+            "label": q.get("label"),
+            "type": q.get("type"),
+            "targets": target_items(q.get("target")),
+            "advances": str(q.get("advances") or ""),
+            "effort_min": _effort_of(q),
+            "reason": str(q.get("reason") or ""),
+        } for q in chain[1:]]
+        task["reason"] = (
+            str(task.get("reason") or "")
+            + f" · ALSO IN THIS RUN (clubbed because the head alone is under the "
+              f"{RUN_TARGET_MIN}-min pay-off target): "
+            + "; ".join(f"{c['label']} (~{c['effort_min']} min)" for c in task["closes"]))
+    return task
+
+
 def _queue_task(q: dict, seq: int) -> dict:
     """A code task derived from one queue entry (bugfix|feature)."""
     return {
@@ -274,9 +365,12 @@ def next_task(project: Path, seq: int, supervised: bool = False) -> dict | None:
     # runner ignored was dead weight (goal-less projects never built a queued
     # task while any polish surface was left).
     surfaces = scan_surfaces(project)
-    for q in queue:
-        if _buildable(q, surfaces):
-            return _queue_task(q, seq)
+    chain = run_chain(queue, lambda q: _buildable(q, surfaces))
+    if chain:
+        # ONE run, ONE release: a head that cannot pay for its own release is
+        # clubbed with same-milestone followers (see run_chain), and the task
+        # spec names every entry so `record` closes them all.
+        return _chain_task(chain, seq)
     for t in surfaces:
         if t.get("status") != "unanimated":
             continue
