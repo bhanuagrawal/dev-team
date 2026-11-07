@@ -296,9 +296,12 @@ def _refreshed_play_store_flags(project: Path, flags: list) -> list:
     """
     from team import asks as asks_mod
     flags = asks_mod.resolve_collector_flags(Path(project), flags)
-    ids = {str(u.get("id", "")) for u in flags}
-    if not any(i.startswith("play-store-") for i in ids):
-        return flags
+    # `resolve_collector_flags` has already re-read the Play collector, so the
+    # list is current whether or not a play-store flag survived it. Returning
+    # None on the play-store branch dropped the ENTIRE agent-flags block exactly
+    # when the owner most needed it (2026-11-08: a shipped run printed nothing
+    # while three flags were open).
+    return flags
 
 
 def _print_ask_review(title: str, how: str, profile: dict, tools: dict) -> str:

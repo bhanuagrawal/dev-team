@@ -68,7 +68,7 @@
   },
   {
    "id": "ga4-read-is-verified",
-   "rule": "a GA4 connection is ready only when the declared property can actually be read; the credential is a reader service account (connections.ga4.key_file or machine-wide $DEVTEAM_GA4_KEY), never the owner's ADC login — Google blocks analytics.readonly for gcloud's default client",
+   "rule": "a GA4 connection is ready only when the declared property can actually be read; the credential is a reader service account (connections.ga4.key_file or machine-wide $DEVTEAM_GA4_KEY), never the owner's ADC login \u2014 Google blocks analytics.readonly for gcloud's default client",
    "doc": "AGENTS.md",
    "kind": "code",
    "enforced_by": "team/ga4.py (one credential resolver + a real runReport probe) used by team/research.py and devteam doctor",
@@ -76,11 +76,11 @@
   },
   {
    "id": "nightly-three-runs-in-window",
-   "rule": "every scheduled app runs RUNS_PER_DAY (3) times a night inside the owner's 23:00–11:00 window; apps are interleaved evenly so consecutive machine-wide runs are as far apart as the app count allows, and overlap is tolerated because three runs make a skipped one harmless",
+   "rule": "every scheduled app runs RUNS_PER_DAY (3) times a night inside the owner's 23:00\u201311:00 window; apps are interleaved evenly so consecutive machine-wide runs are as far apart as the app count allows, and overlap is tolerated because three runs make a skipped one harmless",
    "doc": "AGENTS.md",
    "kind": "code",
    "enforced_by": "devteam setup (scheduler.plan_schedule/apply_plan installs 3 slots per app) + devteam schedules --rebalance (re-spaces every app) + devteam doctor and store-readiness (assert 3 slots inside the window)",
-   "note": "owner directive 2026-11-05: three runs a night, 11pm–11am, overlap tolerated but avoided where possible; MIN_GAP_MIN is now a best-effort target, not a refusal"
+   "note": "owner directive 2026-11-05: three runs a night, 11pm\u201311am, overlap tolerated but avoided where possible; MIN_GAP_MIN is now a best-effort target, not a refusal"
   },
   {
    "id": "cleanup-is-part-of-the-run",
@@ -98,7 +98,7 @@
   },
   {
    "id": "no-auto-guards",
-   "rule": "no frozen paths, release-knob diff or dependency gates; compile/tests are the gates — and a production change must carry its own test in the same diff",
+   "rule": "no frozen paths, release-knob diff or dependency gates; compile/tests are the gates \u2014 and a production change must carry its own test in the same diff",
    "doc": "AGENTS.md#8",
    "kind": "code",
    "enforced_by": "devteam verify (diff-scoped test gate) / devteam release (same gate before the bump)"
@@ -130,7 +130,7 @@
    "doc": "AGENTS.md#10",
    "kind": "code",
    "note": "warn-only by design: the run commits its own work, it does not commit the owner's",
-   "enforced_by": "devteam doctor / status (checkout_dirty — reports, never commits the owner's WIP)"
+   "enforced_by": "devteam doctor / status (checkout_dirty \u2014 reports, never commits the owner's WIP)"
   },
   {
    "id": "verify-before-release",
@@ -194,14 +194,14 @@
    "doc": "AGENTS.md#8 / dev-team skill (emulator failure modes)",
    "kind": "enforcible",
    "proposal": "devteam verify's instrumented stage: before booting an AVD, if a qemu process holds that AVD's lock while `adb devices` shows no online device AND this run started no emulator, terminate the holder, clear the locks, boot again, and only then fall back to warn-only; record the repair in the run log",
-   "note": "2026-11-05/06: the two touched device classes passed (13 tests), then a zombie qemu from a failed boot kept the AVD lock, every later boot died in ~1s, and verify degraded to 'device test runner could not execute (warn-only)' — the degrade is right for a machine with no emulator, wrong for a repairable lock holder"
+   "note": "2026-11-05/06: the two touched device classes passed (13 tests), then a zombie qemu from a failed boot kept the AVD lock, every later boot died in ~1s, and verify degraded to 'device test runner could not execute (warn-only)' \u2014 the degrade is right for a machine with no emulator, wrong for a repairable lock holder"
   },
   {
    "id": "plan-middle-tier",
-   "rule": "the plan has a middle tier: vision → goals (the ENDS, one number each) → milestones (the MEANS) → tasks; a new milestone must sit under a goal, and a later goal's milestones are not planned while an earlier goal's number fails",
+   "rule": "the plan has a middle tier: vision \u2192 goals (the ENDS, one number each) \u2192 milestones (the MEANS) \u2192 tasks; a new milestone must sit under a goal, and a later goal's milestones are not planned while an earlier goal's number fails",
    "doc": "AGENTS.md#planning-has-four-tiers",
    "kind": "code",
-   "enforced_by": "team/goals.py (ensure_goal_tier, tree_gaps, validate_advances) — devteam adapt re-shapes the tree, devteam doctor gates it, the planner's goal gate refuses the queue"
+   "enforced_by": "team/goals.py (ensure_goal_tier, tree_gaps, validate_advances) \u2014 devteam adapt re-shapes the tree, devteam doctor gates it, the planner's goal gate refuses the queue"
   },
   {
    "id": "store-screenshots-track-the-shipped-ui",
@@ -218,6 +218,15 @@
    "kind": "enforcible",
    "proposal": "store-readiness 'Installed Icon Matches Store Listing': when the app ships an adaptive VECTOR launcher (mipmap-anydpi-v26/ic_launcher.xml) and no PNG mipmap, render the vector's foreground+background pair at 512x512 (or compare the listing icon against the adaptive icon's declared colors) and report parity from that render instead of the current 'no launcher bitmap to compare' WARNING, which no adaptive-icon project can ever clear",
    "note": "run-derived 2026-11-07 (BookSwapKMP v1.0.2): every store-readiness run carried this WARNING while the listing icon (Stitch) and the adaptive launcher are the only icon assets the project ships; the same run also found the keystore check passing the scan tree instead of the project, so a real backup read as missing"
+  },
+  {
+   "id": "competitor-research-honesty",
+   "rule": "competitor research may not present a figure it did not read: no default rating (the parser fills 4.5 when the listing gave none), no 'not stated' rendered as a value, and no search-answer fragment presented as a listing feature",
+   "doc": "AGENTS.md (MODE B step 1 / spec review)",
+   "kind": "enforcible",
+   "why": "2026-11-08: `devteam competition` produced a gate-passing document that listed the project itself as its own rival, a cybersecurity MDR portal as a field-inspection benchmark, and 4.5\u2605 for every app (a parser default, not a reading). The store blocker would have been 'cleared' by data the owner could not trust; the document was not committed.",
+   "proposal": "`_parse_recon_search_output` carries rating=None (never 4.5) when the listing gave none; `devteam store-readiness` refuses docs/COMPETITION_RESEARCH.md that renders a 'not stated' rating/install as a value, or a feature bullet containing 'the sources do not provide' / 'no specific mention'",
+   "note": "2026-11-08: `devteam competition` produced a gate-passing document that listed the project itself as its own rival, a cybersecurity MDR portal as a field-inspection benchmark, and 4.5 stars for every app (a parser default, not a reading). The document was not committed; self-exclusion and the search-term fallback are already fixed in code."
   }
  ]
 }

@@ -86,9 +86,34 @@ def _derive_search_term(project: Path, explicit_term: str = "") -> str:
     if any(k in combined for k in ["meditation", "serenity", "calm", "breathe", "breathing"]):
         return "meditation and focus"
 
-    # Default fallback: clean project name or words from vision
+    # Fallback: the vision's own domain words, with the product name removed.
+    # A bare product NAME is the worst possible query: searching one returned
+    # apps that merely shared a word with it (a cybersecurity MDR portal, and the
+    # project's own listing) and filed them as direct benchmarks.
+    domain = re.sub(r"[^a-zA-Z0-9]+", " ", vision.replace(name, " "))
+    words = [w for w in domain.split() if len(w) > 2]
+    if len(words) >= 2:
+        return " ".join(words[:5])
     words = [w for w in re.sub(r"[^a-zA-Z0-9]+", " ", name).split() if len(w) > 2]
     return " ".join(words[:2]) if words else project.name
+
+
+def _own_package(project: Path) -> str:
+    """The app's own applicationId — it can never be its own competitor."""
+    profile = profile_of(project)
+    candidates = ["app/build.gradle", "app/build.gradle.kts",
+                  str(profile.get("version_file") or "")]
+    for rel in candidates:
+        if not rel:
+            continue
+        gradle = project / rel
+        if not gradle.is_file():
+            continue
+        m = re.search(r'applicationId\s*(?:=\s*|\(\s*|\s+)["\']([^"\']+)["\']',
+                      gradle.read_text())
+        if m:
+            return m.group(1)
+    return ""
 
 
 def _parse_recon_search_output(output: str) -> list[dict[str, Any]]:
@@ -166,6 +191,9 @@ def search_competitor_candidates(project: Path,
                         "source": "tavily_search",
                     })
 
+    own = _own_package(project)
+    if own:
+        candidates = [c for c in candidates if c.get("package") != own]
     return candidates[:max(limit, 5)]
 
 
