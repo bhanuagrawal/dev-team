@@ -22,6 +22,10 @@ Rules that keep it evidence, not entertainment:
     verdict, so a claim ("the spinner sits for four seconds") is reproducible;
   * a recording older than the screen's own sources is STALE and is refused —
     the same rule stills already follow;
+  * a flow is REPLAYABLE: `"fresh": true` on a first-run journey clears the app's
+    data before launch (`install -r` keeps it, so without this the flow is
+    recordable once per device and fails on its first step thereafter); a flow
+    that needs seeded state simply omits the key;
   * an emulator this command started is stopped before it returns.
 
 Nothing here is committed: `.pipeline/` is machine-local, by contract.
@@ -488,6 +492,17 @@ def record_flow(project: Path, flow: dict, serial: str, log=None) -> dict:
     pkg = package_name(project)
     _wake(serial)
     _adb(serial, ["shell", "am", "force-stop", pkg], timeout=30)
+    # A FIRST-RUN flow only exists on a device with no app data. `install -r -d`
+    # keeps that data, so without a reset the flow is recordable exactly once per
+    # device and every later run dies on the first step ("no node matching 'Maybe
+    # later'") — seen 2026-11-07. The reset is DECLARED per flow, never implied: a
+    # journey that needs seeded state must keep it.
+    if flow.get("fresh"):
+        cleared = _adb(serial, ["shell", "pm", "clear", pkg], timeout=60)
+        out = ((cleared.stdout or "") if cleared else "").strip()
+        if not out.lower().startswith("success"):
+            raise SystemExit(f"ux-video: could not clear app data for '{pkg}' "
+                             f"(declared fresh) — got {out or 'no answer'}")
     _adb(serial, ["shell", "monkey", "-p", pkg, "-c", "android.intent.category.LAUNCHER", "1"],
          timeout=45)
     time.sleep(1.2)
