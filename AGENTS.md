@@ -124,8 +124,13 @@ checklist + release-candidate call) and the two page URLs `record` prints.
    assertion — a screenshot render does not count), release-note freshness (the
    note may not repeat the last shipped one), compile, unit tests, instrumented
    tests. `release` re-runs the test gate before the version bump, so skipping
-   `verify` does not skip it. Version/signing/SDK changes and new libraries are
-   the reviewer's diff to catch — say so in the handover when a task touches them.
+   `verify` does not skip it. **100% unit and UI test coverage is enforced by
+   code**: `config/coverage.json` and `team/coverage.py` set the floor at 100%;
+   when coverage is below 100%, the planner (`team/research.py`) is code-gated
+   to make raising coverage the **topmost priority** (`queue[0]`), rejecting any
+   plan whose head does not target tests. Version/signing/SDK changes and new
+   libraries are the reviewer's diff to catch — say so in the handover when a task
+   touches them.
 9. **Ask the owner only what no agent can decide** (freeze-worthy incidents,
    discard-vs-keep on their WIP, direction). Never ask about promotion — the
    owner triggers it with their own words; the agent never raises it. Whether an

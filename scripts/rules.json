@@ -111,6 +111,13 @@
    "enforced_by": "devteam verify (test gate) / devteam release (refuses before the version bump) / devteam doctor (test-posture warn)"
   },
   {
+   "id": "full-test-coverage-enforced",
+   "rule": "100% unit and UI test coverage is enforced by code; when below 100%, the planner must make raising coverage the topmost priority (queue HEAD)",
+   "doc": "AGENTS.md#8",
+   "kind": "code",
+   "enforced_by": "config/coverage.json / team/coverage.py (100% floors) / team/research.py (_validate rejects non-test queue HEAD) / devteam doctor (coverage WARN)"
+  },
+  {
    "id": "ask-only-what-no-agent-can-decide",
    "rule": "ask the owner only for what no agent can decide (incidents, WIP, direction); never about promotion",
    "doc": "AGENTS.md#9",

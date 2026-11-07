@@ -29,10 +29,11 @@ import json
 import re
 from pathlib import Path
 
-# Default floors. Owner-tunable in config/coverage.json; a project may override its
-# own in profile["coverage"] (a project fact, so it lives there, not here).
-DEFAULT_UNIT_FLOOR = 60
-DEFAULT_UI_FLOOR = 50
+# Default floors: 100% unit and UI test coverage required.
+# Code-enforced in team/research.py: when below 100%, the planner MUST make raising
+# coverage the topmost priority (queue HEAD).
+DEFAULT_UNIT_FLOOR = 100
+DEFAULT_UI_FLOOR = 100
 
 # Standard Gradle + Kotlin Multiplatform source-set names. Only the ones that hold
 # shipped code or tests; generated sets (build/) are never scanned.
@@ -191,14 +192,23 @@ def collect(tree: Path, profile: dict | None = None) -> dict:
     unit_tests = _references(tree, UNIT_TEST_SETS)
     all_tests = unit_tests + "\n" + _references(tree, UI_TEST_SETS)
     if not all_tests.strip():
+        ui_count = sum(1 for f in main_files if _is_ui(f.relative_to(tree)))
+        unit_count = len(main_files) - ui_count
+        below = []
+        if unit_count > 0 and 0 < unit_floor:
+            below.append("unit")
+        if ui_count > 0 and 0 < ui_floor:
+            below.append("ui")
         return {
             "status": "no-tests",
             "floor": {"unit": unit_floor, "ui": ui_floor},
-            "unit": {"percent": 0, "covered": 0, "total": len(main_files),
-                     "measured_by": "structural", "missing_examples": []},
-            "ui": {"percent": None, "covered": 0, "total": 0,
-                   "measured_by": "structural", "missing_examples": []},
-            "below_floor": ["unit"],
+            "unit": {"percent": 0 if unit_count else None, "covered": 0, "total": unit_count,
+                     "measured_by": "structural",
+                     "missing_examples": [str(f.relative_to(tree)) for f in main_files if not _is_ui(f.relative_to(tree))][:6]},
+            "ui": {"percent": 0 if ui_count else None, "covered": 0, "total": ui_count,
+                   "measured_by": "structural",
+                   "missing_examples": [str(f.relative_to(tree)) for f in main_files if _is_ui(f.relative_to(tree))][:6]},
+            "below_floor": below,
             "note": "main sources exist but no test sources do — coverage is 0 by definition",
         }
 
@@ -259,19 +269,33 @@ def collect(tree: Path, profile: dict | None = None) -> dict:
     }
 
 
-def stored(project: Path) -> dict | None:
+def stored(project: Path, profile: dict | None = None) -> dict | None:
     """The coverage signal from the last collected research.json, if any.
 
     Cheap read for `status`/reports: the numbers were measured against the shipped
     tree at collect time, and re-measuring on every status call would re-walk the
-    codebase for a line of text.
+    codebase for a line of text. Floors are re-evaluated dynamically against the
+    active profile and team config so changes are immediately visible.
     """
     f = Path(project) / ".pipeline" / "research.json"
     try:
         sig = (json.loads(f.read_text()).get("signals") or {}).get("coverage")
     except (OSError, ValueError):
         return None
-    return sig if isinstance(sig, dict) and sig.get("status") else None
+    if not isinstance(sig, dict) or not sig.get("status"):
+        return None
+    unit_floor, ui_floor = floors(profile)
+    unit_leg = sig.get("unit") or {}
+    ui_leg = sig.get("ui") or {}
+    below = []
+    if unit_leg.get("percent") is not None and unit_leg["percent"] < unit_floor:
+        below.append("unit")
+    if ui_leg.get("percent") is not None and ui_leg["percent"] < ui_floor:
+        below.append("ui")
+    sig = dict(sig)
+    sig["floor"] = {"unit": unit_floor, "ui": ui_floor}
+    sig["below_floor"] = below
+    return sig
 
 
 def summary_line(sig: dict) -> str:

@@ -468,6 +468,31 @@ def run_doctor(project: Path, log) -> dict:
     except Exception as e:  # a check must never hide the report
         log(f"doctor tests: could not check ({e})")
 
+    # Coverage posture: 100% unit and UI test coverage is enforced by code.
+    # When below 100%, warn so the debt is visible and planner queue HEAD prioritizes it.
+    try:
+        from . import coverage as coverage_mod
+        cov = coverage_mod.stored(project)
+        if not cov:
+            from . import scan as scan_mod
+            stree = scan_mod.origin_tree(project)
+            if stree.is_dir():
+                cov = coverage_mod.collect(stree, profile_of(project))
+        if cov and cov.get("status") == "ok":
+            below = cov.get("below_floor") or []
+            if below:
+                log(f"doctor coverage: WARN — {coverage_mod.summary_line(cov).removeprefix('coverage: ')} (target 100%)")
+                report["coverage"] = {
+                    "status": "warn", "blocked": [],
+                    "checks_passed": 0,
+                    "note": f"coverage below 100% ({', '.join(below)}); planner queue HEAD must raise coverage",
+                }
+            else:
+                log(f"doctor coverage: ready — 100% unit and UI coverage")
+                report["coverage"] = {"status": "ready", "blocked": [], "checks_passed": 1}
+    except Exception as e:  # a check must never hide the report
+        log(f"doctor coverage: could not check ({e})")
+
     # The report page answers "what shipped, what do I test?" on the owner's phone.
     # Every ledger write rebuilds it (`core.save_state`), so a page older than the
     # ledger means a rebuild FAILED or a writer bypassed the ledger — and the page
