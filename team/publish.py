@@ -141,6 +141,18 @@ def _g(args: list[str], project: Path, timeout: int = 60):
     return git(args, cwd=project, timeout=timeout)
 
 
+def _retired_on_origin(project: Path, branch: str) -> list[str]:
+    """The files this mirror replaced that origin STILL carries.
+
+    A run whose process started before the mirror changed can put them back; a
+    publish that says "unchanged" would then leave two plans on the site, one of
+    them stale. So the retired files are checked on origin, not just on disk.
+    """
+    return [f for f in RETIRED
+            if _g(["cat-file", "-e", f"origin/{branch}:{f}"], project,
+                  timeout=30).returncode == 0]
+
+
 def published_url(project: Path) -> tuple[str | None, str]:
     """(url, why-not) for the plan as it stands — LOCAL refs only, no network, so
     it is safe to call from a read-only command like `status`.
@@ -271,9 +283,11 @@ def publish(project: Path, log=None) -> dict:
                 "why": "no plan mirror to publish yet"}
 
     # Already published and unchanged: no commit, no push, and we can say where
-    # it lives instead of silently doing nothing.
+    # it lives instead of silently doing nothing — unless origin still carries a
+    # file this mirror retired, which is a commit worth making.
+    stale = _retired_on_origin(project, branch)
     url, _why = published_url(project)
-    if url:
+    if url and not stale:
         return {"pushed": True, "url": url, "sha": "",
                 "why": "unchanged since the last publish"}
     # Current on origin but never read back (a lagging Pages build, or the first
