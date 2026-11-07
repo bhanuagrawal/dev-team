@@ -34,6 +34,19 @@ python3 cli.py alarm   <project>
 Report the outcome banner with the `RELEASE HANDOVER` block (store note + owner
 checklist + release-candidate call) and the two page URLs `record` prints.
 
+### Planning has four tiers — and code owns the shape
+
+`vision` (owner, one sentence) → `goals` (the **ends**: a great experience, users
+stay, users pay — each with one number) → `milestones` (the **means**: a feature
+or outcome) → `tasks` (the queue). A milestone is never added directly under the
+vision, and work filed under a later goal is refused while an earlier goal's
+number fails — so "keep users before you sell to them" is a gate, not a
+reminder. `devteam adapt` inserts/re-tiers the tree deterministically on the
+next run of any app (no LLM, no owner ask, every move recorded for review),
+`devteam doctor` blocks a flat tree, and the planner may move any branch below
+the vision (`goal_changes`). A new app gets the three goals as soon as its
+vision exists, so its first plan files milestones under ends from the start.
+
 ## Rules that hold for every agent
 
 1. **Never edit project code on `main`.** Every task runs in

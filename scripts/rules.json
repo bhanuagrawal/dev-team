@@ -197,6 +197,13 @@
    "note": "2026-11-05/06: the two touched device classes passed (13 tests), then a zombie qemu from a failed boot kept the AVD lock, every later boot died in ~1s, and verify degraded to 'device test runner could not execute (warn-only)' \u2014 the degrade is right for a machine with no emulator, wrong for a repairable lock holder"
   },
   {
+   "id": "plan-middle-tier",
+   "rule": "the plan has a middle tier: vision → goals (the ENDS, one number each) → milestones (the MEANS) → tasks; a new milestone must sit under a goal, and a later goal's milestones are not planned while an earlier goal's number fails",
+   "doc": "AGENTS.md#planning-has-four-tiers",
+   "kind": "code",
+   "enforced_by": "team/goals.py (ensure_goal_tier, tree_gaps, validate_advances) — devteam adapt re-shapes the tree, devteam doctor gates it, the planner's goal gate refuses the queue"
+  },
+  {
    "id": "store-screenshots-track-the-shipped-ui",
    "rule": "a listing frame must be painted from a render that contains the screen it depicts; a poster older than the newest change to its scene's composables is stale, not current",
    "doc": "AGENTS.md#5",

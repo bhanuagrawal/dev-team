@@ -1436,7 +1436,7 @@ def cmd_pick(args: argparse.Namespace) -> int:
 
 
 def cmd_tree(args: argparse.Namespace) -> None:
-    """Deterministic view of the goal tree: vision → milestones → leaves."""
+    """Deterministic view of the goal tree: vision → goals → milestones → leaves."""
     from team import tree as tree_mod
     project = resolve_project(args.project)
     if args.html:
@@ -1527,7 +1527,12 @@ def cmd_goal(args: argparse.Namespace) -> int:
         title = args.title or ""
         if not title:
             raise SystemExit("goal add needs --title (what this branch is for)")
-        new = {"id": args.id or _new_id(title), "kind": args.kind or "subgoal",
+        kind = args.kind or ("goal" if parent == "vision" else "subgoal")
+        if parent == "vision" and kind != "goal":
+            raise SystemExit("a branch directly under the vision is a GOAL (an end "
+                             "the product must reach for users) — use --kind goal, "
+                             "or add the milestone under an existing goal")
+        new = {"id": args.id or _new_id(title), "kind": kind,
                "title": title, "decided_by": "agent" if args.by == "agent" else "owner",
                "why": (args.why or "")[:300], "status": args.status or "active"}
         if args.outcome:
@@ -1649,6 +1654,11 @@ def cmd_plan(args: argparse.Namespace) -> int:
     from team.core import agent_argv, role_cfg
     project = resolve_project(args.project)
     log = RunLog(project, "plan-" + today())
+    # Shape before readiness: the middle tier is code's job, so the doctor this
+    # plan runs and the plan itself judge the SAME tree (no "blocked" line for a
+    # gap the next command would have closed in a millisecond).
+    from team import goals as goals_mod
+    goals_mod.ensure_shape(project, log)
     doctor.run_doctor(project, log)
     # ONE agent owns the plan, and it must always be able to run. If this host has
     # no synthesis command configured, the hand-off IS the normal path: write the
@@ -2285,14 +2295,28 @@ def cmd_vision(args: argparse.Namespace) -> int:
     goals.change(state, "set the long-term goal", "vision", args.why or
                  "the owner wrote the goal the team works toward",
                  before=old or "(none)", after=text, by="owner")
+    # The middle tier is STRUCTURE, so code supplies it the moment the owner
+    # states the goal: a brand-new app plans against ends (experience →
+    # retention → revenue) from its FIRST plan instead of against loose
+    # features. No direction is invented here — only the shape under the sentence
+    # the owner just wrote, and every move is recorded for review.
+    before_tier = len(goals.goal_tier(profile))
+    goals.ensure_goal_tier(profile)
+    if len(goals.goal_tier(profile)) > before_tier:
+        goals.change(state, "add", "goal tier",
+                     "a new app gets the three ends the moment its goal exists, so "
+                     "its first plan files milestones under what users need rather "
+                     "than under loose features",
+                     before="vision only", after="vision → goals → milestones",
+                     by="agent")
     save_json(pipeline_dir(project) / "profile.json", profile)
     save_state(project, state)
     from team import tree as tree_mod
     tree_mod.write(project)
     print(f"the goal is now: {text}")
-    if not goals_block["milestones"]:
-        print("  next: the team's job is to propose the milestones under it "
-              "(`devteam research`), not to ask you for them")
+    if not goals.has_milestones(profile):
+        print("  next: the team's job is to propose the milestones under the "
+              "goals above (`devteam research`), not to ask you for them")
     print_page(project, "the goal is at the top")
     return 0
 
@@ -3921,7 +3945,8 @@ def main() -> None:
     g.add_argument("--id", help="the branch to change (see `goal log` / the tree page)")
     g.add_argument("--title", help="add: what this branch is for, in plain words")
     g.add_argument("--parent", help="add/reparent: vision or another branch id")
-    g.add_argument("--kind", default="subgoal", choices=["subgoal", "milestone"])
+    g.add_argument("--kind", default=None,
+                   choices=["goal", "subgoal", "milestone"])
     g.add_argument("--status", help="set-status: active|pending|done|parked|proposed")
     g.add_argument("--outcome", help="add: what will be true when this is done")
     g.add_argument("--measure", action="append",

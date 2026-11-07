@@ -372,6 +372,32 @@ def run_doctor(project: Path, log) -> dict:
                         "checks_passed": 0}
         log(f"doctor ci: BLOCKED — {exc}")
 
+    # The plan's SHAPE is code-evaluated, not prose: vision → goals → milestones.
+    # A flat tree means a FEATURE stands where a GOAL should (bedtime grayscale,
+    # notification shielding) and no goal number can gate the next one. The fix
+    # is one deterministic command, so this blocks rather than warns.
+    try:
+        from . import goals as goals_mod
+        gaps = goals_mod.tree_gaps(profile)
+        why = gaps[0] + (f" (and {len(gaps) - 1} more)" if len(gaps) > 1 else "")
+        checks = [("the plan has a middle tier (vision → goals → milestones)"
+                   if not gaps else "the plan has no middle tier: " + why,
+                   not gaps,
+                   f"run: devteam adapt {project.name}   (re-shapes the tree "
+                   f"deterministically; it never invents the vision)")]
+        bad = [(r, fix) for r, ok, fix in checks if not ok]
+        report["goals"] = {
+            "status": "ready" if not bad else "blocked",
+            "blocked": [{"requirement": r, "fix": fix} for r, fix in bad],
+            "checks_passed": len(checks) - len(bad),
+        }
+        for r, fix in bad:
+            log(f"doctor goals: BLOCKED — {r} ({fix})")
+        if not bad:
+            log("doctor goals: ready (vision → goals → milestones)")
+    except Exception as e:  # a check must never hide the report
+        log(f"doctor goals: could not check ({e})")
+
     # Nothing may exist only on this disk (AGENTS.md). `status` reports the same
     # set: it is the detection half of the rule — the writer commits or parks
     # its own work, the team never commits the owner's WIP for them.

@@ -104,6 +104,10 @@ def needed(project: Path) -> list[str]:
     out += [f"missing state key '{k}'" for k in
             ("queue", "goal_log", "tree_changes", "alignment_log")
             if k not in state]
+    # The plan's SHAPE is structure, not direction: vision → goals → milestones.
+    # A flat tree (milestones straight under the vision) is repaired here, and a
+    # new app gets the tier the first time it has anything to organise.
+    out += goals.tree_gaps(profile)
     plan = goals.plan(profile)
     stale = [q.get("label") for q in state.get("queue", [])
              if str(q.get("advances") or "").strip() not in ("", "none")
@@ -196,6 +200,15 @@ def run(project: Path, log: RunLog | None = None, apply: bool = True) -> dict:
     if a:
         asks.append(ask(a["what"], a["how"]))
 
+    # 4b. the plan's SHAPE: vision → goals → milestones ------------------------
+    # Structure only, and every move is recorded for review: the goals are the
+    # ENDS (experience → retention → revenue) and each existing milestone is
+    # filed under the one its title names. The planner may move any of them; the
+    # VISION is untouched (it is the owner's sentence). This is what re-shapes
+    # every already-running app on its next run, deterministically.
+    for line in goals.ensure_goal_tier(profile, state):
+        note(line)
+
     # 5. stale goal links in the queue ---------------------------------------
     # A queue entry pointing at a branch that no longer exists would be invisible
     # drift: the tree shows it as unlinked work and the goal gate rejects new
@@ -226,7 +239,8 @@ def run(project: Path, log: RunLog | None = None, apply: bool = True) -> dict:
     if p:
         needs_metrics = any(
             isinstance(m, dict) and m.get("metric")
-            for ms in p["milestones"] for m in (ms.get("measures") or []))
+            for n in goals.nodes(profile)
+            for m in (n["raw"].get("measures") or []))
         if needs_metrics and not (pipeline_dir(project) / "research.json").exists():
             asks.append(ask(
                 "one of the goals is measured by a number (weekly active users) "

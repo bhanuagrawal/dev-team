@@ -13,9 +13,9 @@ Tree shape (nothing is fixed — branches can be added, parked, dropped,
 reparented; only the human changes the root):
 
   vision (root, owner-only)          profile['goals']['vision']
-  └─ milestone / sub-goal            profile['goals']['milestones'][*] (+ nested
-                                     'children' for agent-proposed sub-goals)
-     └─ task (a leaf = one run)      state['queue'] entries (advances) and
+  └─ goal                            a top-level node with kind='goal' — an END
+     └─ milestone / sub-goal         profile['goals']['milestones'][*] children
+        └─ task (a leaf = one run)   state['queue'] entries (advances) and
                                      state['shipped'] ledger rows (delivered)
 """
 from __future__ import annotations
@@ -140,9 +140,11 @@ def build(project) -> dict:
         mid = str(raw["id"])
         node = {"kind": kind, "id": mid,
                 "title": str(raw.get("title") or mid),
-                "status": ((st.get(mid, "pending") if kind == "milestone" else "")
+                "status": ((st.get(mid, "pending") if kind in ("milestone", "goal")
+                            else "")
                            or str(raw.get("status") or "")
-                           or (PROPOSED if kind != "milestone" else "pending")),
+                           or (PROPOSED if kind not in ("milestone", "goal")
+                               else "pending")),
                 "decided_by": str(raw.get("decided_by") or "owner"),
                 "outcome": str(raw.get("outcome") or ""),
                 "measures": _measures_view(raw, research),
@@ -151,12 +153,15 @@ def build(project) -> dict:
                 "children": []}
         for sub in raw.get("children") or []:
             if isinstance(sub, dict) and sub.get("id"):
-                node["children"].append(make_node(sub, "subgoal"))
+                subkind = "goal" if str(sub.get("kind") or "") == goals.GOAL_KIND \
+                    else "subgoal"
+                node["children"].append(make_node(sub, subkind))
         return node
 
     nodes: list[dict] = []
     for m in plan["milestones"]:
-        node = make_node(m, "milestone")
+        topkind = "goal" if str(m.get("kind") or "") == goals.GOAL_KIND else "milestone"
+        node = make_node(m, topkind)
         nodes.append(node)
         root["children"].append(node)
 
@@ -237,6 +242,16 @@ def render_text(model: dict) -> str:
             tail = (f"built in v{node['version']}" if node.get("version")
                     else "NEXT RUN" if node.get("is_next") else "in the queue")
             lines.append(f"{pad}{mark} {node['title']}   ({tail})")
+        elif kind == "goal":
+            mark = {"active": ">", "done": "✓", "pending": "·", "proposed": "?",
+                    "parked": "x", "history": "o"}.get(status, "·")
+            tail = goals.STATUS_WORDS.get(status, status)
+            if who:
+                tail += f", set by {who}"
+            if node.get("progress"):
+                tail += f" · {node['progress']}"
+            lines.append(f"{pad}{mark} {node['title']}   "
+                         f"(a goal · {tail})")
         else:
             mark = {"active": ">", "done": "✓", "pending": "·", "proposed": "?",
                     "parked": "x", "history": "o"}.get(status, "·")

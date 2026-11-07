@@ -1,4 +1,4 @@
-"""Goal model — long-term vision → mid-term milestones → short-term queue.
+"""Goal model — long-term vision → goals → mid-term milestones → short-term queue.
 
 The owner's ask (2026-10-18): "we need to run a workflow that leads towards
 goals, like companies run: long-term, mid-term, short-term. Otherwise we are
@@ -6,17 +6,28 @@ blindly wasting workflow." The answer here is DATA + DETERMINISTIC CODE, not a
 new agent:
 
   vision      (long term, owner-authored, rarely changes)  → profile['goals']['vision']
-  milestones  (mid term: an outcome + measures)            → profile['goals']['milestones']
+  goals       (the ENDS: what the product must be for users, each with ONE
+               number — a great experience, users stay, users pay)
+                                                           → profile['goals']['milestones']
+                                                             nodes with kind='goal'
+  milestones  (mid term: a MEANS — an outcome + measures)  → children of a goal
   queue       (short term: the existing research queue)     → state['queue'], each entry
                                                               may carry 'advances': <milestone id>
+
+The middle tier exists because a milestone is a MEANS (bedtime grayscale,
+notification shielding) and nothing in the data named the ENDS those means
+serve: a feature stood where a goal should, and "keep users before you sell to
+them" was a sentence, not a gate. Now a goal whose number fails keeps later
+goals' milestones out of the plan (`validate_advances`), and a new milestone
+must sit under a goal (`apply_one`).
 
 Division of labour, deliberately asymmetric:
   - the LLM (research synthesis) only PROPOSES: it tags each queue entry with
     the milestone it advances, and (for milestones whose measures are not
     machine-checkable) states a verdict;
   - CODE DECIDES everything derivable: which milestone is active, whether a
-    metric-measured milestone is met, which queue entries are goal-linked, and
-    in what order work is served. No LLM call is needed to answer "where is
+    metric-measured goal/milestone is met, which queue entries are goal-linked,
+    and in what order work is served. No LLM call is needed to answer "where is
     this app going?" or "what gets built next?".
 
 Everything degrades: a project with no profile['goals'] behaves exactly as
@@ -29,6 +40,191 @@ from .core import now_iso
 _OPS = {"<": lambda a, b: a < b, "<=": lambda a, b: a <= b,
         ">": lambda a, b: a > b, ">=": lambda a, b: a >= b,
         "==": lambda a, b: a == b}
+
+
+# --------------------------------------------------------------------------- #
+# THE MIDDLE TIER — goals (the ENDS) between the vision and the milestones
+# --------------------------------------------------------------------------- #
+# Owner, 2026-11-07: "long term goal is fine, short term looks like a task — we
+# should have one more layer in between: next to the long-term goal could be
+# 'great user experience', 'retaining customers', and below it what we have
+# today."
+#
+# The gap was real: the old tree was vision → milestones, and a MILESTONE is a
+# MEANS (a feature: bedtime grayscale, notification shielding). Nothing in the
+# data named the ENDS those features serve, so a feature could be mistaken for a
+# goal, a plan could sell before it kept anyone, and "does this work serve
+# anything?" had no answer a machine could check.
+#
+#   vision      (owner, one sentence, rarely changes)
+#   goals       (the ends; each carries ONE number — experience, retention, revenue)
+#   milestones  (the means; the old top level, now filed under a goal)
+#   tasks       (the queue)
+#
+# A goal node is a normal tree node with kind="goal": the SAME add/park/reparent
+# engine, the SAME rendering, the SAME audit log. No new storage format.
+GOAL_KIND = "goal"
+
+GOAL_DEFAULTS = (
+    {"id": "goal-experience", "title": "A great experience",
+     "outcome": "Users get a product that does the thing it promises, without "
+                "friction, confusion or a crash.",
+     "why": "everything else is measured on top of it — a user who cannot use the "
+            "app never becomes a retained one, let alone a paying one"},
+    {"id": "goal-retention", "title": "Users stay",
+     "outcome": "People who install keep using it — the product earns a place in "
+                "their day.",
+     "why": "demand cannot be measured on users who leave on day one; retention is "
+            "the first half of the owner's thesis"},
+    {"id": "goal-revenue", "title": "Users pay",
+     "outcome": "The product earns subscription revenue from the users it keeps.",
+     "why": "the second half of the owner's thesis, and it only means anything "
+            "after the first two hold"},
+)
+
+# Which goal a MILESTONE's title names. Deliberately title-only and dumb: a
+# reparent is one auditable change, and the planner can move any branch it
+# disagrees with. Guessing from outcomes/measures would need judgement, which
+# adapt must never do.
+_REVENUE_HINTS = ("subscri", "paywall", "conversion", "revenue", "mrr", "ltv",
+                  "trial", "monetiz", "monetis", "purchase", "billing", "price",
+                  "funnel", "upsell", "checkout", "upgrade sheet")
+_RETENTION_HINTS = ("retention", "churn", "uninstall", "day-1", "day 1", "day-30",
+                    "day 30", "streak", "re-engage", "reengage", "come back",
+                    "active users", "weekly active", "keep users", "detox")
+
+
+def _classify(title: str) -> str:
+    t = (title or "").lower()
+    if any(w in t for w in _REVENUE_HINTS):
+        return "goal-revenue"
+    if any(w in t for w in _RETENTION_HINTS):
+        return "goal-retention"
+    return "goal-experience"
+
+
+def goal_tier(profile: dict) -> list[dict]:
+    """The goal nodes — top-level branches with kind='goal' (empty on a flat tree)."""
+    p = plan(profile)
+    if not p:
+        return []
+    return [m for m in p["milestones"] if str(m.get("kind") or "") == GOAL_KIND]
+
+
+def tree_gaps(profile: dict) -> list[str]:
+    """What is structurally wrong with the plan's SHAPE, in plain words.
+
+    Empty when the tree has a goal tier and every milestone sits under one, or
+    when there is nothing to organise yet (no vision / no milestones — the
+    existing blocking owner ask covers that case)."""
+    p = plan(profile)
+    if not p:
+        return []
+    out: list[str] = []
+    goals = goal_tier(profile)
+    if not goals:
+        out.append("no goal tier: milestones sit directly under the vision, so a "
+                   "feature stands where a goal should")
+    for m in p["milestones"]:
+        if str(m.get("kind") or "") != GOAL_KIND:
+            out.append(f"milestone '{m['id']}' sits outside any goal")
+    return out
+
+
+def goal_of(profile: dict, node_id: str) -> str:
+    """The goal a node sits under ('' when none / when node_id is itself a goal)."""
+    flat = {n["id"]: n for n in nodes(profile)}
+    n = flat.get(str(node_id or ""))
+    while n is not None and n["kind"] != GOAL_KIND:
+        n = flat.get(n["parent"])
+    return n["id"] if n is not None else ""
+
+
+def ensure_goal_tier(profile: dict, state: dict | None = None,
+                     by: str = "agent") -> list[str]:
+    """Insert/finish the middle tier deterministically — no LLM, idempotent.
+
+    Flat tree (milestones directly under the vision): create the three ends and
+    file every existing milestone under the goal its TITLE names, keeping their
+    order. Tier already present: file any top-level orphan under a goal.
+    Returns plain-English notes ([] when already shaped)."""
+    p = plan(profile)
+    if not p:
+        return []
+    top = profile.setdefault("goals", {}).setdefault("milestones", [])
+    notes: list[str] = []
+
+    if not any(str(m.get("kind") or "") == GOAL_KIND
+               for m in top if isinstance(m, dict)):
+        created: dict[str, dict] = {}
+        for spec in GOAL_DEFAULTS:
+            created[spec["id"]] = {
+                "id": spec["id"], "kind": GOAL_KIND, "title": spec["title"],
+                "outcome": spec["outcome"], "decided_by": by, "status": "pending",
+                "why": spec["why"], "children": [],
+            }
+        moved: list[tuple[str, str]] = []
+        for m in list(top):
+            if not isinstance(m, dict) or not m.get("id"):
+                continue
+            gid = _classify(str(m.get("title") or ""))
+            created[gid]["children"].append(m)
+            moved.append((str(m["id"]), gid))
+        profile["goals"]["milestones"] = [created[s["id"]] for s in GOAL_DEFAULTS]
+        notes.append("added the goal tier between the vision and the milestones "
+                     "(" + ", ".join(s["title"] for s in GOAL_DEFAULTS) + ")")
+        for mid, gid in moved:
+            notes.append(f"milestone '{mid}' → goal '{gid}'")
+        if state is not None:
+            change(
+                state, "add", "goal tier",
+                "the plan had no middle tier: milestones sat directly under the "
+                "vision, so a feature stood where a goal should and no goal number "
+                "could gate the next one. Code inserted the three ends (experience "
+                "→ retention → revenue) and filed each milestone under the goal its "
+                "title names; the planner may move any of them.",
+                before="vision → milestones", after="vision → goals → milestones",
+                by=by)
+        return notes
+
+    # tier exists — close the remaining gap (a milestone added at the top level)
+    goals = {str(m["id"]): m for m in top
+             if isinstance(m, dict) and str(m.get("kind") or "") == GOAL_KIND}
+    orphans = [m for m in top
+               if isinstance(m, dict) and m.get("id")
+               and str(m.get("kind") or "") != GOAL_KIND]
+    for m in orphans:
+        gid = _classify(str(m.get("title") or ""))
+        target = goals.get(gid) or next(iter(goals.values()), None)
+        if target is None:
+            break
+        top.remove(m)
+        target.setdefault("children", []).append(m)
+        notes.append(f"milestone '{m['id']}' moved under goal '{target['id']}'")
+        if state is not None:
+            change(state, "reparent", str(m["id"]),
+                   "a milestone must sit under a goal; code filed it under the "
+                   "goal its title names", before="vision", after=str(target["id"]),
+                   by=by)
+    return notes
+
+
+def ensure_shape(project, log=None) -> list[str]:
+    """Apply ensure_goal_tier to a PROJECT's files (no-op when already shaped).
+
+    The one entry point `adapt`, the planner and a manual run all call, so the
+    next run of ANY app re-shapes its plan the same way."""
+    from .core import pipeline_dir, profile_of, save_json, state_of
+    profile, state = profile_of(project), state_of(project)
+    notes = ensure_goal_tier(profile, state)
+    if notes:
+        pdir = pipeline_dir(project)
+        save_json(pdir / "profile.json", profile)
+        save_json(pdir / "state.json", state)
+        if log:
+            for n in notes:
+                log("plan: " + n)
+    return notes
 
 
 def vision(profile: dict) -> str:
@@ -109,18 +305,42 @@ def has_goals(profile: dict) -> bool:
     return plan(profile) is not None
 
 
+def has_milestones(profile: dict) -> bool:
+    """True when the tree holds at least one MEANS (a non-goal branch)."""
+    return any(n["kind"] != GOAL_KIND for n in nodes(profile))
+
+
 def _log(state: dict) -> list[dict]:
     return state.get("goal_log") or []
 
 
-def status_of(profile: dict, state: dict) -> dict[str, str]:
-    """milestone id → 'active' | 'pending' | 'done' | 'parked'.
+def _leaves_under(nid: str, kids: dict, kind: dict) -> list[str]:
+    """Every leaf (a node that is nobody's parent) under a branch, in tree order."""
+    out: list[str] = []
+    for c in kids.get(nid) or []:
+        cid = str((c or {}).get("id") or "")
+        if not cid:
+            continue
+        if kids.get(cid):
+            out += _leaves_under(cid, kids, kind)
+        else:
+            out.append(cid)
+    return out
 
-    Deterministic: a milestone is done when the owner said so in the profile OR
-    code/the synthesis recorded a met verdict; a branch the owner set aside is
-    'parked' and can never be promoted. The active milestone is the first branch
-    EXPLICITLY marked active (the owner's live step), and only when none is
-    marked does position decide — the first still-open milestone in order.
+
+def status_of(profile: dict, state: dict) -> dict[str, str]:
+    """node id → 'active' | 'pending' | 'done' | 'parked'.
+
+    Deterministic, over the WHOLE tree (goal tier included):
+      * a milestone is done when the owner said so in the profile OR code/the
+        synthesis recorded a met verdict; a branch the owner set aside is
+        'parked' and can never be promoted;
+      * the active pointer is the first LEAF the owner/planner explicitly marked
+        active, else the first still-open leaf in tree order — a leaf, because a
+        container (a goal, or a milestone holding sub-goals) is not the thing a
+        run builds;
+      * a GOAL derives its status from what is under it: done when everything
+        under it is done, active when it holds the active pointer, else pending.
 
     Position alone used to decide, which meant parking a milestone changed its
     label and nothing else: the very branch the owner set aside stayed the one
@@ -132,48 +352,98 @@ def status_of(profile: dict, state: dict) -> dict[str, str]:
     for e in _log(state):
         if e.get("milestone"):
             latest[str(e["milestone"])] = str(e.get("verdict", ""))
-    raw = {str(m.get("id")): str(m.get("status", "")).lower()
-           for m in (profile.get("goals") or {}).get("milestones", [])
-           if isinstance(m, dict)}
+    flat = nodes(profile)
+    raw = {n["id"]: n["raw"] for n in flat}
+    kind = {n["id"]: n["kind"] for n in flat}
+    kids = {n["id"]: [c for c in (n["raw"].get("children") or [])
+                      if isinstance(c, dict) and c.get("id")]
+            for n in flat}
     out: dict[str, str] = {}
-    for m in p["milestones"]:
-        mid = m["id"]
-        if raw.get(mid) in ("done", "dropped") or latest.get(mid) in ("done", "dropped"):
-            out[mid] = "done"
-        elif raw.get(mid) in ("parked", "retired"):
-            out[mid] = "parked"
+
+    for n in flat:
+        nid = n["id"]
+        if kind[nid] == GOAL_KIND:
+            continue
+        rs = str(raw[nid].get("status") or "").lower()
+        if rs in ("done", "dropped") or latest.get(nid) in ("done", "dropped"):
+            out[nid] = "done"
+        elif rs in ("parked", "retired"):
+            out[nid] = "parked"
         else:
-            out[mid] = "pending"
-    for m in p["milestones"]:
-        if raw.get(m["id"]) == "active" and out[m["id"]] == "pending":
-            out[m["id"]] = "active"
-            return out
-    for m in p["milestones"]:
-        if out[m["id"]] == "pending":
-            out[m["id"]] = "active"
-            break
+            out[nid] = "pending"
+
+    def explicit_active(i: str) -> bool:
+        return (kind.get(i) != GOAL_KIND
+                and str(raw.get(i, {}).get("status") or "").lower() == "active"
+                and out.get(i) == "pending")
+
+    leaves = [n["id"] for n in flat
+              if kind[n["id"]] != GOAL_KIND and not kids.get(n["id"])]
+    active = next((i for i in leaves if explicit_active(i)), None)
+    if active is None:
+        active = next((i for i in leaves if out.get(i) == "pending"), None)
+    if active is None:  # a container-only tree: any open node is better than none
+        active = next((n["id"] for n in flat
+                       if kind[n["id"]] != GOAL_KIND
+                       and out.get(n["id"]) == "pending"), None)
+    if active:
+        out[active] = "active"
+
+    # goals last (post-order: children appear after parents in a depth-first walk)
+    for n in reversed(flat):
+        nid = n["id"]
+        if kind[nid] != GOAL_KIND:
+            continue
+        sts = [out[i] for i in _leaves_under(nid, kids, kind) if i in out]
+        rs = str(raw[nid].get("status") or "").lower()
+        if rs in ("done", "dropped") or latest.get(nid) in ("done", "dropped"):
+            out[nid] = "done"
+        elif rs in ("parked", "retired"):
+            out[nid] = "parked"
+        elif sts and all(s == "done" for s in sts):
+            out[nid] = "done"
+        elif "active" in sts:
+            out[nid] = "active"
+        elif sts and all(s in ("done", "parked") for s in sts):
+            out[nid] = "parked"
+        else:
+            out[nid] = "pending"
     return out
 
 
 def active_milestone(profile: dict, state: dict) -> dict | None:
+    """The leaf this run should be building (a goal or a container is never it)."""
     p = plan(profile)
     if not p:
         return None
     st = status_of(profile, state)
-    for m in p["milestones"]:
-        if st.get(m["id"]) == "active":
-            return m
+    for n in nodes(profile):
+        if n["kind"] == GOAL_KIND or st.get(n["id"]) != "active":
+            continue
+        raw = n["raw"]
+        return {"id": n["id"], "title": n["title"],
+                "outcome": str(raw.get("outcome") or ""),
+                "measures": raw.get("measures") or [],
+                "children": raw.get("children") or [],
+                "status": str(raw.get("status") or ""),
+                "decided_by": str(raw.get("decided_by") or "owner"),
+                "kind": n["kind"], "order": 0}
     return None
 
 
 def milestone(profile: dict, mid: str) -> dict | None:
-    p = plan(profile)
-    if not p:
+    """Any branch by id, at ANY depth (a milestone now lives under a goal)."""
+    n = find_node(profile, str(mid or ""))
+    if n is None:
         return None
-    for m in p["milestones"]:
-        if m["id"] == mid:
-            return m
-    return None
+    raw = n["raw"]
+    return {"id": n["id"], "title": n["title"],
+            "outcome": str(raw.get("outcome") or ""),
+            "measures": raw.get("measures") or [],
+            "children": raw.get("children") or [],
+            "status": str(raw.get("status") or ""),
+            "decided_by": str(raw.get("decided_by") or "owner"),
+            "kind": n["kind"], "order": 0}
 
 
 def check_measures(ms: dict, research: dict | None) -> tuple[bool | None, str]:
@@ -231,13 +501,16 @@ def queue_entry_milestone(entry: dict, profile: dict, state: dict) -> str:
 
 
 def validate_advances(result: dict, profile: dict, state: dict,
-                      extra_ids: tuple = ()) -> str | None:
+                      extra_ids: tuple = (),
+                      research: dict | None = None) -> str | None:
     """Deterministic gate on the research plan: with a goal tree defined, every
     queue entry must declare the milestone it advances ('none' is allowed but
     must also be listed in off_goal so the drift is visible and recorded).
 
     `extra_ids` are branches the SAME result is about to add (goal_changes), so a
-    synthesis can create a branch and queue work for it in one plan."""
+    synthesis can create a branch and queue work for it in one plan.
+    `research` carries the metric signals that let an EARLIER goal's number gate
+    later work (the middle tier is a gate, not a label)."""
     p = plan(profile)
     if not p:
         return None
@@ -267,6 +540,11 @@ def validate_advances(result: dict, profile: dict, state: dict,
         if mid not in known:
             return (f"queue entry '{q.get('label')}' advances unknown milestone "
                     f"'{mid}' (known ids: {sorted(known)})")
+        node = find_node(profile, mid)
+        if node is not None and node["kind"] == GOAL_KIND:
+            return (f"queue entry '{q.get('label')}' advances the GOAL '{mid}' — a "
+                    "task serves a milestone under it, not the goal itself; name "
+                    "the milestone")
         if mid in done:
             return (f"queue entry '{q.get('label')}' advances milestone '{mid}', "
                     "which is already done")
@@ -274,6 +552,20 @@ def validate_advances(result: dict, profile: dict, state: dict,
             return (f"queue entry '{q.get('label')}' advances '{mid}', which is "
                     "parked/retired — either set it active or queue work that "
                     "serves the active step")
+        # THE MIDDLE TIER IS A GATE: work filed under a later goal is not planned
+        # while an earlier goal's NUMBER is unmet. "Keep users before you sell to
+        # them" then holds by construction, not by a sentence nobody re-reads.
+        gid = goal_of(profile, mid)
+        if gid and research is not None:
+            for g in goal_tier(profile):
+                if g["id"] == gid:
+                    break
+                ok, evidence = check_measures(g, research)
+                if ok is False:
+                    return (f"queue entry '{q.get('label')}' advances '{mid}', but "
+                            f"the earlier goal '{g['title']}' is not met "
+                            f"({evidence}) — the plan may not sell what it has not "
+                            f"kept: finish that goal before working past it")
     return None
 
 
@@ -287,17 +579,26 @@ def goal_block(profile: dict, state: dict) -> str:
                 "(`devteam vision <project> \"<one sentence>\"`).")
     st = status_of(profile, state)
     lines = [f'PLAN  the goal: {p["vision"] or "(none)"}']
-    for m in p["milestones"]:
+
+    def emit(node: dict, depth: int) -> None:
+        mid = str(node.get("id") or "")
         mark = {"done": "✓", "active": ">", "pending": "·", "parked": "x"}.get(
-            st[m["id"]], "·")
-        extra = " — set aside" if str(m.get("status")) == "parked" else ""
-        lines.append(f"  {mark} {m['title']}{extra}")
+            st.get(mid, "·"), "·")
+        extra = " — set aside" if str(node.get("status")) == "parked" else ""
+        pad = "   " * depth
+        lines.append(f"  {pad}{mark} {node['title']}{extra}")
+        for c in node.get("children") or []:
+            if isinstance(c, dict) and c.get("id"):
+                emit(c, depth + 1)
+
+    for m in p["milestones"]:
+        emit(m, 0)
     act = active_milestone(profile, state)
     if act:
         lines.append(f"  working on: {act['title']}")
-    elif p["milestones"]:
-        lines.append("  working on: nothing — every goal is done; the team should "
-                     "propose the next one")
+    elif has_milestones(profile):
+        lines.append("  working on: nothing — every milestone is done; the team "
+                     "should propose the next one")
     else:
         lines.append("  working on: no milestone yet — the planner proposes the "
                      "first one under your goal (you own only the goal itself)")
@@ -318,29 +619,50 @@ def prompt_block(profile: dict, state: dict) -> str:
     st = status_of(profile, state)
     act = active_milestone(profile, state)
     body = [f'LONG-TERM VISION (owner): "{p["vision"]}"',
-            "MILESTONES (mid-term, in order):"]
+            "GOALS (the ENDS, in order — each carries ONE number; every milestone",
+            "sits under a goal. A later goal may not be worked on while an earlier",
+            "goal's number fails: that is enforced by code, not a suggestion):"]
+    if not goal_tier(profile):
+        body.append("  (no goal tier yet — CODE inserts experience → retention → "
+                    "revenue on this plan; add milestones under a goal, never "
+                    "directly under the vision)")
+    body.append("THE TREE (goals are the ends, milestones the means — in order):")
+
+    def render(node: dict, indent: int) -> None:
+        nid = str(node.get("id") or "")
+        label = "goal" if str(node.get("kind") or "") == GOAL_KIND else "milestone"
+        body.append(f'{"  " * indent}- {label} id="{nid}" '
+                    f'status={st.get(nid, "pending")} title="{node.get("title")}"')
+        if node.get("outcome"):
+            body.append(f'{"  " * (indent + 1)}outcome: {node["outcome"]}')
+        for x in node.get("measures") or []:
+            if not isinstance(x, dict):
+                continue
+            if x.get("metric"):
+                body.append(f'{"  " * (indent + 1)}measure(metric): {x["metric"]} '
+                            f'{x.get("op", "<=")} {x.get("target")}')
+            elif x.get("text"):
+                body.append(f'{"  " * (indent + 1)}measure: {x["text"]}')
+        for c in node.get("children") or []:
+            if isinstance(c, dict) and c.get("id"):
+                render(c, indent + 1)
+
     for m in p["milestones"]:
-        body.append(f'  - id="{m["id"]}" status={st[m["id"]]} title="{m["title"]}"')
-        if m.get("outcome"):
-            body.append(f'      outcome: {m["outcome"]}')
-        for x in m["measures"]:
-            if isinstance(x, dict):
-                if x.get("metric"):
-                    body.append(f'      measure(metric): {x["metric"]} '
-                                f'{x.get("op","<=")} {x.get("target")}')
-                elif x.get("text"):
-                    body.append(f'      measure: {x["text"]}')
+        render(m, 1)
     if act:
         body.append(f'ACTIVE MILESTONE: {act["id"]}')
-    elif p["milestones"]:
+    elif has_milestones(profile):
         body.append("ACTIVE MILESTONE: none (every milestone is done — retiring one "
                     "advances the pointer; proposing the next is an owner call)")
     else:
         body.append("ACTIVE MILESTONE: none yet — the vision has no milestones. "
-                    "YOUR JOB THIS CYCLE: propose the first one (goal_changes: "
-                    "action=add, kind=milestone, parent=vision, with an outcome and "
-                    "measures) and aim the queue at it. Never ask the owner for "
-                    "milestones — you own the tree below the vision.")
+                    "YOUR JOB THIS CYCLE: propose the first one under a goal "
+                    "(goal_changes: action=add, kind=milestone, parent=<a goal id "
+                    "from the tree above>, with an outcome and measures) and aim "
+                    "the queue at it. Never ask the owner for milestones — you own "
+                    "the tree below the vision. Give each GOAL its one number "
+                    "(action=update, measures=[{metric, op, target}]) as soon as a "
+                    "signal can read it.")
     return "\n".join(body)
 
 
@@ -367,7 +689,7 @@ def report_line(profile: dict, state: dict, task: dict | None = None) -> str:
     # A vision with no milestones under it yet is NOT "all done" — the planner
     # still has to propose the first one (owner directive: the team proposes
     # milestones, the owner owns only the vision).
-    if plan(profile)["milestones"]:
+    if has_milestones(profile):
         return "goal: all milestones done — the next one needs the owner or the planner"
     return "goal: vision set, no milestone yet — the planner proposes the first one"
 
@@ -414,6 +736,12 @@ def apply_one(profile: dict, change: dict, by: str = "agent") -> tuple[str, str,
         if not title:
             return bad("a new branch needs a title (what it is for, in words)")
         parent = str(change.get("parent") or "vision")
+        kind = str(change.get("kind") or
+                   (GOAL_KIND if parent == "vision" else "subgoal"))
+        if parent == "vision" and kind != GOAL_KIND:
+            return bad("a branch directly under the vision is a GOAL (an end the "
+                       "product must reach for users) — pass kind=\"goal\", or add "
+                       "the milestone under an existing goal")
         kids = holder_list(profile, parent)
         if kids is None:
             return bad(f"no branch '{parent}' to add under "
@@ -427,7 +755,7 @@ def apply_one(profile: dict, change: dict, by: str = "agent") -> tuple[str, str,
                 return good(str(k.get("id")),
                             f"already existed under {parent} (nothing added)", why)
         node_id = str(change.get("id") or _slug(title, profile))
-        new = {"id": node_id, "kind": str(change.get("kind") or "subgoal"),
+        new = {"id": node_id, "kind": kind,
                "title": title, "decided_by": by,
                "status": str(change.get("status") or "active"),
                "why": why[:300]}
@@ -464,6 +792,25 @@ def apply_one(profile: dict, change: dict, by: str = "agent") -> tuple[str, str,
         if raw in kids:
             kids.remove(raw)
         return good(node_id, "removed from the plan", why)
+    if action == "update":
+        # The planner owns the tree BELOW the vision: it may restate a branch's
+        # outcome, or replace a text measure with the number now that a signal
+        # exists. The vision itself is not a node here, so it stays the owner's.
+        for key in ("title", "outcome"):
+            if isinstance(change.get(key), str) and change[key].strip():
+                raw[key] = change[key].strip()
+        if change.get("measures") is not None:
+            raw["measures"] = [m if isinstance(m, dict) else {"text": str(m)}
+                               for m in change["measures"]]
+        if change.get("measure"):
+            raw.setdefault("measures", []).append({"text": str(change["measure"])})
+        if change.get("status"):
+            st = str(change["status"])
+            if st not in ("active", "pending", "done", "parked", "proposed"):
+                return bad("status must be one of: active, pending, done, parked, "
+                           "proposed")
+            raw["status"] = st
+        return good(node_id, "updated", why)
     if action == "reparent":
         target = str(change.get("parent") or "")
         if raw_node(profile, target)[0] is None:
@@ -486,14 +833,22 @@ def validate_changes(result: dict) -> str:
         if not isinstance(c, dict):
             return f"goal_changes[{i}] must be an object"
         if str(c.get("action") or "") not in ("add", "park", "set-status",
-                                              "retire", "reparent"):
+                                              "retire", "reparent", "update"):
             return (f"goal_changes[{i}] has action '{c.get('action')}' — use add, "
-                    "park, set-status, retire or reparent")
+                    "park, set-status, retire, reparent or update")
         if not str(c.get("why") or "").strip():
             return (f"goal_changes[{i}] has no 'why' — the owner MUST be able to "
                     "read why the plan moved")
         if c.get("action") == "add" and not str(c.get("title") or "").strip():
             return f"goal_changes[{i}] add needs a title"
+        if c.get("action") == "add":
+            parent = str(c.get("parent") or "vision")
+            kind = str(c.get("kind") or
+                       (GOAL_KIND if parent == "vision" else "subgoal"))
+            if parent == "vision" and kind != GOAL_KIND:
+                return (f"goal_changes[{i}] adds a '{kind}' directly under the "
+                        "vision — a top-level branch is a GOAL (kind=\"goal\"); "
+                        "milestones sit under a goal")
     return ""
 
 
