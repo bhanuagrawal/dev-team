@@ -11,8 +11,9 @@ CODING CONVENTIONS (MANDATORY READS — style law; must read before writing code
   Doctrine governs NEW files; for files you EDIT, match that file's existing idiom instead (no retrofits).
 
 HARD RULES:
-1. Edit ONLY files under: {target_area}
-   Other allowed paths (only if needed): {allowed_paths}
+1. Target focus area: {target_area}
+   Other relevant paths: {allowed_paths}
+   There is NO file blocking: you have full authority to edit any files across the project (shared components, themes, ViewModels, resources, tests) required to properly implement the task, resolve root causes, and pass all verification gates.
 2. Localization: this project ships {locales} locales. REUSE existing shared
    strings where natural. If you MUST add a user-facing string, add it to the
    default values/strings.xml AND every locale file the profile declares.

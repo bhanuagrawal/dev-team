@@ -852,7 +852,7 @@ Decide what to BUILD NEXT. Output STRICT JSON only (no prose, no code fence):
   "insights": {{"headline": "one line", "analysis": "2-5 sentences grounded in the numbers"}},
   "queue": [
     {{"type": "motion|bugfix|feature|investigation", "label": "...",
-      "target": "<motion: the exact surface path; feature/bugfix: the repo-relative path(s) you will edit, comma-separated — this BECOMES the developer's edit allow-list, so no prose here; investigation: a short topic>",
+      "target": "<motion: the exact surface path; feature/bugfix: primary repo-relative path(s) being addressed, comma-separated; investigation: a short topic>",
       "effort_min": {target_effort},
       "priority": 1, "reason": "one line grounded in research",
       "advances": "<milestone id this task serves, or 'none'>",
@@ -882,11 +882,15 @@ Decide what to BUILD NEXT. Output STRICT JSON only (no prose, no code fence):
 }}
 Rules:
 - STORE READINESS: inspect `signals.store_readiness`. If blockers exist (or `is_ready_for_submission` is false), prioritize resolving those compliance issues (targetSdk, permissions, privacy policy, icons, release signing) before discretionary polish, keeping the app releasable on Google Play.
-- UI & EXPERIENTIAL QUALITY (`signals.ux`): the owner's standing direction is
-  "polish a lot — do not dumbly keep adding features", and "look and feel usually
-  does not change in one run". Visual reviews inspect real rendered surfaces for
-  broken layouts, usability degradation, and polish. Gripes carry stable ids (`UX-...`).
-  Read them before proposing anything:
+- UI, EXPERIENTIAL QUALITY & HOLISTIC REPLANNING (`signals.ux`):
+  Visual reviews inspect real rendered surfaces for broken layouts, usability degradation, and polish. Gripes carry stable ids (`UX-...`).
+  Read all signals together before proposing anything:
+  * HOLISTIC IMPACT ANALYSIS (NOT JUST QUEUING IN FRONT):
+    Do NOT simply prepend one single bugfix task onto an existing queue and leave the rest unchanged.
+    Signals (crashes from vitals, UI blunders from `signals.ux.p0_blunders`, degraded usability) are systemic feedback on the live product.
+    Evaluate ALL open signals together and analyze their downstream impact:
+    - Impact on the Task List: Do reported blunders or broken UX flows invalidate or alter upcoming queued tasks? (e.g. if task 2 builds onto a broken screen, building task 2 as originally planned is waste). Regenerate or restructure the task list: drop obsolete tasks, rewrite task scopes, merge multiple related blunders across screens into a coherent refactor task (~210 min), or supersede tasks that no longer make sense.
+    - Impact on the Goal Tree: If signals reveal that a milestone's underlying UX model or assumptions were flawed, update the tree via `goal_changes` (reparent, park, retire, or update outcomes and measures).
   * P0 UI BLUNDERS ARE FIRES (`signals.ux.p0_blunders`): critical layout breaks,
     overlapping text/controls, clipped/invisible primary CTA buttons, blank unrendered cards,
     crash overlays, or unreadable contrast. If ANY P0 blunder exists, resolving it is a
@@ -937,12 +941,13 @@ Rules:
   A branch you add may be queued against in the SAME plan: put the branch's id
   (or its exact title) in the queue entry's "advances" — code resolves a title to
   the id. Do not add a branch that already exists: change it instead.
-- MAINTENANCE, NOT REGENERATION: every entry already in
-  signals.repo.current_queue must be judged this cycle — carried forward,
-  superseded by a new entry, or dropped with a reason. Do not rebuild the queue
-  from scratch: keep what still serves the plan, and reorder only where the
-  active milestone says so. (Carried-forward work must still be valid: an entry
-  whose goal no longer exists must be re-pointed at a live one or dropped.)
+- QUEUE RE-EVALUATION & HOLISTIC REPLANNING: every entry in
+  signals.repo.current_queue must be judged this cycle against all fresh signals.
+  When new blockers, crashes, or UI blunders arrive, evaluate their downstream impact
+  across all queued tasks: regenerate, supersede, or drop tasks that are impacted or invalidated.
+  Bundle related fixes across screens into coherent engineering passes. Do not blindly prepend
+  hotfixes to a stale queue; re-plan the execution path holistically. (Carried-forward work must
+  still be valid: an entry whose goal no longer exists must be re-pointed at a live one or dropped.)
 - HANDOVER: queue[0] is the task THE NEXT RUN BUILDS. Put the single most
   valuable next step for the ACTIVE milestone first — the runner-up second, and
   so on. The order you write IS the execution order.
@@ -985,14 +990,13 @@ Rules:
     finishable, verifiable and releasable in a single pass.
   - Exception: the delivery-restoring entry (signals.ci red, queue[0]) may be
     any size — restoring delivery outranks sizing.
-- 'target' is the developer's file allow-list, not a description: for
-  feature/bugfix it must be repo-relative PATH(S) (files, dirs or globs, e.g.
-  'app/src/main/java/**/ui/Foo.kt'); put the explanation in 'reason'. A prose
-  target is rejected in code — it would silently replace the allow-list and
-  fail the build step. EVERY item needs a path separator: a TOP-LEVEL file (one
-  that sits at the repo root, e.g. settings.gradle.kts or build.gradle.kts)
-  must be written './settings.gradle.kts', never a bare filename — the
-  validator rejects a separator-less item and the whole plan is refused.
+- 'target' indicates the primary files/entry points for the task (repo-relative PATH(S),
+  files, dirs or globs, e.g. 'app/src/main/java/**/ui/Foo.kt'); put the explanation in 'reason'.
+  There is NO file blocking: developers have full authority to edit any shared files, viewmodels,
+  themes, or tests needed to resolve the task properly. 'target' provides the primary focus and
+  validator anchor. EVERY item needs a path separator: a TOP-LEVEL file (one that sits at the
+  repo root, e.g. settings.gradle.kts or build.gradle.kts) must be written './settings.gradle.kts',
+  never a bare filename — the validator rejects a separator-less item and the whole plan is refused.
 - A NEW DEPENDENCY IS A DECISION, NOT A DETAIL: if an entry's work needs a
   third-party library, name it in the entry's `dependencies_added` (the alias,
   the catalogue key or the coordinate — any of the three will do) AND say in
