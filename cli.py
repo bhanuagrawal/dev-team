@@ -834,6 +834,33 @@ def cmd_worktree_prune(args: argparse.Namespace) -> None:
     print_page(project, "shows the queue", file=sys.stderr)
 
 
+def _revamp_intent(*texts: str) -> bool:
+    """True only when the words ASK for a rebuild, not when they mention one.
+
+    2026-11-08: a P0 bugfix spec whose reason read "since the revamp deleted the
+    screen-time code" matched the substring "revamp", so `worktree-start` wiped
+    and archived the whole worktree it had just cut. A reference to a past or
+    future revamp is narration; only an explicit rebuild phrase is a request.
+    """
+    blob = " ".join(t for t in texts if t).lower()
+    blob = re.sub(r"\b(?:pre|post|non|anti)[- ]revamp\w*", " ", blob)
+    blob = re.sub(r"\b(?:before|after|since|previous|last|old|current)\s+(?:the\s+)?revamp\b", " ", blob)
+    return any(p in blob for p in _REVAMP_PHRASES)
+
+
+# Phrases a request to rebuild actually uses. Deliberately narrow: a bare
+# "revamp"/"rebuild" anywhere in prose is exactly the false positive above.
+_REVAMP_PHRASES = (
+    "rebuild from scratch", "rebuild from the ground up", "ground-up rebuild",
+    "rebuild the app", "rebuild the ui", "rebuild the codebase", "rebuild this app",
+    "revamp the app", "revamp the ui", "revamp this app", "full revamp", "ui revamp",
+    "design revamp", "ground-up revamp", "complete redesign", "redesign from scratch",
+    "delete the codebase", "delete codebase", "delete the ui", "delete ui",
+    "purge the codebase", "purge codebase", "wipe the codebase", "start from scratch",
+    "scrap the existing design", "scrap the design",
+)
+
+
 def cmd_worktree_start(args: argparse.Namespace) -> None:
     project = resolve_project(args.project)
     if not args.task_id:
@@ -852,15 +879,15 @@ def cmd_worktree_start(args: argparse.Namespace) -> None:
         spec = task_spec_path(project, args.task_id)
         if spec and spec.is_file():
             task_data = json.loads(spec.read_text())
+            kind = str(task_data.get("kind") or task_data.get("type") or "").lower()
             label = str(task_data.get("label", "")).lower()
-            req_text = str(task_data.get("owner_request", "") or task_data.get("reason", "")).lower()
-            if not is_revamp:
-                is_revamp = (
-                    task_data.get("kind") == "revamp"
-                    or task_data.get("type") == "revamp"
-                    or any(k in label for k in ("revamp", "rebuild", "delete"))
-                    or any(k in req_text for k in ("revamp", "rebuild", "delete the codebase", "delete codebase", "from scratch", "delete ui", "delete the ui"))
-                )
+            req_text = str(task_data.get("owner_request", "") or "")
+            # A bugfix is never a rebuild, whatever its prose mentions.
+            is_revamp = kind != "bugfix" and (
+                is_revamp
+                or kind == "revamp"
+                or _revamp_intent(label, req_text)
+            )
     except (Exception, SystemExit):
         # This lookup is a probe for the revamp purge, never a gate: a spec
         # this command cannot find must not kill a worktree it just prepared.

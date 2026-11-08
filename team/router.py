@@ -156,10 +156,38 @@ def _norm(text: str) -> str:
     return re.sub(r"[^a-z0-9]+", " ", (text or "").lower()).strip()
 
 
+# A phrase that asks for a rebuild, not one that merely mentions a revamp.
+# 2026-11-08: a P0 bugfix prompt saying "use the code from before the revamp" was
+# classified as a revamp and got the destructive purge chain. Only an explicit
+# rebuild request may do that.
+_STRONG_REBUILD_PHRASES = (
+    "rebuild from scratch", "rebuild from the ground up", "ground-up rebuild",
+    "rebuild the app", "rebuild the ui", "rebuild the codebase", "rebuild this app",
+    "revamp the app", "revamp the ui", "revamp this app", "full revamp", "ui revamp",
+    "design revamp", "ground-up revamp", "complete redesign", "redesign from scratch",
+    "delete the codebase", "delete codebase", "delete the ui", "delete ui",
+    "purge the codebase", "purge codebase", "wipe the codebase", "start from scratch",
+    "scrap the existing design", "scrap the design", "ui overhaul",
+)
+
+# Words that name a defect or a repair. When one is present and no explicit
+# rebuild is asked for, the work is a bugfix — never a ground-up rebuild.
+_REPAIR_MARKERS = (
+    "fix", "p0", "bug", "regression", "doesn't work", "does not work",
+    "not working", "broken", "crash", "stuck", "wrong", "re-render",
+    "rerender", "duplicate", "no change", "still lands", "still landed",
+)
+
+
 def kind_of(prompt: str) -> tuple[str, str]:
     """(kind, evidence). Evidence is the literal term that decided it, so the
     plan can be argued with instead of believed."""
     low = " " + (prompt or "").lower() + " "
+    strong_rebuild = any(p in low for p in _STRONG_REBUILD_PHRASES)
+    if not strong_rebuild:
+        for marker in _REPAIR_MARKERS:
+            if re.search(rf"(?<![a-z]){re.escape(marker)}(?![a-z])", low):
+                return "bugfix", marker
     for kind, _type, terms, _why in KINDS:
         for term in terms:
             if term in low:
