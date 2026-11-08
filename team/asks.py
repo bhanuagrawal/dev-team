@@ -342,6 +342,26 @@ def review(title: str, how: str = "", profile: dict | None = None,
         )
         return row
 
+    # The recon agent is a local tool the machine already has: its three verbs are
+    # runnable by any agent with an emulator (`recon research --yes` needs a Play
+    # signed-in account, NOT a human standing by — a human is only the wall of a
+    # sign-in/CAPTCHA). Filed as owner work before 2026-11-08 because no `devteam`
+    # command appears in the text and no console page is named.
+    recon = re.search(r"\brecon\s+(research|play|install)\b", text)
+    if recon:
+        row.update(
+            verdict="agent", tool=None,
+            steps=[
+                f"run `recon {recon.group(1)}` (pass `--yes` where the verb takes it) — "
+                "it drives an emulator, not a console",
+                "read the log for the picks and their reasons; a human is needed only at "
+                "a sign-in / CAPTCHA wall",
+            ],
+            why=("the ask names the local recon command, so the machine can run it "
+                 "end to end"),
+        )
+        return row
+
     rule = _first(RULES, text)
     if not rule:
         row["why"] = ("no console page, cloud API, OS setting or app dialog is named in "
@@ -580,6 +600,13 @@ SELFTEST: list[tuple[str, str, dict | None, str, str | None]] = [
     # its title says "Google Play".
     ("Resolve Google Play Store readiness blockers",
      "Run `devteam competition <project> --limit 5` to research >= 5 rivals and write docs/COMPETITION_RESEARCH.md",
+     None, "agent", None),
+    # The recon agent is local work (emulator + Play account), not an owner chore:
+    # its text names no `devteam` command, so before 2026-11-08 it fell through to
+    # "no console page named" and was handed to the owner.
+    ("Run competitor recon",
+     "any agent or the owner can run this — it needs an EMULATOR and a Play-signed-in "
+     "account, NOT a human standing by: `recon research --term \"<what a rival is>\" --yes`",
      None, "agent", None),
 ]
 
