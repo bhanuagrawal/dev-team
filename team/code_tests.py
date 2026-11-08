@@ -322,15 +322,23 @@ def gate(worktree: Path, files: list[str]) -> tuple[bool, str]:
 # posture — doctor/capabilities read the same classification
 # --------------------------------------------------------------------------- #
 def posture(root: Path) -> dict:
-    """Counts of production sources and asserting tests on disk.
+    """Counts of production sources and asserting tests on the delivery tree.
 
     Not a gate; it makes a project's test debt visible BEFORE the next change
-    fails verify. Reads the checkout (a test source set is layout, not state).
+    fails verify. Reads origin/main (via the caller), because the checkout drifts
+    and a stale count misleads exactly when a release just changed it.
     """
     sources = ui_sources = 0
     unit_tests = ui_tests = 0
     for p in root.rglob("*"):
-        if not p.is_file() or any(x in SKIP_DIR_PARTS for x in p.parts):
+        if not p.is_file():
+            continue
+        # Judge the RELATIVE path: the delivery tree lives INSIDE the project
+        # (`.pipeline/scan`), so testing absolute parts against SKIP_DIR_PARTS
+        # skipped every file and reported 0 sources — a silent zero is worse than
+        # the stale count this tree switch was meant to fix.
+        rel_parts = p.relative_to(root).parts[:-1]
+        if any(x in SKIP_DIR_PARTS for x in rel_parts):
             continue
         rel = p.relative_to(root).as_posix()
         if is_production_source(rel):

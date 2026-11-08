@@ -487,7 +487,16 @@ def run_doctor(project: Path, log) -> dict:
     # task fails verify — the fix is agent work, never an owner ask.
     try:
         from . import code_tests
-        posture = code_tests.posture(project)
+        from . import scan as scan_mod
+        # Count on the DELIVERY tree, not the checkout: a checkout that lags
+        # origin/main (the normal state after a release) reported 36 test files
+        # while the shipped tree held 43, so the owner read a stale number right
+        # after paying for the release that added them.
+        try:
+            posture_tree = scan_mod.origin_tree(project)
+        except Exception:
+            posture_tree = project
+        posture = code_tests.posture(posture_tree if posture_tree.is_dir() else project)
         rows = code_tests.posture_checks(posture)
         bad = [(r, fix) for r, ok, fix in rows if not ok]
         if bad:
