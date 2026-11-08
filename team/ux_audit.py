@@ -432,7 +432,16 @@ def plan(project: Path) -> dict:
         "unchanged": sum(1 for r in rows if r["status"] == "unchanged"),
         "no_render": sum(1 for r in rows if not r["render"]),
     }
-    return {"rows": rows, "counts": counts, "rubric": RUBRIC}
+    # A scene the project rendered but no declared surface owns is a screen nobody
+    # can audit: `stale_for_files` walks surfaces only, so a run that changes such
+    # a screen gets no warning and polish on it is never measured (seen 2026-11-09:
+    # merge/split/rearrange working screens had scenes and no surface, so a run
+    # that changed all three passed `verify`'s UX check silently). Deterministic:
+    # it is the set difference between rendered scenes and surface bindings.
+    bound = {r["scene"] for r in rows if r.get("scene")}
+    unbound = sorted(sid for sid in scene_map if sid not in bound)
+    return {"rows": rows, "counts": counts, "rubric": RUBRIC,
+            "unbound_scenes": unbound}
 
 
 def to_audit(project: Path, only_scene: str | None = None,
@@ -464,6 +473,28 @@ def stale_for_files(project: Path, changed: list[str]) -> list[dict]:
         if touched:
             out.append({"label": r["label"], "status": r["status"],
                         "scene": r["scene"], "paths": touched})
+    return out
+
+
+def scenes_without_surfaces(project: Path, changed: list[str]) -> list[dict]:
+    """Rendered scenes this diff changed whose screen no declared surface audits.
+
+    `stale_for_files` can only warn about surfaces, because a surface is what the
+    audit is keyed on. A scene the project renders for a screen nobody declared is
+    therefore invisible: the run changes the screen, `verify` stays silent, and
+    the audit's "nothing changed" reading is about a surface that never existed.
+    Matching is exact (the scene's composable identifier against the changed file
+    stem), never fuzzy, so a scene mapped to a wrapper cannot claim a file.
+    """
+    scene_map = scenes(project)
+    unbound = set(plan(project).get("unbound_scenes") or [])
+    changed_stems = {Path(c).stem.lower() for c in changed}
+    out = []
+    for sid in sorted(unbound):
+        comp = (scene_map.get(sid) or {}).get("composable", "")
+        root = comp.split("(")[0].strip().lower()
+        if root and root in changed_stems:
+            out.append({"scene": sid, "file": root})
     return out
 
 
@@ -986,6 +1017,15 @@ def report(p: dict) -> str:
         lines.append(f"  {icon.get(r['status'], '?')} {r['status']:11} {r['label'][:44]:44} "
                      f"scene={r['scene'] or '—'} · {gripes} open")
     open_gripes = [(r["label"], g) for r in p["rows"] for g in r["gripes"]]
+    unbound = p.get("unbound_scenes") or []
+    if unbound:
+        # Not a gate: the owner decides whether a scene is a screen worth judging
+        # or a marketing crop. It is a fact, so a screen the app renders and no
+        # surface audits is named instead of silently skipped by every audit.
+        lines.append(f"  ⚑ {len(unbound)} rendered scene(s) belong to no declared surface "
+                     f"(no changed-screen warning can reach them): {', '.join(unbound[:8])}")
+        lines.append("    bind one with a project target named after its composable, "
+                     "or drop the scene from docs/storefront.json")
     if open_gripes:
         p0_list = [(l, g) for l, g in open_gripes if g.get("severity") == "P0_BLUNDER"]
         p1_list = [(l, g) for l, g in open_gripes if g.get("severity") == "P1_DEGRADED"]

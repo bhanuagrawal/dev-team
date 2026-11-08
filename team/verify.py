@@ -652,6 +652,12 @@ def verify_all(project: Path, worktree: Path, base: str, log, gradle: bool = Tru
             log("ux: " + "; ".join(f"{s['label']} changed ({s['status']}), no audit since"
                                    for s in stale[:4]))
             log("ux: run `devteam ux-audit <project>` — unchanged screens cost nothing")
+        unbound = ux_audit.scenes_without_surfaces(project, files)
+        if unbound:
+            log("ux: " + "; ".join(f"scene {s['scene']} renders {s['file']}, "
+                                   "which no declared surface audits" for s in unbound[:4]))
+            log("ux: bind it as a project target or drop the scene — a screen no surface "
+                "owns can change without any audit noticing")
     except Exception as e:  # a dead check must SAY it is dead, not vanish silently
         log(f"ux: could not check (no audit signal): {e} — "
             "`devteam capabilities <project>` names what is missing")
