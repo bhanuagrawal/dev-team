@@ -648,10 +648,27 @@ def audit_surface(project: Path, row: dict, prev: dict | None = None, log=None) 
     newer = [p for p in (row.get("inputs") or [])
              if Path(p).exists() and Path(p).stat().st_mtime > png.stat().st_mtime]
     if newer:
+        # The remedy depends on WHICH picture is stale, and naming the wrong one
+        # costs a whole round trip: a DEVICE frame is produced by the journey
+        # walker (`ux-flow`), not by `storefront-scenes` (which renders
+        # composables off-device for Play screenshots and cannot refresh it).
+        # Seen 2026-11-09: two `ux-audit` runs in a row told the orchestrator to
+        # re-render with `storefront-scenes`, which had just run and changed
+        # nothing, while the frame that needed re-walking was a flow still.
+        flows_dir = pipeline_dir(project) / "ux_flows"
+        try:
+            is_flow_frame = flows_dir in png.parents
+        except Exception:
+            is_flow_frame = False
+        remedy = (
+            f"re-walk the journey: `devteam ux-flow {project.name} --flow "
+            f"{_flow_id_for(png, flows_dir) or '<flow id>'}`"
+            if is_flow_frame else
+            f"re-render with `devteam storefront-scenes {project.name}`"
+        )
         raise SystemExit(
             f"stale render for '{row['label']}': {len(newer)} source file(s) are "
-            f"newer than {png.name} — re-render with "
-            f"`devteam storefront-scenes {project.name}`, then audit again "
+            f"newer than {png.name} — {remedy}, then audit again "
             f"(nothing recorded: an old picture is not evidence)")
 
     current_dhash = None
@@ -896,6 +913,26 @@ def _device_still(project: Path, serial: str, log=None) -> Path | None:
     if log:
         log(f"~ ux: captured the app's own screen -> {dest.name}")
     return dest
+
+
+def _flow_id_for(png: Path, flows_dir: Path) -> str:
+    """The journey id whose result recorded [png] — so a stale-frame remedy names
+    the walk that can actually refresh it, never a command that cannot."""
+    try:
+        for result in flows_dir.glob("*/result.json"):
+            try:
+                data = json.loads(result.read_text())
+            except Exception:
+                continue
+            for still in data.get("stills") or []:
+                try:
+                    if Path(still).resolve() == png.resolve():
+                        return str(data.get("flow") or result.parent.name)
+                except Exception:
+                    continue
+    except Exception:
+        pass
+    return ""
 
 
 def _flow_still_for(project: Path, surface: str) -> Path | None:
