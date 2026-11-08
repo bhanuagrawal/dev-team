@@ -192,8 +192,31 @@ class _Handler(BaseHTTPRequestHandler):
 
     # -- routes -------------------------------------------------------------
     def do_GET(self):
-        path = urlparse(self.path).path
+        parsed = urlparse(self.path)
+        path = parsed.path
         self._record("GET", path, {})
+        if path == "/auth/v1/authorize":
+            # What a real GoTrue does: bounce the browser back to the app's own
+            # scheme with tokens in the FRAGMENT. The Custom Tab hands off to the
+            # intent filter, so the OAuth-only journey is auditable with no provider.
+            provider = (parsed.query.split("provider=")[-1].split("&")[0]
+                        if "provider=" in parsed.query else "google")
+            location = (f"bookswap://auth-callback#access_token={MOCK_TOKEN}"
+                        f"&refresh_token=mock-refresh-token&expires_in=3600"
+                        f"&token_type=bearer&provider={provider}")
+            self.send_response(302)
+            self.send_header("Location", location)
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+            return
+        if path == "/auth/v1/user":
+            self._json({"id": READER_ID, "email": "audit@bookswap.test"})
+            return
+        if path == "/auth/v1/user":
+            # The app asks who the token belongs to; GoTrue answers on GET and POST.
+            self._json({"id": READER_ID, "email": "audit@bookswap.test"})
+            return
+
         if path == "/rest/v1/profiles":
             self._json([PROFILE])
             return
@@ -206,6 +229,10 @@ class _Handler(BaseHTTPRequestHandler):
         path = urlparse(self.path).path
         body = self._body()
         self._record("POST", path, body)
+
+        if path == "/auth/v1/user":
+            self._json({"id": READER_ID, "email": "audit@bookswap.test"})
+            return
 
         if path in ("/auth/v1/signup", "/auth/v1/token"):
             email = str(body.get("email") or "reader@bookswap.test")

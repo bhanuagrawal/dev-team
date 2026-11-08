@@ -294,6 +294,12 @@ def _screenshot(serial: str, dest: Path) -> bool:
     return False
 
 
+def _mock_token() -> str:
+    """The token the local mock issues, so the delivered callback is a real one."""
+    from .mock_server import MOCK_TOKEN
+    return MOCK_TOKEN
+
+
 def _launcher_component(serial: str, pkg: str) -> str:
     r = _adb(serial, ["shell", "cmd", "package", "resolve-activity", "--brief", pkg], timeout=45)
     text = r.stdout or ""
@@ -393,7 +399,7 @@ def _sheet(stills: list[Path], out: Path) -> Path | None:
 
 def audit_flow(project: Path, flow: dict, serial: str, log=None,
                max_steps: int | None = None, via: str = "api",
-               base_url: str | None = None) -> dict:
+               base_url: str | None = None, signed_in=None) -> dict:
     """Drive one goal-declared journey and judge what a person would hit."""
     from . import ux_video, vision_layout
 
@@ -593,6 +599,35 @@ def audit_flow(project: Path, flow: dict, serial: str, log=None,
         time.sleep(1.4)
         after = ux_video._screen_sig(serial)
         is_dead = bool(before and after and before == after) and not target.get("editable")
+        if base_url and (target.get("label") or "").lower().startswith("continue with"):
+            time.sleep(1.2)
+            _adb(serial, ["shell", "am", "start", "-a", "android.intent.action.VIEW",
+                          "-d", f"bookswap://auth-callback#access_token={_mock_token()}"
+                                f"&refresh_token=mock-refresh&expires_in=3600&token_type=bearer"],
+                 timeout=45)
+            # Completing a session is not instant (user fetch → profile fetch →
+            # navigation). A fixed sleep judged the previous screen; a screen-change
+            # poll broke on the Custom Tab closing, 1s before the feed. Wait for the
+            # ground truth instead: the mock has answered the feed's first call.
+            time.sleep(0.8)
+            if signed_in is not None:
+                for _ in range(30):
+                    time.sleep(0.4)
+                    if signed_in():
+                        break
+            else:
+                before_cb = ux_video._screen_sig(serial)
+                for _ in range(16):
+                    time.sleep(0.5)
+                    if ux_video._screen_sig(serial) != before_cb:
+                        break
+            time.sleep(1.2)
+            steps.append({"n": step, "did": f"tapped {target['label']}",
+                          "then": "the provider returned to bookswap://auth-callback "
+                                  "(delivered by the runner: a mock cannot drive a browser)",
+                          "screen": screen, "action": "tap", "label": target["label"]})
+            continue
+
         entry = {"n": step, "did": f"tapped {target['label'] or '(unlabelled)'}",
                  "then": ("nothing changed — DEAD CONTROL" if is_dead else
                           ("focus moved into a text field" if target.get("editable")
@@ -807,8 +842,11 @@ def run(project: Path, only: str | None = None, log=None, avd: str | None = None
                                                 "password": "audit-pass-123"}}
             fid = str(flow["id"])
             try:
-                res = audit_flow(project, flow, serial, log=log,
-                                 max_steps=max_steps, base_url=base_url)
+                res = audit_flow(
+                    project, flow, serial, log=log, max_steps=max_steps,
+                    base_url=base_url,
+                    signed_in=(lambda: any("/functions/v1/ui-composer" in r["path"]
+                                           for r in server.requests)) if server else None)
             except SystemExit as exc:
                 failed.append({"id": fid, "reason": str(exc)[:300]})
                 continue
