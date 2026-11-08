@@ -1070,7 +1070,7 @@ def run_store_readiness_audit(project: Path, tree: Path | None = None) -> list[R
 
     # ── 10. Discovery & Product Architecture ──────────────────────────────
     from . import competition
-    comp_ok, comp_summary, _ = competition.verify_competition_research(project)
+    comp_ok, comp_summary, _ = competition.verify_competition_research(project, tree=src)
     checks.append(ReadinessCheck(
         category="Discovery & Product Architecture",
         name="Competitive Market Recon (docs/COMPETITION_RESEARCH.md)",

@@ -576,13 +576,22 @@ def research_competitors(project: Path,
     }
 
 
-def verify_competition_research(project: Path) -> tuple[bool, str, list[str]]:
+def verify_competition_research(project: Path,
+                               tree: Path | None = None) -> tuple[bool, str, list[str]]:
     """Deterministically audit competition research artifacts for store readiness.
+
+    `project` is the owner's checkout (it holds `.pipeline/`, machine-local).
+    `tree` is where the DOCUMENT is read from: a caller that knows the delivery
+    ref must pass it. The checkout drifts (seen: a release that shipped
+    docs/COMPETITION_RESEARCH.md to origin/main still read BLOCKED here because
+    the checkout was one commit behind), and a readiness gate that grades the
+    wrong tree reports a blocker the shipped app does not have.
 
     Returns:
         (passed: bool, summary: str, details: list[str])
     """
-    doc_path = project / COMPETITION_DOC_REL
+    base = tree if (tree is not None and Path(tree).is_dir()) else project
+    doc_path = base / COMPETITION_DOC_REL
     report_path = pipeline_dir(project) / "competitors" / "report.json"
     details = []
 
