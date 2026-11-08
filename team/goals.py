@@ -815,10 +815,12 @@ def apply_one(profile: dict, change: dict, by: str = "agent") -> tuple[str, str,
         target = str(change.get("parent") or "")
         if raw_node(profile, target)[0] is None:
             return bad(f"no branch '{target}' to move it under")
-        kids = holder_list(profile, parent or "vision") or []
-        if raw in kids:
+        kids = holder_list(profile, parent or "vision")
+        if kids is not None and raw in kids:
             kids.remove(raw)
-        (holder_list(profile, target) or []).append(raw)
+        dest = holder_list(profile, target)
+        if dest is not None:
+            dest.append(raw)
         return good(node_id, f"moved under {target}", why)
     return bad(f"unknown change '{action}' — use add, park, set-status, retire "
                "or reparent")
