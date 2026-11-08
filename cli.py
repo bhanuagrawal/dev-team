@@ -3341,18 +3341,40 @@ def cmd_storefront_brand(args: argparse.Namespace) -> int:
         return 0
 
     if getattr(args, "launcher", False):
-        # The launcher is APP code, so this command WRITES it and stops: the task
-        # branch and `devteam release` own the commit. Committing it here pushed
-        # half a change to main from a worktree while the pixels stayed on a dt
-        # branch — provenance on one ref, the files on another (seen 2026-11-08).
-        res = sbf.write_launcher(project, log=print,
-                                 background=str(getattr(args, "launcher_background", "") or ""))
-        if res.get("status") != "OK":
-            print(f"STOREFRONT BRAND: {res.get('status')}")
-            print(f"  ✗ {res.get('error')}")
+        # The launcher is APP code with its own provenance contract
+        # (docs/launcher-icon.json), so this delegates to the brand chain's one
+        # implementation and STOPS: the task branch and `devteam release` own the
+        # commit. Committing it here pushed provenance to main from a worktree
+        # while the pixels stayed on a dt branch (seen 2026-11-08).
+        from team import brand_change as bc
+
+        play_icon = project / sbf.IMAGES_REL / sbf.FILES["icon"]
+        design_html = project / sbf.ICON_HTML_REL
+        if not play_icon.is_file():
+            print("STOREFRONT BRAND: BLOCKED — no listing icon to derive the launcher from")
+            print(f"  ✗ {play_icon} is missing — adopt the Stitch artboard first")
             return 1
-        print(f"  + launcher rendered at {len(res.get('files') or [])} file(s) from the "
-              f"adopted icon art (provenance recorded in {sbf.BRAND_REL})")
+        if not design_html.is_file():
+            print("STOREFRONT BRAND: BLOCKED — the adopted artboard is not kept in the project")
+            print(f"  ✗ {design_html} is missing — `--adopt-stitch` keeps it")
+            return 1
+        # The brief that produced the artboard is part of the claim `verify` reads.
+        prompt_file = project / bc.PROMPT_REL
+        if not prompt_file.is_file():
+            prompt_file.parent.mkdir(parents=True, exist_ok=True)
+            prompt_file.write_text(sbf.icon_stitch_prompt(project).strip() + "\n")
+            print(f"  + recorded the icon brief at {bc.PROMPT_REL}")
+        icon = ((sbf.load(project).get("assets") or {}).get("icon") or {})
+        res = bc.apply_launcher(
+            project, play_icon,
+            str(getattr(args, "launcher_background", "") or "") or bc._edge_color(play_icon),
+            stitch={"source": icon.get("source") or "stitch",
+                    "screen": icon.get("stitch_source") or "",
+                    "artboard": icon.get("html") or sbf.ICON_HTML_REL},
+            design_html=design_html)
+        print(f"  + launcher rendered from {play_icon.name} into "
+              f"{len(res.get('densities') or {})} density(ies) "
+              f"(provenance: {bc.LAUNCHER_REL})")
         print("  ~ NOT committed: launcher files are app code — commit them on the task "
               "branch and let `devteam release` land them")
         return 0
