@@ -280,12 +280,22 @@ def _settle(serial: str, pkg: str, timeout: float = 12.0) -> tuple[bool, float]:
 
 
 def _window_title(serial: str, pkg: str) -> str:
+    """The focused activity's short name — never a fragment of it.
+
+    The old pattern let a greedy class match eat the ident and captured one
+    trailing LETTER, so a finding read "tapping 'x' on y does nothing" (seen
+    2026-11-08). Take the component after the package, then its last segment.
+    """
     r = _adb(serial, ["shell", "dumpsys", "window"], timeout=60)
     text = r.stdout or ""
     for line in text.splitlines():
-        if "mCurrentFocus" in line and pkg in line:
-            m = re.search(rf"{re.escape(pkg)}/[\w.]*\.?([\w]+)\b", line)
-            return m.group(1) if m else "app"
+        if "mCurrentFocus" not in line or pkg not in line:
+            continue
+        m = re.search(rf"{re.escape(pkg)}/([\w.$]+)", line)
+        if not m:
+            return "app"
+        short = m.group(1).rsplit(".", 1)[-1]
+        return short if len(short) >= 3 else "app"
     if "Application Not Responding" in text or " isn't responding" in text:
         return "ANR dialog"
     return ""
