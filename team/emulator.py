@@ -144,6 +144,80 @@ def booted(serial: str, timeout: int = 240) -> bool:
     return False
 
 
+def trust_state(serial: str) -> str:
+    """What adb says about this serial: 'device', 'unauthorized', 'offline' or ''.
+
+    A listed-but-untrusted emulator is the failure that made a whole pass look
+    like an app crash (2026-11-09): `adb devices` reported it, `running()` handed
+    it back as usable, every install and launch failed with `device
+    unauthorized`, and the audit said "the app never came to the front". A device
+    adb cannot talk to is not a device, so the state is read, not assumed."""
+    r = _adb(["devices"])
+    if r is None or r.returncode != 0:
+        return ""
+    for line in (r.stdout or "").splitlines():
+        m = _SERIAL_RE.match(line.strip())
+        if m and m.group(1) == serial:
+            rest = line.strip()[len(serial):].strip()
+            return rest.split()[0] if rest else ""
+    return ""
+
+
+def _boot(name: str, log=None, wipe: bool = False, timeout: int = 240) -> str:
+    """Start `name` headless and return its serial once boot completes."""
+    if not adb_available():
+        raise SystemExit("adb is not available — install Android platform-tools")
+    clear_stale_locks(name, log)
+    if log:
+        log(f"~ emulator: starting {name} (headless)"
+            + (", wiping its data image" if wipe else ""))
+    args = [emulator_bin(), "-avd", name, "-no-window", "-no-audio",
+            "-no-boot-anim", "-no-snapshot-save", "-gpu", "swiftshader_indirect",
+            "-netdelay", "none", "-netspeed", "full"]
+    if wipe:
+        args += ["-no-snapshot-load", "-wipe-data"]
+    subprocess.Popen(args, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                     start_new_session=True)
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        live = running()
+        if live:
+            serial = live[0]["serial"]
+            if booted(serial, timeout=max(10, int(deadline - time.monotonic()))):
+                if log:
+                    log(f"~ emulator: {name} booted as {serial}")
+                return serial
+            break
+        time.sleep(2.0)
+    raise SystemExit(f"emulator {name} did not boot within {timeout}s")
+
+
+def recover_untrusted(entry: dict, name: str = "", log=None,
+                      timeout: int = 240) -> str:
+    """A headless emulator adb does not trust cannot be repaired by hand.
+
+    The guest keeps its own `/data/misc/adb/adb_keys`, seeded from this host's
+    key when the data image was created. When the host key changed (or the image
+    predates it) the guest answers `unauthorized`, and the only fix is the
+    "Allow USB debugging" dialog — which a `-no-window` boot cannot show. The
+    deterministic repair is a fresh data image, which re-seeds the key: the AVD
+    is a disposable test device, so its data is not a record of anything. Both
+    the wipe and its reason are logged, never silent."""
+    serial = entry["serial"]
+    avd = (name or entry.get("avd") or "").strip()
+    if not avd:
+        installed = avds()
+        if not installed:
+            raise SystemExit("no AVD installed — create one (`android emulator create`)")
+        avd = installed[0]
+    if log:
+        log(f"~ emulator: {_label(entry)} is {trust_state(serial) or 'unusable'} — adb "
+            f"cannot drive it and a headless pass cannot tap 'Allow'; wiping "
+            f"{avd}'s data image so the guest re-seeds adb_keys from this host")
+    stop(serial)
+    return _boot(avd, log=log, wipe=True, timeout=timeout)
+
+
 def ensure_device(avd: str | None = None, log=None, timeout: int = 240) -> tuple[str, bool]:
     """A booted emulator — the existing one, or one this call starts.
 
@@ -153,9 +227,38 @@ def ensure_device(avd: str | None = None, log=None, timeout: int = 240) -> tuple
     """
     live = running()
     if live:
+        entry = live[0]
+        state = trust_state(entry["serial"])
+        if state == "offline":
+            # A boot in progress answers `offline`; that is normal for a minute
+            # and must never be "repaired" by wiping a device someone just
+            # started. Wait it out, then judge from the state it settles into.
+            deadline = time.monotonic() + min(90, timeout)
+            while state == "offline" and time.monotonic() < deadline:
+                time.sleep(3.0)
+                state = trust_state(entry["serial"])
+            if state == "device" and booted(entry["serial"], timeout=60):
+                if log:
+                    log(f"~ emulator: reusing {_label(entry)}")
+                return entry["serial"], False
+        if state == "device":
+            if log:
+                log(f"~ emulator: reusing {_label(entry)}")
+            return entry["serial"], False
+        # Listed but not drivable: an untrusted headless emulator answers every
+        # adb command with `device unauthorized`, which surfaces downstream as
+        # "the app never came to the front" — a lie about the app. Repair the
+        # device instead of handing the next step a device that cannot work.
+        if state == "unauthorized" and entry["serial"].startswith("emulator-"):
+            serial = recover_untrusted(entry, name=avd or "", log=log, timeout=timeout)
+            return serial, True
         if log:
-            log(f"~ emulator: reusing {_label(live[0])}")
-        return live[0]["serial"], False
+            log(f"~ emulator: {_label(entry)} is {state or 'unusable'} — not touching "
+                f"a device adb does not trust")
+        raise SystemExit(
+            f"emulator {_label(entry)} is {state or 'unusable'} — adb cannot drive it. "
+            f"Stop it (`android emulator stop {entry.get('avd') or '<avd>'}`) or pass "
+            f"--avd to boot another.")
     name = (avd or "").strip()
     if not name:
         installed = avds()
@@ -163,29 +266,7 @@ def ensure_device(avd: str | None = None, log=None, timeout: int = 240) -> tuple
             raise SystemExit("no AVD installed — create one (`android emulator create`) "
                              "or pass --avd <name>")
         name = installed[0]
-    if not adb_available():
-        raise SystemExit("adb is not available — install Android platform-tools")
-    clear_stale_locks(name, log)
-    if log:
-        log(f"~ emulator: starting {name} (headless)")
-    subprocess.Popen(
-        [emulator_bin(), "-avd", name, "-no-window", "-no-audio", "-no-boot-anim",
-         "-no-snapshot-save", "-gpu", "swiftshader_indirect", "-netdelay", "none",
-         "-netspeed", "full"],
-        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
-    deadline = time.monotonic() + timeout
-    serial = ""
-    while time.monotonic() < deadline:
-        live = running()
-        if live:
-            serial = live[0]["serial"]
-            if booted(serial, timeout=max(10, int(deadline - time.monotonic()))):
-                if log:
-                    log(f"~ emulator: {name} booted as {serial}")
-                return serial, True
-            break
-        time.sleep(2.0)
-    raise SystemExit(f"emulator {name} did not boot within {timeout}s")
+    return _boot(name, log=log, timeout=timeout), True
 
 
 def baseline_path(project: Path) -> Path:
