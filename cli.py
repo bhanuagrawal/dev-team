@@ -2125,6 +2125,49 @@ def cmd_ux_video(args: argparse.Namespace) -> int:
     return 1 if res["failed"] else 0
 
 
+def cmd_ux_flow(args: argparse.Namespace) -> int:
+    """Goal-declared journeys, navigated by a vision model, judged as a person."""
+    project = resolve_project(args.project)
+    log = RunLog(project, "ux-flow-" + today())
+    from team import ux_flow
+    res = ux_flow.run(project, only=getattr(args, "flow", None), log=log,
+                      avd=getattr(args, "avd", None),
+                      keep_emulator=getattr(args, "keep_emulator", False),
+                      max_steps=getattr(args, "max_steps", None))
+    if not res["planned"]:
+        print(ux_flow.status_report(project))
+        return 0
+    for r in res["run"]:
+        mark = "✅" if r["goal_reached"] else "❌"
+        print(f"\n== {r['flow']} ({r['surface'] or 'no surface'}) — {mark} "
+              f"{r['outcome']} in {len(r['steps'])} step(s) ==")
+        print(f"  goal: {r['goal']}")
+        for s in r["steps"]:
+            print(f"  {s['n']:2}. {s['did']} → {s['then']}")
+        for d in r.get("dead_taps") or []:
+            print(f"  ⚠️  DEAD CONTROL — {d['label']!r} on {d['screen'] or 'screen'}")
+        for c in r.get("crashes") or []:
+            print(f"  🚨 CRASH — {c}")
+        for x in r.get("reactions") or []:
+            print(f"  {x.get('at', ''):8} {x.get('line', '')}")
+        if r.get("premium"):
+            print("  premium: " + " · ".join(r["premium"][:3]))
+        for d in r.get("defects") or []:
+            elem = f" [{d.get('element')}]" if d.get("element") else ""
+            print(f"  · {d.get('severity', '')}{elem} {d.get('line', '')}")
+        if r.get("verdict"):
+            print(f"  verdict: {r['verdict']}")
+        if r.get("model_error"):
+            print(f"  ~ the judge could not run: {r['model_error']}")
+        if not r["goal_reached"] and r.get("reason"):
+            print(f"  why it stopped: {r['reason']}")
+    for f in res["failed"]:
+        print(f"✗ failed {f['id']}: {f['reason']}")
+    print(f"\nflow(s) audited {len(res['run'])}/{res['planned']} · stored in "
+          f".pipeline/ux_audit.json")
+    return 1 if res["failed"] else 0
+
+
 def cmd_ux_audit(args: argparse.Namespace) -> int:
     """One neutral first-use reaction over the screens this run actually touched."""
     project = resolve_project(args.project)
@@ -3297,6 +3340,23 @@ def cmd_storefront_brand(args: argparse.Namespace) -> int:
               f"--stitch-source <projects/…/screens/…>")
         return 0
 
+    if getattr(args, "launcher", False):
+        # The launcher is APP code, so this command WRITES it and stops: the task
+        # branch and `devteam release` own the commit. Committing it here pushed
+        # half a change to main from a worktree while the pixels stayed on a dt
+        # branch — provenance on one ref, the files on another (seen 2026-11-08).
+        res = sbf.write_launcher(project, log=print,
+                                 background=str(getattr(args, "launcher_background", "") or ""))
+        if res.get("status") != "OK":
+            print(f"STOREFRONT BRAND: {res.get('status')}")
+            print(f"  ✗ {res.get('error')}")
+            return 1
+        print(f"  + launcher rendered at {len(res.get('files') or [])} file(s) from the "
+              f"adopted icon art (provenance recorded in {sbf.BRAND_REL})")
+        print("  ~ NOT committed: launcher files are app code — commit them on the task "
+              "branch and let `devteam release` land them")
+        return 0
+
     if getattr(args, "adopt_stitch", None):
         res = sbf.adopt_stitch_icon(project, Path(str(args.adopt_stitch)).expanduser(),
                                     stitch_source=args.stitch_source or "",
@@ -3308,6 +3368,7 @@ def cmd_storefront_brand(args: argparse.Namespace) -> int:
                 print(f"  → {res['hint']}")
             return 1
         print(f"  + adopted the Stitch design as {res['file']} (kept at {res['html']})")
+
 
     elif getattr(args, "adopt", None):
         kind, _, path = str(args.adopt).partition("=")
@@ -4165,6 +4226,19 @@ def main() -> None:
                     help="who judges the motion: browser Gemini (default, same maker as the "
                          "store assets) or the vision API")
     uv.set_defaults(fn=cmd_ux_video)
+    uf = sub.add_parser("ux-flow", help="drive goal-declared journeys on a device with a VISION "
+                                        "model choosing each action, then judge whether a real "
+                                        "user can complete them (no script: docs/ux-flows.json "
+                                        "entries with a `goal` and no `steps`)")
+    uf.add_argument("project")
+    uf.add_argument("--flow", help="audit one goal-declared flow id")
+    uf.add_argument("--avd", help="AVD to boot when none is running (default: the first installed)")
+    uf.add_argument("--max-steps", type=int, default=None,
+                    help=f"step budget for each flow (default: the flow's max_steps, else "
+                         f"{10})")
+    uf.add_argument("--keep-emulator", action="store_true",
+                    help="leave the emulator this command started running")
+    uf.set_defaults(fn=cmd_ux_flow)
     tt = sub.add_parser("tree"); tt.add_argument("project")
     tt.add_argument("--html", action="store_true", help="write the html view and print its path")
     tt.add_argument("--open", action="store_true", help="open the html view in the browser")
@@ -4222,6 +4296,13 @@ def main() -> None:
                      help="record an OWNER-supplied file instead: icon=<png> | feature=<png> "
                           "(Play's exact dimensions required)")
     sbr.add_argument("--note", default="", help="why the owner supplied it (recorded)")
+    sbr.add_argument("--launcher", action="store_true",
+                     help="render the adopted icon artboard into the app's launcher "
+                          "(raster mipmaps + adaptive foregrounds at every density) so the "
+                          "icon a user taps IS the listing icon")
+    sbr.add_argument("--launcher-background", default="",
+                     help="with --launcher: the adaptive background colour (default: the "
+                          "icon art's own corner pixel)")
     sbr.add_argument("--force", action="store_true", help="repaint even if an approved asset exists")
     sbr.set_defaults(fn=cmd_storefront_brand)
     br = sub.add_parser("brand", help="OWNER brand feedback → Stitch artboard (from code) → app "

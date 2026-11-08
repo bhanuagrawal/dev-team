@@ -768,14 +768,44 @@ def run_store_readiness_audit(project: Path, tree: Path | None = None) -> list[R
                          "one set of pixels, and it records the provenance `verify` reads"),
                 ))
         else:
-            checks.append(ReadinessCheck(
-                category="Storefront Graphic Assets",
-                name="Installed Icon Matches Store Listing",
-                passed=False,
-                severity="WARNING",
-                detail="no listing icon or no launcher bitmap to compare",
-                fix="Add images/icon.png and mipmap-*/ic_launcher.png, then re-run this audit",
-            ))
+            # A project whose launcher is only an adaptive VECTOR has no bitmap to
+            # compare, and that used to be reported as a benign warning forever —
+            # which is how a launcher left over from a scaffold shipped for months
+            # under an adopted listing icon (Play rejects that as a Misleading
+            # Claims mismatch). When brand art IS recorded, an unprovable launcher
+            # is a BLOCKER, and the fix is one command that renders the same
+            # artboard into every density.
+            brand_icon = {}
+            try:
+                brand_icon = ((sbf.load(project).get("assets") or {}).get("icon") or {})
+            except Exception:
+                brand_icon = {}
+            adaptive = [p for p in src.glob("**/res/mipmap-anydpi-v26/ic_launcher.xml")
+                        if not re.search(r"(^|/)(build|\.pipeline|\.git)/",
+                                         p.relative_to(src).as_posix())]
+            if brand_icon.get("source") in ("stitch", "gemini", "owner") and adaptive:
+                checks.append(ReadinessCheck(
+                    category="Storefront Graphic Assets",
+                    name="Installed Icon Matches Store Listing",
+                    passed=False,
+                    severity="BLOCKER",
+                    detail=("the launcher is an adaptive VECTOR with no rendered bitmap, so "
+                            "it cannot be proven to be the recorded listing icon — the icon a "
+                            "user taps may be a different design (Play rejects this as a "
+                            "listing mismatch)"),
+                    fix=f"devteam storefront-brand {project.name} --launcher  "
+                        f"— renders the adopted artboard into mipmap-*/ic_launcher.png and "
+                        f"the adaptive foreground, then this check compares the pixels",
+                ))
+            else:
+                checks.append(ReadinessCheck(
+                    category="Storefront Graphic Assets",
+                    name="Installed Icon Matches Store Listing",
+                    passed=False,
+                    severity="WARNING",
+                    detail="no listing icon or no launcher bitmap to compare",
+                    fix="Add images/icon.png and mipmap-*/ic_launcher.png, then re-run this audit",
+                ))
 
         # A listing is a promise about a specific build. When the app is rebuilt
         # but `docs/storefront.json` still names the old screens, the screenshots

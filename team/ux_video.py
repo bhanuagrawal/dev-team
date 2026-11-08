@@ -130,8 +130,20 @@ def load_spec(project: Path) -> dict:
 
 
 def declared(project: Path) -> list[dict]:
-    return [f for f in (load_spec(project).get("flows") or [])
-            if isinstance(f, dict) and str(f.get("id") or "").strip()]
+    """Flows THIS pass owns: a declared action list.
+
+    A flow that declares a `goal` and no steps is navigated by a model and belongs
+    to `devteam ux-flow`; recording it here would produce a video of nothing
+    happening and then judge it, which is worse than skipping it.
+    """
+    out = []
+    for f in (load_spec(project).get("flows") or []):
+        if not isinstance(f, dict) or not str(f.get("id") or "").strip():
+            continue
+        if str(f.get("goal") or "").strip() and not (f.get("steps") or []):
+            continue
+        out.append(f)
+    return out
 
 
 def _slug(text: str) -> str:
