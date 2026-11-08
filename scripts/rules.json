@@ -227,6 +227,14 @@
    "why": "2026-11-08: `devteam competition` produced a gate-passing document that listed the project itself as its own rival, a cybersecurity MDR portal as a field-inspection benchmark, and 4.5\u2605 for every app (a parser default, not a reading). The store blocker would have been 'cleared' by data the owner could not trust; the document was not committed.",
    "proposal": "`_parse_recon_search_output` carries rating=None (never 4.5) when the listing gave none; `devteam store-readiness` refuses docs/COMPETITION_RESEARCH.md that renders a 'not stated' rating/install as a value, or a feature bullet containing 'the sources do not provide' / 'no specific mention'",
    "note": "2026-11-08: `devteam competition` produced a gate-passing document that listed the project itself as its own rival, a cybersecurity MDR portal as a field-inspection benchmark, and 4.5 stars for every app (a parser default, not a reading). The document was not committed; self-exclusion and the search-term fallback are already fixed in code."
+  },
+  {
+   "id": "live-path-verdict-needs-probe",
+   "rule": "a milestone measure that names a server-side effect ('RPC succeeds', 'scan is sent', 'handshake completes') is only marked met with a recorded live probe; reading the call site and passing fake-transport tests is not evidence that the call lands",
+   "doc": "AGENTS.md#goal-mode",
+   "kind": "enforcible",
+   "proposal": "a measure may carry {\"probe\": \"<command>\"}; devteam plan --apply-result runs it (or refuses the verdict when the measure text names a backend path and no probe exists), exactly as metric measures are already evaluated by code. Today the orchestrator's 'cheap check' is prose.",
+   "note": "run-derived 2026-11-08 (BookSwapKMP v1.0.3): m1 'Local Supabase RPC book requests succeed' was retired as met because BookSwapRepository forwarded requestBook/verifyHandoff to the RPCs and tests passed on a fake transport \u2014 the app actually boots to Discovery with no sign-in (App.kt default destination, in-memory SessionStore), so the RPCs post with the anon key and auth.uid() is NULL. The owner found it by hand; the gates could not, because the defect is 'the default entry never authenticates', which no diff-scoped test names."
   }
  ]
 }
