@@ -106,7 +106,9 @@ jobs:
         env:
           VERSION_NAME: ${{ env.VERSION_NAME }}
           VERSION_CODE: ${{ env.VERSION_CODE }}
-        run: ./gradlew __BUNDLE_TASKS__
+        run: |
+          sed -i 's/networkTimeout=.*/networkTimeout=120000/' gradle/wrapper/gradle-wrapper.properties 2>/dev/null || true
+          ./gradlew __BUNDLE_TASKS__ -Dorg.gradle.internal.http.socketTimeout=120000 -Dorg.gradle.internal.http.connectionTimeout=120000
 
       - name: Upload AAB as workflow artifact
         uses: actions/upload-artifact@v4

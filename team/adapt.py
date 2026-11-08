@@ -286,6 +286,23 @@ def run(project: Path, log: RunLog | None = None, apply: bool = True) -> dict:
             "no docs/design.md found — the developer agent builds screens without an enforced design system",
             f"run `devteam design {project.name}` to research category standards and synthesize docs/design.md"))
 
+    # 7c. gradle wrapper timeout: 10s default is flaky under CI download loads
+    wrapper_props = project / "gradle" / "wrapper" / "gradle-wrapper.properties"
+    if wrapper_props.is_file():
+        try:
+            wt = wrapper_props.read_text(encoding="utf-8")
+            import re
+            m = re.search(r"^\s*networkTimeout\s*=\s*(\d+)", wt, re.M)
+            if not m or int(m.group(1)) < 60000:
+                if m:
+                    new_wt = re.sub(r"^\s*networkTimeout\s*=\s*\d+", "networkTimeout=120000", wt, flags=re.M)
+                else:
+                    new_wt = wt.rstrip() + "\nnetworkTimeout=120000\n"
+                wrapper_props.write_text(new_wt, encoding="utf-8")
+                note("bumped gradle-wrapper networkTimeout to 120000 (120s)")
+        except OSError:
+            pass
+
     # 7c. capabilities the team ships that THIS project is not wired for ------
     # A new capability used to arrive as a new command, which `adapt` could not
     # see: it compares data shape (schema, keys), and a command changes neither.
