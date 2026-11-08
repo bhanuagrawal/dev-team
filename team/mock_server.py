@@ -204,10 +204,32 @@ class _Handler(BaseHTTPRequestHandler):
             location = (f"bookswap://auth-callback#access_token={MOCK_TOKEN}"
                         f"&refresh_token=mock-refresh-token&expires_in=3600"
                         f"&token_type=bearer&provider={provider}")
-            self.send_response(302)
+            html = f"""<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>BookSwap Sign In</title>
+  <meta http-equiv="refresh" content="0;url={location}">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+</head>
+<body style="font-family:system-ui,-apple-system,sans-serif;text-align:center;padding:48px 24px;background:#FAF7F2;color:#1C1917;">
+  <h2 style="font-family:serif;font-size:24px;margin-bottom:12px;">Signing in to BookSwap...</h2>
+  <p style="color:#57534E;margin-bottom:24px;">Authenticating via {provider.capitalize()}. If you are not redirected automatically, tap below:</p>
+  <p><a id="auth-return-btn" href="{location}" style="display:inline-block;padding:14px 28px;background:#1B4332;color:#ffffff;border-radius:12px;text-decoration:none;font-weight:600;font-size:16px;box-shadow:0 2px 8px rgba(0,0,0,0.1);">Return to BookSwap</a></p>
+  <script>
+    setTimeout(function() {{
+      window.location.href = "{location}";
+    }}, 50);
+  </script>
+</body>
+</html>"""
+            body = html.encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
             self.send_header("Location", location)
-            self.send_header("Content-Length", "0")
+            self.send_header("Content-Length", str(len(body)))
             self.end_headers()
+            self.wfile.write(body)
             return
         if path == "/auth/v1/user":
             self._json({"id": READER_ID, "email": "audit@bookswap.test"})
