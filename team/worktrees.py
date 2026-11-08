@@ -194,6 +194,28 @@ def _locks(project: Path) -> dict[str, str]:
     return out
 
 
+def live_run_reason(project: Path, tree: Path) -> str | None:
+    """Why this tree still belongs to a LIVE run — or None when it may be reused.
+
+    Why this exists (2026-11-08): two agents ran the same task. The second
+    `worktree-start` unlocked and `remove --force`d the first one's tree and
+    re-cut it from origin/main, so a verified, uncommitted change existed
+    nowhere and a different fix shipped in its place. `prune` already treats a
+    locked tree touched inside the settle window as live; `prepare_worktree`
+    did not, and it is the one caller that can destroy work. Refusing is the
+    only answer that cannot.
+    """
+    locks = _locks(project)
+    if not any(_same_path(Path(p), tree.resolve()) for p in locks):
+        return None
+    idle_min = int(max(0, time.time() - _last_activity(tree)) // 60)
+    settle = _settle_seconds()
+    if idle_min * 60 >= settle:
+        return None
+    return (f"locked by a run and touched {idle_min}m ago "
+            f"(settle {settle // 60}m) — another session owns this tree")
+
+
 def _commit_all(tree: Path, message: str) -> tuple[bool, str]:
     git(["add", "-A"], cwd=tree, timeout=120)
     r = git(["commit", "-m", message], cwd=tree, timeout=120)

@@ -157,6 +157,13 @@ def prepare_worktree(project: Path, task_id: str, log: RunLog) -> tuple[Path, st
     base = r.stdout.strip()
     wt = project / RUN_BASE / task_id
     if wt.exists():
+        live = worktrees.live_run_reason(project, wt)
+        if live:
+            log(f"worktree: REFUSED to replace {wt.name} — {live}")
+            log("worktree: another session is working in that tree. Its work is "
+                "safe at origin/dt/<task-id> once it pushes; wait for it (or for "
+                "the settle window) instead of wiping an uncommitted change.")
+            return None
         git(["worktree", "unlock", str(wt)], cwd=project, timeout=60)
         git(["worktree", "remove", "--force", str(wt)], cwd=project)
     for ref in (f"dt/{task_id}", "dt-base"):
