@@ -70,7 +70,7 @@ Goal: {goal}
 Step {step} of {max_steps}.
 Already done: {history}
 {screen}
-
+{credentials}
 The screenshot IS the current screen. The list below is what is tappable on it
 (read from the app's accessibility tree — tap by INDEX, never invent a place).
 
@@ -78,6 +78,9 @@ Tappable:
 {targets}
 {dead}
 Choose the SINGLE next action that moves a real user closest to the goal:
+  type    — index + field ("email" or "password"): put the journey's credential in
+            that field. ONLY when CREDENTIALS are listed below; if they are not,
+            a text field is a wall for you, not a dead control — choose stuck.
   tap     — an index from the list above
   back    — leave a screen that cannot progress this journey
   done    — the goal is reached on this screen
@@ -89,6 +92,7 @@ destructive or payment control.
 
 Reply with JSON only, no prose, no code fences:
   {{"action": "tap", "index": 2, "why": "one short line"}}
+  {{"action": "type", "index": 4, "field": "email", "why": "one short line"}}
   {{"action": "back", "why": "one short line"}}
   {{"action": "done", "why": "what proves the goal is reached"}}
   {{"action": "stuck", "why": "what a person would be unable to do here"}}
@@ -425,9 +429,16 @@ def audit_flow(project: Path, flow: dict, serial: str, log=None,
         if tried.get(screen):
             dead_line = ("Already tried on this screen with no visible change (do NOT "
                          "repeat): " + ", ".join(sorted(tried[screen])) + "\n")
+        creds = flow.get("credentials") or {}
+        credentials = ("CREDENTIALS for this journey: email and password are available — "
+                       "use action type with field=email/password.\n"
+                       if creds.get("email") and creds.get("password") else
+                       "CREDENTIALS: none. You cannot sign in or create an account: a "
+                       "text field is where a human takes over.\n")
         prompt = DECIDE_PROMPT.format(
             app=app, flow=fid, goal=goal, step=step, max_steps=cap,
             history=history, screen=(f"Screen: {screen}" if screen else ""),
+            credentials=credentials,
             targets=_label_list(targets), dead=dead_line)
         decision = _ask(cfg, prompt, still)
         action = str(decision.get("action") or "").strip().lower()
@@ -440,7 +451,14 @@ def audit_flow(project: Path, flow: dict, serial: str, log=None,
                           "screen": screen, "action": "done"})
             break
         if action in ("stuck", "ask"):
-            outcome, reason = "stuck", str(decision.get("why") or "")
+            # A wall is not a defect: with no credentials the agent cannot sign in,
+            # the same way it cannot pay or pass a CAPTCHA. Say so, and do not let a
+            # judge turn "I have no password" into "the app is broken".
+            needs_a_person = (
+                not (flow.get("credentials") or {}).get("password")
+                and any(x.get("editable") for x in targets))
+            outcome = "needs_credentials" if needs_a_person else "stuck"
+            reason = str(decision.get("why") or "")
             steps.append({"n": step, "did": "stopped", "then": reason,
                           "screen": screen, "action": "stuck"})
             break
@@ -453,6 +471,33 @@ def audit_flow(project: Path, flow: dict, serial: str, log=None,
         if action != "tap":
             outcome, reason = "error", f"the model answered {json.dumps(decision)[:120]}"
             break
+
+        if action == "type":
+            idx = decision.get("index")
+            field = str(decision.get("field") or "").strip().lower()
+            creds = flow.get("credentials") or {}
+            value = creds.get(field) or ""
+            if not isinstance(idx, int) or not (0 <= idx < len(targets)) or not value:
+                outcome, reason = "error", (
+                    f"type needs a listed index and an available credential "
+                    f"(got index {idx!r}, field {field!r})")
+                break
+            target = targets[idx]
+            _adb(serial, ["shell", "input", "tap", str(target["x"]), str(target["y"])],
+                 timeout=30)
+            time.sleep(0.5)
+            _adb(serial, ["shell", "input", "text", value.replace(" ", "%s")], timeout=30)
+            time.sleep(0.6)
+            typed = value[:4].lower() in (ux_video._ui_xml(serial) or "").lower()
+            steps.append({"n": step, "did": f"typed the {field} into "
+                                            f"{target['label'] or 'the field'}",
+                          "then": ("the field accepted it" if typed else
+                                   "the field did not show the text"),
+                          "screen": screen, "action": "type"})
+            if not typed:
+                dead.append({"step": step, "label": target["label"],
+                             "screen": screen})
+            continue
 
         index = decision.get("index")
         if not isinstance(index, int) or not (0 <= index < len(targets)):
@@ -562,7 +607,12 @@ def store(project: Path, result: dict, log=None) -> dict:
     for c in result["crashes"]:
         findings.append((f"the app crashed during the {result['flow']} journey: {c}",
                          "", "P0_BLUNDER", "flow", "crash"))
-    if result["outcome"] == "stuck" and result.get("reason"):
+    if result["outcome"] == "needs_credentials":
+        # Nothing is written: the journey stopped because the AUDITOR has no
+        # password. Recording that as a defect would bury the app's real findings
+        # under a limitation of the tool.
+        pass
+    elif result["outcome"] == "stuck" and result.get("reason"):
         findings.append((f"the {result['flow']} journey cannot be completed: {result['reason']}",
                          "", "P1_DEGRADED", "flow", "blocked"))
     if result["outcome"] in ("budget", "timeout"):
