@@ -784,10 +784,71 @@ def audit_surface(project: Path, row: dict, prev: dict | None = None, log=None) 
 DEVICE_DIR = "ux_device"
 
 
+def _foreground_package(serial: str) -> str:
+    """The package Android is actually showing, straight from the window manager."""
+    from .emulator import ADB
+    try:
+        r = subprocess.run(
+            [ADB, "-s", serial, "shell", "dumpsys", "window", "windows"],
+            capture_output=True, text=True, timeout=30,
+        )
+    except Exception:
+        return ""
+    text = r.stdout or ""
+    focuses = re.findall(r"mCurrentFocus=Window\{[^}]*?\s([A-Za-z][\w.]+)/", text)
+    return focuses[-1] if focuses else ""
+
+
+def launch_app(project: Path, serial: str, log=None, tries: int = 3) -> bool:
+    """Bring the app under test to the front, and say whether it really is.
+
+    An audit is evidence about the app, so a frame of the LAUNCHER must never be
+    accepted as one: on 2026-11-08 every screen of one project was judged from the
+    launcher because the capture path installed the APK and photographed whatever
+    was on screen. `install` alone opens nothing. The launch is followed by a
+    foreground check against the app's own package id, so a device that refuses
+    to start the app yields NO evidence (and the audit says so) instead of a
+    confident verdict on somebody else's pixels.
+    """
+    from . import ux_video
+    import time as _time
+
+    try:
+        pkg = ux_video.package_name(project)
+    except SystemExit as e:
+        if log:
+            log(f"~ ux: cannot launch the app to photograph it — {e}")
+        return False
+
+    for _attempt in range(max(1, tries)):
+        ux_video._adb(serial, ["shell", "am", "force-stop", pkg], timeout=30)
+        ux_video._adb(
+            serial,
+            ["shell", "monkey", "-p", pkg, "-c", "android.intent.category.LAUNCHER", "1"],
+            timeout=45,
+        )
+        for _ in range(16):
+            _time.sleep(0.5)
+            if _foreground_package(serial) == pkg:
+                if log:
+                    log(f"~ ux: '{pkg}' is in front")
+                return True
+
+    if log:
+        log(f"~ ux: '{pkg}' never came to the front — refusing to photograph the launcher")
+    return False
+
+
 def _device_still(project: Path, serial: str, log=None) -> Path | None:
-    """The screen as the device is showing it right now."""
+    """The app's own screen as the device is showing it right now."""
     from .emulator import ADB
     import subprocess as _sp
+
+    # The frame is only evidence if the app is what is on screen. Ask the window
+    # manager first, so a launcher/notification shade is never stored as "Score".
+    if not launch_app(project, serial, log=log):
+        return None
+
     out_dir = pipeline_dir(project) / DEVICE_DIR
     out_dir.mkdir(parents=True, exist_ok=True)
     dest = out_dir / f"live-{now_iso().replace(':', '')}.png"
@@ -796,9 +857,13 @@ def _device_still(project: Path, serial: str, log=None) -> Path | None:
     data = r.stdout or b""
     if not data.startswith(b"\x89PNG"):
         return None
+    if not launch_app(project, serial, log=None, tries=1):
+        if log:
+            log("~ ux: the app left the foreground during the capture — frame discarded")
+        return None
     dest.write_bytes(data)
     if log:
-        log(f"~ ux: captured the device screen -> {dest.name}")
+        log(f"~ ux: captured the app's own screen -> {dest.name}")
     return dest
 
 
@@ -845,13 +910,28 @@ def run_audit(project: Path, only_scene: str | None = None,
         try:
             ux_video.build_and_install(project, serial, log)
             live = _device_still(project, serial, log=log)
+            # ONE live frame cannot be evidence for several screens: it shows the
+            # screen the app opens on, and nothing else. Assigning it to every
+            # label made the audit judge the same picture four times (2026-11-08:
+            # a launcher frame, then the same setup form, reported against Score,
+            # Summary and History alike). A multi-screen pass therefore needs a
+            # per-surface frame, which a declared journey supplies; a single-screen
+            # pass — the normal "this screen changed" case — may use the live one.
+            per_surface = {row["label"]: _flow_still_for(project, row["label"]) for row in targets}
+            have_journey = any(p is not None for p in per_surface.values())
             for row in targets:
-                still = _flow_still_for(project, row["label"]) or live
+                still = per_surface.get(row["label"])
+                if still is None and len(targets) == 1:
+                    still = live
                 if still is not None:
                     row["render"] = str(still)
+                elif log:
+                    log(f"~ ux: '{row['label']}' has no frame of its own — "
+                        "declare a journey (`docs/ux-flows.json` + `devteam ux-flow`) "
+                        "so this screen is judged from itself")
             if log:
                 log("~ ux: evidence = device stills"
-                    + (" (flow frames where a journey kept them)" if live else ""))
+                    + (" (per-surface journey frames)" if have_journey else ""))
         finally:
             if started:
                 stopped = emulator.stop(serial)
