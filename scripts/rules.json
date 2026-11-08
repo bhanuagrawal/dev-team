@@ -244,13 +244,21 @@
    "enforced_by": "team/emulator.require_device() is the only way the three UX passes get a serial (it raises when none is available); team/verify.device_gate runs verify.integration_task on the JVM or skips, and no longer boots an AVD",
    "note": "owner policy 2026-11-08. run-derived: ux-audit used to judge a Robolectric render, which cannot show a keyboard covering the submit button, an inset collision, a session that failed to persist, or an unreachable network \u2014 all found within an hour of moving the audit onto the device."
   },
-{
- "id": "ux-evidence-must-be-the-screen",
- "rule": "a UX verdict may only be stored against a frame that is provably the app AND that screen: the capture path launches the app and confirms the foreground package, and one live frame is never reused as evidence for several surfaces \u2014 each surface needs its own journey frame",
- "doc": "AGENTS.md#7 / devteam ux-audit",
- "kind": "code",
- "enforced_by": "team/ux_audit.launch_app() force-stops and launches the app, then reads mCurrentFocus until the app's own package is in front (no frame is stored otherwise); run_audit assigns a live frame only to a single-surface pass and otherwise requires a per-surface journey frame",
- "note": "run-derived 2026-11-08: ux-audit installed the APK, photographed the launcher and stored three P1 'wrong screen captured' gripes on each of four screens; before that it re-judged one frame as four different screens. Both halves are refused in code now, and a project with several stale screens must declare journeys (docs/ux-flows.json + `devteam ux-flow`) to be judged."
-}
+  {
+   "id": "ux-evidence-must-be-the-screen",
+   "rule": "a UX verdict may only be stored against a frame that is provably the app AND that screen: the capture path launches the app and confirms the foreground package, and one live frame is never reused as evidence for several surfaces \u2014 each surface needs its own journey frame",
+   "doc": "AGENTS.md#7 / devteam ux-audit",
+   "kind": "code",
+   "enforced_by": "team/ux_audit.launch_app() force-stops and launches the app, then reads mCurrentFocus until the app's own package is in front (no frame is stored otherwise); run_audit assigns a live frame only to a single-surface pass and otherwise requires a per-surface journey frame",
+   "note": "run-derived 2026-11-08: ux-audit installed the APK, photographed the launcher and stored three P1 'wrong screen captured' gripes on each of four screens; before that it re-judged one frame as four different screens. Both halves are refused in code now, and a project with several stale screens must declare journeys (docs/ux-flows.json + `devteam ux-flow`) to be judged."
+  },
+  {
+   "id": "verdicts-are-revisable",
+   "rule": "a milestone verdict can be withdrawn when new evidence lands; the plan must reflect the APP, not the last diff",
+   "doc": "AGENTS.md#goal-mode",
+   "kind": "code",
+   "enforced_by": "devteam goal <project> verdict --id <milestone> --met yes|no --evidence '\u2026' (appends to goal_log, re-derives the pointer, rewrites the page)",
+   "note": "owner question 2026-11-08 ('flow awareness'): m1 sat at \u2713 for a week while the feed crashed and no request could be sent, because only the planner could write a verdict and only for the ACTIVE milestone \u2014 a wrong 'met' was unwithdrawable once the pointer moved on."
+  }
  ]
 }

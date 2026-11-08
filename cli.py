@@ -1016,6 +1016,23 @@ def cmd_queue(args: argparse.Namespace) -> None:
         tree_mod.write(project)
         print_page(project, "shows the new queue item", file=sys.stderr)
         return
+    if action == "verdict":
+        mid = str(args.id or "").strip()
+        if not mid or args.met not in ("yes", "no"):
+            print("verdict needs --id <milestone> --met yes|no --evidence \"…\"")
+            return 2
+        if goals.milestone(profile, mid) is None:
+            print(f"no such milestone: {mid}")
+            return 2
+        verdict = "done" if args.met == "yes" else "active"
+        goals.record_verdict(state, mid, verdict,
+                             str(args.evidence or ""), args.by or "agent")
+        save_state(project, state)
+        print(f"verdict recorded: [{mid}] {'MET' if args.met == 'yes' else 'NOT MET'} — "
+              f"{str(args.evidence or '')[:140]}")
+        from team import tree as tree_mod
+        tree_mod.write(project)
+        return 0
     if action == "review":
         from team import queue as qmod
         print(qmod.review(state))
@@ -1547,6 +1564,23 @@ def cmd_goal(args: argparse.Namespace) -> int:
                 "seen" if e.get("reviewed") else "TO REVIEW")
             print(f"  [{flag}] {str(e.get('at'))[:16]} {e.get('action')} "
                   f"'{e.get('node')}' — {e.get('why')}")
+        return 0
+    if action == "verdict":
+        mid = str(args.id or "").strip()
+        if not mid or args.met not in ("yes", "no"):
+            print("verdict needs --id <milestone> --met yes|no --evidence \"…\"")
+            return 2
+        if goals.milestone(profile, mid) is None:
+            print(f"no such milestone: {mid}")
+            return 2
+        verdict = "done" if args.met == "yes" else "active"
+        goals.record_verdict(state, mid, verdict,
+                             str(args.evidence or ""), args.by or "agent")
+        save_state(project, state)
+        print(f"verdict recorded: [{mid}] {'MET' if args.met == 'yes' else 'NOT MET'} — "
+              f"{str(args.evidence or '')[:140]}")
+        from team import tree as tree_mod
+        tree_mod.write(project)
         return 0
     if action == "review":
         n = 0
@@ -4305,7 +4339,10 @@ def main() -> None:
     g = sub.add_parser("goal")
     g.add_argument("project")
     g.add_argument("action", choices=["add", "park", "set-status", "retire",
-                                      "reparent", "revert", "review", "log"])
+                                      "reparent", "revert", "review", "log", "verdict"])
+    g.add_argument("--met", choices=["yes", "no"],
+                   help="verdict: whether the milestone's measures are met NOW")
+    g.add_argument("--evidence", help="verdict: the probe or artifact that decides it")
     g.add_argument("--id", help="the branch to change (see `goal log` / the tree page)")
     g.add_argument("--title", help="add: what this branch is for, in plain words")
     g.add_argument("--parent", help="add/reparent: vision or another branch id")
