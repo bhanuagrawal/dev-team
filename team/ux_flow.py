@@ -259,6 +259,26 @@ def _screenshot(serial: str, dest: Path) -> bool:
     return False
 
 
+def _settle(serial: str, pkg: str, timeout: float = 12.0) -> tuple[bool, float]:
+    """Wait for the launch screen to become the app's own, tappable UI.
+
+    A screenshot taken 1.6s after `am start` catches the splash on a slow boot and
+    the model then judges a logo as the product ("nothing is loading or tappable")
+    — a false P0 that hides the real one. "Settled" is: the focused window belongs
+    to the app AND the accessibility tree exposes at least one label. A flow that
+    never settles is a genuine finding, returned as settled=False with the wait.
+    """
+    from .ux_video import _ui_xml
+    t0 = time.monotonic()
+    while time.monotonic() - t0 < timeout:
+        time.sleep(0.7)
+        if not _window_title(serial, pkg):
+            continue
+        if tappables(_ui_xml(serial), pkg):
+            return True, time.monotonic() - t0
+    return False, time.monotonic() - t0
+
+
 def _window_title(serial: str, pkg: str) -> str:
     r = _adb(serial, ["shell", "dumpsys", "window"], timeout=60)
     text = r.stdout or ""
@@ -328,10 +348,37 @@ def audit_flow(project: Path, flow: dict, serial: str, log=None,
                              f"declared fresh) — got {word or 'no answer'}")
     _adb(serial, ["shell", "monkey", "-p", pkg, "-c", "android.intent.category.LAUNCHER", "1"],
          timeout=45)
-    time.sleep(1.6)
+    settled, waited = _settle(serial, pkg)
+    if log:
+        log(f"~ ux-flow: '{fid}' launch screen settled after {waited:.1f}s"
+            + ("" if settled else " — THE APP NEVER LEFT ITS LAUNCH SCREEN"))
 
     steps: list[dict] = []
     stills: list[Path] = []
+    if not settled:
+        still = out_dir / "step-01.png"
+        _screenshot(serial, still)
+        stills.append(still)
+        result = {
+            "flow": fid, "surface": str(flow.get("surface") or ""), "goal": goal,
+            "outcome": "stuck",
+            "reason": (f"the app never left its launch screen: no tappable UI from "
+                       f"{pkg} after {waited:.0f}s"),
+            "steps": [{"n": 1, "did": "waited for the app to open",
+                       "then": f"still no app UI after {waited:.0f}s",
+                       "screen": "", "action": "stuck"}],
+            "dead_taps": [], "crashes": [], "goal_reached": False,
+            "verdict": f"the journey never starts: the app does not open in {waited:.0f}s",
+            "reactions": [], "premium": [], "defects": [], "model_error": "",
+            "stills": [str(p) for p in stills], "sheet": str(still),
+            "rubric": RUBRIC, "at": now_iso(),
+        }
+        (out_dir / "result.json").write_text(json.dumps(result, indent=2) + "\n")
+        _write_record(project, {"flow": fid, "step": 1, "state": "done",
+                                "outcome": "stuck", "goal_reached": False,
+                                "verdict": result["verdict"]})
+        return result
+
     tried: dict[str, set[str]] = {}
     outcome = "budget"
     reason = ""
@@ -529,6 +576,12 @@ def store(project: Path, result: dict, log=None) -> dict:
 
     retired = 0
     for g in row.get("gripes") or []:
+        # ONLY this flow may retire its own findings. Two journeys can share a
+        # surface, and retiring a sibling's gripes because THIS one did not step on
+        # them wiped a valid P0 the moment the next flow ran (seen 2026-11-08: the
+        # first-run findings vanished when request-a-book was audited next).
+        if g.get("flow") and g.get("flow") != result["flow"]:
+            continue
         if g.get("status") == "open" and g.get("id") not in open_now:
             g["status"] = "gone"
             g["gone_at"] = now_iso()
