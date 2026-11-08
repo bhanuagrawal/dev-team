@@ -2125,6 +2125,14 @@ def cmd_ux_video(args: argparse.Namespace) -> int:
     return 1 if res["failed"] else 0
 
 
+def cmd_mock_server(args: argparse.Namespace) -> int:
+    """Foreground mock backend: deterministic Supabase shapes, no real project."""
+    project = resolve_project(args.project)
+    from team import mock_server
+    return mock_server.serve(project.name, port=args.port or mock_server.DEFAULT_PORT,
+                             log=lambda m: print(f"[{project.name}] {m}"))
+
+
 def cmd_ux_flow(args: argparse.Namespace) -> int:
     """Goal-declared journeys, navigated by a vision model, judged as a person."""
     project = resolve_project(args.project)
@@ -2135,7 +2143,9 @@ def cmd_ux_flow(args: argparse.Namespace) -> int:
                       keep_emulator=getattr(args, "keep_emulator", False),
                       max_steps=getattr(args, "max_steps", None),
                       worktree=(Path(args.worktree).expanduser()
-                                if getattr(args, "worktree", None) else None))
+                                if getattr(args, "worktree", None) else None),
+                      mock=getattr(args, "mock", False),
+                      mock_port=getattr(args, "mock_port", None))
     if not res["planned"]:
         print(ux_flow.status_report(project))
         return 0
@@ -2159,6 +2169,9 @@ def cmd_ux_flow(args: argparse.Namespace) -> int:
             print(f"  · {d.get('severity', '')}{elem} {d.get('line', '')}")
         if r.get("verdict"):
             print(f"  verdict: {r['verdict']}")
+        if r.get("mock_requests"):
+            print("  mock backend: " + ", ".join(
+                f"{x['method']} {x['path'].split('/')[-1]}" for x in r["mock_requests"][:8]))
         if r.get("model_error"):
             print(f"  ~ the judge could not run: {r['model_error']}")
         if not r["goal_reached"] and r.get("reason"):
@@ -4265,10 +4278,21 @@ def main() -> None:
     uf.add_argument("--worktree", metavar="PATH",
                     help="audit THIS task worktree instead of origin/main — the point is "
                          "to walk a change before it is merged (and before CI)")
+    uf.add_argument("--mock", action="store_true",
+                    help="serve a local Supabase-shaped mock and point the DEBUG build at "
+                         "it, so a journey can be walked past sign-in to the end")
+    uf.add_argument("--mock-port", type=int, default=None,
+                    help="port for the mock (default 54399, or the next free one)")
     uf.add_argument("--via", choices=["api"], default="api",
                     help="the vision model that navigates (the API; browser Gemini is "
                          "the asset maker, not a navigator)")
     uf.set_defaults(fn=cmd_ux_flow)
+    ms = sub.add_parser("mock-server", help="serve a local Supabase-shaped mock backend "
+                                            "(deterministic fixtures) for a manual or audited "
+                                            "walk of a debug build")
+    ms.add_argument("project")
+    ms.add_argument("--port", type=int, default=None)
+    ms.set_defaults(fn=cmd_mock_server)
     tt = sub.add_parser("tree"); tt.add_argument("project")
     tt.add_argument("--html", action="store_true", help="write the html view and print its path")
     tt.add_argument("--open", action="store_true", help="open the html view in the browser")

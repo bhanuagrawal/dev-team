@@ -69,6 +69,7 @@ Journey: {flow}
 Goal: {goal}
 Step {step} of {max_steps}.
 Already done: {history}
+Already filled: {filled}
 {screen}
 {credentials}
 The screenshot IS the current screen. The list below is what is tappable on it
@@ -239,6 +240,31 @@ def tappables(xml: str, pkg: str = "") -> list[dict]:
     return uniq[:14]
 
 
+def _pick_field(targets: list[dict], role: str) -> int | None:
+    """The index of the editable field that plays `role`, by label then by order.
+
+    Compose does not always expose a text field's label, so the SECOND editable
+    control on a sign-in screen is the password even when it is unlabelled —
+    trusting the model's index typed the password into the email box (seen
+    2026-08-11 style: the field showed "audit-pass-123" and submit silently did
+    nothing because the email was never valid).
+    """
+    fields = [i for i, t in enumerate(targets) if t.get("editable")]
+    def labelled(i: int) -> bool:
+        lab = (targets[i].get("label") or "").lower()
+        keys = ("email", "mail") if role == "email" else (
+            "pass", "secret") if role == "password" else ()
+        return bool(keys) and any(k in lab for k in keys)
+    named = [i for i in fields if labelled(i)]
+    if named:
+        return named[0]
+    if role == "email":
+        return fields[0] if fields else None
+    if role == "password":
+        return fields[1] if len(fields) > 1 else (fields[0] if fields else None)
+    return fields[0] if fields else None
+
+
 def _label_list(targets: list[dict]) -> str:
     if not targets:
         return "  (nothing tappable is exposed — this screen may be blank, a canvas,\n" \
@@ -266,6 +292,34 @@ def _screenshot(serial: str, dest: Path) -> bool:
         dest.write_bytes(data)
         return True
     return False
+
+
+def _launcher_component(serial: str, pkg: str) -> str:
+    r = _adb(serial, ["shell", "cmd", "package", "resolve-activity", "--brief", pkg], timeout=45)
+    text = r.stdout or ""
+    for line in text.splitlines():
+        line = line.strip()
+        if "/" in line and pkg in line:
+            return line
+    return ""
+
+
+def _launch(serial: str, pkg: str, base_url: str | None = None) -> None:
+    """Open the app; with a mock, say where the API lives.
+
+    `monkey` cannot carry extras, and the base-URL handoff has to be an intent
+    extra. The DEBUG build honours it (a release build ignores it), so this is the
+    one seam that lets an audit reach a local backend without any production code
+    path being different.
+    """
+    component = _launcher_component(serial, pkg) if base_url else ""
+    if component:
+        args = ["shell", "am", "start", "-n", component,
+                "--es", "devteam_mock_base_url", str(base_url)]
+        _adb(serial, args, timeout=45)
+        return
+    _adb(serial, ["shell", "monkey", "-p", pkg, "-c",
+                  "android.intent.category.LAUNCHER", "1"], timeout=45)
 
 
 def _settle(serial: str, pkg: str, timeout: float = 12.0) -> tuple[bool, float]:
@@ -338,7 +392,8 @@ def _sheet(stills: list[Path], out: Path) -> Path | None:
 
 
 def audit_flow(project: Path, flow: dict, serial: str, log=None,
-               max_steps: int | None = None, via: str = "api") -> dict:
+               max_steps: int | None = None, via: str = "api",
+               base_url: str | None = None) -> dict:
     """Drive one goal-declared journey and judge what a person would hit."""
     from . import ux_video, vision_layout
 
@@ -365,8 +420,7 @@ def audit_flow(project: Path, flow: dict, serial: str, log=None,
         if not word.lower().startswith("success"):
             raise SystemExit(f"ux-flow: could not clear app data for '{pkg}' (flow is "
                              f"declared fresh) — got {word or 'no answer'}")
-    _adb(serial, ["shell", "monkey", "-p", pkg, "-c", "android.intent.category.LAUNCHER", "1"],
-         timeout=45)
+    _launch(serial, pkg, base_url=base_url)
     settled, waited = _settle(serial, pkg)
     if log:
         log(f"~ ux-flow: '{fid}' launch screen settled after {waited:.1f}s"
@@ -399,6 +453,8 @@ def audit_flow(project: Path, flow: dict, serial: str, log=None,
         return result
 
     tried: dict[str, set[str]] = {}
+    filled: set[str] = set()
+    typed = 0
     outcome = "budget"
     reason = ""
     crashes: list[str] = []
@@ -423,6 +479,10 @@ def audit_flow(project: Path, flow: dict, serial: str, log=None,
         xml = ux_video._ui_xml(serial)
         targets = tappables(xml, pkg)
         screen = _window_title(serial, pkg)
+        if log and any(x.get("editable") for x in targets):
+            log("~ ux-flow: fields on this screen: " + ", ".join(
+                f"{i}:{t['label'] or '(unlabelled)'}" for i, t in enumerate(targets)
+                if t.get("editable")))
         history = ("\n".join(f"  {s['n']}. {s['did']} → {s['then']}" for s in steps)
                    or "  (nothing yet)")
         dead_line = ""
@@ -437,7 +497,8 @@ def audit_flow(project: Path, flow: dict, serial: str, log=None,
                        "text field is where a human takes over.\n")
         prompt = DECIDE_PROMPT.format(
             app=app, flow=fid, goal=goal, step=step, max_steps=cap,
-            history=history, screen=(f"Screen: {screen}" if screen else ""),
+            history=history, filled=(", ".join(sorted(filled)) or "(none yet)"),
+            screen=(f"Screen: {screen}" if screen else ""),
             credentials=credentials,
             targets=_label_list(targets), dead=dead_line)
         decision = _ask(cfg, prompt, still)
@@ -468,24 +529,37 @@ def audit_flow(project: Path, flow: dict, serial: str, log=None,
             steps.append({"n": step, "did": "pressed back", "then": "left the screen",
                           "screen": screen, "action": "back"})
             continue
-        if action != "tap":
-            outcome, reason = "error", f"the model answered {json.dumps(decision)[:120]}"
-            break
-
         if action == "type":
-            idx = decision.get("index")
+            typed += 1
             field = str(decision.get("field") or "").strip().lower()
             creds = flow.get("credentials") or {}
             value = creds.get(field) or ""
+            idx = _pick_field(targets, field)
             if not isinstance(idx, int) or not (0 <= idx < len(targets)) or not value:
                 outcome, reason = "error", (
                     f"type needs a listed index and an available credential "
                     f"(got index {idx!r}, field {field!r})")
                 break
             target = targets[idx]
+            label = (target["label"] or "").strip()
+            # The field's own label can be empty in a Compose dump, so trust the
+            # model's declared field when it names a credential we actually hold.
+            role = (field if field in creds else
+                    "email" if any(k in label.lower() for k in ("email", "mail"))
+                    else "password" if any(k in label.lower() for k in ("pass", "secret"))
+                    else "field")
+            if role in filled or typed > len(creds):
+                # Typing again APPENDS: the field read "…testaudit-pass-123" and the
+                # sign-in then failed for a reason the app never caused.
+                outcome, reason = "error", (
+                    f"the model tried to fill the {role} field again (already filled: "
+                    f"{', '.join(sorted(filled)) or 'none'})")
+                break
             _adb(serial, ["shell", "input", "tap", str(target["x"]), str(target["y"])],
                  timeout=30)
-            time.sleep(0.5)
+            time.sleep(0.4)
+            # Clear whatever was there, so a retype replaces instead of appending.
+            _adb(serial, ["shell", "input", "keyevent", *(["67"] * 60)], timeout=60)
             _adb(serial, ["shell", "input", "text", value.replace(" ", "%s")], timeout=30)
             time.sleep(0.6)
             typed = value[:4].lower() in (ux_video._ui_xml(serial) or "").lower()
@@ -497,9 +571,18 @@ def audit_flow(project: Path, flow: dict, serial: str, log=None,
             if not typed:
                 dead.append({"step": step, "label": target["label"],
                              "screen": screen})
+            filled.add(role)
+            # The keyboard covers the submit control on a 6.4" phone; close it so the
+            # next decision sees the screen a person would see after typing.
+            _adb(serial, ["shell", "input", "keyevent", "4"], timeout=30)
+            time.sleep(0.4)
             continue
 
         index = decision.get("index")
+        if action != "tap":
+            outcome, reason = "error", f"the model answered {json.dumps(decision)[:120]}"
+            break
+
         if not isinstance(index, int) or not (0 <= index < len(targets)):
             outcome, reason = "error", f"tap index {index!r} is not a listed target"
             break
@@ -535,7 +618,12 @@ def audit_flow(project: Path, flow: dict, serial: str, log=None,
     sheet_path = _sheet(stills, out_dir / f"{_slug(fid)}-trajectory.png")
     verdict = {"goal_reached": outcome == "done", "verdict": "", "reactions": [],
                "defects": [], "premium": []}
-    if sheet_path is not None:
+    if outcome == "error":
+        # The DRIVER failed (a malformed decision, a tap it could not place). Asking
+        # the judge to describe a journey that never happened produced invented
+        # P0s from a single screenshot, so the error is reported as itself.
+        verdict["verdict"] = f"the audit could not drive this journey: {reason}"
+    elif sheet_path is not None:
         history = "\n".join(f"  {s['n']}. {s['did']} → {s['then']}" for s in steps)
         try:
             verdict = _ask(cfg, JUDGE_PROMPT.format(
@@ -607,7 +695,7 @@ def store(project: Path, result: dict, log=None) -> dict:
     for c in result["crashes"]:
         findings.append((f"the app crashed during the {result['flow']} journey: {c}",
                          "", "P0_BLUNDER", "flow", "crash"))
-    if result["outcome"] == "needs_credentials":
+    if result["outcome"] in ("needs_credentials", "error"):
         # Nothing is written: the journey stopped because the AUDITOR has no
         # password. Recording that as a defect would bury the app's real findings
         # under a limitation of the tool.
@@ -673,7 +761,8 @@ def store(project: Path, result: dict, log=None) -> dict:
 # --------------------------------------------------------------------------- #
 def run(project: Path, only: str | None = None, log=None, avd: str | None = None,
         keep_emulator: bool = False, max_steps: int | None = None,
-        worktree: Path | None = None) -> dict:
+        worktree: Path | None = None, mock: bool = False,
+        mock_port: int | None = None) -> dict:
     """Audit every goal-declared flow (or one), on a device this pass owns."""
     from . import emulator
 
@@ -688,6 +777,18 @@ def run(project: Path, only: str | None = None, log=None, avd: str | None = None
     if not todo:
         return {"planned": 0, "run": [], "skipped": [], "failed": []}
 
+    server = None
+    base_url = None
+    if mock:
+        from . import mock_server
+        server = mock_server.MockServer(mock_port or mock_server.DEFAULT_PORT).start()
+        if not server.wait_ready():
+            raise SystemExit("ux-flow: the mock backend did not come up")
+        base_url = server.url
+        if log:
+            log(f"~ ux-flow: mock backend on {base_url} (deterministic fixtures) — "
+                f"the debug build is pointed at it, no production path changes")
+
     serial, started = emulator.ensure_device(avd=avd, log=log)
     results, failed, skipped = [], [], []
     try:
@@ -698,17 +799,30 @@ def run(project: Path, only: str | None = None, log=None, avd: str | None = None
         if log:
             log(f"~ ux-flow: auditing {build['source']}")
         for flow in todo:
+            if mock and not (flow.get("credentials") or {}).get("password"):
+                # The mock accepts these; a real backend would not, so they are
+                # injected only for an audited mock run and never live in the spec.
+                flow = {**flow, "credentials": {"email": "audit@bookswap.test",
+                                                "password": "audit-pass-123"}}
             fid = str(flow["id"])
             try:
                 res = audit_flow(project, flow, serial, log=log,
-                                 max_steps=max_steps)
+                                 max_steps=max_steps, base_url=base_url)
             except SystemExit as exc:
                 failed.append({"id": fid, "reason": str(exc)[:300]})
                 continue
             res["build"] = build
+            res["mock"] = base_url or ""
             results.append(res)
             store(project, res, log=log)
     finally:
+        if server is not None:
+            res_requests = server.requests
+            if log:
+                log(f"~ ux-flow: mock backend answered {len(res_requests)} request(s)")
+            for r in results:
+                r["mock_requests"] = res_requests
+            server.stop()
         if started and not keep_emulator:
             stopped = emulator.stop(serial)
             if log:
