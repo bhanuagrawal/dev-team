@@ -268,6 +268,14 @@
       "enforced_by": "",
       "proposal": "devteam verify: when the diff adds or changes src/test files under an included build, run `./gradlew <profile.verify.test> --dry-run` and WARN (or fail once the rule is proven) unless the dry-run task graph contains that build's `:test` task; coverage.py already counts build-logic src/test as unit coverage, so today a project can reach 100% with tests nothing ever executes",
       "note": "run-derived 2026-11-08 (ZenListKMP): unit coverage counted build-logic/convention/src/main as uncovered, the queue head was the entry to test it, and verify's test command was ':app:test..., :shared:test...' — the new build-logic tests would have been decoration in every gate while the coverage signal turned green. Closed for that project by a root `testBuildLogic` task wired into profile.verify.test; the generic mechanism is proposed here."
+    },
+    {
+      "id": "brand-publish-reconciles-with-the-store",
+      "rule": "a brand change's 'next: publish' must be decided from the STORE, not from the last step the brand command happened to run: an icon already inside a Play review submission (or whose live listing bytes match the committed icon) is published, and the chain must not tell the owner to upload it again",
+      "doc": "AGENTS.md#5",
+      "kind": "enforcible",
+      "proposal": "team/brand_change.status(): when the last step is 'released' and Play answers with a live listing icon whose sha256 matches the committed distribution/listing/<locale>/images/icon.png, record the 'published' step (or report 'already live') instead of printing 'next: devteam brand <project> --publish'; team/play_listing.publish_icon() short-circuits when the live bytes already match, so a re-run never opens a fresh Play edit on an in-review listing",
+      "note": "run-derived 2026-11-09: status printed 'brand: open at released — icon-refresh-2026-11-07; next: devteam brand <project> --publish' while signals.store_status showed that exact icon already cleared by the API and inside the current review submission (the storefront pass published it, not the brand command). The owner's obvious next action would have opened a second Play edit and re-triggered review for bytes Play already had; the store is the record of whether an asset is published, never a command's step log."
     }
   ]
 }
