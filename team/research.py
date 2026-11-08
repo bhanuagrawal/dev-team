@@ -220,19 +220,30 @@ def _ga4_pull(project: Path, profile: dict) -> dict:
                 "dimensions": [{"name": d} for d in dims],
                 "metrics": [{"name": m} for m in metrics],
             }
-            excludes = conf.get("exclude_device_models") or []
-            if excludes:
-                body["dimensionFilter"] = {"andGroup": {"expressions": [
-                    {"notExpression": {"filter": {"fieldName": "deviceModel",
-                     "inListFilter": {"values": excludes}}}}]}}
+            # Baseline test device models and emulators to exclude across all apps,
+            # merged with any project-specific exclusions.
+            excludes = list(dict.fromkeys(
+                ["OnePlus8Pro", "IN2025", "sdk_gphone16k_arm64", "sdk_gphone_arm64"]
+                + (conf.get("exclude_device_models") or [])
+            ))
+            exprs: list[dict] = [
+                # Exclude events with no country set (local test/emulator networks)
+                {"notExpression": {"filter": {"fieldName": "country",
+                 "inListFilter": {"values": ["(not set)", ""]}}}},
+                # Exclude test devices by marketing model name
+                {"notExpression": {"filter": {"fieldName": "deviceModel",
+                 "inListFilter": {"values": excludes}}}},
+                # Exclude test devices by technical hardware model
+                {"notExpression": {"filter": {"fieldName": "mobileDeviceModel",
+                 "inListFilter": {"values": excludes}}}},
+                # Exclude local debug builds (release candidates '-rc' remain included)
+                {"notExpression": {"filter": {"fieldName": "appVersion",
+                 "stringFilter": {"matchType": "CONTAINS", "value": "debug"}}}},
+            ]
             if event_filter:
-                body["dimensionFilter"] = {"andGroup": {"expressions": [
-                    {"filter": {"fieldName": "eventName",
-                     "stringFilter": {"value": event_filter}}}]}}
-                body["dimensionFilter"]["andGroup"]["expressions"].extend(
-                    #  keep model exclusion alongside event filter
-                    [{"notExpression": {"filter": {"fieldName": "deviceModel",
-                      "inListFilter": {"values": excludes}}}}] if excludes else [])
+                exprs.append({"filter": {"fieldName": "eventName",
+                              "stringFilter": {"value": event_filter}}})
+            body["dimensionFilter"] = {"andGroup": {"expressions": exprs}}
             r = run(["curl", "-s", "-X", "POST",
                      "-H", f"Authorization: Bearer {token}",
                      "-H", "Content-Type: application/json",
