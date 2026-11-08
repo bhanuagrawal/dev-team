@@ -800,6 +800,13 @@ def cmd_ci(args: argparse.Namespace) -> int:
     project = resolve_project(args.project)
     from team import ci
     if getattr(args, "write", False):
+        # A command that writes inside a project ends with a commit on a pushed
+        # ref (AGENTS.md): the generated workflow is code, and a copy that exists
+        # only on this disk is not the CI that will run. Snapshot first so only
+        # the files THIS command wrote are committed, never a stale checkout's
+        # copies of the other workflows.
+        from team.publish import commit_paths, snapshot_paths
+        baseline = snapshot_paths(project, [".github/workflows"])
         res = ci.write(project)
         if res["written"]:
             print(f"ci: wrote {res['workflow']} (trigger: {res['trigger']}, package: {res['package']})")
@@ -808,6 +815,17 @@ def cmd_ci(args: argparse.Namespace) -> int:
                   f"(trigger: {res['trigger']}, package: {res['package']})")
         for name in res["retired"]:
             print(f"  - retired .github/workflows/{name}")
+        landed = commit_paths(
+            project, [".github/workflows"],
+            "chore(ci): regenerate the release workflow from the team template",
+            log=print, baseline=baseline)
+        if landed.get("pushed"):
+            if landed.get("sha"):
+                print(f"ci: committed → origin @ {landed['sha']}")
+            else:
+                print("ci: origin already carries these bytes")
+        else:
+            print(f"ci: NOT committed — {landed.get('why', 'unknown')} (next run retries)")
         return 0
     print(ci.render(project))
     return 0

@@ -422,6 +422,15 @@ def commit_paths(project: Path, paths: list[str], message: str, log=None,
     # Directories are committed file-by-file against a per-file baseline: copying
     # a whole tree swept in the stale copies a behind-origin checkout still holds.
     keep = _expand_paths(project, keep)
+    if not keep and not baseline:
+        return {"pushed": False, "sha": "", "why": "no committable paths"}
+    if baseline is not None:
+        # A file the command DELETED is part of what it wrote: it was in the
+        # baseline and is gone from disk now. Keep it named so the worktree's
+        # copy is removed from origin too (`ci --write` retires old workflows
+        # this way; without this the retired file survived on main forever).
+        keep += [rel for rel in baseline
+                 if rel not in keep and not (project / rel).exists()]
     if not keep:
         return {"pushed": False, "sha": "", "why": "no committable paths"}
     if baseline is not None:
@@ -438,6 +447,7 @@ def commit_paths(project: Path, paths: list[str], message: str, log=None,
         wt, why = _origin_tree(project, branch)
         if wt is None:
             return {"pushed": False, "sha": "", "why": why}
+        removed: list[str] = []
         for rel in keep:
             src, dst = project / rel, wt / rel
             if src.is_dir():
@@ -461,23 +471,27 @@ def commit_paths(project: Path, paths: list[str], message: str, log=None,
                 shutil.copy2(src, dst)
             elif dst.exists():
                 _g(["rm", "-q", "--", rel], wt, timeout=60)
+                removed.append(rel)
         # A path that exists in NEITHER the checkout nor origin has nothing to
         # stage, and `git add` treats it as a fatal pathspec error ("did not match
         # any files") — it then adds NOTHING, the index still matches HEAD and this
         # function reported success while the caller's deltas stayed in the
         # checkout only. Callers legitimately pass aspirational paths (a frames
         # dir no run has created yet), so drop the missing ones instead of failing.
-        addable = [rel for rel in keep if (wt / rel).exists()]
-        if addable:
-            a = _g(["add", "-A", "--", *addable], wt, timeout=120)
+        # A REMOVED path is the opposite case: `git rm` already staged it above,
+        # and naming it here is what keeps the deletion inside this commit.
+        stageable = [rel for rel in keep if (wt / rel).exists()] + removed
+        if stageable:
+            a = _g(["add", "-A", "--", *stageable], wt, timeout=120)
             if a.returncode != 0:
                 tail = (a.stderr or a.stdout or "").strip().splitlines()
                 return {"pushed": False, "sha": "",
                         "why": f"git add failed: {tail[0] if tail else 'unknown'}"}
-        if _g(["diff", "--cached", "--quiet", "--", *keep], wt, timeout=60).returncode == 0:
+        if _g(["diff", "--cached", "--quiet", "--", *(stageable or keep)], wt,
+              timeout=60).returncode == 0:
             say("nothing to commit — origin already carries these bytes")
             return {"pushed": True, "sha": "", "why": "already on origin"}
-        c = _g(["commit", "-m", message, "--", *(addable or keep)], wt, timeout=120)
+        c = _g(["commit", "-m", message, "--", *(stageable or keep)], wt, timeout=120)
         if c.returncode != 0:
             tail = (c.stderr or c.stdout or "").strip().splitlines()
             return {"pushed": False, "sha": "",

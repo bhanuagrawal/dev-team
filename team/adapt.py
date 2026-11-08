@@ -287,7 +287,12 @@ def run(project: Path, log: RunLog | None = None, apply: bool = True) -> dict:
             f"run `devteam design {project.name}` to research category standards and synthesize docs/design.md"))
 
     # 7c. gradle wrapper timeout: 10s default is flaky under CI download loads
-    wrapper_props = project / "gradle" / "wrapper" / "gradle-wrapper.properties"
+    wrapper_rel = "gradle/wrapper/gradle-wrapper.properties"
+    wrapper_props = project / wrapper_rel
+    wrapper_baseline = None
+    if apply and wrapper_props.is_file():
+        from .publish import snapshot_paths
+        wrapper_baseline = snapshot_paths(project, [wrapper_rel])
     if wrapper_props.is_file():
         try:
             wt = wrapper_props.read_text(encoding="utf-8")
@@ -300,6 +305,19 @@ def run(project: Path, log: RunLog | None = None, apply: bool = True) -> dict:
                     new_wt = wt.rstrip() + "\nnetworkTimeout=120000\n"
                 wrapper_props.write_text(new_wt, encoding="utf-8")
                 note("bumped gradle-wrapper networkTimeout to 120000 (120s)")
+                if apply and wrapper_baseline is not None:
+                    # Adapt WROTE a tracked file, so it must land on a pushed ref
+                    # like every other command that edits a project (AGENTS.md):
+                    # a wrapper fix that lives only in one checkout reddens the
+                    # next run's compile gate and looks like the developer's fault.
+                    from .publish import commit_paths
+                    landed = commit_paths(
+                        project, [wrapper_rel],
+                        "chore: raise the gradle wrapper network timeout (dev-team adapt)",
+                        log=log, baseline=wrapper_baseline)
+                    if not landed.get("pushed"):
+                        note("wrapper timeout fixed locally but NOT on origin yet ("
+                             + str(landed.get("why", "unknown")) + ") — the next run retries")
         except OSError:
             pass
 
