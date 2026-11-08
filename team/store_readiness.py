@@ -218,6 +218,52 @@ def _read_gradle_property(content: str, key: str) -> str | None:
     return None
 
 
+# A design token a user can SEE: a colour or a measured size. Prose that names
+# the system font families that already ship is documentation, not a restyle.
+_DESIGN_VISUAL_TOKEN_RE = re.compile(
+    r"#[0-9a-fA-F]{3,8}\b"
+    r"|\b\d+(?:\.\d+)?\s*(?:sp|dp)\b"
+)
+
+
+def _design_visual_change_since(src: Path, rel: str, since_ts: float) -> bool | None:
+    """Did `rel` change anything a screenshot would show since `since_ts`?
+
+    True / False when git can answer, None when it cannot (no repo, no
+    history, a git that refuses) — the caller then keeps the conservative
+    mtime verdict rather than guessing. A prose edit cannot make a listing's
+    screenshots depict obsolete UI, and saying it does sends an agent to
+    repaint owner-approved posters for nothing.
+    """
+    try:
+        log = run(
+            ["git", "-C", str(src), "log", f"--since=@{int(since_ts)}",
+             "--format=%H", "--", rel],
+            src, timeout=60,
+        )
+        if log.returncode != 0:
+            return None
+        shas = [line.strip() for line in (log.stdout or "").splitlines() if line.strip()]
+        if not shas:
+            return False
+        for sha in shas:
+            diff = run(
+                ["git", "-C", str(src), "show", "--unified=0", "--format=",
+                 sha, "--", rel],
+                src, timeout=60,
+            )
+            if diff.returncode != 0:
+                return None
+            for line in (diff.stdout or "").splitlines():
+                if not line.startswith(("+", "-")) or line.startswith(("+++", "---")):
+                    continue
+                if _DESIGN_VISUAL_TOKEN_RE.search(line):
+                    return True
+        return False
+    except Exception:
+        return None
+
+
 def run_store_readiness_audit(project: Path, tree: Path | None = None) -> list[ReadinessCheck]:
     """Audit the app's Play submission readiness.
 
@@ -688,6 +734,13 @@ def run_store_readiness_audit(project: Path, tree: Path | None = None) -> list[R
             design_mtime = design_file.stat().st_mtime
             oldest_shot_mtime = min(s.stat().st_mtime for s in shots)
             is_stale = (design_mtime - oldest_shot_mtime) > 600
+            # A design.md write is not automatically a VISUAL change: a run that
+            # only documents the font families that already ship used to mark a
+            # listing "obsolete pre-revamp UI" and send an agent to repaint four
+            # owner-approved posters for nothing (2026-11-08). When git can
+            # answer, judge the edit by the tokens it actually moved.
+            fresh_because_visual_unchanged = False
+            comp_ts = None
             if is_stale:
                 frames_meta = src / "docs" / "storefront-frames.json"
                 if frames_meta.is_file():
@@ -700,14 +753,24 @@ def run_store_readiness_audit(project: Path, tree: Path | None = None) -> list[R
                                 is_stale = False
                     except Exception:
                         pass
+            if is_stale and comp_ts is not None:
+                visual = _design_visual_change_since(src, "docs/design.md", comp_ts)
+                if visual is False:
+                    is_stale = False
+                    fresh_because_visual_unchanged = True
             checks.append(ReadinessCheck(
                 category="Storefront Graphic Assets",
                 name="Storefront Screenshots Freshness",
                 passed=not is_stale,
                 severity="BLOCKER" if is_stale else "INFO",
-                detail="Screenshots are fresh relative to docs/design.md" if not is_stale else (
-                    f"Screenshots in {shots_dir.relative_to(src)} are older than docs/design.md — "
-                    "listing depicts obsolete pre-revamp UI/palette"
+                detail=(
+                    "Screenshots are fresh relative to docs/design.md's visual tokens "
+                    "(only prose changed since the last composition)"
+                    if fresh_because_visual_unchanged
+                    else ("Screenshots are fresh relative to docs/design.md" if not is_stale else (
+                        f"Screenshots in {shots_dir.relative_to(src)} are older than docs/design.md — "
+                        "listing depicts obsolete pre-revamp UI/palette"
+                    ))
                 ),
                 fix="Run `devteam storefront-build <project> --poster --force` to regenerate screenshots matching the new design",
             ))
