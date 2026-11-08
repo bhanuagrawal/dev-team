@@ -293,6 +293,68 @@ def storefront_decision_check(worktree: Path, files: list[str]) -> tuple[bool, s
     return True, "review and direction match the scene spec"
 
 
+def flow_gate(project: Path, worktree: Path, spec: dict | None,
+              files: list[str]) -> tuple[bool, str]:
+    """A journey whose screen this diff changed must be walked again, or excused.
+
+    Deterministic and offline: it compares the diff against each declared journey's
+    surface files and the freshness of that journey's recorded result. It never
+    boots a device — the walking happens in `devteam ux-flow`, which the developer
+    runs on its own tree. The excuse is explicit and recorded, never implied:
+    `"flow_impact": "none"` + `"flow_impact_reason"` in the task spec.
+    """
+    from . import ux_audit, ux_flow
+    try:
+        flows = ux_flow.declared(project)
+    except Exception as exc:
+        return True, f"flow gate could not read the journey spec ({exc})"
+    if not flows:
+        return True, ""
+    surfaces = {s["label"].strip().lower(): s for s in ux_audit.surfaces(project)}
+    changed = {Path(f).as_posix() for f in files}
+    unexercised: list[str] = []
+    for flow in flows:
+        surface = surfaces.get(str(flow.get("surface") or "").strip().lower())
+        if not surface:
+            continue
+        touched = [p for p in surface.get("paths") or []
+                   if Path(p).as_posix() in changed
+                   or any(Path(c).name == Path(p).name for c in changed)]
+        if not touched:
+            continue
+        result = ux_flow.run_dir(project) / ux_flow._slug(str(flow["id"])) / "result.json"
+        if not result.is_file():
+            unexercised.append(f"{flow['id']} (never walked)")
+            continue
+        try:
+            walked = result.stat().st_mtime
+        except OSError:
+            walked = 0.0
+        newest = 0.0
+        for rel in touched:
+            for base in (worktree, project):
+                candidate = base / rel
+                try:
+                    newest = max(newest, candidate.stat().st_mtime)
+                except OSError:
+                    continue
+        if newest > walked:
+            unexercised.append(f"{flow['id']} (its screen changed after the last walk)")
+    if not unexercised:
+        return True, "no declared journey touches this diff"
+    impact = str((spec or {}).get("flow_impact") or "").strip().lower()
+    reason = str((spec or {}).get("flow_impact_reason") or "").strip()
+    if impact == "none" and reason:
+        return True, ("journeys declared unaffected: " + "; ".join(unexercised[:3])
+                      + f" — reason: {reason[:120]}")
+    return False, (
+        "FLOW NOT RE-EXERCISED — this diff changes a screen a declared journey walks, "
+        "and the journey has not been run since: " + "; ".join(unexercised[:4]) +
+        ". Walk it on this tree with `devteam ux-flow <project> --worktree <tree> "
+        "--flow <id>`, or, if it genuinely cannot be affected, put "
+        '`"flow_impact": "none"` and `"flow_impact_reason": "…"` in the task spec.')
+
+
 def localization_check(project_root: Path, files: list[str]) -> tuple[bool, str]:
     """Expertise-as-script: every NEW R.string reference in Kotlin changes must
     exist in every locale's strings.xml (this app ships 15 locales)."""
@@ -555,6 +617,12 @@ def verify_all(project: Path, worktree: Path, base: str, log, gradle: bool = Tru
     files = changed_files(worktree, base)
     failures: list[str] = []
 
+    ok, msg = flow_gate(project, worktree, spec, files)
+    if not ok:
+        log("flow: FAIL — " + msg[:300])
+        failures.append(msg)
+    else:
+        log("flow: " + (msg or "no declared journey touches this diff"))
     ok, msg = scope_check(profile, files)
     log(f"scope: {msg.replace(chr(10), ' | ')}" if not ok else f"scope ok ({len(files)} files)")
     if not ok:

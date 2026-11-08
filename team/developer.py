@@ -292,6 +292,38 @@ TESTS ARE PART OF THIS DIFF — `devteam verify` REFUSES the change without them
 """
 
 
+def _flow_contract(project: Path) -> str:
+    """The journeys a change has to keep walking.
+
+    The audit tools can only catch a broken flow AFTER someone runs them; the agent
+    that breaks it is the one writing the screen. So the developer is handed the
+    journeys up front, as part of its definition of done, and told how to prove
+    them on the tree it is editing.
+    """
+    from . import ux_flow
+    flows = ux_flow.declared(project)
+    if not flows:
+        return ""
+    lines = ["", "JOURNEYS THIS CHANGE MUST KEEP WORKING — a screen that compiles but",
+             "cannot be used is a failed task, not a follow-up:"]
+    for f in flows:
+        lines.append(f"  - {f['id']} (surface: {f.get('surface') or '—'}): "
+                     f"{str(f.get('goal') or '').strip()[:160]}")
+    lines += [
+        "  If your change touches a screen one of these walks, the journey must still",
+        "  reach its goal. Prove it on THIS tree (not main):",
+        "    devteam ux-flow <project> --worktree <this worktree> --flow <id>",
+        "  If you ADD a screen or a flow that no journey covers, add its journey to",
+        "  docs/ux-flows.json in this same change (id, surface, goal) — an undeclared",
+        "  flow is invisible to every later audit.",
+        "  No device available? Say so in your closing note AND put",
+        '  `"flow_impact": "none"` plus `"flow_impact_reason": "…"` in the task spec.',
+        "  `devteam verify` refuses an unexercised journey either way — silently",
+        "  breaking a flow is not an option the gates leave open.",
+    ]
+    return "\n".join(lines)
+
+
 def build_prompt(project: Path, profile: dict, task: dict, task_paths: list[str],
                  tpl_override: str | None = None) -> str:
     """Deterministic prompt builder — used for BOTH the native-subagent path
@@ -371,4 +403,4 @@ def build_prompt(project: Path, profile: dict, task: dict, task_paths: list[str]
         locales=n_locales,
         research_context=research_ctx or "see research.json constraints",
         project_name=profile["name"],
-    ) + _test_contract(project)
+    ) + _test_contract(project) + _flow_contract(project)
