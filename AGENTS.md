@@ -245,7 +245,7 @@ reads it here — one source, no copies to drift.
 When building and shipping a brand-new app MVP in one go, the agent MUST execute these steps in strict sequence before returning to the owner that work is done:
 
 1. **Discovery & Architecture:**
-   - Draft `docs/PRD.md` with explicit, domain-specific features (no generic placeholders).
+   - Architecture & features are codified directly into the goal tree (`.pipeline/{profile,state}.json`) with minute technical specifications, data schemas, protocol contracts, and verifiable acceptance criteria — never in drifting markdown PRDs (`docs/PRD.md` is retired in favor of the goal tree).
    - Perform competitive recon and write `docs/COMPETITION_RESEARCH.md` (minimum 5 competitors with pricing, weaknesses, and differentiation).
 2. **Initial UI Design & Stitch MCP:**
    - Initial UI is designed via **Stitch MCP** (`generate_screen_from_text` or `create_design_system_from_design_md`), NEVER invented blindly.

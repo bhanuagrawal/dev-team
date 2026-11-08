@@ -761,6 +761,12 @@ def apply_one(profile: dict, change: dict, by: str = "agent") -> tuple[str, str,
                "why": why[:300]}
         if change.get("outcome"):
             new["outcome"] = str(change["outcome"])
+        if change.get("spec") is not None:
+            new["spec"] = change["spec"]
+        if change.get("acceptance_criteria") is not None:
+            new["acceptance_criteria"] = list(change["acceptance_criteria"])
+        if change.get("requirements") is not None:
+            new["requirements"] = list(change["requirements"])
         meas = list(change.get("measures") or [])
         if change.get("measure"):
             meas.append({"text": change["measure"]})
@@ -799,6 +805,12 @@ def apply_one(profile: dict, change: dict, by: str = "agent") -> tuple[str, str,
         for key in ("title", "outcome"):
             if isinstance(change.get(key), str) and change[key].strip():
                 raw[key] = change[key].strip()
+        if change.get("spec") is not None:
+            raw["spec"] = change["spec"]
+        if change.get("acceptance_criteria") is not None:
+            raw["acceptance_criteria"] = list(change["acceptance_criteria"])
+        if change.get("requirements") is not None:
+            raw["requirements"] = list(change["requirements"])
         if change.get("measures") is not None:
             raw["measures"] = [m if isinstance(m, dict) else {"text": str(m)}
                                for m in change["measures"]]

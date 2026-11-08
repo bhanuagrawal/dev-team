@@ -56,10 +56,13 @@ def _measures_view(ms: dict, research: dict | None) -> list[str]:
 
 def _task_node(label: str, target, advances: str, status: str,
                version: str = "", date: str = "", task_id: str = "",
-               detail: str = "", kind: str = "") -> dict:
+               detail: str = "", kind: str = "", spec=None,
+               acceptance_criteria=None, requirements=None, contract=None) -> dict:
     return {"kind": "task", "id": label, "title": label, "status": status,
             "advances": advances, "target": target, "version": version,
-            "date": date, "task_id": task_id, "detail": detail, "task_kind": kind}
+            "date": date, "task_id": task_id, "detail": detail, "task_kind": kind,
+            "spec": spec, "acceptance_criteria": acceptance_criteria,
+            "requirements": requirements, "contract": contract}
 
 
 def build(project) -> dict:
@@ -148,6 +151,9 @@ def build(project) -> dict:
                 "decided_by": str(raw.get("decided_by") or "owner"),
                 "outcome": str(raw.get("outcome") or ""),
                 "measures": _measures_view(raw, research),
+                "spec": raw.get("spec"),
+                "acceptance_criteria": raw.get("acceptance_criteria"),
+                "requirements": raw.get("requirements"),
                 "verdict": (verdicts.get(mid) or {}).get("verdict", ""),
                 "evidence": (verdicts.get(mid) or {}).get("evidence", ""),
                 "children": []}
@@ -187,7 +193,11 @@ def build(project) -> dict:
                           ship.get("version", "") if ship else "",
                           ship.get("date", "") if ship else "",
                           detail=str(q.get("reason") or "")[:160],
-                          kind=str(q.get("type") or ""))
+                          kind=str(q.get("type") or ""),
+                          spec=q.get("spec"),
+                          acceptance_criteria=q.get("acceptance_criteria"),
+                          requirements=q.get("requirements"),
+                          contract=q.get("contract"))
         leaf["order"] = order
         if not ship and not next_marked[0]:
             leaf["is_next"] = True   # deterministic: the queue head is next run
@@ -418,6 +428,13 @@ def _details(summary: str, items: list[str]) -> str:
             f'<div class="inner"><ul>{body}</ul></div></details>')
 
 
+def _pre_details(summary: str, text: str) -> str:
+    if not text:
+        return ""
+    return (f'<details><summary>{_esc(summary)}</summary>'
+            f'<div class="inner"><pre style="white-space:pre-wrap;font-size:12px;margin:4px 0;background:#f5f2eb;padding:8px;border-radius:4px">{_esc(text)}</pre></div></details>')
+
+
 def _body(model: dict) -> str:
     root = model["root"]
     col = _collect(model)
@@ -481,6 +498,15 @@ def _body(model: dict) -> str:
                             f'</div><div class="m">{_esc(b.get("progress", ""))}</div>')
             if b.get("measures"):
                 meta.append(_details("how we will know it is done", b["measures"]))
+            if b.get("spec"):
+                import json as _json
+                spec_val = b["spec"]
+                spec_str = _json.dumps(spec_val, indent=2) if isinstance(spec_val, (dict, list)) else str(spec_val)
+                meta.append(_pre_details("technical specification", spec_str))
+            if b.get("acceptance_criteria"):
+                meta.append(_details("acceptance criteria", [_esc(str(x)) for x in b["acceptance_criteria"]]))
+            if b.get("requirements"):
+                meta.append(_details("functional requirements", [_esc(str(x)) for x in b["requirements"]]))
             tech = ([f'id: {b["id"]}', f'set by: {who or "—"}']
                     + [f'status: {b.get("status")}'])
             meta += [_details("technical detail", tech)]
@@ -499,6 +525,17 @@ def _body(model: dict) -> str:
         out.append('<div class="empty">Nothing waiting right now.</div>')
     for i, leaf in enumerate(col["queue"], 1):
         why = ([leaf["detail"]] if leaf.get("detail") else [])
+        if leaf.get("spec"):
+            import json as _json
+            spec_val = leaf["spec"]
+            spec_str = _json.dumps(spec_val, indent=2) if isinstance(spec_val, (dict, list)) else str(spec_val)
+            why.append(_pre_details("specification", spec_str))
+        if leaf.get("acceptance_criteria"):
+            ac_items = "".join(f"<li>{_esc(str(x))}</li>" for x in leaf["acceptance_criteria"])
+            why.append(f'<details><summary>acceptance criteria</summary><div class="inner"><ul style="margin:4px 0;padding-left:18px">{ac_items}</ul></div></details>')
+        if leaf.get("requirements"):
+            req_items = "".join(f"<li>{_esc(str(x))}</li>" for x in leaf["requirements"])
+            why.append(f'<details><summary>requirements</summary><div class="inner"><ul style="margin:4px 0;padding-left:18px">{req_items}</ul></div></details>')
         tech = [f'type: {leaf.get("task_kind") or "—"}',
                 f'serves: {leaf.get("for") or "—"}',
                 f'goal id: {leaf.get("advances") or "—"}',

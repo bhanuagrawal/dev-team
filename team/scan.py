@@ -230,6 +230,11 @@ def _chain_task(chain: list[dict], seq: int) -> dict:
             "advances": str(q.get("advances") or ""),
             "effort_min": _effort_of(q),
             "reason": str(q.get("reason") or ""),
+            **( {"spec": q["spec"]} if q.get("spec") is not None else {} ),
+            **( {"acceptance_criteria": q["acceptance_criteria"]} if q.get("acceptance_criteria") is not None else {} ),
+            **( {"requirements": q["requirements"]} if q.get("requirements") is not None else {} ),
+            **( {"contract": q["contract"]} if q.get("contract") is not None else {} ),
+            **( {"notes": q["notes"]} if q.get("notes") is not None else {} ),
         } for q in chain[1:]]
         task["reason"] = (
             str(task.get("reason") or "")
@@ -273,6 +278,12 @@ def _queue_task(q: dict, seq: int) -> dict:
         # so it is where its store copy has to survive.
         **( {"whatsnew": str(q["whatsnew"]).strip()}
             if str(q.get("whatsnew") or "").strip() else {} ),
+        # Minute technical specification, acceptance criteria, requirements, and contracts
+        **( {"spec": q["spec"]} if q.get("spec") is not None else {} ),
+        **( {"acceptance_criteria": q["acceptance_criteria"]} if q.get("acceptance_criteria") is not None else {} ),
+        **( {"requirements": q["requirements"]} if q.get("requirements") is not None else {} ),
+        **( {"contract": q["contract"]} if q.get("contract") is not None else {} ),
+        **( {"notes": q["notes"]} if q.get("notes") is not None else {} ),
     }
 
 

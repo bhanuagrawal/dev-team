@@ -123,6 +123,9 @@ def needed(project: Path) -> list[str]:
     design_doc = project / "docs" / "design.md"
     if design_doc.exists() and not any(str(c).endswith("docs/design.md") for c in profile.get("conventions", [])):
         out.append("docs/design.md exists on disk but is not registered in conventions")
+    for legacy_name in ("PRD.md", "prd.md", "plan.md"):
+        if (project / "docs" / legacy_name).exists():
+            out.append(f"drifting docs/{legacy_name} file present (requirements belong in the goal tree)")
     return out
 
 
@@ -335,6 +338,18 @@ def run(project: Path, log: RunLog | None = None, apply: bool = True) -> dict:
             asks.append(ask(f"{row['detail']} ({row['id']})",
                             "run `devteam capabilities "
                             f"{project.name}` for the full table"))
+
+    # 7d. retire drifting standalone PRD markdown files ------------------------
+    # Requirements live in .pipeline/profile.json and state.json (the goal tree),
+    # where the developer subagent and compiler enforce them directly.
+    for legacy_name in ("PRD.md", "prd.md", "plan.md"):
+        legacy_file = project / "docs" / legacy_name
+        if legacy_file.exists():
+            try:
+                legacy_file.unlink()
+                note(f"retired drifting {legacy_file.relative_to(project)} — requirements live in the goal tree")
+            except Exception:
+                pass
 
     # 8. write (only if something changed) + snapshots + mirrors -------------
     # A standing owner ask is NOT "not current": the shape is fine, the question

@@ -372,14 +372,47 @@ def build_prompt(project: Path, profile: dict, task: dict, task_paths: list[str]
     node = goals.find_node(profile, mid) if mid else None
     if node:
         goal_txt = f"GOAL THIS SERVES: {node['title']}"
-        if node["raw"].get("outcome"):
-            goal_txt += f" — done here means: {node['raw']['outcome']}"
+        raw_m = node.get("raw") or {}
+        if raw_m.get("outcome"):
+            goal_txt += f" — done here means: {raw_m['outcome']}"
+        if raw_m.get("measures"):
+            meas_lines = [m.get("text", str(m)) if isinstance(m, dict) else str(m) for m in raw_m["measures"]]
+            goal_txt += "\nMILESTONE MEASURES (VERIFIABLE CRITERIA):\n  - " + "\n  - ".join(meas_lines)
+        if raw_m.get("acceptance_criteria"):
+            ac_lines = [str(x) for x in raw_m["acceptance_criteria"]]
+            goal_txt += "\nMILESTONE ACCEPTANCE CRITERIA:\n  - " + "\n  - ".join(ac_lines)
+        if raw_m.get("requirements"):
+            req_lines = [str(x) for x in raw_m["requirements"]]
+            goal_txt += "\nMILESTONE REQUIREMENTS:\n  - " + "\n  - ".join(req_lines)
+        if raw_m.get("spec"):
+            spec_val = raw_m["spec"]
+            spec_str = json.dumps(spec_val, indent=2) if isinstance(spec_val, (dict, list)) else str(spec_val)
+            goal_txt += f"\nMILESTONE TECHNICAL SPECIFICATION:\n{spec_str}"
         vision = (goals.plan(profile) or {}).get("vision")
         if vision:
             goal_txt += f'\nLONG-TERM (owner): {vision}'
         goal_txt += ("\nDo not widen scope to 'help' this goal: a smaller change "
                      "that serves it is better than a bigger one that does not.")
-        research_ctx = goal_txt + ("\n" + research_ctx if research_ctx else "")
+        research_ctx = goal_txt + ("\n\n" + research_ctx if research_ctx else "")
+
+    task_sections = []
+    if task.get("spec"):
+        s = task["spec"]
+        task_sections.append("TASK TECHNICAL SPECIFICATION:\n" + (json.dumps(s, indent=2) if isinstance(s, (dict, list)) else str(s)))
+    if task.get("acceptance_criteria"):
+        ac = task["acceptance_criteria"]
+        ac_lines = [str(x) for x in ac] if isinstance(ac, list) else [str(ac)]
+        task_sections.append("TASK ACCEPTANCE CRITERIA (MANDATORY VERIFICATIONS):\n  - " + "\n  - ".join(ac_lines))
+    if task.get("requirements"):
+        req = task["requirements"]
+        req_lines = [str(x) for x in req] if isinstance(req, list) else [str(req)]
+        task_sections.append("TASK REQUIREMENTS:\n  - " + "\n  - ".join(req_lines))
+    if task.get("contract"):
+        task_sections.append("TASK API/DATA CONTRACT:\n" + json.dumps(task["contract"], indent=2))
+    if task.get("notes"):
+        task_sections.append("DOMAIN CONSTRAINTS & NOTES:\n" + str(task["notes"]))
+    if task_sections:
+        research_ctx = "\n\n".join(task_sections) + ("\n\n" + research_ctx if research_ctx else "")
     n_locales = profile.get("locales") or \
         "the skill set of locale strings.xml files shipped by this project"
     conventions = [_annotate_path(str(p)) for p in profile.get("conventions", [])]
