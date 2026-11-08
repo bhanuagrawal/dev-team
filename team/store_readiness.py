@@ -1174,14 +1174,39 @@ def run_store_readiness_audit(project: Path, tree: Path | None = None) -> list[R
     ))
 
     prd_file = src / "docs/PRD.md"
-    has_prd = prd_file.is_file() and len(prd_file.read_text(errors="ignore").strip()) >= 500
+    has_prd_file = prd_file.is_file() and len(prd_file.read_text(errors="ignore").strip()) >= 500
+
+    # Architecture & features are codified directly into the goal tree (.pipeline/profile.json)
+    # with technical specs and acceptance criteria, retiring drifting markdown PRDs.
+    def _has_codified_spec(node: Any) -> bool:
+        if isinstance(node, dict):
+            if "spec" in node or "acceptance_criteria" in node:
+                return True
+            for v in node.values():
+                if _has_codified_spec(v):
+                    return True
+        elif isinstance(node, list):
+            for item in node:
+                if _has_codified_spec(item):
+                    return True
+        return False
+
+    has_codified_goals = _has_codified_spec(profile.get("goals"))
+    has_prd = has_prd_file or has_codified_goals
+    detail = (
+        "Codified in goal tree (.pipeline/profile.json) with technical specs & acceptance criteria"
+        if has_codified_goals
+        else (f"PRD present ({len(prd_file.read_text(errors='ignore')) if prd_file.is_file() else 0} chars)"
+              if has_prd_file else "Neither docs/PRD.md nor codified goal tree specs found")
+    )
+
     checks.append(ReadinessCheck(
         category="Discovery & Product Architecture",
-        name="Product Requirements Document (docs/PRD.md)",
+        name="Product Architecture & Requirements (Goal Tree / PRD)",
         passed=has_prd,
         severity="BLOCKER" if not has_prd else "INFO",
-        detail=f"PRD present ({len(prd_file.read_text(errors='ignore')) if prd_file.is_file() else 0} chars)" if has_prd else "docs/PRD.md is missing or empty",
-        fix="Run `devteam revamp <project>` to synthesize a comprehensive docs/PRD.md anchored to profile vision",
+        detail=detail,
+        fix="Codify architecture & acceptance criteria into the goal tree or synthesize docs/PRD.md",
     ))
 
     design_file = src / "docs/design.md"
