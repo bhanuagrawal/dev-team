@@ -102,6 +102,29 @@ jobs:
           keyPassword=${{ secrets.KEY_PASSWORD }}
           EOF
 
+      # The Gradle wrapper downloads its distribution on every fresh runner, and
+      # services.gradle.org / GitHub Releases has returned 504s and read timeouts (2026-11-08) —
+      # which failed a release AFTER a green verify. Warm the wrapper with retries and a
+      # mirror fallback so CI stays resilient against upstream CDN outages.
+      - name: Warm the Gradle wrapper
+        run: |
+          for attempt in 1 2; do
+            if ./gradlew --version > /dev/null 2>&1; then
+              echo "wrapper ready (attempt $attempt)"; exit 0
+            fi
+            echo "wrapper download attempt $attempt failed; retrying in 5s"
+            sleep 5
+          done
+          echo "primary distribution host unavailable; falling back to mirror"
+          sed -i.bak -e 's|https\\://services.gradle.org/distributions/|https\\://mirrors.cloud.tencent.com/gradle/|g' \
+                     -e 's|validateDistributionUrl=true|validateDistributionUrl=false|g' \
+                     gradle/wrapper/gradle-wrapper.properties
+          if ./gradlew --version; then
+            echo "wrapper ready from mirror"; exit 0
+          fi
+          echo "::error::the Gradle wrapper could not be downloaded from primary or fallback mirrors"
+          exit 1
+
       - name: Build release AAB
         env:
           VERSION_NAME: ${{ env.VERSION_NAME }}
