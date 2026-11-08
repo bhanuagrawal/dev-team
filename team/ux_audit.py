@@ -781,19 +781,83 @@ def audit_surface(project: Path, row: dict, prev: dict | None = None, log=None) 
     }
 
 
-def run_audit(project: Path, only_scene: str | None = None,
-              everything: bool = False, capture_emulator: bool = False,
-              log=None) -> dict:
-    """Audit the screens this run needs, and record what it found."""
-    if capture_emulator:
-        p_temp = plan(project)
-        for r in p_temp["rows"]:
-            if not r.get("render"):
-                emu_shot = capture_emulator_screenshot(project, r["label"])
-                if emu_shot and log:
-                    log(f"~ ux: captured emulator screenshot for '{r['label']}' -> {emu_shot.name}")
+DEVICE_DIR = "ux_device"
 
+
+def _device_still(project: Path, serial: str, log=None) -> Path | None:
+    """The screen as the device is showing it right now."""
+    from .emulator import ADB
+    import subprocess as _sp
+    out_dir = pipeline_dir(project) / DEVICE_DIR
+    out_dir.mkdir(parents=True, exist_ok=True)
+    dest = out_dir / f"live-{now_iso().replace(':', '')}.png"
+    r = _sp.run([ADB, "-s", serial, "exec-out", "screencap", "-p"],
+                capture_output=True, timeout=90)
+    data = r.stdout or b""
+    if not data.startswith(b"\x89PNG"):
+        return None
+    dest.write_bytes(data)
+    if log:
+        log(f"~ ux: captured the device screen -> {dest.name}")
+    return dest
+
+
+def _flow_still_for(project: Path, surface: str) -> Path | None:
+    """The newest DEVICE still a declared journey produced for this surface.
+
+    This is why the flow pass exists: it walks the app and keeps a frame per step,
+    so a still audit has real device evidence for a screen instead of a render.
+    """
+    flows_dir = pipeline_dir(project) / "ux_flows"
+    best: tuple[float, Path] | None = None
+    if not flows_dir.is_dir():
+        return None
+    for result in flows_dir.glob("*/result.json"):
+        try:
+            data = json.loads(result.read_text())
+        except Exception:
+            continue
+        if str(data.get("surface") or "").strip().lower() != surface.strip().lower():
+            continue
+        for still in data.get("stills") or []:
+            p = Path(still)
+            if p.is_file() and (best is None or p.stat().st_mtime > best[0]):
+                best = (p.stat().st_mtime, p)
+    return best[1] if best else None
+
+
+def run_audit(project: Path, only_scene: str | None = None,
+              everything: bool = False, capture_emulator: bool = True,
+              log=None, avd: str | None = None, device: bool = True) -> dict:
+    """Audit the screens this run needs, from DEVICE frames, and record it.
+
+    Owner policy 2026-11-08: ux-audit, ux-video and ux-flow all judge a DEVICE, not
+    an off-device render. A picture composed on the JVM cannot show a keyboard over
+    the submit button, an inset collision, a session that failed to persist, or a
+    network the app cannot reach — which is exactly the class of defect that
+    mattered here. `storefront-scenes` keeps the off-device renderer for Play
+    screenshots; it is not UX evidence.
+    """
     targets = to_audit(project, only_scene=only_scene, everything=everything)
+    if device and targets:
+        from . import emulator, ux_video
+        serial, started = emulator.require_device(avd=avd, log=log, purpose="ux-audit")
+        try:
+            ux_video.build_and_install(project, serial, log)
+            live = _device_still(project, serial, log=log)
+            for row in targets:
+                still = _flow_still_for(project, row["label"]) or live
+                if still is not None:
+                    row["render"] = str(still)
+            if log:
+                log("~ ux: evidence = device stills"
+                    + (" (flow frames where a journey kept them)" if live else ""))
+        finally:
+            if started:
+                stopped = emulator.stop(serial)
+                if log:
+                    log(f"~ ux: emulator {serial} "
+                        f"{'stopped' if stopped else 'DID NOT STOP'}")
     data = load(project)
     data["rubric"] = RUBRIC
     data["audit_version"] = AUDIT_VERSION

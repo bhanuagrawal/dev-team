@@ -1194,7 +1194,8 @@ def run(project: Path, only: str | None = None, everything: bool = False,
     recorded: list[dict] = []
 
     if to_record:
-        serial, started = emulator.ensure_device(avd=avd, log=log)
+        serial, started = emulator.require_device(avd=avd, log=log,
+                                              purpose="ux-video")
         try:
             build_info = build_and_install(project, serial, log)
             for r in to_record:

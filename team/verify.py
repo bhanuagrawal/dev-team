@@ -459,55 +459,33 @@ def instrumented_check(worktree: Path, profile: dict, log) -> tuple[bool, str]:
         failure) is a HARD BLOCKER.
     """
     if not has_instrumented_tests(worktree):
-        log("instrumented: no on-device tests in this project — skipped (no boot)")
+        log("instrumented: no integration tests in this project — skipped")
         return True, ""
+    # OWNER POLICY (2026-11-08): an integration test runs OFF a device. A gate that
+    # boots an emulator fails for infrastructure reasons (a hung AVD, a zombie lock,
+    # no snapshot) and reads like a code failure; the device passes (`ux-audit`,
+    # `ux-video`, `ux-flow`) are the ones that own device validation.
     cfg = profile.get("verify") or {}
-    task = cfg.get("instrumented") or "<auto>"
-    if task == "<auto>":
-        task = default_instrumented_task(worktree)
-        log(f"instrumented: task derived from layout → {task}")
+    offdevice = cfg.get("integration_task")
+    if not offdevice:
+        log("instrumented: integration tests run OFF-DEVICE by policy — the device "
+            "passes (ux-audit/ux-video/ux-flow) own device validation; declare "
+            "verify.integration_task to run them on the JVM here")
+        return True, ""
+    cfg = dict(cfg)
+    task = str(offdevice)
     timeout = int(cfg.get("instrumented_timeout", 1200))
-
-    booted = emulator.running()
-    if booted:
-        where = ", ".join(e.get("avd") or e["serial"] for e in booted)
-        log(f"~ instrumented: reusing the emulator already running ({where}) — no boot")
-        argv = ["./gradlew", task]
-    else:
-        avd = cfg.get("avd") or next(iter(available_avds()), "")
-        if not avd:
-            log("~ instrumented: on-device tests exist but no AVD available — failure to run test is non-blocking (warn-only)")
-            return True, ""
-        wrapper = shutil.which("with-emulator") or str(Path.home() / ".local/bin/with-emulator")
-        if not Path(wrapper).exists():
-            log("~ instrumented: on-device tests exist but with-emulator missing — failure to run test is non-blocking (warn-only)")
-            return True, ""
-        # Nothing is booted, so a lock file can only be debris from a dead
-        # instance — and `android emulator start` refuses to run at all while
-        # one exists ("Running multiple emulators with the same AVD"). Clear it
-        # here rather than making the operator discover it (2026-10-25).
-        emulator.clear_stale_locks(avd, log)
-        log(f"~ instrumented: booting '{avd}' via with-emulator (teardown guaranteed)")
-        argv = [wrapper, avd, "--", "./gradlew", task]
-
-    log(f"~ gradle {task} on the device (≤{timeout}s)")
+    log(f"~ gradle {task} off-device (JVM/Robolectric, ≤{timeout}s)")
     ensure_wrapper_distribution(worktree, log)
     try:
-        r = run(argv, worktree, timeout=timeout, env=gradle_env(worktree))
+        r = run(["./gradlew", task], worktree, timeout=timeout, env=gradle_env(worktree))
     except subprocess.TimeoutExpired:
-        log(f"~ instrumented: {task} timed out after {timeout}s on the emulator — failure to run test is non-blocking (warn-only)")
+        log(f"~ integration: {task} timed out after {timeout}s off-device — warn-only")
         return True, ""
     if r.returncode == 0:
-        log(f"  ok: {task}")
+        log(f"  ok: {task} (off-device)")
         return True, ""
-
-    output = (r.stdout or "") + (r.stderr or "")
-    tail = output[-4000:]
-    if _is_test_runner_infra_failure(output):
-        log(f"~ instrumented: device test runner could not execute ({task}) — failure to run test is non-blocking (warn-only)")
-        return True, ""
-
-    return False, f"{task} FAILED on the emulator (test assertion/execution failure):\n{tail}"
+    return False, f"{task} FAILED off-device:\n" + ((r.stdout or "") + (r.stderr or ""))[-4000:]
 
 
 

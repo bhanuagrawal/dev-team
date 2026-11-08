@@ -235,6 +235,14 @@
    "kind": "enforcible",
    "proposal": "a measure may carry {\"probe\": \"<command>\"}; devteam plan --apply-result runs it (or refuses the verdict when the measure text names a backend path and no probe exists), exactly as metric measures are already evaluated by code. Today the orchestrator's 'cheap check' is prose.",
    "note": "run-derived 2026-11-08 (BookSwapKMP v1.0.3): m1 'Local Supabase RPC book requests succeed' was retired as met because BookSwapRepository forwarded requestBook/verifyHandoff to the RPCs and tests passed on a fake transport \u2014 the app actually boots to Discovery with no sign-in (App.kt default destination, in-memory SessionStore), so the RPCs post with the anon key and auth.uid() is NULL. The owner found it by hand; the gates could not, because the defect is 'the default entry never authenticates', which no diff-scoped test names."
+  },
+  {
+   "id": "device-evidence-for-ux-offdevice-for-integration",
+   "rule": "ux-audit, ux-video and ux-flow judge a DEVICE (emulator or connected phone) \u2014 never an off-device render; integration tests run OFF a device (JVM/Robolectric) and verify never boots one for them",
+   "doc": "AGENTS.md#gates",
+   "kind": "code",
+   "enforced_by": "team/emulator.require_device() is the only way the three UX passes get a serial (it raises when none is available); team/verify.device_gate runs verify.integration_task on the JVM or skips, and no longer boots an AVD",
+   "note": "owner policy 2026-11-08. run-derived: ux-audit used to judge a Robolectric render, which cannot show a keyboard covering the submit button, an inset collision, a session that failed to persist, or an unreachable network \u2014 all found within an hour of moving the audit onto the device."
   }
  ]
 }

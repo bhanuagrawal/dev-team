@@ -273,3 +273,28 @@ def _leak_verdict(project: Path, stop_leaked: bool) -> tuple[bool, str]:
     if kept:
         parts.append("STILL RUNNING (stop manually): " + ", ".join(kept))
     return False, "emulator: " + "; ".join(parts)
+
+
+def require_device(avd: str | None = None, log=None, purpose: str = "this pass"
+                   ) -> tuple[str, bool]:
+    """A device, or a failure that says why — never a silent downgrade.
+
+    UX evidence is only evidence if it came off a device: a render of a composable
+    proves the code compiles a picture, not that the screen works with a keyboard,
+    insets, a real network and a real navigation stack. So `ux-audit`, `ux-video`
+    and `ux-flow` REQUIRE an emulator or a connected device, and this is the one
+    place that decides it.
+
+    Integration tests are the opposite: they must run OFF a device (JVM /
+    Robolectric), because a gate that needs a boot is a gate that fails for
+    infrastructure reasons (owner policy 2026-11-08).
+
+    Returns (serial, started_by_us). The caller MUST stop it when the second value
+    is True; a device this call did not start is never touched.
+    """
+    serial, started = ensure_device(avd=avd, log=log)
+    if log:
+        kind = "connected device" if not serial.startswith("emulator-") else "emulator"
+        log(f"~ device: {purpose} runs on {kind} {serial}"
+            + (" (started by this pass)" if started else " (already running)"))
+    return serial, started

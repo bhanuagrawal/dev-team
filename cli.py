@@ -2190,7 +2190,9 @@ def cmd_ux_audit(args: argparse.Namespace) -> int:
     from team import ux_audit
     res = ux_audit.run_audit(project, only_scene=getattr(args, "scene", None),
                              everything=getattr(args, "all", False),
-                             capture_emulator=getattr(args, "emulator", False), log=log)
+                             capture_emulator=True, log=log,
+                             avd=getattr(args, "avd", None),
+                             device=not getattr(args, "no_device", False))
     if not res["targets"]:
         print("nothing to audit: no screen changed since its last audit "
               "(unchanged screens cost $0.00)")
@@ -4246,7 +4248,10 @@ def main() -> None:
     ua.add_argument("project")
     ua.add_argument("--scene", help="audit one rendered scene id (docs/storefront.json)")
     ua.add_argument("--all", action="store_true", help="audit every screen with a render")
-    ua.add_argument("--emulator", action="store_true", help="capture screen directly from running emulator if available")
+    ua.add_argument("--avd", help="AVD to boot when none is running")
+    ua.add_argument("--no-device", action="store_true",
+                    help="opt OUT of device evidence (not supported for a real audit: a "
+                         "render cannot show keyboard/inset/network behaviour)")
     ua.set_defaults(fn=cmd_ux_audit)
     uv = sub.add_parser("ux-video", help="record declared journeys (docs/ux-flows.json) on a device "
                                          "and react to how they FEEL in motion, not just one still")

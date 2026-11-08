@@ -789,7 +789,8 @@ def run(project: Path, only: str | None = None, log=None, avd: str | None = None
             log(f"~ ux-flow: mock backend on {base_url} (deterministic fixtures) — "
                 f"the debug build is pointed at it, no production path changes")
 
-    serial, started = emulator.ensure_device(avd=avd, log=log)
+    serial, started = emulator.require_device(avd=avd, log=log,
+                                              purpose="ux-flow")
     results, failed, skipped = [], [], []
     try:
         from . import ux_video
