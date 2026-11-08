@@ -217,8 +217,13 @@ def tappables(xml: str, pkg: str = "") -> list[dict]:
             continue
         if label.strip().lower() in IGNORE_LABELS:
             continue
+        cls = str(attrs.get("class") or "")
         out.append({"label": label[:60], "x": (x1 + x2) // 2, "y": (y1 + y2) // 2,
-                    "clickable": clickable})
+                    "clickable": clickable,
+                    # A field that takes focus without repainting the screen is not a
+                    # dead control; only a person can fill it, so the journey stops there.
+                    "editable": ("EditText" in cls) or attrs.get("focusable") == "true"
+                                and attrs.get("clickable") != "true"})
     # A label that appears twice (a card and its text) is one decision.
     seen, uniq = set(), []
     for t in out:
@@ -459,9 +464,11 @@ def audit_flow(project: Path, flow: dict, serial: str, log=None,
              timeout=30)
         time.sleep(1.4)
         after = ux_video._screen_sig(serial)
-        is_dead = bool(before and after and before == after)
+        is_dead = bool(before and after and before == after) and not target.get("editable")
         entry = {"n": step, "did": f"tapped {target['label'] or '(unlabelled)'}",
-                 "then": ("nothing changed — DEAD CONTROL" if is_dead else "the screen changed"),
+                 "then": ("nothing changed — DEAD CONTROL" if is_dead else
+                          ("focus moved into a text field" if target.get("editable")
+                           else "the screen changed")),
                  "screen": screen, "action": "tap", "label": target["label"],
                  "dead": is_dead}
         steps.append(entry)
@@ -615,7 +622,8 @@ def store(project: Path, result: dict, log=None) -> dict:
 # run
 # --------------------------------------------------------------------------- #
 def run(project: Path, only: str | None = None, log=None, avd: str | None = None,
-        keep_emulator: bool = False, max_steps: int | None = None) -> dict:
+        keep_emulator: bool = False, max_steps: int | None = None,
+        worktree: Path | None = None) -> dict:
     """Audit every goal-declared flow (or one), on a device this pass owns."""
     from . import emulator
 
@@ -634,7 +642,11 @@ def run(project: Path, only: str | None = None, log=None, avd: str | None = None
     results, failed, skipped = [], [], []
     try:
         from . import ux_video
-        build = ux_video.build_and_install(project, serial, log)
+        build = ux_video.build_and_install(project, serial, log,
+                                           tree=Path(worktree) if worktree else None)
+        build["source"] = ("worktree: " + str(worktree)) if worktree else "delivery (origin/main)"
+        if log:
+            log(f"~ ux-flow: auditing {build['source']}")
         for flow in todo:
             fid = str(flow["id"])
             try:

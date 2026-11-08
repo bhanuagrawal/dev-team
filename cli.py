@@ -2133,7 +2133,9 @@ def cmd_ux_flow(args: argparse.Namespace) -> int:
     res = ux_flow.run(project, only=getattr(args, "flow", None), log=log,
                       avd=getattr(args, "avd", None),
                       keep_emulator=getattr(args, "keep_emulator", False),
-                      max_steps=getattr(args, "max_steps", None))
+                      max_steps=getattr(args, "max_steps", None),
+                      worktree=(Path(args.worktree).expanduser()
+                                if getattr(args, "worktree", None) else None))
     if not res["planned"]:
         print(ux_flow.status_report(project))
         return 0
@@ -4260,6 +4262,12 @@ def main() -> None:
                          f"{10})")
     uf.add_argument("--keep-emulator", action="store_true",
                     help="leave the emulator this command started running")
+    uf.add_argument("--worktree", metavar="PATH",
+                    help="audit THIS task worktree instead of origin/main — the point is "
+                         "to walk a change before it is merged (and before CI)")
+    uf.add_argument("--via", choices=["api"], default="api",
+                    help="the vision model that navigates (the API; browser Gemini is "
+                         "the asset maker, not a navigator)")
     uf.set_defaults(fn=cmd_ux_flow)
     tt = sub.add_parser("tree"); tt.add_argument("project")
     tt.add_argument("--html", action="store_true", help="write the html view and print its path")

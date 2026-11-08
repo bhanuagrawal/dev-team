@@ -308,12 +308,24 @@ def package_name(project: Path) -> str:
     raise SystemExit("cannot determine the app id — set \"package\" in " + FLOWS_REL)
 
 
-def build_and_install(project: Path, serial: str, log=None) -> dict:
-    """Build the debug APK from the DELIVERY tree and install it on the device."""
+def build_and_install(project: Path, serial: str, log=None,
+                      tree: Path | None = None) -> dict:
+    """Build the debug APK and install it on the device.
+
+    Default: the DELIVERY tree (`origin/main`) — a recording describes the build CI
+    ships. An explicit `tree` overrides it, which is what lets a journey be walked
+    on a TASK WORKTREE before the change is merged: an audit that can only see
+    `main` can only ever report a defect after it has already shipped.
+    """
     from . import scan
     from . import storefront_preview as sp
 
-    tree = scan.origin_tree(project, log)
+    if tree is None:
+        tree = scan.origin_tree(project, log)
+    else:
+        tree = Path(tree)
+        if not (tree / "gradlew").is_file() and log:
+            log(f"~ ux: building from {tree} (not a delivery checkout)")
     module = sp.find_compose_module(tree)
     gw = tree / "gradlew"
     if not gw.is_file():
