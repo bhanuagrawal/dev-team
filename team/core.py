@@ -151,6 +151,8 @@ def resolve_project(name_or_path: str) -> Path:
             bare = bare or cand
     if bare is not None:
         hint = _onboarded_hint(Path(name_or_path).name)
+        if len(hint) == 1:
+            return hint[0]
         nearby = ("; onboarded projects that look similar: "
                   + ", ".join(str(h) for h in hint)) if hint else ""
         raise SystemExit(
@@ -158,6 +160,8 @@ def resolve_project(name_or_path: str) -> Path:
             f"(no .pipeline/profile.json){nearby}. Pass the onboarded project's path "
             "or run from its folder")
     hint = _onboarded_hint(Path(name_or_path).name)
+    if len(hint) == 1:
+        return hint[0]
     nearby = ("; onboarded projects that look similar: "
               + ", ".join(str(h) for h in hint)) if hint else ""
     raise SystemExit(
