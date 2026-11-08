@@ -623,6 +623,22 @@ def verify_all(project: Path, worktree: Path, base: str, log, gradle: bool = Tru
     except Exception as e:
         log(f"ux video: could not check (no flow signal): {e}")
 
+    # The JOURNEY half: a screen a declared journey drives has changed since that
+    # journey was last walked, or the journey has never been walked at all. A
+    # scripted flow cannot catch "the app now opens on the wrong screen"; only a
+    # pass that goes through the app can. Warning, not a gate — it needs a device
+    # and a model, and neither belongs in a compile gate.
+    try:
+        from . import ux_flow
+        stale_journeys = ux_flow.stale_for_files(project, files)
+        if stale_journeys:
+            log("ux flow: " + "; ".join(
+                f"{s['id']} ({s['why']})" for s in stale_journeys[:4]))
+            log("ux flow: run `devteam ux-flow <project>` — a vision model walks each "
+                "declared journey and judges whether a person can finish it")
+    except Exception as e:
+        log(f"ux flow: could not check (no journey signal): {e}")
+
     ok, msg = localization_check(worktree, files)
     log("localization: ok" if ok else "localization: FAIL")
     if not ok:

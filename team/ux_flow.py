@@ -674,3 +674,51 @@ def status_report(project: Path) -> str:
     if not rows:
         lines.append("  no goal-declared flow — add one with a `goal` and no `steps`")
     return "\n".join(lines)
+
+
+def stale_for_files(project: Path, changed: list[str]) -> list[dict]:
+    """Declared journeys whose screen this diff touches, or that never ran.
+
+    Deterministic: a journey is stale when a file under its `surface` screen (as
+    `ux_audit.surfaces` resolves it) is in the diff, or when it has no result at
+    all. It never guesses about the code — it names what nobody has walked.
+    """
+    from . import ux_audit
+    rows = declared(project)
+    if not rows:
+        return []
+    surfaces = {s["label"].strip().lower(): s for s in ux_audit.surfaces(project)}
+    out = []
+    for flow in rows:
+        fid = str(flow["id"])
+        result = run_dir(project) / _slug(fid) / "result.json"
+        if not result.is_file():
+            out.append({"id": fid, "why": "never walked", "surface": flow.get("surface") or ""})
+            continue
+        surface = surfaces.get(str(flow.get("surface") or "").strip().lower())
+        if not surface:
+            continue
+        touched = {Path(c).as_posix() for c in changed}
+        stale = [p for p in (surface.get("paths") or [])
+                 if Path(p).as_posix() in touched
+                 or any(Path(c).name == Path(p).name for c in touched)]
+        if not stale:
+            continue
+        # A journey walked AFTER the change is current: compare the walk against the
+        # touched file's own mtime, so shipping the release that fixes a finding does
+        # not immediately re-report every journey as stale.
+        walked_at = 0.0
+        try:
+            walked_at = result.stat().st_mtime
+        except OSError:
+            pass
+        touched_at = 0.0
+        for p in stale:
+            try:
+                touched_at = max(touched_at, (project / p).stat().st_mtime)
+            except OSError:
+                touched_at = max(touched_at, Path(p).stat().st_mtime if Path(p).exists() else 0)
+        if touched_at > walked_at:
+            out.append({"id": fid, "why": f"{Path(stale[0]).name} changed since it was walked",
+                        "surface": surface["label"]})
+    return out
