@@ -12,6 +12,15 @@ that line names `replan` — a plan is never followed against a main it was not
 built from. Nothing is deleted: every adoption is logged in `state.adoptions` and
 every queue verdict in `state.queue_events`.
 
+**A team change to the plan format is the same problem** (2026-11-09: a task is a
+mini-PRD — `problem`, `done_when`, `user_sees`, `not_in_scope`). Each app picks it
+up on its next run — `adapt` at step 0 is deterministic, and old queue entries are
+grandfathered so the rule cannot stall a run it did not plan. To do it now instead
+of waiting for three nightly slots per app: `devteam replan --all --dry-run` shows
+every app, what it would adopt and whether its tasks are still on the older shape;
+drop `--dry-run` to sweep for real (`--no-llm` = shape only, the planner finishes
+next run).
+
 ## The one loop (any agent, any app)
 
 ```bash

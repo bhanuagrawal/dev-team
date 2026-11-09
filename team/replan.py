@@ -67,6 +67,21 @@ def detect(project: Path) -> list[dict[str, Any]]:
         out.append({"what": "plan built from an older main",
                     "detail": f"plan base {base[:12]} ≠ delivery "
                               f"{str(ref['ref_sha'])[:12]}"})
+
+    # A team change to the plan FORMAT (2026-11-09: a task is a mini-PRD — problem,
+    # done_when, user_sees, not_in_scope) reaches a project on its next plan
+    # review, because old entries are grandfathered so a rule cannot stall a run
+    # it did not plan. That is correct but invisible: the owner cannot see which
+    # apps still run the older shape. This check is the visible half.
+    legacy = [q for q in (state.get("queue") or [])
+              if q.get("type") in ("feature", "bugfix")
+              and not (q.get("problem") and q.get("done_when"))]
+    if legacy:
+        out.append({"what": "plan on the older format",
+                    "detail": f"{len(legacy)} task(s) carry no problem/done_when "
+                              f"(e.g. {legacy[0].get('label')}) — grandfathered, so they "
+                              f"still run; the next plan review rewrites them, or run "
+                              f"`devteam replan` now"})
     return out
 
 

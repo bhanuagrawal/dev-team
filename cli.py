@@ -3572,11 +3572,46 @@ def cmd_admit(args: argparse.Namespace) -> int:
 
 
 def cmd_replan(args: argparse.Namespace) -> int:
-    """OUT-OF-BAND CHANGE → detect, adopt, adapt, re-plan. The plan moves, never the owner."""
-    project = resolve_project(args.project)
-    from team.core import delivery_notice
-    from team import replan as replan_mod
+    """OUT-OF-BAND CHANGE → detect, adopt, adapt, re-plan. The plan moves, never the owner.
 
+    `--all` sweeps every onboarded app: a team change to the plan FORMAT reaches
+    each app on its next run anyway (adapt is deterministic, old queue entries are
+    grandfathered), so the sweep is for the owner who does not want to wait for
+    three nightly slots per app.
+    """
+    from team import replan as replan_mod
+    from team.core import delivery_notice
+
+    if args.all:
+        from team.report import projects as all_projects
+
+        apps = all_projects()
+        if not apps:
+            print("replan --all: no onboarded projects found")
+            return 0
+        rows, failed = [], 0
+        for project in apps:
+            log = RunLog(project, "replan-" + today())
+            print(f"\n=== {project.name} ===")
+            try:
+                res = replan_mod.run(project, log, use_llm=not args.no_llm,
+                                     apply=not args.dry_run)
+            except Exception as e:      # one broken app must not stop the sweep
+                failed += 1
+                print(f"  replan: FAILED — {e}")
+                rows.append((project.name, "FAILED", "", ""))
+                continue
+            rows.append((project.name, str(len(res["found"])),
+                         res.get("base") or "—", res.get("head") or "—"))
+        print("\nREPLAN SWEEP" + (" (dry run — nothing written)" if args.dry_run else ""))
+        print(f"  {'app':<28} {'adopted':>7}  {'base':<12} head")
+        for name, n, base, head in rows:
+            print(f"  {name:<28} {n:>7}  {base:<12} {head}")
+        print(f"  {len(rows)} app(s), {failed} failed"
+              + ("  — re-run one with `devteam replan <app>`" if failed else ""))
+        return 1 if failed else 0
+
+    project = resolve_project(args.project)
     print(delivery_notice(project))
     log = RunLog(project, "replan-" + today())
     res = replan_mod.run(project, log, use_llm=not args.no_llm, apply=not args.dry_run)
@@ -4558,7 +4593,10 @@ def main() -> None:
                          help="an out-of-band change (owner edit, hand push): detect "
                               "it, ADOPT it (never revert), re-shape the project and "
                               "re-derive the queue — then stamp what the plan is built on")
-    rpl.add_argument("project")
+    rpl.add_argument("project", nargs="?", help="omit with --all")
+    rpl.add_argument("--all", action="store_true",
+                     help="sweep every onboarded app (a plan-format change reaches "
+                          "each app on its next run anyway; this is the now)")
     rpl.add_argument("--dry-run", action="store_true", help="report only, write nothing")
     rpl.add_argument("--no-llm", action="store_true", help="collect and write the planner prompt instead")
     rpl.set_defaults(fn=cmd_replan)
