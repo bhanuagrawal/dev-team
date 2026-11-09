@@ -1908,6 +1908,12 @@ def cmd_status(args: argparse.Namespace) -> None:
                      "by the picker, dropped by the next plan review): "
                      + ", ".join(f"\"{q['label']}\"" for q in delivered))
         print(line)
+    flags = state.get("admit_log") or []
+    if flags:
+        last_flag = flags[-1]
+        print(f"admit:      {len(flags)} request(s) FLAGGED — nothing queued; last: "
+              f"\"{str(last_flag.get('question') or '')[:90]}\" "
+              f"({last_flag.get('who')} decides)")
     print(f"targets:    {len(profile['targets'])} shipped-do: "
           f"{sum(1 for s in surfaces if s['status'] == 'shipped')} "
           f"animated: {sum(1 for s in surfaces if s['status'] == 'animated')} "
@@ -3521,32 +3527,39 @@ def cmd_storefront_brand(args: argparse.Namespace) -> int:
     return 0
 
 
-def cmd_route(args: argparse.Namespace) -> int:
-    """THE PROMPT HANDLER: one owner sentence → ordered tool plan (optionally queued).
+def cmd_admit(args: argparse.Namespace) -> int:
+    """THE GATE: judge an owner request against the plan, then pin it (or flag it).
 
-    The planner (`devteam plan`) is a different step and runs INSIDE the plan's
-    first step when the request is admitted — the handler decides the order, the
-    planner decides the queue's shape. See team/router.py.
+    The agent decides intent (`--kind`, `--advances`, `--why`, `--verdict`); this
+    command decides the consequences and refuses a wrong statement. See
+    team/admit.py for why the keyword classifier (`devteam route`) was retired.
     """
     project = resolve_project(args.project)
     from team.core import delivery_notice
-    from team import router
+    from team import admit as admit_mod
 
     print(delivery_notice(project))
-    res = router.apply(project, args.prompt) if getattr(args, "apply", False) \
-        else router.plan(project, args.prompt)
-    if getattr(args, "json", False):
+    res = admit_mod.admit(project, args.query, args.kind, args.advances,
+                          args.why, args.verdict, dry_run=args.dry_run)
+    if args.json:
         print(json.dumps(res, indent=2))
     else:
-        print(router.format_plan(res))
-        if res.get("queue_impact"):
+        print(admit_mod.format_admit(res))
+        if res.get("impact"):
             print()
-            print(res["queue_impact"])
-    if res.get("blocked"):
-        print("\nROUTE: blocked — answer the question above before any tool runs")
-        return 2
-    if not getattr(args, "apply", False):
-        print("\n  nothing was queued; re-run with --apply to admit the task and pin it")
+            print(res["impact"])
+    return 0 if (res.get("ok") or res.get("verdict") == "precheck") else 2
+
+
+def cmd_tools(args: argparse.Namespace) -> int:
+    """ONE PASS over the toolbox: every verb, what it writes, what it refuses."""
+    from team import toolbox
+
+    if args.json:
+        print(json.dumps(toolbox.INVENTORY if args.all else
+                         {r["verb"]: r for r in toolbox.for_agents()}, indent=2))
+    else:
+        print(toolbox.format_inventory(agent_only=not args.all))
     return 0
 
 
@@ -4481,15 +4494,30 @@ def main() -> None:
     br.add_argument("--reset", action="store_true",
                     help="clear an abandoned brand run deliberately (kept as a .bak file)")
     br.set_defaults(fn=cmd_brand)
-    rt = sub.add_parser("route", help="THE PROMPT HANDLER: turn one owner sentence into the "
-                                      "ordered tool plan it implies, judge alignment with the "
-                                      "current plan, and pin the task at the queue head")
+    from team.admit import KINDS as _ADMIT_KINDS
+    rt = sub.add_parser("admit",
+                        help="THE GATE: judge one owner request against the plan, "
+                             "then pin it at the queue head — or flag it and queue "
+                             "nothing (nothing is executed without an 'aligned' verdict)")
     rt.add_argument("project")
-    rt.add_argument("--prompt", required=True, help="the owner's words, verbatim")
-    rt.add_argument("--apply", action="store_true",
-                    help="admit the task (pinned head) and record the plan; default is a dry run")
-    rt.add_argument("--json", action="store_true", help="machine-readable plan")
-    rt.set_defaults(fn=cmd_route)
+    rt.add_argument("--query", required=True, help="the owner's words, verbatim")
+    rt.add_argument("--kind", choices=sorted(_ADMIT_KINDS),
+                    help="what kind of work this is (the agent decides; code validates)")
+    rt.add_argument("--advances", default="", help="the milestone id this serves")
+    rt.add_argument("--why", default="", help="one line: which outcome this serves")
+    rt.add_argument("--verdict", choices=("aligned", "neutral", "against", "gap"),
+                    help="the agent's alignment call; omit for the pre-check")
+    rt.add_argument("--dry-run", action="store_true",
+                    help="run every check, queue nothing")
+    rt.add_argument("--json", action="store_true", help="machine-readable result")
+    rt.set_defaults(fn=cmd_admit)
+    tl = sub.add_parser("tools",
+                        help="ONE PASS of the whole toolbox: every verb, what it "
+                             "writes, what it refuses (read it before deciding a "
+                             "sequence — the team does not route)")
+    tl.add_argument("--all", action="store_true", help="include host plumbing")
+    tl.add_argument("--json", action="store_true", help="machine-readable inventory")
+    tl.set_defaults(fn=cmd_tools)
     sb = sub.add_parser("storefront-build",
                         help="THE storefront asset pass: render, compose the designed frame, composite, gate, publish — in one deterministic order")
     sb.add_argument("project")

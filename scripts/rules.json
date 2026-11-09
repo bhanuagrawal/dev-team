@@ -278,6 +278,20 @@
       "note": "run-derived 2026-11-09: status printed 'brand: open at released — icon-refresh-2026-11-07; next: devteam brand <project> --publish' while signals.store_status showed that exact icon already cleared by the API and inside the current review submission (the storefront pass published it, not the brand command). The owner's obvious next action would have opened a second Play edit and re-triggered review for bytes Play already had; the store is the record of whether an asset is published, never a command's step log."
     },
     {
+      "id": "agent-decides-intent-code-decides-consequences",
+      "rule": "a request becomes work only through `devteam admit`: the agent states the kind, the milestone, the reason and its own alignment verdict; code validates every consequence and flags (queueing nothing) when any check fails",
+      "doc": "AGENTS.md#the-one-loop",
+      "kind": "code",
+      "enforced_by": "team/admit.py (devteam admit) — unknown kind, unknown/done/parked milestone, unmet earlier goal, empty --why, no vision, missing --verdict are all refused; the old keyword classifier (devteam route) is retired because code cannot read intent"
+    },
+    {
+      "id": "tool-inventory-is-complete",
+      "rule": "every verb the CLI registers is described in one inventory (what it writes, what it refuses), because that list is the only thing an agent reads before choosing a sequence",
+      "doc": "AGENTS.md#the-one-loop",
+      "kind": "code",
+      "enforced_by": "team/toolbox.py + devteam doctor (compares `sub.add_parser(...)` in cli.py with the inventory in both directions and BLOCKS on drift); printed by `devteam tools`"
+    },
+    {
       "id": "flow-frame-is-not-surface-evidence",
       "rule": "a journey that dead-ends before reaching a surface must not supply that surface's UX evidence: ux-audit judged 'Discovery' from the newest still of the first-run journey — which is the sign-in recovery card — and filed sign-in gripes against the discovery feed",
       "doc": "AGENTS.md#8",

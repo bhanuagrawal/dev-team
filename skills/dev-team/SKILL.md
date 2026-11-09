@@ -11,6 +11,47 @@ description: >
   default across Claude Code, OpenCode, and Antigravity) or delegated to a
   subagent you spawn; all quality gates and bookkeeping run via this CLI.
 
+## FIRST ACTION — one pass over the toolbox (owner directive 2026-11-09)
+
+**You are the resolver. The team does not route, classify or guess what the owner
+meant — you do.** Two commands, in this order, before any other tool or edit:
+
+```bash
+devteam tools                 # ONE PASS: every verb, what it writes, what it refuses
+devteam status <project>      # where this project actually stands (delivery ref, plan, queue)
+```
+
+Then decide the sequence yourself from that list — do not look for a route table;
+there isn't one any more (`devteam route` was retired because code cannot read
+intent). The planner (`devteam plan`) owns WHICH task is next; you own WHICH tools
+in what order.
+
+**A request is not work until it passes the gate.** When the owner asks for
+something (a bug, a feature, a colour, the icon, the screenshots, a release), run:
+
+```bash
+devteam admit <project> --query "<the owner's words, verbatim>" \
+        --kind <bugfix|feature|visual|revamp|brand|store|release|direction> \
+        --advances <milestone id from `devteam tree`> \
+        --why "<one line: which outcome this serves>" \
+        --verdict aligned|neutral|against|gap
+```
+
+- **OK** → the task is pinned at the HEAD of the queue. Then run the normal loop
+  (`plan` → `pick` → `worktree-start` → `developer-prompt` → develop → `verify`
+  → `release` → `record`). It is top priority by construction, not by memory.
+- **FLAG** → **nothing was queued. Do not execute. Reply and stop.** The block
+  names who decides: `OWNER` (a direction call, or work that fights the plan —
+  the owner answers) or `AGENT` (a kind/milestone is missing, or the plan needs a
+  branch first — fix that, then admit again).
+- **NEEDS YOUR JUDGMENT** (no `--verdict`) → you were asked the alignment
+  question; answer with `--verdict` on a re-run. Never skip straight to code.
+
+The engine checks the consequences deterministically: unknown kind, unknown /
+done / parked milestone, an earlier goal whose number is unmet, a missing reason,
+a project with no vision → refused. Your judgment is the only thing code cannot
+make, so code refuses to run without it. Nothing here is advisory.
+
 ## MINIMAL-TOOLS PRINCIPLE (all agents, both modes)
 Every agent runs on whatever connections the project HAS and still produces
 full output. It NEVER blocks on an absent data source, and it ALWAYS ends its
@@ -43,7 +84,7 @@ run `doctor` and a live probe (`research`, or the collector directly):
   and a human, as `competitor-recon` does) → THEN it is an owner ask, and it is
   worth stating the single missing step rather than the whole path.
 
-## MODE SELECTION (do this first, every invocation)
+## MODE SELECTION (do this AFTER the toolbox pass, every invocation)
 - Project exists and has .pipeline/profile.json → MODE A (nightly run
   procedure below). STEP 0 of MODE A is `adapt` — a project onboarded under an
   older team is brought up to date by code before any work is picked; never edit
@@ -801,6 +842,9 @@ agent, judge and apply in code; never drop silently.*
 The owner may ask for ONE agent only, and that must work:
 - "run only the developer agent" → spawn the developer subagent on the given
   task/spec and STOP — no pipeline bookkeeping beyond that agent's own duty.
+  Scope-limited still means ADMITTED: if the request would CREATE the work, run
+  `devteam admit` first (a task that was never admitted has no milestone, no
+  reason and no place in the plan — the run would be invisible).
 - "run only release / verify / alarm / create / setup" → run just that stage
   via the matching commands/skill section, then report.
 - "run competitor recon" / "do competition research" / "check a competitor

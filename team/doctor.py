@@ -333,6 +333,35 @@ def run_doctor(project: Path, log) -> dict:
             "checks_passed": sum(1 for _, ok, _ in generic_checks if ok),
         }
 
+    # The TOOLBOX is the agent's one-pass inventory of every verb (2026-11-09).
+    # A command that exists in cli.py but not in the inventory is invisible work
+    # — the same failure `capabilities.py` exists to stop — so code compares both
+    # directions and BLOCKS instead of trusting whoever added the parser.
+    try:
+        from . import toolbox as toolbox_mod
+        problems = toolbox_mod.drift()
+        checks = [("every cli.py verb has a toolbox row, and vice versa" if not problems
+                   else "the toolbox has drifted from cli.py: " + "; ".join(problems[:3]),
+                   not problems,
+                   "describe the verb in team/toolbox.py (what it writes, what it "
+                   "refuses) or delete the row")]
+        bad = [(r, fix) for r, ok, fix in checks if not ok]
+        report["toolbox"] = {
+            "status": "ready" if not bad else "blocked",
+            "blocked": [{"requirement": r, "fix": fix} for r, fix in bad],
+            "checks_passed": len(checks) - len(bad),
+        }
+        for r, fix in bad:
+            log(f"doctor toolbox: BLOCKED — {r} ({fix})")
+        if not bad:
+            log(f"doctor toolbox: ready ({len(toolbox_mod.INVENTORY)} verbs, "
+                "the inventory matches the parser)")
+    except Exception as e:  # an inventory check must never hide the report
+        report["toolbox"] = {"status": "blocked",
+                             "blocked": [{"requirement": "toolbox loads", "fix": str(e)}],
+                             "checks_passed": 0}
+        log(f"doctor toolbox: BLOCKED — {e}")
+
     # The project's CI is GENERATED from the team template (AGENTS.md #4). A copy
     # that disagrees with its generator is a workflow nobody reviewed, and the next
     # `ci --write` silently rewrites it — so the drift is invisible without this.

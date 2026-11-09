@@ -33,8 +33,10 @@ allowed*, the agent decides *what to do*.
 | # | What the orchestrator runs | Kind |
 |---|---|---|
 | — | *trigger* `scripts/nightly.sh <Project>` → `opencode run --auto "Run workflow for <Project>."` | shell |
-| 0 | `cli.py adapt` | code |
-| 1 | `cli.py status` | code (read-only) |
+| 0 | `cli.py tools` — one pass over the inventory | code (read-only) |
+| 0.5 | `cli.py status` | code (read-only) |
+| 0.7 | `cli.py admit` — when the owner asked for something: gate it against the plan; FLAG ⇒ reply and stop, OK ⇒ pinned at the queue head | code (**gate**) |
+| 1 | `cli.py adapt` | code |
 | 2 | `cli.py plan` | code + **one LLM call** |
 | 3 | `cli.py pick` — then write `.pipeline/tasks/<id>.json` | code, then agent |
 | 4 | `cli.py worktree-start` | code |

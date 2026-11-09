@@ -16,8 +16,13 @@ release, whichever agent runs it.
 
 ```bash
 cd ~/dev-team
+python3 cli.py tools                  # ONE PASS: every verb, what it writes, what it refuses
+python3 cli.py status  <project>      # queue, delivery state, goal
 python3 cli.py adapt   <project>     # make the project match the current team
-python3 cli.py status  <project>     # queue, delivery state, goal
+python3 cli.py admit   <project> --query "<the owner's words>" \
+        --kind <kind> --advances <milestone> --why "<one line>" --verdict aligned
+#   → OK: pinned at the HEAD of the queue (execute it now — it is top priority).
+#   → FLAG: nothing queued — reply to whoever the block names and STOP.
 python3 cli.py asks    <project>     # review every open ask/flag: can a machine do it?
 python3 cli.py plan    <project>     # planner maintains the queue (runs every cycle)
 python3 cli.py pick    <project>     # the queue head → task spec + worktree command
@@ -33,6 +38,15 @@ python3 cli.py record  <project> --result shipped --task-spec <spec> --version <
 python3 cli.py rc      <project> --version <v> --yes|--no --note "<one line>"
 python3 cli.py alarm   <project>
 ```
+
+**The agent is the resolver; the team is the toolbox.** There is no route table
+and no keyword classifier (the old `devteam route` is retired — code cannot read
+intent, and its guess was the only check on its guess). The agent reads
+`devteam tools` once, decides the sequence, and `devteam admit` is the only way a
+request becomes work: it validates the consequences (kind, milestone, the gate
+that an earlier goal's number must be met, a recorded reason, a vision) and pins
+the task at the queue head — or flags it and queues nothing, so the owner decides.
+`devteam doctor` blocks when a command exists that the inventory does not describe.
 
 Report the outcome banner with the `RELEASE HANDOVER` block (store note + owner
 checklist + release-candidate call) and the two page URLs `record` prints.
