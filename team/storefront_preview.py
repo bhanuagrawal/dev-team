@@ -832,15 +832,30 @@ def _delivery_tree(project: Path, log: Any = None) -> Path:
     local_props = project / "local.properties"
     if local_props.is_file() and not (tree / "local.properties").is_file():
         shutil.copy2(local_props, tree / "local.properties")  # gitignored, needed by AGP
-    # The spec is a project-owned dev-team output, not app code: it is the INPUT to
-    # the harness, so the checkout's current copy always wins. Copying only when the
-    # delivery tree lacked one meant a corrected scene spec was silently ignored —
-    # the renderer re-ran the OLD harness, the corrected spec was committed after,
-    # and the screenshots (and the UX audit over them) described a picture the
-    # committed spec no longer draws (seen 2026-11-07: a paywall scene still named
-    # a deleted constant, so re-rendering could never recover).
+    # WHICH SPEC WINS IS A FACT, NOT A PREFERENCE. The spec is a project-owned
+    # dev-team output, not app code, and it is the INPUT to the harness — so a
+    # corrected spec must never be silently ignored (2026-11-07: a paywall scene
+    # named a deleted constant and re-rendering could never recover). But the
+    # opposite mistake is just as bad: the checkout can be BEHIND the delivery ref,
+    # and copying its spec over the shipped one re-draws the previous scene bodies
+    # and leaves the delivery tree dirty with a spec that exists on no ref (seen
+    # 2026-11-09: a render right after a release judged the pre-release spec, so the
+    # frames and the audit described the screen that had just been replaced).
+    # So: restore the SHIPPED spec first (the tree is a disposable cache), then let
+    # the checkout's copy win only when the checkout is not behind origin/main.
+    from .core import git, git_ref_state
+    if (tree / ".git").exists():
+        restored = git(["checkout", "--", SPEC_REL], cwd=tree, timeout=60)
+        if restored.returncode == 0 and log:
+            log(f"  = delivery tree restored to the shipped {SPEC_REL}")
     if (project / SPEC_REL).is_file():
-        shutil.copy2(project / SPEC_REL, tree / SPEC_REL)
+        state = git_ref_state(project)
+        if int(state.get("behind") or 0) > 0:
+            if log:
+                log(f"  = checkout is {state.get('behind')} behind {state.get('ref')} — "
+                    f"using the shipped {SPEC_REL}, not the checkout's older copy")
+        else:
+            shutil.copy2(project / SPEC_REL, tree / SPEC_REL)
     return tree
 
 
