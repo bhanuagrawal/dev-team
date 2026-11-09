@@ -68,6 +68,43 @@ def _png_dimensions(path: Path) -> tuple[int, int] | None:
     return None
 
 
+def _launcher_label(src: Path) -> str | None:
+    """The name Android shows under the icon, resolved from the manifest.
+
+    Play's Misleading Claims policy covers the NAME as well as the icon: an app
+    whose installed label differs from its listing title is rejected. Returns
+    the literal label or the resolved `@string/...` value; None when no
+    `<application android:label>` can be read.
+    """
+    manifests = [p for p in src.glob("**/AndroidManifest.xml")
+                 if not re.search(r"(^|/)(build|\.pipeline|\.git)/",
+                                  p.relative_to(src).as_posix())]
+    for manifest in manifests:
+        try:
+            text = manifest.read_text(errors="ignore")
+        except OSError:
+            continue
+        found = re.search(
+            r"<application\b[^>]*android:label\s*=\s*\"([^\"]+)\"", text, re.S)
+        if not found:
+            continue
+        raw = found.group(1).strip()
+        if not raw.startswith("@string/"):
+            return raw
+        key = raw.split("/", 1)[1]
+        for strings in manifest.parent.glob("res/values*/strings.xml"):
+            try:
+                body = strings.read_text(errors="ignore")
+            except OSError:
+                continue
+            value = re.search(
+                rf"<string\s+name=\"{re.escape(key)}\"\s*>(.*?)</string>",
+                body, re.S)
+            if value:
+                return value.group(1).strip()
+    return None
+
+
 def _find_listing_dir(project: Path) -> Path | None:
     for rel in ("distribution/listing/en-US", "distribution/listing",
                 "fastlane/metadata/android/en-US", "src/main/play/listings/en-US"):
@@ -876,6 +913,42 @@ def run_store_readiness_audit(project: Path, tree: Path | None = None) -> list[R
                     detail="no listing icon or no launcher bitmap to compare",
                     fix="Add images/icon.png and mipmap-*/ic_launcher.png, then re-run this audit",
                 ))
+
+        # The icon check above only covers HALF of Play's Misleading Claims rule.
+        # The other half is the name: an app that installs as "Foo" while the
+        # listing promises "Foo: Something More" is rejected exactly the same
+        # way, and this audit used to pass it because it only compared pixels.
+        # That is not a hypothetical — it is how a real rejection shipped past a
+        # green readiness report. Compare the launcher label to the listing title.
+        installed_name = _launcher_label(src)
+        title_path = listing_dir / "title.txt"
+        if title_path.is_file() and installed_name:
+            wanted = title_path.read_text(errors="ignore").strip()
+            same_name = installed_name.strip() == wanted
+            checks.append(ReadinessCheck(
+                category="Storefront Graphic Assets",
+                name="Installed Name Matches Store Listing",
+                passed=same_name,
+                severity="INFO" if same_name else "BLOCKER",
+                detail=(f"launcher label and listing title agree ({wanted!r})"
+                        if same_name else
+                        f"the installed app is named {installed_name!r} while the "
+                        f"listing title is {wanted!r} — Play rejects this as an "
+                        f"app-store listing mismatch under the Misleading Claims "
+                        f"policy"),
+                fix=("Make @string/app_name equal the listing title exactly (or "
+                     "shorten the title to the installed name) and ship a build "
+                     "that carries it"),
+            ))
+        else:
+            checks.append(ReadinessCheck(
+                category="Storefront Graphic Assets",
+                name="Installed Name Matches Store Listing",
+                passed=False,
+                severity="WARNING",
+                detail="no listing title or no resolvable launcher label — name parity is unproven",
+                fix="Add title.txt and an android:label on <application>, then re-run this audit",
+            ))
 
         # A listing is a promise about a specific build. When the app is rebuilt
         # but `docs/storefront.json` still names the old screens, the screenshots
