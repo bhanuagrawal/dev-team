@@ -1414,6 +1414,20 @@ def cmd_record(args: argparse.Namespace) -> None:
     block = goals.review_block(state_of(project))
     if block:
         print("\n" + block)
+    # THE MOMENT THE OWNER ASKED ABOUT (2026-11-09): the last task of a branch has
+    # just shipped, so "all tasks done" is now on the table. Print whether the
+    # branch's own measures are backed — a built branch with no evidence is a GAP,
+    # and that gap is what the next run builds, not the next feature.
+    try:
+        from team import closure
+
+        mid = str(task.get("advances") or "")
+        rows = closure.audit(project, node_id=mid) if mid else []
+        done_rows = [r for r in rows if r["built"]]
+        if done_rows:
+            print("\n" + closure.format_audit(done_rows))
+    except Exception:
+        pass
     # Every run ends by handing the owner the page: "where we are now", one paste.
     # The plan itself is published too, so what the owner opens is what the repo
     # says — see team/publish.py (best-effort: never fails a run).
@@ -1924,6 +1938,18 @@ def cmd_status(args: argparse.Namespace) -> None:
         print(f"admit:      {len(flags)} request(s) FLAGGED — nothing queued; last: "
               f"\"{str(last_flag.get('question') or '')[:90]}\" "
               f"({last_flag.get('who')} decides)")
+    # A branch can look finished because its list is empty. Say which ones, so the
+    # next task is the gap rather than the next feature (team/closure.py).
+    try:
+        from team import closure
+
+        built_gaps = [r for r in closure.audit(project) if r["built"] and not r["complete"]]
+        if built_gaps:
+            names = ", ".join(f"\"{r['title'][:44]}…\"" for r in built_gaps[:2])
+            print(f"closure:    {len(built_gaps)} built branch(es) with NO evidence "
+                  f"({names}) — the gap is the next task; `devteam closure {profile['name']}`")
+    except Exception:
+        pass
     print(f"targets:    {len(profile['targets'])} shipped-do: "
           f"{sum(1 for s in surfaces if s['status'] == 'shipped')} "
           f"animated: {sum(1 for s in surfaces if s['status'] == 'animated')} "
@@ -3571,6 +3597,19 @@ def cmd_admit(args: argparse.Namespace) -> int:
     return 0 if (res.get("ok") or res.get("verdict") == "precheck") else 2
 
 
+def cmd_closure(args: argparse.Namespace) -> int:
+    """CLOSURE — is every 'done' backed by evidence, or is the list just empty?"""
+    project = resolve_project(args.project)
+    from team import closure
+
+    rows = closure.audit(project, node_id=args.node)
+    print(closure.format_audit(rows))
+    if args.require and any(r["built"] and not r["complete"] for r in rows):
+        print("\nclosure: FAIL — a node is built without evidence (see above)")
+        return 1
+    return 0
+
+
 def cmd_replan(args: argparse.Namespace) -> int:
     """OUT-OF-BAND CHANGE → detect, adopt, adapt, re-plan. The plan moves, never the owner.
 
@@ -4600,6 +4639,15 @@ def main() -> None:
     rpl.add_argument("--dry-run", action="store_true", help="report only, write nothing")
     rpl.add_argument("--no-llm", action="store_true", help="collect and write the planner prompt instead")
     rpl.set_defaults(fn=cmd_replan)
+    cl = sub.add_parser("closure",
+                        help="CLOSURE: is a 'done' real? A branch whose tasks are all "
+                             "delivered but whose measures have no evidence is a GAP — "
+                             "the next task, not the next feature")
+    cl.add_argument("project")
+    cl.add_argument("--node", help="one branch by id")
+    cl.add_argument("--require", action="store_true",
+                    help="exit 1 when any built branch has no evidence (a step can refuse to move on)")
+    cl.set_defaults(fn=cmd_closure)
     sb = sub.add_parser("storefront-build",
                         help="THE storefront asset pass: render, compose the designed frame, composite, gate, publish — in one deterministic order")
     sb.add_argument("project")

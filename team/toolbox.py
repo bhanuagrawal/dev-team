@@ -93,6 +93,11 @@ _RAW: list[tuple[str, str, str, str, str, bool]] = [
      "state.queue only when the verdict is 'aligned'; admit log otherwise",
      "unknown kind, unknown/done/parked milestone, unmet earlier goal, no --why, "
      "no vision, no --verdict", True),
+    ("closure", "plan", "is a 'done' real? A branch whose tasks are all delivered but "
+                        "whose measures have no evidence is a GAP — the next task, not "
+                        "the next feature",
+     "nothing; --require exits 1 instead of reporting",
+     "nothing — it reports", True),
     ("loop", "plan", "N cycles of plan review + refill, printing each next task "
                      "(inspection — the agent executes)",
      ".pipeline/runs/ log", "nothing", True),

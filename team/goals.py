@@ -525,6 +525,16 @@ def validate_advances(result: dict, profile: dict, state: dict,
                if n["status"].lower() in ("parked", "retired", "dropped")}
     off = {str(x.get("label") or "").strip()
            for x in (result.get("off_goal") or []) if isinstance(x, dict)}
+    # A branch whose tasks are all delivered but whose measures have no evidence is
+    # NOT done — it is a gap, and queuing work against it is exactly what should
+    # happen next (owner directive 2026-11-09). Computed once, before the per-entry
+    # checks, because it changes what "already done" means below.
+    try:
+        from . import closure as closure_mod
+        built_gaps = closure_mod.gaps_from(profile, state, research)
+    except Exception:
+        built_gaps = []
+    gap_ids = {r["id"] for r in built_gaps}
     for q in result.get("queue", []):
         mid = str(q.get("advances") or "").strip()
         if not mid:
@@ -545,9 +555,15 @@ def validate_advances(result: dict, profile: dict, state: dict,
             return (f"queue entry '{q.get('label')}' advances the GOAL '{mid}' — a "
                     "task serves a milestone under it, not the goal itself; name "
                     "the milestone")
-        if mid in done:
+        if mid in done and mid not in gap_ids:
             return (f"queue entry '{q.get('label')}' advances milestone '{mid}', "
                     "which is already done")
+        if mid in gap_ids:
+            gap = next(r for r in built_gaps if r["id"] == mid)
+            if not str(q.get("problem") or "").strip():
+                return (f"queue entry '{q.get('label')}' closes the gap in '{mid}' "
+                        f"({gap['missing'][0]}) — say WHAT the gap is in 'problem' "
+                        f"so the task is written from evidence, not from the label")
         if mid in shelved:
             return (f"queue entry '{q.get('label')}' advances '{mid}', which is "
                     "parked/retired — either set it active or queue work that "
@@ -566,6 +582,35 @@ def validate_advances(result: dict, profile: dict, state: dict,
                             f"the earlier goal '{g['title']}' is not met "
                             f"({evidence}) — the plan may not sell what it has not "
                             f"kept: finish that goal before working past it")
+
+    # NOTHING IS RETIRED BY EXHAUSTION (owner directive 2026-11-09): a branch whose
+    # tasks are all delivered but whose measures have no evidence is a GAP, not a
+    # finish. Work may still go to that branch (to close it), or to another goal —
+    # but the plan may not step OVER it. That is how a feature ships "done" while
+    # the thing it promised was never proven. The refusal names the gap so the next
+    # task can be written from its own words.
+    try:
+        from . import closure
+        built_gaps = closure.gaps_from(profile, state, research)
+    except Exception:
+        built_gaps = []
+    if built_gaps:
+        order = [n["id"] for n in flat]
+        gap_ids = {r["id"] for r in built_gaps}
+        for q in (result.get("queue") or [])[:1]:
+            mid = str(q.get("advances") or "").strip()
+            if mid in gap_ids or mid not in order:
+                continue
+            gid = goal_of(profile, mid)
+            for g in built_gaps:
+                if goal_of(profile, g["id"]) != gid or g["id"] not in order:
+                    continue
+                if order.index(g["id"]) < order.index(mid):
+                    return (f"queue entry '{q.get('label')}' advances '{mid}', but "
+                            f"'{g['title']}' is built and NOT proven "
+                            f"({g['missing'][0]}) — queue the gap against "
+                            f"'{g['id']}' first, or correct that branch's measures "
+                            f"with a goal change")
     return None
 
 
@@ -585,6 +630,19 @@ def goal_block(profile: dict, state: dict) -> str:
     st = status_of(profile, state)
     lines = [f'PLAN  the long-term goal: {p["vision"] or "(none)"}', ""]
 
+    # "done" by exhaustion vs "done" with evidence (2026-11-09): a branch whose
+    # tasks all shipped but whose measures have no proof is a GAP, and it marks
+    # ⚠ above it too — a sub-goal cannot read done while a feature under it has
+    # no evidence. Loaded once and used by both lists below.
+    try:
+        from . import closure as closure_mod
+        _gaps = {r["id"]: r for r in closure_mod.gaps_from(profile, state, None)}
+    except Exception:
+        _gaps = {}
+
+    def _goal_gap(gid: str) -> bool:
+        return any(r["id"] == gid or goal_of(profile, r["id"]) == gid for r in _gaps.values())
+
     goals_list = goal_tier(profile)
     lines.append("SUB-GOALS  (why — in order)")
     if not goals_list:
@@ -595,7 +653,12 @@ def goal_block(profile: dict, state: dict) -> str:
         num[gid] = i
         mark = {"done": "✓", "active": ">", "pending": "·", "parked": "x"}.get(
             st.get(gid, "·"), "·")
-        lines.append(f"  {i}. {mark} {g.get('title')}")
+        if gid in _gaps:
+            mark = "⚠"
+        line = f"  {i}. {mark} {g.get('title')}"
+        if gid in _gaps:
+            line += "   (built, NOT proven)"
+        lines.append(line)
         for ln in _measure_lines(g, "       "):
             lines.append(ln)
     lines.append("")
@@ -608,8 +671,12 @@ def goal_block(profile: dict, state: dict) -> str:
         nid = str(node.get("id") or "")
         mark = {"done": "✓", "active": ">", "pending": "·", "parked": "x"}.get(
             st.get(nid, "·"), "·")
+        if nid in _gaps:
+            mark = "⚠"
         pad = "   " * depth
         line = f"  {pad}{counter['n']}. {mark} {node.get('title')}"
+        if nid in _gaps:
+            line += "   (built, NOT proven — the gap is the next task)"
         if serves:
             line += "   (serves " + ", ".join(str(s) for s in serves) + ")"
         lines.append(line)

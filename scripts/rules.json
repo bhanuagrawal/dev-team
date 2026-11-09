@@ -298,6 +298,13 @@
       "kind": "enforcible",
       "proposal": "team/ux_audit.py _flow_still_for: use a still only from a flow whose goal was REACHED (or a frame whose step screen matches the surface); a stuck journey's last frame is where it died, not what the surface looks like",
       "note": "run-derived 2026-11-09 (BookSwapKMP): the first-run journey dead-ends at provider sign-in (no credentials on a headless emulator), so its last still is the sign-in recovery card; the next ux-audit reviewed that card as 'Discovery' and produced 'wait, this is a sign-in screen, not a discovery feed' + 'an error banner already?' as feed gripes. Stale-frame remedies also named the wrong command — fixed in the same run (a flow still is refreshed by `devteam ux-flow`, never by `storefront-scenes`)."
+    },
+    {
+      "id": "done-is-earned-not-exhausted",
+      "rule": "a branch is not done when its task list empties: it is COMPLETE only when every measure it declared has evidence (a machine-checkable number, or a recorded verdict with evidence); a built branch without evidence is a GAP and that gap is the next task",
+      "doc": "docs/planning.md",
+      "kind": "code",
+      "enforced_by": "team/closure.py (devteam closure --require) + goals.validate_advances (work may be queued AT a gap, a plan may not step OVER one) + status/record print the closure block"
     }
   ]
 }
