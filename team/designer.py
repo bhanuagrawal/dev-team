@@ -73,7 +73,7 @@ def targets_of(task: dict) -> list[str]:
 
 def is_ui_task(task: dict) -> bool:
     """Does this task write UI? Derived from targets, not from a hand label."""
-    label = str(task.get("surface", {}).get("label") or task.get("label") or "")
+    label = task_label(task)
     if label.startswith("design-"):
         return False  # this task produces design law/screens, it does not consume one
     targets = targets_of(task)
@@ -93,7 +93,7 @@ def load_records(project: Path) -> dict:
 
 def status(project: Path, task: dict) -> dict:
     """answered | pending | stale | not_applicable for THIS task."""
-    label = str((task.get("surface") or {}).get("label") or task.get("label") or "")
+    label = task_label(task)
     if not is_ui_task(task):
         return {"task": label, "state": "not_applicable",
                 "reason": "no UI targets — design consultation not needed"}
@@ -159,7 +159,7 @@ Answer as JSON only:
 
 
 def record(project: Path, task: dict, answer: dict) -> dict:
-    label = str((task.get("surface") or {}).get("label") or task.get("label") or "")
+    label = task_label(task)
     decision = str(answer.get("decision") or "").strip()
     if decision not in DECISIONS:
         raise ValueError(f"decision must be one of {DECISIONS}, got {decision!r}")
@@ -201,4 +201,5 @@ def line(project: Path, task: dict) -> str:
 
 
 def task_label(task: dict) -> str:
-    return str((task.get("surface") or {}).get("label") or task.get("label") or "")
+    return str((task.get("surface") or {}).get("label")
+               or task.get("label") or task.get("id") or "")
