@@ -163,6 +163,8 @@ def build(project) -> dict:
                 "decided_by": str(raw.get("decided_by") or "owner"),
                 "outcome": str(raw.get("outcome") or ""),
                 "measures": _measures_view(raw, research),
+                "design": (raw.get("design") if isinstance(raw.get("design"), dict)
+                           else {}),
                 "verdict": (verdicts.get(mid) or {}).get("verdict", ""),
                 "evidence": (verdicts.get(mid) or {}).get("evidence", ""),
                 "children": []}
@@ -204,6 +206,8 @@ def build(project) -> dict:
                           detail=str(q.get("reason") or "")[:160],
                           kind=str(q.get("type") or ""),
                           pinned=bool(q.get("pinned")))
+        leaf["design"] = str(q.get("design") or "")
+        leaf["design_source"] = str(q.get("design_source") or "")
         leaf["order"] = order
         if not ship and not next_marked[0]:
             leaf["is_next"] = True   # deterministic: the queue head is next run
@@ -337,6 +341,11 @@ _HTML = """<!doctype html>
  .priority .np {{ color:#6b4a3d; font-size:13.5px; margin-top:5px; }}
  .priority .nm {{ color:#8a5a45; font-size:13px; margin-top:7px; }}
  .pill.resume {{ background:#fdf1e3; color:#9a4b06; }}
+ .designsum {{ color:var(--soft); font-size:12.5px; margin:14px 0 0; }}
+ .designbadge {{ margin-top:7px; }}
+ .pill.design.ready {{ background:#e9f7ef; color:#14764a; }}
+ .pill.design.derive {{ background:#f3f1ec; color:#4b5563; }}
+ .pill.design.needed {{ background:#fdf1e3; color:#9a4b06; }}
  .subgoals {{ display:grid; grid-template-columns:repeat(auto-fit,minmax(250px,1fr));
               gap:10px; }}
  .sg {{ background:var(--card); border:1px solid var(--line); border-radius:14px;
@@ -573,6 +582,20 @@ def _body(model: dict) -> str:
             first_plan["_resume"] = True
         out.append("</div>")
 
+    # 2c. design readiness across the plan (an attribute, not a phase)
+    dst = [f.get("design") or {} for f in features]
+    n_ready = sum(1 for d in dst if d.get("status") == "ready")
+    n_derive = sum(1 for d in dst if d.get("status") == "derive")
+    needed_feats = [f for f in features if (f.get("design") or {}).get("status") == "needed"]
+    n_needed = len(needed_feats)
+    if features:
+        where = ""
+        if n_needed and all(f.get("phase") == 2 for f in needed_feats):
+            where = " (all Phase 2)"
+        out.append('<div class="designsum">Design: '
+                   f'{n_ready} ready from Stitch · {n_derive} derived from the system · '
+                   f'{n_needed} need a screen{where}</div>')
+
     # 3. tier 2 — sub-goals, the ends, with the features that serve each
     out.append('<h2>Sub-goals <span class="count">the ends · order is '
                'priority</span></h2>')
@@ -678,6 +701,13 @@ def _feature_card(f: dict, order: dict, goal_title: dict) -> str:
         out.append('<div class="serves">Serves: '
                    + "".join(f'<span class="chip">{_esc(s)}</span>' for s in serves)
                    + "</div>")
+    d = f.get("design") or {}
+    if d.get("status") in ("ready", "derive", "needed"):
+        label = {"ready": "Design · " + str(d.get("source") or "Stitch"),
+                 "derive": "Design · derived",
+                 "needed": "Design · needed"}[d["status"]]
+        out.append(f'<div class="designbadge"><span class="pill design '
+                   f'{_esc(d["status"])}">{_esc(label)}</span></div>')
     if f.get("outcome"):
         out.append(f'<div class="feat-o">{_esc(f["outcome"])}</div>')
     if f.get("bar") is not None:
@@ -720,6 +750,9 @@ def _task_row(t: dict, order: dict, feature_label: str = "") -> str:
            + "</div>"]
     if feature_label:
         out.append(f'<div class="tf">in {_esc(_short(feature_label, 56))}</div>')
+    if str(t.get("design") or "") == "needed":
+        out.append('<div class="tf"><span class="pill design needed">'
+                   'design first</span></div>')
     if t.get("detail"):
         out.append(f'<div class="tm">{_esc(_short(t["detail"], 150))}</div>')
     tech = [f'id: {t["id"]}',

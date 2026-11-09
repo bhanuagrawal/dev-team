@@ -428,7 +428,19 @@ def design_brief(project: Path, profile: dict, task: dict,
     described = " ".join(str(x) for x in (
         (task.get("surface") or {}).get("label", ""), task.get("reason", ""),
         task.get("whatsnew", ""), " ".join(focus_paths)))
-    required, why = design_mod.should_invoke_stitch(described, list(focus_paths))
+    # The PLAN is the authority when it records design readiness: a task marked
+    # ready/derive/na must not be re-judged by keyword heuristics, and a task
+    # marked needed must not start by improvising in code.
+    explicit = str(task.get("design") or "").strip().lower()
+    if explicit == "needed":
+        required, why = True, "the plan marks this task as needing a design"
+    elif explicit in ("ready", "derive", "na"):
+        required = False
+        why = {"ready": "a Stitch screen covers this feature",
+               "derive": "the design system and existing components cover it",
+               "na": "the plan marks this as logic/data work"}[explicit]
+    else:
+        required, why = design_mod.should_invoke_stitch(described, list(focus_paths))
 
     available: list[dict] = []
     if (project / design_mod.DESIGN_DOC_REL).is_file():
@@ -469,6 +481,8 @@ def design_brief(project: Path, profile: dict, task: dict,
             f"devteam design {project.name}  # writes docs/design.md + registers it in conventions",
         ]
     else:
+        block["action"] = "no design needed for this task (logic/data/CI work)"
+    if explicit == "na":
         block["action"] = "no design needed for this task (logic/data/CI work)"
     return block
 

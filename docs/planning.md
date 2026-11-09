@@ -32,6 +32,19 @@ belongs to exactly one feature (`advances=<feature id>`). The page renders all f
 tiers and groups features into phase lanes; it never shows a separate task list that
 competes with the hierarchy.
 
+### Design readiness is an attribute, not a phase
+
+A feature records `design` — one of `ready` (a Stitch screen exists), `derive`
+(the design system + existing components cover it), `needed` (no screen exists),
+or `na` (backend/data work). UI tasks inherit the feature's status; a `needed`
+feature gets a **design task queued before its build task**. `ready` and
+`derive` tasks build against `docs/design.md` and the Stitch project; they do not
+improvise a new visual language.
+
+The first design gate is the law itself: when the Stitch project changes, the
+`design-regenerate-from-stitch` task runs before any UI task, because every
+developer prompt reads `docs/design.md`.
+
 ### Priority interrupts pause a phase; they never re-plan it
 
 The queue has two lanes:
