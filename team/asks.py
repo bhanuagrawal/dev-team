@@ -155,6 +155,17 @@ OWNER_INPUT: list[tuple[str, str]] = [
 _DECISION = (r"\bwhich\b|\bchoose\b|\bdecide\b|\bconfirm you want\b|\byour approval\b",
              "the choice the ask names (the agent cannot make it for you)")
 
+# Verbs that REPORT and never repair. Naming one is not "the fix is this command":
+# the GA4 upgrade's `how` ends "`devteam doctor` verifies", and treating that as
+# the repair told an agent to run doctor until a flag cleared — a loop that cannot
+# terminate when the underlying property does not exist (seen 2026-11-10). Keep
+# this list to verbs whose only job is to read; a verb that writes belongs out.
+AUDIT_VERBS: set[str] = {
+    "doctor", "status", "tools", "takeover", "tree", "asks", "alarm", "coverage",
+    "capabilities", "closure", "poll", "ux-plan", "storefront-status",
+    "store-readiness",
+}
+
 # --------------------------------------------------------------------------- #
 # tool rules — most specific first; the first match wins
 # --------------------------------------------------------------------------- #
@@ -327,8 +338,18 @@ def review(title: str, how: str = "", profile: dict | None = None,
     # run itself — driving a console for it is a wrong trip. Seen 2026-11-06: a
     # store-readiness blocker whose fix is `devteam competition` was filed as a
     # Play Console chore only because its title said "Google Play".
-    local = re.search(r"\bdevteam\s+([a-z][a-z-]+)", text)
-    if local and local.group(1) not in ("promote",):
+    #
+    # A verb that only REPORTS is not the fix (seen 2026-11-10): the GA4 upgrade's
+    # `how` ends "`devteam doctor` verifies", and reading that as the repair told
+    # the agent to "run doctor and the flag clears itself" — a loop that can never
+    # terminate, because doctor never repairs anything and the property did not
+    # exist. Skip audit verbs and keep looking for a verb that writes.
+    local = next(
+        (m for m in re.finditer(r"\bdevteam\s+([a-z][a-z-]+)", text)
+         if m.group(1) != "promote" and m.group(1) not in AUDIT_VERBS),
+        None,
+    )
+    if local:
         command = local.group(1)
         row.update(
             verdict="agent", tool=None,
@@ -601,6 +622,17 @@ SELFTEST: list[tuple[str, str, dict | None, str, str | None]] = [
     ("Resolve Google Play Store readiness blockers",
      "Run `devteam competition <project> --limit 5` to research >= 5 rivals and write docs/COMPETITION_RESEARCH.md",
      None, "agent", None),
+    # An audit verb in the text is NOT the fix (2026-11-10): the real GA4 upgrade's
+    # `how` ends "`devteam doctor` verifies", and reading that as the repair sent the
+    # agent to a command that only reports — while the property did not exist at all.
+    # The honest missing step is the console: which property is the app's (or
+    # approval to create one), which only the owner can supply.
+    ("Connect app analytics (GA4 / Firebase)",
+     "declare profile.connections.ga4 {property: <GA4 property id>} — auth is the "
+     "shared owner login (gcloud auth application-default login --scopes="
+     "https://www.googleapis.com/auth/analytics.readonly, one time, all projects); "
+     "`devteam doctor` verifies",
+     None, "mixed", "browser-control"),
     # The recon agent is local work (emulator + Play account), not an owner chore:
     # its text names no `devteam` command, so before 2026-11-08 it fell through to
     # "no console page named" and was handed to the owner.
