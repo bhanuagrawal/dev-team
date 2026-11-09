@@ -498,7 +498,15 @@ def set_status(project: Path, *, enable: bool) -> dict[str, Any]:
 
 
 def status(project: Path) -> dict[str, Any]:
-    """What exists live for this plan's campaign, and in what state."""
+    """What exists live for this plan's campaign, and whether it actually serves.
+
+    `campaign.status = ENABLED` is not the answer to "are my ads running": an
+    account can be eligible, approved and funded and still show nothing because
+    every keyword sits below the first-page bid. That is exactly how Paddle sat
+    for 30 days with 0 impressions while `--status` printed ENABLED. So the
+    status carries the serving facts too: 30-day impressions/clicks/cost and the
+    keyword-level primary-status reasons, which is where the cause lives.
+    """
     plan = load_plan(project)
     cid = str(plan["account"]["customer_id"]).replace("-", "")
     name = plan["campaign"]["name"]
@@ -508,15 +516,34 @@ def status(project: Path) -> dict[str, Any]:
     if not rows:
         return {"exists": False, "customer_id": cid, "name": name}
     camp = rows[0]["campaign"]
+    cid_where = f"campaign.id = {camp['id']}"
     groups = gaql(cid, "SELECT ad_group.name, ad_group.status FROM ad_group "
-                       f"WHERE campaign.id = {camp['id']}")
+                       f"WHERE {cid_where}")
     ads = gaql(cid, "SELECT ad_group_ad.ad.id FROM ad_group_ad "
-                    f"WHERE campaign.id = {camp['id']}")
-    kws = gaql(cid, "SELECT ad_group_criterion.criterion_id FROM ad_group_criterion "
-                    f"WHERE campaign.id = {camp['id']} AND ad_group_criterion.type = 'KEYWORD' "
+                    f"WHERE {cid_where}")
+    kws = gaql(cid, "SELECT ad_group_criterion.criterion_id, "
+                    "ad_group_criterion.primary_status, "
+                    "ad_group_criterion.primary_status_reasons "
+                    f"FROM ad_group_criterion WHERE {cid_where} "
+                    "AND ad_group_criterion.type = 'KEYWORD' "
                     "AND ad_group_criterion.negative = false")
+    perf = gaql(cid, "SELECT campaign.id, metrics.impressions, metrics.clicks, "
+                     "metrics.cost_micros FROM campaign WHERE "
+                     f"segments.date DURING LAST_30_DAYS AND {cid_where}")
+    metrics = (perf[0].get("metrics") if perf else {}) or {}
+    reasons = [k["adGroupCriterion"].get("primaryStatusReasons") or [] for k in kws]
+    below = sum(1 for r in reasons if "AD_GROUP_CRITERION_BELOW_FIRST_PAGE_BID" in r)
+    rarely = sum(1 for r in reasons if "AD_GROUP_CRITERION_RARELY_SERVED" in r)
+    eligible = sum(1 for k in kws
+                   if k["adGroupCriterion"].get("primaryStatus") == "ELIGIBLE")
     return {"exists": True, "customer_id": cid, "name": name,
             "campaign_id": camp["id"], "status": camp["status"],
             "primary_status": camp.get("primaryStatus"),
             "daily_budget": int(rows[0]["campaignBudget"]["amountMicros"]) / 1e6,
-            "ad_groups": len(groups), "ads": len(ads), "keywords": len(kws)}
+            "ad_groups": len(groups), "ads": len(ads), "keywords": len(kws),
+            "impressions_30d": int(metrics.get("impressions") or 0),
+            "clicks_30d": int(metrics.get("clicks") or 0),
+            "cost_30d": int(metrics.get("costMicros") or 0) / 1e6,
+            "eligible_keywords": eligible,
+            "below_first_page_bid": below,
+            "rarely_served": rarely}

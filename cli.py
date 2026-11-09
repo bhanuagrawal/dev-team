@@ -3996,6 +3996,28 @@ def cmd_ads(args: argparse.Namespace) -> int:
         print(f"  campaign  {st['campaign_id']}  {st['status']} ({st['primary_status']})")
         print(f"  budget    ₹{st['daily_budget']:.0f}/day · account {st['customer_id']}")
         print(f"  built     {st['ad_groups']} ad groups · {st['ads']} ads · {st['keywords']} keywords")
+        print(f"  serving   {st['impressions_30d']:,} impressions · "
+              f"{st['clicks_30d']:,} clicks · ₹{st['cost_30d']:.0f} spent (last 30 days)")
+        print(f"  keywords  {st['eligible_keywords']} eligible · "
+              f"{st['below_first_page_bid']} below first-page bid · "
+              f"{st['rarely_served']} rarely served")
+        # Enabled is not serving. Zero impressions has exactly two in-account
+        # causes the API can name; print the cause and exit non-zero so a
+        # scripted check cannot read "ENABLED" as "running".
+        if st["status"] == "ENABLED" and st["impressions_30d"] == 0:
+            if st["below_first_page_bid"]:
+                print(f"  ✗ NOT SHOWING — {st['below_first_page_bid']}/{st['keywords']} "
+                      "keywords are below the first-page bid; the ad-group CPC bid "
+                      "is too low for this market")
+                return 1
+            if st["rarely_served"]:
+                print(f"  ✗ NOT SHOWING — {st['rarely_served']}/{st['keywords']} "
+                      "keywords are rarely served: the targeted searches have "
+                      "almost no volume in this geo/language")
+                return 1
+            print("  ! enabled with no impressions in 30 days and no keyword "
+                  "blocker — check billing, account suspension, or that the "
+                  "campaign was created moments ago")
         return 0
 
     plan = ads.load_plan(project)
