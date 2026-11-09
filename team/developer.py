@@ -294,9 +294,9 @@ TESTS ARE PART OF THIS DIFF — `devteam verify` REFUSES the change without them
   - Every other production file needs a unit test with @Test and at least one
     assertion.
   - A screenshot/render with no assertion is NOT a test and does not count.
-  - Test files under {unit_txt} (unit) and {ui_txt} (UI) are ALWAYS allowed for
-    this task, in addition to the allow-list above. Never weaken an existing
-    test to make the gate pass.
+  - Test files under {unit_txt} (unit) and {ui_txt} (UI) are always the right
+    place for the tests this change owes. Never weaken an existing test to make
+    the gate pass.
 """
 
 
@@ -411,7 +411,81 @@ def build_prompt(project: Path, profile: dict, task: dict, task_paths: list[str]
         locales=n_locales,
         research_context=research_ctx or "see research.json constraints",
         project_name=profile["name"],
-    ) + _test_contract(project) + _flow_contract(project)
+    ) + _test_contract(project) + _flow_contract(project) + _design_contract(
+        project, profile, task, task_paths)
+
+
+def design_brief(project: Path, profile: dict, task: dict,
+                 focus_paths: list[str]) -> dict:
+    """Is a design required for this task, which one exists, and what to do if none.
+
+    Owner directive (2026-11-09): a task tied to a design is BUILT from it, and a
+    task that needs a design does not improvise one in code. All three answers come
+    from disk and from `design.should_invoke_stitch` — never from an agent's memory.
+    """
+    from . import design as design_mod
+
+    described = " ".join(str(x) for x in (
+        (task.get("surface") or {}).get("label", ""), task.get("reason", ""),
+        task.get("whatsnew", ""), " ".join(focus_paths)))
+    required, why = design_mod.should_invoke_stitch(described, list(focus_paths))
+
+    available: list[dict] = []
+    if (project / design_mod.DESIGN_DOC_REL).is_file():
+        available.append({"kind": "design_doc", "path": design_mod.DESIGN_DOC_REL,
+                          "use": "the style law — read it before writing UI"})
+    stitch = profile.get("design") or {}
+    if stitch.get("stitch_project_id"):
+        available.append({"kind": "stitch_project",
+                          "id": stitch["stitch_project_id"],
+                          "use": "generate or refresh the screen inside this project"})
+    if stitch.get("design_system_id"):
+        available.append({"kind": "stitch_design_system", "id": stitch["design_system_id"]})
+    manifest = project / ".pipeline" / "stitch_manifest.json"
+    if manifest.is_file():
+        try:
+            screens = json.loads(manifest.read_text()).get("canonical_screens") or []
+        except Exception:
+            screens = []
+        if screens:
+            available.append({"kind": "stitch_manifest", "path": ".pipeline/stitch_manifest.json",
+                              "screens": [s.get("title") for s in screens[:8]]})
+
+    block: dict = {"required": required, "why": why, "available": available}
+    if available and required:
+        block["action"] = ("build from the design above; a new or redesigned screen "
+                           "matches it instead of inventing a parallel visual language")
+    elif available:
+        block["action"] = ("this task does not need a new design — follow the existing "
+                           "tokens and components")
+    elif required:
+        block["action"] = ("NO DESIGN EXISTS and this task needs one. Generate it in "
+                           "Stitch BEFORE writing the screen, adopt it into "
+                           "docs/design.md, then implement against it. Do not invent "
+                           "the visual language in code.")
+        block["generate_with"] = [
+            f"devteam stitch-prompt {project.name} --screen <screen>  # locked screen prompt",
+            f"devteam stitch-screen {project.name} --screen <screen> --generate  # projects it in Stitch",
+            f"devteam design {project.name}  # writes docs/design.md + registers it in conventions",
+        ]
+    else:
+        block["action"] = "no design needed for this task (logic/data/CI work)"
+    return block
+
+
+def _design_contract(project: Path, profile: dict, task: dict,
+                     task_paths: list[str]) -> str:
+    """The design answer, appended to the legacy prose template as well."""
+    d = design_brief(project, profile, task, task_paths)
+    lines = ["", "DESIGN — " + ("required" if d["required"] else "not required")
+             + f" ({d['why']})"]
+    for a in d["available"]:
+        detail = a.get("id") or a.get("path") or ""
+        lines.append(f"  - {a['kind']}: {detail} — {a.get('use') or ''}")
+    lines.append("  " + d["action"])
+    for cmd in d.get("generate_with") or []:
+        lines.append(f"    {cmd}")
+    return "\n".join(lines)
 
 
 # --------------------------------------------------------------------------- #
@@ -476,6 +550,7 @@ def task_context(project: Path, profile: dict, task: dict,
             "createComposeRule/createAndroidComposeRule or Espresso/UiAutomator, "
             "with at least one assertion. Everything else needs a unit test with "
             "@Test and an assertion. A screenshot/render is not a test."),
+        "design": design_brief(project, profile, task, task_paths),
     }
     reason = str(task.get("reason") or "").strip()
     if reason:
