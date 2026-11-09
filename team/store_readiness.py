@@ -1089,7 +1089,16 @@ def run_store_readiness_audit(project: Path, tree: Path | None = None) -> list[R
             fix="Ensure values-<loc>/strings.xml exists for every locale declared in profile.json",
         ))
     elif isinstance(declared_locales, int) and declared_locales > 0:
-        val_dirs = [d for d in src.glob("**/res/values-*") if d.is_dir() and "values-v" not in d.name and "values-night" not in d.name]
+        # A locale directory is `values-<language>` (e.g. `values-vi` for Vietnamese).
+        # `values-v21` is an API qualifier and `values-night` a dark variant, and neither is a
+        # locale. Matching the prefix "values-v" instead of a version qualifier silently dropped
+        # `values-vi`, so a project shipping every declared locale still read as one short — a
+        # presence-driven false negative that could never clear (2026-11-10).
+        non_locale = re.compile(r"values-(?:night.*|v\d+.*)")
+        val_dirs = sorted({
+            d.name for d in src.glob("**/res/values-*")
+            if d.is_dir() and not non_locale.fullmatch(d.name)
+        })
         checks.append(ReadinessCheck(
             category="Localization",
             name=f"Declared Locales ({declared_locales} locales)",
