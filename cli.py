@@ -4119,6 +4119,26 @@ def cmd_ads(args: argparse.Namespace) -> int:
     except ads.AdsError as exc:
         return fail(str(exc))
 
+    if getattr(args, "sync", False):
+        try:
+            plan = ads.load_plan(project)
+            res = ads.sync(project, plan, commit=bool(getattr(args, "commit", False)))
+        except ads.AdsError as exc:
+            return fail(str(exc))
+        print(f"ADS SYNC: {res['name']} ({res['campaign_id']})")
+        if not res["changes"]:
+            print("  nothing to change — the live campaign already matches the plan")
+        for change in res["changes"]:
+            print(f"  {change}")
+        for extra in res["extras"]:
+            print(f"  ! {extra}")
+        if res["status"] == "synced":
+            path = ads.record(project, plan, res)
+            print(f"  applied {res['operations']} change(s) · recorded {path.name}")
+        else:
+            print(f"  dry run — {res['operations']} change(s) would apply; add --commit")
+        return 0
+
     if getattr(args, "status", False):
         try:
             st = ads.status(project)
@@ -4814,7 +4834,11 @@ def main() -> None:
                        help="validate the locked plan against Google's limits (no API call)")
     ads_p.add_argument("--create", action="store_true",
                        help="create the campaign from the plan (dry run unless --commit)")
-    ads_p.add_argument("--commit", action="store_true", help="actually create it")
+    ads_p.add_argument("--sync", action="store_true",
+                       help="apply the locked plan to the live campaign — budget, ad-group "
+                            "bids, missing keywords, missing geo (dry run unless --commit)")
+    ads_p.add_argument("--commit", action="store_true",
+                       help="actually create it / apply the sync")
     ads_p.add_argument("--enable", action="store_true",
                        help="create it ENABLED (default: PAUSED, ready to start)")
     ads_p.add_argument("--status", action="store_true",

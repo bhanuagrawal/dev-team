@@ -447,6 +447,162 @@ def create(project: Path, plan: dict[str, Any], *, commit: bool, enable: bool) -
     return result
 
 
+# ──────────────────────────────── editing live ───────────────────────────────
+def _geo_countries(camp: dict[str, Any]) -> list[str]:
+    """Every country the plan asks for — `geo.country` plus optional `geo.countries`."""
+    out = [str(camp["geo"]["country"]).upper()]
+    for c in camp["geo"].get("countries") or []:
+        c = str(c).upper()
+        if c not in out:
+            out.append(c)
+    return out
+
+
+def sync(project: Path, plan: dict[str, Any], *, commit: bool) -> dict[str, Any]:
+    """Apply the locked plan to the campaign that already exists.
+
+    WHY THIS EXISTS
+    ---------------
+    A plan is a decision; a campaign is a snapshot of it taken at creation time.
+    Raising a bid, adding a keyword or widening the geo afterwards had no verb —
+    so the only way to act on "the bid is too low" was a hand edit in the Ads
+    console, which leaves no record and no review. This applies the diff:
+
+      * the daily budget and every ad-group CPC bid, exactly (money decisions);
+      * keywords the plan names but the account lacks, added;
+      * geo/language targets the plan names but the account lacks, added.
+
+    It never removes a keyword, a geo or an ad group: a plan that forgot
+    something must not silently delete live targeting. Extras are reported, and
+    removing them stays a human edit. Dry run unless `commit`, and every commit
+    asks the API to validate first, so a rejected op spends nothing.
+    """
+    tok = token()
+    cid = str(plan["account"]["customer_id"]).replace("-", "")
+    camp_plan = plan["campaign"]
+    issues = validate(plan)
+    if issues:
+        raise AdsError("plan rejected: " + "; ".join(issues))
+    live = find_campaign(cid, camp_plan["name"])
+    if not live:
+        raise AdsError(f"no live campaign named '{camp_plan['name']}' — "
+                       "run `--create --commit` first")
+    where = f"campaign.id = {live['id']}"
+    changes: list[str] = []
+    extras: list[str] = []
+    ops: list[dict[str, Any]] = []
+
+    # budget — exact, because it is the ceiling on spend
+    row = gaql(cid, "SELECT campaign.id, campaign.campaign_budget, "
+                    "campaign_budget.amount_micros FROM campaign "
+                    f"WHERE campaign.id = {live['id']}")[0]
+    budget_res = row["campaign"]["campaignBudget"]
+    live_budget = int(row["campaignBudget"]["amountMicros"])
+    want_budget = int(float(camp_plan["daily_budget"]) * 1_000_000)
+    if live_budget != want_budget:
+        ops.append({"campaignBudgetOperation": {
+            "update": {"resourceName": budget_res, "amountMicros": str(want_budget)},
+            "updateMask": "amount_micros"}})
+        changes.append(f"budget ₹{live_budget / 1e6:.0f} → ₹{want_budget / 1e6:.0f}/day")
+
+    groups = {g["adGroup"]["name"]: g["adGroup"]
+              for g in gaql(cid, "SELECT ad_group.id, ad_group.name, "
+                                 "ad_group.resource_name, ad_group.cpc_bid_micros "
+                                 f"FROM ad_group WHERE {where} "
+                                 "AND ad_group.status != 'REMOVED'")}
+    live_kw_rows = gaql(cid, "SELECT ad_group.name, ad_group_criterion.keyword.text, "
+                             "ad_group_criterion.keyword.match_type "
+                             "FROM ad_group_criterion "
+                             f"WHERE {where} AND ad_group_criterion.type = 'KEYWORD' "
+                             "AND ad_group_criterion.negative = false")
+    live_kw = {(r["adGroup"]["name"],
+                (r["adGroupCriterion"]["keyword"]["text"] or "").lower(),
+                r["adGroupCriterion"]["keyword"].get("matchType")) for r in live_kw_rows}
+
+    placeholder = 0
+    for group in plan["ad_groups"]:
+        name = group["name"]
+        want_bid = int(float(group["cpc_bid"]) * 1_000_000)
+        g = groups.get(name)
+        if not g:
+            placeholder += 1
+            res = f"customers/{cid}/adGroups/-{100 + placeholder}"
+            ops.append({"adGroupOperation": {"create": {
+                "resourceName": res, "name": name, "status": "ENABLED",
+                "campaign": live["resourceName"], "type": "SEARCH_STANDARD",
+                "cpcBidMicros": str(want_bid)}}})
+            ops.append({"adGroupAdOperation": {"create": {
+                "adGroup": res, "status": "ENABLED",
+                "ad": {"responsiveSearchAd": {
+                    "headlines": [{"text": h} for h in group["headlines"]],
+                    "descriptions": [{"text": d} for d in group["descriptions"]]}},
+                "finalUrls": [plan["app"]["store_url"]]}}})
+            changes.append(f"+ ad group '{name}' (₹{want_bid / 1e6:.0f} max CPC)")
+            live_kw = {k for k in live_kw if k[0] != name}
+            g = {"resourceName": res, "cpcBidMicros": "0"}
+        elif int(g.get("cpcBidMicros") or 0) != want_bid:
+            ops.append({"adGroupOperation": {
+                "update": {"resourceName": g["resourceName"],
+                           "cpcBidMicros": str(want_bid)},
+                "updateMask": "cpc_bid_micros"}})
+            changes.append(f"~ '{name}' CPC ₹{int(g.get('cpcBidMicros') or 0) / 1e6:.0f} "
+                           f"→ ₹{want_bid / 1e6:.0f}")
+        for kw in group["keywords"]:
+            text = kw["text"] if isinstance(kw, dict) else kw
+            match = _match(kw.get("match") if isinstance(kw, dict) else None)
+            if (name, text.lower(), match) in live_kw:
+                continue
+            ops.append({"adGroupCriterionOperation": {"create": {
+                "adGroup": g["resourceName"], "status": "ENABLED",
+                "keyword": {"text": text, "matchType": match}}}})
+            changes.append(f"+ keyword '{text}' [{match.lower()}] in '{name}'")
+
+    # geo / language — additive only; removing live targeting is a human call
+    crit = gaql(cid, "SELECT campaign_criterion.type, "
+                     "campaign_criterion.location.geo_target_constant, "
+                     "campaign_criterion.language.language_constant "
+                     f"FROM campaign_criterion WHERE {where} "
+                     "AND campaign_criterion.negative = false")
+    live_geo = {r["campaignCriterion"].get("location", {}).get("geoTargetConstant")
+                for r in crit if r["campaignCriterion"].get("type") == "LOCATION"}
+    live_lang = {r["campaignCriterion"].get("language", {}).get("languageConstant")
+                 for r in crit if r["campaignCriterion"].get("type") == "LANGUAGE"}
+    for code in _geo_countries(camp_plan):
+        geo = _geo_constant(code)
+        if geo in live_geo:
+            continue
+        ops.append({"campaignCriterionOperation": {"create": {
+            "campaign": live["resourceName"], "location": {"geo_target_constant": geo}}}})
+        changes.append(f"+ geo {code}")
+    for lang in camp_plan["languages"]:
+        const = _language_constant(lang)
+        if const in live_lang:
+            continue
+        ops.append({"campaignCriterionOperation": {"create": {
+            "campaign": live["resourceName"],
+            "language": {"language_constant": const}}}})
+        changes.append(f"+ language {lang}")
+
+    planned_names = {g["name"] for g in plan["ad_groups"]}
+    for name in sorted(set(groups) - planned_names):
+        extras.append(f"ad group '{name}' is live but not in the plan")
+    planned_geo = {_geo_constant(c) for c in _geo_countries(camp_plan)}
+    for geo in sorted(x for x in live_geo - planned_geo if x):
+        extras.append(f"{geo.split('/')[-1]} is targeted but not in the plan")
+
+    applied = False
+    if commit and ops:
+        _post(f"customers/{cid}/googleAds:mutate",
+              {"validateOnly": True, "mutateOperations": ops}, tok)
+        _post(f"customers/{cid}/googleAds:mutate",
+              {"validateOnly": False, "mutateOperations": ops}, tok)
+        applied = True
+    return {"status": "synced" if applied else "dry_run",
+            "customer_id": cid, "name": camp_plan["name"],
+            "campaign_id": live["id"], "operations": len(ops),
+            "changes": changes, "extras": extras}
+
+
 def record(project: Path, plan: dict[str, Any], result: dict[str, Any]) -> Path:
     """The run record: what was created, when, for which app — nothing hangs on memory."""
     ads_dir = pipeline_dir(project) / "ads"
