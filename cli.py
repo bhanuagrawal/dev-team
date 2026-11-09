@@ -4977,10 +4977,10 @@ def cmd_stitch_export(args: argparse.Namespace) -> int:
     print(f"manifest: {out / 'manifest.json'} ({len(manifest['canonical_screens'])} screen(s))")
     if not args.no_commit:
         import subprocess as _sp
-        _sp.run(["git", "add", "docs/stitch", ".pipeline/stitch_manifest.json"], cwd=project)
+        _sp.run(["git", "add", "docs/stitch"], cwd=project)
         r = _sp.run(["git", "commit", "-m",
                      "design(stitch): export the screen set as the design spec",
-                     "--", "docs/stitch", ".pipeline/stitch_manifest.json"],
+                     "--", "docs/stitch"],
                     cwd=project, capture_output=True, text=True)
         if r.returncode == 0:
             print("committed: docs/stitch + manifest (push it before a release)")
