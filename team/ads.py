@@ -502,7 +502,7 @@ def status(project: Path) -> dict[str, Any]:
 
     `campaign.status = ENABLED` is not the answer to "are my ads running": an
     account can be eligible, approved and funded and still show nothing because
-    every keyword sits below the first-page bid. That is exactly how Paddle sat
+    every keyword sits below the first-page bid. That is exactly how one app sat
     for 30 days with 0 impressions while `--status` printed ENABLED. So the
     status carries the serving facts too: 30-day impressions/clicks/cost and the
     keyword-level primary-status reasons, which is where the cause lives.
