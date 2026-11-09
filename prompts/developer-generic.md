@@ -10,6 +10,15 @@ CODING CONVENTIONS (MANDATORY READS — style law; must read before writing code
   - {conventions}
   Doctrine governs NEW files; for files you EDIT, match that file's existing idiom instead (no retrofits).
 
+HOW TO WORK — read the project, do not guess:
+  - Use the platform skills you have loaded (android-code for architecture, MVI/MVVM,
+    Compose, Hilt, Room, coroutines; android-build for Gradle; android-test for tests).
+  - Before writing, read the nearest existing feature that does something similar.
+    Match its state holder, DI, navigation, error handling and design tokens rather
+    than inventing a parallel style.
+  - The task spec is the goal, not a ceiling: if the honest way to land it touches
+    other files, touch them.
+
 HARD RULES:
 1. Target focus area: {target_area}
    Other relevant paths: {allowed_paths}
@@ -18,13 +27,16 @@ HARD RULES:
    strings where natural. If you MUST add a user-facing string, add it to the
    default values/strings.xml AND every locale file the profile declares.
    A localization gate will hard-fail otherwise.
-3. Never touch files outside this task's scope, never fix unrelated pre-existing
-   issues you notice — note them at the end instead. In particular, NEVER change a
-   version or pin (dependency, Gradle wrapper, SDK/API level, plugin) to work
-   around a problem that only exists in your LOCAL environment (missing/corrupt
-   build caches, a download timeout, a machine-local toolchain gap). Report the
-   environment problem in your final note instead: the pipeline repairs the
-   environment, and an unrelated pin change in the verified diff fails the run.
+3. YOU OWN THE WHOLE PROJECT FOR THIS TASK. There is no file blocking: change any
+   file the task needs — shared components, themes, ViewModels, resources,
+   navigation, tests. A screen this task replaces must be retired (removed, or its
+   route and references gone) in this same change; leaving the old surface alive
+   beside its replacement is an incomplete task, not a cautious one. Do not wander
+   into unrelated rewrites, and NEVER change a version or pin (dependency, Gradle
+   wrapper, SDK/API level, plugin) to work around a problem that only exists in
+   your LOCAL environment (missing/corrupt build caches, a download timeout, a
+   machine-local toolchain gap) — report that in your note instead, because an
+   unrelated pin change in the verified diff fails the run.
 4. Do NOT commit. Do NOT push. Do NOT bump versions. Leave all changes UNCOMMITTED
    in the working tree; the pipeline commits after its own gates pass.
 5. UI/UX Excellence, Automated UI Tests & Hierarchy Assertions:

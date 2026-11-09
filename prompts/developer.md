@@ -30,13 +30,16 @@ HARD RULES:
    values-it, values-ja, values-ko, values-nl, values-pt-rBR, values-ru, values-tr,
    values-vi, values-zh-rCN). A localization gate will hard-fail otherwise. Adding
    to all 15 files is required, non-translated-but-present English text is acceptable.
-3. Never touch files outside this task's scope, never fix unrelated pre-existing
-   issues you notice — note them at the end instead. In particular, NEVER change a
-   version or pin (dependency, Gradle wrapper, SDK/API level, plugin) to work
-   around a problem that only exists in your LOCAL environment (missing/corrupt
-   build caches, a download timeout, a machine-local toolchain gap). Report the
-   environment problem in your final note instead: the pipeline repairs the
-   environment, and an unrelated pin change in the verified diff fails the run.
+3. YOU OWN THE WHOLE PROJECT FOR THIS TASK. There is no file blocking: change any
+   file the task needs — shared components, themes, ViewModels, resources,
+   navigation, tests. A screen this task replaces must be retired (removed, or its
+   route and references gone) in this same change; leaving the old surface alive
+   beside its replacement is an incomplete task, not a cautious one. Do not wander
+   into unrelated rewrites, and NEVER change a version or pin (dependency, Gradle
+   wrapper, SDK/API level, plugin) to work around a problem that only exists in
+   your LOCAL environment (missing/corrupt build caches, a download timeout, a
+   machine-local toolchain gap) — report that in your note instead, because an
+   unrelated pin change in the verified diff fails the run.
 4. Do NOT commit. Do NOT push. Do NOT bump versions. Leave all changes UNCOMMITTED
    in the working tree; the pipeline commits after its own gates pass.
 5. UI/UX Excellence, Automated UI Tests & Self-Check: Always design for the physical context of use (ambient light/glare, viewing distance, one-handed reachability, motion state). Never ship raw wireframe/canvas prototypes or unstyled low-contrast text. Use cohesive design tokens (high-contrast palette, tabular display typography, modern squircles 16-24dp, tactile press feedback). Write automated UI tests for any new or modified UI components/surfaces verifying transitions, geometry, and states. Run automated UI hierarchy assertions to ensure no sibling view bounds overlap and all text container dimensions fully enclose their measured text bounds. A MOCKUP'S COPY IS NOT DATA: when a screen is built or redesigned from a design mock, every number, percentage, rank, badge, ID or venue name in that mock is placeholder — render only values the app actually holds (state/models), or drop the element; shipping a mock's invented stat as if the app had recorded it is a truth defect, not styling. Run {compile_cmd} and your tests to verify they are green. Failure to run on-device tests due to missing emulator is non-blocking, but test assertion failures are a hard block.
@@ -54,8 +57,8 @@ WHAT TO BUILD (motion that communicates state — purposeful, not decorative):
 - Use the project's Spacing scale values; reuse existing dp numbers exactly where
   they already matched Spacing in reference files.
 
-SCOPE BOUNDARY: implement exactly the task above. If the task cannot be done
-STOP: write your blocker to the file
-PIPELINE_BLOCKER.md in the worktree root and exit without edits.
+SCOPE: land the task above properly, in full, inside the worktree — including
+retiring what it replaces. If the task cannot be done, STOP: write your blocker to
+the file PIPELINE_BLOCKER.md in the worktree root and exit without edits.
 
 Finish silently. No summary prose at the end is needed.

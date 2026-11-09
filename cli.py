@@ -967,8 +967,10 @@ def cmd_run_orchestrator(args: argparse.Namespace) -> int:
         "full. Run tonight's pipeline: status → asks → PLAN (the planner re-reads "
         "every signal and decides priority and which entries one run clubs into "
         "one release) → pick the run it handed over → worktree-start → "
-        "developer-prompt → spawn the developer as a native subagent (model from "
-        "runtimes.json) → verify the worktree → release on green → record → alarm. "
+        "developer-prompt (it prints a POINTER: worktree + task spec; the spec "
+        "carries the goal, conventions and test contract) → hand that pointer to "
+        "the coding tool as a native subagent (model from runtimes.json) → verify "
+        "the worktree → release on green → record → alarm. "
         "Project: "
         f"{project.name} (absolute path: {project}). Report a compact summary of "
         "what shipped.")
@@ -987,14 +989,27 @@ def cmd_run_orchestrator(args: argparse.Namespace) -> int:
 
 
 def cmd_developer_prompt(args: argparse.Namespace) -> None:
+    """Print the handoff. The task is decided by code; this only points at it.
+
+    No instruction template on the default path: the spec file carries the goal,
+    the conventions, the build/test commands and the test contract (see
+    team.developer.write_brief). `--full` still renders the legacy prose template
+    for a headless CLI tool that cannot read the spec itself.
+    """
     project = resolve_project(args.project)
     profile = profile_of(project)
-    task = load_json(task_spec_path(project, args.task_spec)) \
-        or json.loads(task_spec_path(project, args.task_spec).read_text())
+    spec_path = task_spec_path(project, args.task_spec)
+    task = load_json(spec_path) or json.loads(spec_path.read_text())
     paths = task["surface"].get("targets") or []
-    from team.developer import build_prompt
-    print(build_prompt(project, profile, task, paths,
-                       tpl_override=getattr(args, "template", None)))
+    from team.developer import build_prompt, handoff, write_brief
+
+    if getattr(args, "full", False):
+        print(build_prompt(project, profile, task, paths,
+                           tpl_override=getattr(args, "template", None)))
+        return
+
+    spec = write_brief(project, spec_path, profile, task, paths)
+    print(handoff(spec, getattr(args, "worktree", None)))
 
 
 def cmd_queue(args: argparse.Namespace) -> None:
@@ -4134,7 +4149,7 @@ def main() -> None:
     sc = sub.add_parser("scan");       sc.add_argument("project"); sc.add_argument("--skip-gradle", action="store_true"); sc.set_defaults(fn=cmd_scan)
     pk = sub.add_parser("pick"); pk.add_argument("project"); pk.add_argument("--supervised", action="store_true"); pk.add_argument("--auto-refill", action="store_true", help="synthesize next horizon and refill queue if empty"); pk.set_defaults(fn=cmd_pick)
     w = sub.add_parser("worktree-start"); w.add_argument("project"); w.add_argument("--task-id", required=True); w.set_defaults(fn=cmd_worktree_start)
-    dp = sub.add_parser("developer-prompt"); dp.add_argument("project"); dp.add_argument("task_spec"); dp.add_argument("--template", choices=["motion", "generic", "auto"], default="auto"); dp.set_defaults(fn=cmd_developer_prompt)
+    dp = sub.add_parser("developer-prompt"); dp.add_argument("project"); dp.add_argument("task_spec"); dp.add_argument("--template", choices=["motion", "generic", "auto"], default="auto"); dp.add_argument("--worktree", default=None, help="worktree path printed by worktree-start (included in the handoff)"); dp.add_argument("--full", action="store_true", help="render the legacy prose template (headless tools that cannot read the spec)"); dp.set_defaults(fn=cmd_developer_prompt)
     q = sub.add_parser("queue"); q.add_argument("project"); q.add_argument("--done")
     q.add_argument("action", nargs="?", choices=["add", "review"])
     q.add_argument("--spec"); q.add_argument("--type")

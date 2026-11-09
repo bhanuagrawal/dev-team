@@ -263,11 +263,12 @@ def _check_targets_are_paths(task_paths: list[str]) -> None:
     if prose:
         raise ValueError(
             "surface.targets must be repo-relative PATHS (files, dirs or globs), not "
-            f"prose — got {prose[0]!r}. This is rendered verbatim as the developer's "
-            "'Edit ONLY files under:' allow-list. Move the description to the queue "
-            "entry's `reason` (shown as RESEARCH CONTEXT) or to a plan doc, and list "
-            "real paths in `targets` (a TOP-LEVEL file with no '/' — e.g. "
-            "settings.gradle.kts — must be written './settings.gradle.kts').")
+            f"prose — got {prose[0]!r}. The paths are rendered verbatim as the task's "
+            "focus area, so a sentence there tells the coding agent nothing about "
+            "where to look. Move the description to the queue entry's `reason` (shown "
+            "as RESEARCH CONTEXT) or to a plan doc, and list real paths in `targets` "
+            "(a TOP-LEVEL file with no '/' — e.g. settings.gradle.kts — must be "
+            "written './settings.gradle.kts').")
 
 
 def _test_contract(project: Path) -> str:
@@ -411,3 +412,101 @@ def build_prompt(project: Path, profile: dict, task: dict, task_paths: list[str]
         research_context=research_ctx or "see research.json constraints",
         project_name=profile["name"],
     ) + _test_contract(project) + _flow_contract(project)
+
+
+# --------------------------------------------------------------------------- #
+# THE HANDOFF — the only thing a coding tool is told
+# --------------------------------------------------------------------------- #
+def task_context(project: Path, profile: dict, task: dict,
+                 task_paths: list[str]) -> dict:
+    """Everything the instruction template used to say, as DATA beside the task.
+
+    The owner's objection (2026-11-09): a long prose prompt is a second copy of
+    facts the pipeline already owns, and prose rules are exactly what an agent
+    forgets. So the code decides WHICH task (`pick`) and writes the facts an agent
+    cannot discover cheaply onto disk: the goal, the conventions to read, the
+    build/test commands, the locale set, and the test contract `verify` enforces.
+    The coding tool reads one file and works in its own context.
+    """
+    from . import code_tests, ux_flow
+
+    unit, ui = code_tests.suggest_test_dirs(project)
+    v = profile.get("verify") or {}
+    st = state_of(project)
+
+    # WHICH GOAL THIS RUN SERVES — the plan tree is not in the worktree.
+    mid = str(task.get("advances") or "").strip()
+    if not mid:
+        for q in st.get("queue", []):
+            if q.get("label") == (task.get("surface") or {}).get("label"):
+                mid = str(q.get("advances") or "")
+                break
+    goal = {}
+    node = goals.find_node(profile, mid) if mid else None
+    if node:
+        goal = {"id": mid, "title": node["title"]}
+        if node["raw"].get("outcome"):
+            goal["done_means"] = node["raw"]["outcome"]
+        vision = (goals.plan(profile) or {}).get("vision")
+        if vision:
+            goal["vision"] = vision
+
+    ctx = {
+        "project": profile.get("name"),
+        "focus_paths": list(task_paths),
+        "goal": goal,
+        "conventions": [_annotate_path(str(p))
+                        for p in (profile.get("conventions") or [])],
+        "architecture": (
+            "Use the platform skills you have (android-code, android-build, "
+            "android-test) and match the nearest existing feature: state holder, "
+            "DI, navigation, error handling, design tokens. Read before writing."),
+        "locales": profile.get("locales") or None,
+        "build": {
+            "compile": v.get("compile"),
+            "test": v.get("test"),
+            "unit_test_dirs": unit,
+            "ui_test_dirs": ui,
+        },
+        "tests_enforced_by": "devteam verify",
+        "test_contract": (
+            "Every production file you add or change must be named by a test file "
+            "you also add or change in this same diff. A UI file (Composable, "
+            "Activity/Fragment/Dialog/View, layout XML) needs a UI test using "
+            "createComposeRule/createAndroidComposeRule or Espresso/UiAutomator, "
+            "with at least one assertion. Everything else needs a unit test with "
+            "@Test and an assertion. A screenshot/render is not a test."),
+    }
+    reason = str(task.get("reason") or "").strip()
+    if reason:
+        ctx["why"] = reason
+    flows = ux_flow.declared(project)
+    if flows:
+        ctx["journeys"] = [{"id": f["id"], "surface": f.get("surface"),
+                            "goal": str(f.get("goal") or "")[:160]}
+                           for f in flows]
+    return ctx
+
+
+def write_brief(project: Path, spec_path: Path, profile: dict, task: dict,
+                task_paths: list[str]) -> Path:
+    """Attach the context block to the task spec in place — one file is the brief."""
+    _check_targets_are_paths(task_paths)
+    brief = {**task, "context": task_context(project, profile, task, task_paths)}
+    spec_path.write_text(json.dumps(brief, indent=2) + "\n")
+    return spec_path
+
+
+def handoff(spec_path: Path, worktree: str | None = None) -> str:
+    """The whole instruction: where the work is, and which file says what it is.
+
+    Deliberately not a prompt. The tool reads the spec and works in its own
+    context; the gates (not prose) decide whether the result ships.
+    """
+    lines = []
+    if worktree:
+        lines.append(f"WORKTREE_PATH={worktree}")
+    lines.append(f"TASK_SPEC={spec_path}")
+    lines.append("Implement TASK_SPEC in the worktree. Do not commit — "
+                 "devteam verify decides.")
+    return "\n".join(lines)

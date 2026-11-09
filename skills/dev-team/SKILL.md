@@ -523,14 +523,18 @@ never silently blocking.
    device the owner started themselves as "leaked" and stops it, breaking the
    "never stop an emulator you did not start" rule. Recording the baseline here,
    before any device work, is what makes that check safe.
-6. Get the exact developer prompt (keep it verbatim):
-   `python3 <team>/cli.py developer-prompt <project> .pipeline/tasks/<id>.json`
+6. GET THE HANDOFF (a pointer, not a prompt):
+   `python3 <team>/cli.py developer-prompt <project> .pipeline/tasks/<id>.json --worktree <WORKTREE_PATH>`
+   It prints `WORKTREE_PATH` + `TASK_SPEC` and nothing else. The spec file carries
+   the goal, focus paths, conventions, build/test commands, locale set and the test
+   contract `verify` enforces (`team.developer.write_brief`). Hand that pointer over
+   as-is; the coding tool reads the project and works in its own context. `--full`
+   still renders the legacy prose template if a headless CLI cannot read the spec.
 7. DEVELOP THE TASK — Two execution paths:
    (A) DIRECT ORCHESTRATOR DEVELOPMENT (Universal Default — works in Claude Code, OpenCode, Antigravity, Cursor):
        - You (the orchestrator) perform the implementation directly inside `WORKTREE_PATH`.
-       - Follow the exact instructions, conventions, and constraints from the developer prompt generated in step 6.
-       - Read mandatory style/design docs (`docs/design.md`, `profile.conventions`, official Google skills).
-       - Edit ONLY files under the task's allow-list (`surface.targets`). NEVER edit on `main` directly.
+       - Read the TASK_SPEC first, then the project's conventions (`docs/design.md`, `profile.conventions`) and the nearest existing feature, and match its architecture (MVI/MVVM, DI, navigation, design tokens). Load the platform skills you have (android-code, android-build, android-test).
+       - There is no file allow-list: you own the whole project for this task. Change any file the task needs, and retire a surface the task replaces (old screen, its route, its references) in the same change. NEVER edit on `main` directly — work only in `WORKTREE_PATH`.
        - UI/UX Excellence & Hierarchy Assertions: design for the real-world physical context of use (glanceability from 15ft, outdoor glare, one-handed reachability). Never ship raw wireframe/canvas prototypes or flat unstyled low-contrast text. Use cohesive design tokens (high-contrast palette, tabular display typography, modern squircles 16-24dp, tactile press feedback) and complete lifecycle states (empty guidance, active interaction, frictionless undo recovery, repeat/rematch loops). Whenever adding or modifying UI screens, components, or interactive flows, write automated UI tests (in the project's test set, e.g. `commonTest` or `androidTest`) verifying layout math, interaction states, and user flows. Run automated UI hierarchy assertions to ensure no sibling view bounds overlap and all text container dimensions fully enclose their measured text bounds.
        - Do not change release knobs (versionName, versionCode, signing, targetSdk) unless the task says so — nothing checks this automatically now.
        - Test incrementally inside the worktree using the project's verify commands (e.g. `gradle compileDebugKotlinAndroid testDebugUnitTest`). Failure to run an on-device runner (no AVD/emulator) is non-blocking (warn-only), but any failure of the test assertions themselves is a hard blocker.
@@ -538,7 +542,7 @@ never silently blocking.
    (B) SUBAGENT DELEGATION (Optional fallback when supported and conserving orchestrator context):
        - Budget the session at the task's `effort_min` (~210 is the norm for a healthy entry, band 120-300).
        - Spawn subagent with `cwd = WORKTREE_PATH` using your tool's native mechanism (e.g. `invoke_subagent`).
-       - Pass the exact prompt from step 6.
+       - Pass the pointer from step 6.
        - Model: read `roles.developer.model` from `<team>/config/runtimes.json` if your tool supports per-subagent models.
        - If your tool cannot spawn subagents and you choose not to develop directly, run headless:
          `python3 <team>/cli.py run-headless <project> --task-spec .pipeline/tasks/<id>.json`
