@@ -32,6 +32,22 @@ belongs to exactly one feature (`advances=<feature id>`). The page renders all f
 tiers and groups features into phase lanes; it never shows a separate task list that
 competes with the hierarchy.
 
+### Priority interrupts pause a phase; they never re-plan it
+
+The queue has two lanes:
+
+- **priority** — crashes, production bugs and owner asks. `devteam admit` pins
+  one at the HEAD of the queue and marks it `pinned`.
+- **plan** — the phase tasks, in build order. Phase 1 runs first; Phase 2 is
+  frozen until Phase 1's tasks and measures are done.
+
+The picker always takes a priority entry first. When that lane is empty it
+resumes the phase at its saved pointer — the first unshipped plan task. A crash
+therefore **pauses** the phase; it does not change the phase's task order, its
+resume point or its scope. If the crash makes a phase task wrong, supersede that
+one task with a recorded reason; do not silently drop it or re-plan the phase.
+The plan page shows the interrupt, the resume task and the phase as paused.
+
 ## Done is earned, not exhausted (owner directive 2026-11-09)
 
 When the last task of a feature ships, the feature is not done — it is **built**.

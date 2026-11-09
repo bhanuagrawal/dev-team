@@ -58,10 +58,12 @@ def _measures_view(ms: dict, research: dict | None) -> list[str]:
 
 def _task_node(label: str, target, advances: str, status: str,
                version: str = "", date: str = "", task_id: str = "",
-               detail: str = "", kind: str = "") -> dict:
+               detail: str = "", kind: str = "", pinned: bool = False) -> dict:
     return {"kind": "task", "id": label, "title": label, "status": status,
             "advances": advances, "target": target, "version": version,
-            "date": date, "task_id": task_id, "detail": detail, "task_kind": kind}
+            "date": date, "task_id": task_id, "detail": detail,
+            "task_kind": kind, "pinned": pinned,
+            "lane": "priority" if pinned else "plan"}
 
 
 def build(project) -> dict:
@@ -200,7 +202,8 @@ def build(project) -> dict:
                           ship.get("version", "") if ship else "",
                           ship.get("date", "") if ship else "",
                           detail=str(q.get("reason") or "")[:160],
-                          kind=str(q.get("type") or ""))
+                          kind=str(q.get("type") or ""),
+                          pinned=bool(q.get("pinned")))
         leaf["order"] = order
         if not ship and not next_marked[0]:
             leaf["is_next"] = True   # deterministic: the queue head is next run
@@ -326,6 +329,14 @@ _HTML = """<!doctype html>
  .next .nt {{ font-size:18px; font-weight:750; }}
  .next .nm {{ color:var(--soft); font-size:13px; margin-top:2px; }}
  .next .np {{ color:#374151; font-size:14px; margin-top:9px; }}
+ .priority {{ background:#fff4f2; border:1px solid #f3cfc7; border-left:4px solid #c2410c;
+               border-radius:14px; padding:16px 18px; margin-top:14px; }}
+ .priority .k {{ font-size:11px; font-weight:700; letter-spacing:.11em;
+                 text-transform:uppercase; color:#9a3412; margin-bottom:4px; }}
+ .priority .nt {{ font-size:16px; font-weight:750; }}
+ .priority .np {{ color:#6b4a3d; font-size:13.5px; margin-top:5px; }}
+ .priority .nm {{ color:#8a5a45; font-size:13px; margin-top:7px; }}
+ .pill.resume {{ background:#fdf1e3; color:#9a4b06; }}
  .subgoals {{ display:grid; grid-template-columns:repeat(auto-fit,minmax(250px,1fr));
               gap:10px; }}
  .sg {{ background:var(--card); border:1px solid var(--line); border-radius:14px;
@@ -541,6 +552,27 @@ def _body(model: dict) -> str:
                                f'target: {_targets(next_task.get("target"))}'])
                    + "</div>")
 
+    # 2b. priority lane: an interrupt outranks the phase, but pauses it —
+    # it never re-plans the phase or moves its resume pointer
+    priority = [t for t in all_tasks if t.get("pinned")
+                and t.get("status") != "shipped"]
+    first_plan = next((t for t in all_tasks
+                       if not t.get("pinned") and t.get("status") != "shipped"),
+                      None)
+    if priority:
+        first_plan_id = first_plan["id"] if first_plan else ""
+        out.append('<div class="priority"><div class="k">Priority interrupt · '
+                   'jumps the queue</div>')
+        for p in priority[:3]:
+            out.append(f'<div class="nt">{_esc(_humanize(p["title"]))}</div>'
+                       + (f'<div class="np">{_esc(p.get("detail"))}</div>'
+                          if p.get("detail") else ""))
+        if first_plan:
+            out.append(f'<div class="nm">The phase is paused, not re-planned: '
+                       f'it resumes at <b>{_esc(_humanize(first_plan["title"]))}</b>.</div>')
+            first_plan["_resume"] = True
+        out.append("</div>")
+
     # 3. tier 2 — sub-goals, the ends, with the features that serve each
     out.append('<h2>Sub-goals <span class="count">the ends · order is '
                'priority</span></h2>')
@@ -581,13 +613,17 @@ def _body(model: dict) -> str:
         lane = lanes[ph]
         lane_tasks = sum(len([t for t in f.get("children") or []
                               if t.get("kind") == "task"]) for f in lane)
+        lane_done = sum(1 for f in lane for t in f.get("children") or []
+                        if t.get("kind") == "task" and t.get("status") == "shipped")
         if ph == 2:
-            out.append('<details class="laterwrap"><summary>Phase 2 — later '
+            out.append('<details class="laterwrap"><summary>Phase 2 — frozen '
+                       'until Phase 1 ships '
                        f'({len(lane)} features · {lane_tasks} tasks)</summary>')
         else:
             label = f"Phase {ph}" if ph else "The plan"
-            out.append(f'<h2>{label} <span class="count">{len(lane)} features · '
-                       f'{lane_tasks} tasks</span></h2>')
+            paused = " · paused, resumes below" if priority else ""
+            out.append(f'<h2>{label} <span class="count">{lane_done} of '
+                       f'{lane_tasks} built{paused}</span></h2>')
         for f in lane:
             out.append(_feature_card(f, order, goal_title))
         if ph == 2:
@@ -677,6 +713,8 @@ def _task_row(t: dict, order: dict, feature_label: str = "") -> str:
            '<div class="tb"><div class="tt">'
            f'{_esc(_humanize(t["title"]))}'
            + (' <span class="pill now">next</span>' if is_next else "")
+           + (' <span class="pill resume">resume here</span>'
+              if t.get("_resume") else "")
            + (f' <span class="pill done">v{_esc(t.get("version"))}</span>'
               if shipped and t.get("version") else "")
            + "</div>"]
