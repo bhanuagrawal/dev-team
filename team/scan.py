@@ -33,15 +33,40 @@ def origin_tree(project: Path, log=None) -> Path:
     from .core import git
     wt = project / SCAN_TREE
     git(["fetch", "origin"], cwd=project, timeout=120)
+    moved = False
     if (wt / ".git").exists():
+        before = git(["rev-parse", "HEAD"], cwd=wt).stdout.strip()
         git(["checkout", "--detach", "--force", "origin/main"], cwd=wt, timeout=60)
         git(["clean", "-fd"], cwd=wt, timeout=60)
+        moved = git(["rev-parse", "HEAD"], cwd=wt).stdout.strip() != before
     else:
         r = git(["worktree", "add", "--detach", str(wt), "origin/main"], cwd=project)
         if r.returncode != 0:
             raise SystemExit("cannot create scan worktree: " + (r.stdout + r.stderr)[-500:])
         git(["clean", "-fd"], cwd=wt, timeout=60)
+        moved = True
+    if moved:
+        # A reused scan worktree keeps its gitignored state — build/ included —
+        # across revisions, and a language's incremental snapshots then describe
+        # the OLD tree: compiling the new revision reported every sibling file of
+        # the same module as "Unresolved reference" (2026-11-10, `ux-audit` could
+        # not build the delivery tree that way; `--rerun-tasks` fixed it). Drop the
+        # ignored state on a revision move, then put back the machine-local inputs
+        # a fresh checkout lacks.
+        git(["clean", "-xfd"], cwd=wt, timeout=300)
+        _restore_machine_local_inputs(project, wt, log)
     return wt
+
+
+def _restore_machine_local_inputs(project: Path, wt: Path, log) -> None:
+    """Copy the gitignored build inputs a clean tree lacks (SDK path, signing).
+
+    Shared with the developer worktrees verbatim: one rule, one implementation,
+    so a scan tree that a command builds in has the same inputs a task tree has.
+    """
+    from .developer import _copy_machine_local_inputs
+    _copy_machine_local_inputs(project, wt, log or (lambda _msg: None))
+
 
 
 def _targets_of(t: dict) -> list[str]:
