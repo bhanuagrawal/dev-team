@@ -504,14 +504,16 @@ never silently blocking.
      docs, write findings to docs/progress/investigation-<slug>.md, then
      `record --result shipped --note "investigation: <finding>"`.
    - `risk: supervised` tasks require a human present — otherwise skip them.
-4. Compose the task spec JSON:
+4. Compose the task spec JSON (a mini-PRD, not a label):
    {"id": "dt-<label-slug>-<seq>", "type": "motion|bugfix|feature|investigation",
     "surface": {"label": "<label>", "targets": ["<repo-relative path(s)>"]},
-    "risk": "safe", "effort_min": 210, "created": "<iso>"}
+    "risk": "safe", "effort_min": 210, "created": "<iso>",
+    "problem": "<one line, the user's words: what is broken or missing>",
+    "done_when": ["<acceptance line a test can assert>", "..."],
+    "user_sees": "<optional>", "not_in_scope": "<optional>"}
    Write it to `.pipeline/tasks/<id>.json`. `effort_min` (from the picked queue
-   entry) is the expected size of ONE developer session — the developer prompt
-   shows it, so the task is worked at its intended depth rather than gold-plated
-   or rushed.
+   entry) is the expected size of ONE developer session — the brief shows it, so
+   the task is worked at its intended depth rather than gold-plated or rushed.
 5. Prepare the sandbox (deterministic git plumbing is code, not you):
    `python3 <team>/cli.py worktree-start <project> --task-id <id>`
    → WORKTREE_PATH / WORKTREE_BRANCH / WORKTREE_BASE.

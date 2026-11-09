@@ -263,6 +263,15 @@ def _queue_task(q: dict, seq: int) -> dict:
         # spec instead of re-matching the label (which the next refill rewrites).
         "advances": str(q.get("advances") or ""),
         "reason": str(q.get("reason") or ""),
+        # The mini-PRD travels with the task: after pick, the coding tool is handed
+        # this spec and nothing else, so the intent has to be on disk (owner
+        # directive 2026-11-09). `done_when` is what the tests must assert; the
+        # other two are context for judgements the gate cannot make.
+        **{k: q[k] for k in ("problem", "user_sees", "not_in_scope")
+           if str(q.get(k) or "").strip()},
+        **({"done_when": [str(x) for x in (q.get("done_when") or [])
+                          if str(x).strip()]}
+           if q.get("done_when") else {}),
         "created": now_iso(),
         # The note this release will show on the store travels with the task.
         # `verify` and `release` read `whatsnew` off the SPEC, so a note written

@@ -915,6 +915,10 @@ Decide what to BUILD NEXT. Output STRICT JSON only (no prose, no code fence):
       "target": "<motion: the exact surface path; feature/bugfix: primary repo-relative path(s) being addressed, comma-separated; investigation: a short topic>",
       "effort_min": {target_effort},
       "priority": 1, "reason": "one line grounded in research",
+      "problem": "<one line, in the user's words: what is broken or missing>",
+      "done_when": ["<acceptance line a test can assert>", "..."],
+      "user_sees": "<optional: what the user notices after>",
+      "not_in_scope": "<optional: what this task must not change>",
       "advances": "<milestone id this task serves, or 'none'>",
       "supersedes": ["<exact label of an already-queued task this makes irrelevant>"],
       "clubs": ["<exact label of another queued entry THIS SAME RUN also builds>"]}}
@@ -1082,6 +1086,14 @@ Rules:
   validator anchor. EVERY item needs a path separator: a TOP-LEVEL file (one that sits at the
   repo root, e.g. settings.gradle.kts or build.gradle.kts) must be written './settings.gradle.kts',
   never a bare filename — the validator rejects a separator-less item and the whole plan is refused.
+- EVERY feature/bugfix ENTRY IS A MINI-PRD, not a label (owner directive 2026-11-09):
+  * `problem` — ONE line, in the user's words: what is broken or missing.
+  * `done_when` — 1-3 acceptance lines. Each must be something a TEST can assert;
+    the tests ARE the proof (`verify` refuses a diff whose changed production files
+    carry no test). "works better" / "polished" are not acceptance lines.
+  * `user_sees` (optional) — what the user notices after the change.
+  * `not_in_scope` (optional) — what this task must NOT change.
+  Code rejects a feature/bugfix entry without a non-empty `problem` and `done_when`.
 - A NEW DEPENDENCY IS A DECISION, NOT A DETAIL: if an entry's work needs a
   third-party library, name it in the entry's `dependencies_added` (the alias,
   the catalogue key or the coordinate — any of the three will do) AND say in
@@ -1215,6 +1227,30 @@ def _validate(result: dict, research: dict | None = None) -> str | None:
     for q in result["queue"][:MAX_QUEUE]:
         if not q.get("type") or not q.get("label") or not q.get("reason"):
             return "queue entry missing type/label/reason"
+        # A TASK IS A MINI-PRD (owner directive 2026-11-09). The coding tool is
+        # handed this entry and nothing else, so "what is wrong" and "how we know
+        # it is fixed" must be on the entry itself — a label alone lets a run ship
+        # something nobody asked for and nobody can check.
+        if q.get("type") in ("feature", "bugfix"):
+            # Grandfather an entry carried over from the queue this rule postdates:
+            # it was planned before the mini-PRD existed, and rejecting it would
+            # stall a run on work the planner merely kept.
+            carried = {queue_mod._norm(queue_mod.label_of(o))
+                       for o in ((research or {}).get("signals", {})
+                                 .get("repo", {}).get("current_queue") or [])}
+            if queue_mod._norm(str(q.get("label") or "")) in carried:
+                pass
+            elif not str(q.get("problem") or "").strip():
+                return (f"queue entry '{q.get('label')}' has no 'problem' — every "
+                        "feature/bugfix entry is a mini-PRD: one line, in the user's "
+                        "words, saying what is broken or missing")
+            else:
+                dw = q.get("done_when")
+                if not isinstance(dw, list) or not [x for x in dw if str(x).strip()]:
+                    return (f"queue entry '{q.get('label')}' has no 'done_when' — list "
+                            "1-3 acceptance lines, each one a test can assert. A task "
+                            "without an acceptance line is a wish: the gate cannot check "
+                            "it, so the run ships an opinion")
         if research is not None:
             ci_last = (research.get("signals", {}).get("ci", {}) or {}).get("last_conclusion")
             store_snap = research.get("signals", {}).get("store_status", {}) or {}
@@ -1297,6 +1333,33 @@ def _validate(result: dict, research: dict | None = None) -> str | None:
                             f"({blunder_summary}): a broken or unusable screen is a blocker. "
                             "The queue HEAD (queue[0]) must address the blunder before new feature "
                             "surface area is added")
+
+            # A CRASHING BUILD IS A FIRE (owner directive 2026-11-09). Play vitals
+            # already flags a version at >=1% crash or ANR, but the flag was only
+            # advice: the planner could queue a feature while users were crashing,
+            # and nothing said no. Restoring the product outranks new surface area,
+            # so the head must be the bugfix that names the flagged version.
+            vit = research.get("signals", {}).get("vitals") or {}
+            flagged_versions = [str(v) for v in (vit.get("flagged") or [])]
+            if q is result["queue"][0] and flagged_versions and not (
+                    ci_last == "failure" or store_blocked):
+                vit_metrics = vit.get("metrics") or {}
+                kinds = [k for k in ("crash", "anr")
+                         if (vit_metrics.get(k) or {}).get("flagged")]
+                kind_txt = " / ".join(k.upper() for k in kinds) or "CRASH/ANR"
+                head_text = (str(q.get("label") or "") + " "
+                             + str(q.get("reason") or "") + " "
+                             + str(q.get("target") or "")).lower()
+                cites = ("vitals" in head_text
+                         or any(k in head_text for k in kinds)
+                         or any(v.lower() in head_text for v in flagged_versions))
+                if q.get("type") != "bugfix" or not cites:
+                    return (f"signals.vitals flags {kind_txt} on version(s) "
+                            f"{', '.join(flagged_versions[:3])} (>=1% of sessions): a "
+                            "crashing build is a fire. The queue HEAD (queue[0]) must "
+                            "be the BUGFIX that fixes it and must cite the version or "
+                            "the rate in its label/reason — new feature surface may "
+                            "not head the queue while users are crashing")
 
             # Competitor evidence is data, not a licence to invent: a reason may
             # cite a rival only when a recon report is actually behind it.

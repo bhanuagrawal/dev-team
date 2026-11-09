@@ -570,38 +570,87 @@ def validate_advances(result: dict, profile: dict, state: dict,
 
 
 def goal_block(profile: dict, state: dict) -> str:
-    """Owner-facing PLAN block (status/report). Purely derived, no LLM. Plain
-    words: no ids, no bracket codes — those live in the JSON and `goal log`."""
+    """Owner-facing PLAN block (status/report). Purely derived, no LLM.
+
+    Read as ORDERED LISTS (owner directive 2026-11-09): long-term goal, the
+    sub-goals under it, the features under those, and the task queue — each
+    numbered, because order IS priority. The tree diagram is gone; the links are
+    explicit (`serves=`), so one feature may serve more than one sub-goal.
+    """
     p = plan(profile)
     if not p:
         return ("PLAN: none yet — BLOCKING: nobody has said what this app is for "
                 "long term, so no work is picked until the owner answers "
                 "(`devteam vision <project> \"<one sentence>\"`).")
     st = status_of(profile, state)
-    lines = [f'PLAN  the goal: {p["vision"] or "(none)"}']
+    lines = [f'PLAN  the long-term goal: {p["vision"] or "(none)"}', ""]
 
-    def emit(node: dict, depth: int) -> None:
-        mid = str(node.get("id") or "")
+    goals_list = goal_tier(profile)
+    lines.append("SUB-GOALS  (why — in order)")
+    if not goals_list:
+        lines.append("  (none yet)")
+    num: dict[str, int] = {}
+    for i, g in enumerate(goals_list, 1):
+        gid = str(g.get("id") or "")
+        num[gid] = i
         mark = {"done": "✓", "active": ">", "pending": "·", "parked": "x"}.get(
-            st.get(mid, "·"), "·")
-        extra = " — set aside" if str(node.get("status")) == "parked" else ""
-        pad = "   " * depth
-        lines.append(f"  {pad}{mark} {node['title']}{extra}")
-        for c in node.get("children") or []:
-            if isinstance(c, dict) and c.get("id"):
-                emit(c, depth + 1)
+            st.get(gid, "·"), "·")
+        lines.append(f"  {i}. {mark} {g.get('title')}")
+        for ln in _measure_lines(g, "       "):
+            lines.append(ln)
+    lines.append("")
 
-    for m in p["milestones"]:
-        emit(m, 0)
+    lines.append("FEATURES  (what we build — in order, top = next)")
+    counter = {"n": 0}
+
+    def emit(node: dict, serves: list[int], depth: int) -> None:
+        counter["n"] += 1
+        nid = str(node.get("id") or "")
+        mark = {"done": "✓", "active": ">", "pending": "·", "parked": "x"}.get(
+            st.get(nid, "·"), "·")
+        pad = "   " * depth
+        line = f"  {pad}{counter['n']}. {mark} {node.get('title')}"
+        if serves:
+            line += "   (serves " + ", ".join(str(s) for s in serves) + ")"
+        lines.append(line)
+
+    for top in p["milestones"]:
+        if str(top.get("kind") or "") == GOAL_KIND:
+            gid = str(top.get("id") or "")
+            for c in top.get("children") or []:
+                if isinstance(c, dict) and c.get("id"):
+                    emit(c, [num[gid]] if gid in num else [], 0)
+        else:
+            emit(top, [], 0)
+    if counter["n"] == 0:
+        lines.append("  (none yet)")
+    lines.append("")
+
+    queue = state.get("queue") or []
+    lines.append("TASKS  (what runs next — in order; only #1 ships per run)")
+    if not queue:
+        lines.append("  (empty — the next plan fills it)")
+    for i, q in enumerate(queue[:6], 1):
+        tag = "  ← NEXT RUN" if i == 1 else ""
+        lines.append(f"  {i}. {q.get('label')}{tag}")
+        prob = str(q.get("problem") or "").strip()
+        if prob:
+            lines.append(f"       problem: {prob}")
+        dw = [str(x) for x in (q.get("done_when") or []) if str(x).strip()]
+        if dw:
+            lines.append("       done when: " + "; ".join(dw[:3]))
+    if len(queue) > 6:
+        lines.append(f"  … {len(queue) - 6} more queued")
+
     act = active_milestone(profile, state)
     if act:
         lines.append(f"  working on: {act['title']}")
     elif has_milestones(profile):
-        lines.append("  working on: nothing — every milestone is done; the team "
+        lines.append("  working on: nothing — every feature is done; the team "
                      "should propose the next one")
     else:
-        lines.append("  working on: no milestone yet — the planner proposes the "
-                     "first one under your goal (you own only the goal itself)")
+        lines.append("  working on: no feature yet — the planner proposes the "
+                     "first one under a sub-goal")
     pend = [e for e in (state.get("tree_changes") or []) if not e.get("reviewed")]
     if pend:
         lines.append(f"  the team changed the plan {len(pend)}x since you last "
@@ -609,60 +658,102 @@ def goal_block(profile: dict, state: dict) -> str:
     return "\n".join(lines)
 
 
+def _measure_lines(node: dict, pad: str) -> list[str]:
+    """A node's numbers, one line each — the only part of a feature code can check."""
+    out: list[str] = []
+    for x in node.get("measures") or []:
+        if not isinstance(x, dict):
+            continue
+        if x.get("metric"):
+            out.append(f"{pad}number: {x['metric']} {x.get('op', '<=')} "
+                       f"{x.get('target')}")
+        elif x.get("text"):
+            out.append(f"{pad}number: {x['text']}")
+    return out
+
+
 def prompt_block(profile: dict, state: dict) -> str:
-    """The GOALS section for the research synthesis prompt."""
+    """The PLAN section for the research synthesis prompt.
+
+    The owner's shape (2026-11-09): read as ORDERED LISTS, not a tree diagram.
+    A long-term goal, the sub-goals under it, the features under those, and the
+    task list (the queue) — each numbered, because order IS priority. Links are
+    ids (`serves`), so one feature may serve more than one sub-goal.
+    """
     p = plan(profile)
     if not p:
-        return ("GOALS: this project declares no goal tree. Do not invent one; "
+        return ("PLAN: this project declares no long-term goal. Do not invent one; "
                 "queue executable work as before, and if the app clearly needs a "
-                "direction, propose the first milestone via issues_to_file.")
+                "direction, propose the first feature via issues_to_file.")
     st = status_of(profile, state)
     act = active_milestone(profile, state)
-    body = [f'LONG-TERM VISION (owner): "{p["vision"]}"',
-            "GOALS (the ENDS, in order — each carries ONE number; every milestone",
-            "sits under a goal. A later goal may not be worked on while an earlier",
-            "goal's number fails: that is enforced by code, not a suggestion):"]
-    if not goal_tier(profile):
-        body.append("  (no goal tier yet — CODE inserts experience → retention → "
-                    "revenue on this plan; add milestones under a goal, never "
-                    "directly under the vision)")
-    body.append("THE TREE (goals are the ends, milestones the means — in order):")
 
-    def render(node: dict, indent: int) -> None:
+    body = [f'LONG-TERM GOAL (owner): "{p["vision"]}"', ""]
+
+    goals_list = goal_tier(profile)
+    body.append("SUB-GOALS — the ENDS, in order (each carries ONE number; code "
+                "refuses work under a later sub-goal while an earlier number fails):")
+    if not goals_list:
+        body.append("  (none yet — CODE inserts experience → retention → revenue)")
+    num: dict[str, int] = {}
+    for i, g in enumerate(goals_list, 1):
+        gid = str(g.get("id") or "")
+        num[gid] = i
+        body.append(f"  {i}. {g.get('title')}   id={gid}  "
+                    f"status={st.get(gid, 'pending')}")
+        if g.get("outcome"):
+            body.append(f"     what it means: {g['outcome']}")
+        body += _measure_lines(g, "     ")
+    body.append("")
+
+    body.append("FEATURES — the MEANS, in order (a feature may serve more than one "
+                "sub-goal; queue entries point at these ids):")
+    counter = {"n": 0}
+
+    def emit(node: dict, serves: list[int], depth: int) -> None:
+        counter["n"] += 1
         nid = str(node.get("id") or "")
-        label = "goal" if str(node.get("kind") or "") == GOAL_KIND else "milestone"
-        body.append(f'{"  " * indent}- {label} id="{nid}" '
-                    f'status={st.get(nid, "pending")} title="{node.get("title")}"')
+        pad = "   " * depth
+        line = (f"  {pad}{counter['n']}. {node.get('title')}   id={nid}  "
+                f"status={st.get(nid, 'pending')}")
+        if serves:
+            line += "  serves=" + ",".join(str(s) for s in serves)
+        body.append(line)
         if node.get("outcome"):
-            body.append(f'{"  " * (indent + 1)}outcome: {node["outcome"]}')
-        for x in node.get("measures") or []:
-            if not isinstance(x, dict):
-                continue
-            if x.get("metric"):
-                body.append(f'{"  " * (indent + 1)}measure(metric): {x["metric"]} '
-                            f'{x.get("op", "<=")} {x.get("target")}')
-            elif x.get("text"):
-                body.append(f'{"  " * (indent + 1)}measure: {x["text"]}')
+            body.append(f"  {pad}   outcome: {node['outcome']}")
+        body.extend(_measure_lines(node, f"  {pad}   "))
         for c in node.get("children") or []:
             if isinstance(c, dict) and c.get("id"):
-                render(c, indent + 1)
+                emit(c, serves, depth + 1)
 
-    for m in p["milestones"]:
-        render(m, 1)
+    for top in p["milestones"]:
+        if str(top.get("kind") or "") == GOAL_KIND:
+            gid = str(top.get("id") or "")
+            for c in top.get("children") or []:
+                if isinstance(c, dict) and c.get("id"):
+                    emit(c, [num[gid]] if gid in num else [], 0)
+        else:
+            emit(top, [], 0)
+    if counter["n"] == 0:
+        body.append("  (none yet — propose the first feature under a sub-goal)")
+    body.append("")
+
+    body.append("TASKS — you write this list as `queue`; order IS execution order "
+                "(queue[0] is the only entry a run builds).")
     if act:
-        body.append(f'ACTIVE MILESTONE: {act["id"]}')
+        body.append(f'ACTIVE FEATURE: {act["id"]} — aim the head at it')
     elif has_milestones(profile):
-        body.append("ACTIVE MILESTONE: none (every milestone is done — retiring one "
+        body.append("ACTIVE FEATURE: none (every feature is done — retiring one "
                     "advances the pointer; proposing the next is an owner call)")
     else:
-        body.append("ACTIVE MILESTONE: none yet — the vision has no milestones. "
-                    "YOUR JOB THIS CYCLE: propose the first one under a goal "
-                    "(goal_changes: action=add, kind=milestone, parent=<a goal id "
-                    "from the tree above>, with an outcome and measures) and aim "
-                    "the queue at it. Never ask the owner for milestones — you own "
-                    "the tree below the vision. Give each GOAL its one number "
-                    "(action=update, measures=[{metric, op, target}]) as soon as a "
-                    "signal can read it.")
+        body.append("ACTIVE FEATURE: none yet — the vision has no features. "
+                    "YOUR JOB THIS CYCLE: propose the first one under a sub-goal "
+                    "(goal_changes: action=add, kind=milestone, parent=<a sub-goal "
+                    "id from the list above>, with an outcome and measures) and aim "
+                    "the queue at it. Never ask the owner for features — you own "
+                    "everything below the long-term goal. Give each SUB-GOAL its one "
+                    "number (action=update, measures=[{metric, op, target}]) as soon "
+                    "as a signal can read it.")
     return "\n".join(body)
 
 

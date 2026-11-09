@@ -555,6 +555,13 @@ def task_context(project: Path, profile: dict, task: dict,
     reason = str(task.get("reason") or "").strip()
     if reason:
         ctx["why"] = reason
+    # THE MINI-PRD — what this task is FOR, in the owner's/planner's words. The
+    # acceptance lines are what the tests must assert; verify reads the diff, not
+    # this block, so it can only help the tool pick the right tests.
+    intent = {k: task[k] for k in ("problem", "user_sees", "done_when",
+                                   "not_in_scope") if task.get(k)}
+    if intent:
+        ctx["intent"] = intent
     flows = ux_flow.declared(project)
     if flows:
         ctx["journeys"] = [{"id": f["id"], "surface": f.get("surface"),
