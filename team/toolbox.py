@@ -205,6 +205,52 @@ for _item in _RAW:
     _row(*_item)
 
 
+# The team's own docs, and what each page is for. This is the POINTER CHAIN: the
+# front page (AGENTS.md) links a page, a command prints it when it matters, and
+# `doctor` refuses an orphan page (a page no command names) or a dead row (a row
+# whose file is gone). Prose that nobody is pointed at is prose that rots.
+PAGES: list[tuple[str, str]] = [
+    ("docs/loop.md", "running work: the commands, what lands where, cleanup, done"),
+    ("docs/planning.md", "choosing work: the plan's shape and its gate"),
+    ("docs/store.md", "anything the Play listing shows"),
+    ("docs/guarantees.md", "a gate refused, or you are fixing the team itself"),
+    ("docs/new-app.md", "starting an app from an idea"),
+]
+
+TEAM_ROOT = CLI_PY.parent
+
+
+def page_drift() -> list[str]:
+    """Orphan pages and dead rows, in both directions.
+
+    The same rule for the skill's references: a reference file nobody points at
+    is a page an agent will never read (2026-11-09, the pointer chain)."""
+    declared = {p for p, _ in PAGES}
+    on_disk = {str(p.relative_to(TEAM_ROOT)) for p in (TEAM_ROOT / "docs").glob("*.md")}
+    out = []
+    for page in sorted(on_disk - declared):
+        out.append(f"'{page}' exists but no command names it — add a PAGES row "
+                   f"(team/toolbox.py) and print it where it matters")
+    for page in sorted(declared - on_disk):
+        out.append(f"'{page}' is named in PAGES but the file is gone — fix the pointer")
+    skill = TEAM_ROOT / "skills/dev-team"
+    if skill.is_dir():
+        front = (skill / "SKILL.md")
+        text = front.read_text() if front.is_file() else ""
+        for ref in sorted((skill / "references").glob("*.md")) if (skill / "references").is_dir() else []:
+            if f"references/{ref.name}" not in text:
+                out.append(f"'references/{ref.name}' is not named in SKILL.md — "
+                           f"add it to the Pages table or delete the file")
+    return out
+
+
+def format_pages() -> list[str]:
+    lines = ["", "PAGES — each ends with the ONE next command:", ""]
+    for page, when in PAGES:
+        lines.append(f"  {page:<22} {when}")
+    return lines
+
+
 def commands_in_cli() -> list[str]:
     """Every verb the parser registers. The source is the authority, not this file.
 
@@ -257,4 +303,5 @@ def format_inventory(agent_only: bool = True) -> str:
         lines.append("")
     lines.append(f"{len(rows)} verbs. Full inventory (incl. host plumbing): devteam tools --all")
     lines.append("A request is not work until `devteam admit` pins it at the queue head.")
+    lines.extend(format_pages())
     return "\n".join(lines)

@@ -339,12 +339,12 @@ def run_doctor(project: Path, log) -> dict:
     # directions and BLOCKS instead of trusting whoever added the parser.
     try:
         from . import toolbox as toolbox_mod
-        problems = toolbox_mod.drift()
-        checks = [("every cli.py verb has a toolbox row, and vice versa" if not problems
-                   else "the toolbox has drifted from cli.py: " + "; ".join(problems[:3]),
+        problems = toolbox_mod.drift() + toolbox_mod.page_drift()
+        checks = [("every cli.py verb has a toolbox row (and every docs page a "
+                   "pointer; no dead link)" if not problems
+                   else "the toolbox has drifted: " + "; ".join(problems[:3]),
                    not problems,
-                   "describe the verb in team/toolbox.py (what it writes, what it "
-                   "refuses) or delete the row")]
+                   "describe the verb / page in team/toolbox.py, or delete the row")]
         bad = [(r, fix) for r, ok, fix in checks if not ok]
         report["toolbox"] = {
             "status": "ready" if not bad else "blocked",
