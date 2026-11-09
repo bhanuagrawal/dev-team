@@ -947,6 +947,11 @@ Decide what to BUILD NEXT. Output STRICT JSON only (no prose, no code fence):
 }}
 Rules:
 - STORE READINESS: inspect `signals.store_readiness`. If blockers exist (or `is_ready_for_submission` is false), prioritize resolving those compliance issues (targetSdk, permissions, privacy policy, icons, release signing) before discretionary polish, keeping the app releasable on Google Play.
+  PRECEDENCE, in this order: (1) a red delivery / P0 blunder, (2) a built-but-unproven
+  branch in this goal — the closure gate is CODE-ENFORCED and it rejects a plan whose
+  head steps over one, naming the branch in the refusal, (3) a store-readiness blocker,
+  (4) everything else. So when a gap exists, queue[0] is the gap and the compliance fix
+  is queue[1]; writing the blocker first costs a rejected plan and a second cycle.
 - UI, EXPERIENTIAL QUALITY & HOLISTIC REPLANNING (`signals.ux`):
   Visual reviews inspect real rendered surfaces for broken layouts, usability degradation, and polish. Gripes carry stable ids (`UX-...`).
   Read all signals together before proposing anything:
