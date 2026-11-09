@@ -20,6 +20,8 @@ reparented; only the human changes the root):
 """
 from __future__ import annotations
 
+import re
+
 from .core import now_iso, pipeline_dir, profile_of, state_of
 from . import adapt, goals
 
@@ -136,10 +138,20 @@ def build(project) -> dict:
                                  "status": "history", "decided_by": "—",
                                  "children": [leaf]})
 
-    def make_node(raw: dict, kind: str) -> dict:
+    def make_node(raw: dict, kind: str, parent_id: str = "") -> dict:
         mid = str(raw["id"])
+        title = str(raw.get("title") or mid)
+        phase = raw.get("phase")
+        if phase is None:
+            hit = re.search(r"\(Phase ([12])\)", title)
+            phase = int(hit.group(1)) if hit else None
+        serves = [str(x) for x in (raw.get("serves") or []) if x]
+        if not serves and parent_id:
+            serves = [parent_id]
         node = {"kind": kind, "id": mid,
-                "title": str(raw.get("title") or mid),
+                "title": title,
+                "phase": phase,
+                "serves": serves,
                 "status": ((st.get(mid, "pending")
                             if kind in ("milestone", "goal", "subgoal")
                             else "")
@@ -156,7 +168,7 @@ def build(project) -> dict:
             if isinstance(sub, dict) and sub.get("id"):
                 subkind = "goal" if str(sub.get("kind") or "") == goals.GOAL_KIND \
                     else "subgoal"
-                node["children"].append(make_node(sub, subkind))
+                node["children"].append(make_node(sub, subkind, mid))
         return node
 
     nodes: list[dict] = []
@@ -251,6 +263,8 @@ def render_text(model: dict) -> str:
                 tail += f", set by {who}"
             if node.get("progress"):
                 tail += f" · {node['progress']}"
+            if node.get("phase"):
+                tail += f" · Phase {node['phase']}"
             lines.append(f"{pad}{mark} {node['title']}   "
                          f"(a goal · {tail})")
         else:
@@ -261,6 +275,8 @@ def render_text(model: dict) -> str:
                 tail += f", set by {who}"
             if node.get("progress"):
                 tail += f" · {node['progress']}"
+            if node.get("phase"):
+                tail += f" · Phase {node['phase']}"
             lines.append(f"{pad}{mark} {node['title']}   ({tail})")
         if node.get("note"):
             lines.append(f"{pad}   {node['note']}")
@@ -310,6 +326,21 @@ _HTML = """<!doctype html>
  .next .nt {{ font-size:18px; font-weight:750; }}
  .next .nm {{ color:var(--soft); font-size:13px; margin-top:2px; }}
  .next .np {{ color:#374151; font-size:14px; margin-top:9px; }}
+ .subgoals {{ display:grid; grid-template-columns:repeat(auto-fit,minmax(250px,1fr));
+              gap:10px; }}
+ .sg {{ background:var(--card); border:1px solid var(--line); border-radius:14px;
+        padding:15px 16px; }}
+ .sg-h {{ display:flex; gap:8px; justify-content:space-between; align-items:center; }}
+ .sgt {{ font-size:15.5px; font-weight:750; line-height:1.3; }}
+ .sgo {{ color:var(--soft); font-size:13px; margin-top:6px; }}
+ .sg-feats {{ display:flex; flex-wrap:wrap; gap:5px; margin-top:9px; }}
+ .chip {{ font-size:11.5px; border-radius:999px; padding:2px 8px;
+          background:#f3f1ec; color:#4b5563; }}
+ .chip em {{ font-style:normal; color:#9aa1ab; }}
+ .pill.phase {{ background:#eef2ff; color:#3730a3; }}
+ .serves {{ display:flex; flex-wrap:wrap; gap:5px; align-items:center;
+            color:var(--soft); font-size:12px; margin-top:8px; }}
+ .tf {{ color:#9aa1ab; font-size:11.5px; margin-top:2px; }}
  .ask {{ background:#fff8ec; border:1px solid #f0dcb8; border-radius:12px;
          padding:13px 16px; margin:10px 0; font-size:14px; }}
  .goal {{ margin-top:30px; }}
@@ -454,6 +485,20 @@ def _task_ids(node: dict) -> list[dict]:
     return out
 
 
+def _all_branches(root: dict) -> list[dict]:
+    """Every non-task node, in tree order (goals, features, history)."""
+    out: list[dict] = []
+
+    def walk(n: dict) -> None:
+        for c in n.get("children") or []:
+            if c.get("kind") == "task":
+                continue
+            out.append(c)
+            walk(c)
+    walk(root)
+    return out
+
+
 def _body(model: dict) -> str:
     root = model["root"]
     out: list[str] = []
@@ -463,19 +508,19 @@ def _body(model: dict) -> str:
              if t.get("status") != "shipped" and t.get("order") is not None}
     all_tasks = _task_ids(root)
     next_task = next((t for t in all_tasks if t.get("is_next")), None)
+
+    branches = [b for b in _all_branches(root) if b.get("status") != "history"]
+    goals = [b for b in branches if b.get("kind") == "goal"]
+    features = [b for b in branches if b.get("kind") != "goal"]
+    goal_title = {g["id"]: g["title"] for g in goals}
     feature_of: dict[str, dict] = {}
+    for f in features:
+        for t in f.get("children") or []:
+            if t.get("kind") == "task":
+                feature_of[t["id"]] = f
 
-    def index_features(n: dict) -> None:
-        for c in n.get("children") or []:
-            if c.get("kind") != "task":
-                for t in c.get("children") or []:
-                    if t.get("kind") == "task":
-                        feature_of[t["id"]] = c
-                index_features(c)
-    index_features(root)
-
-    # 1. the one thing the owner writes
-    out.append('<div class="vision"><div class="k">The goal</div>'
+    # 1. tier 1 — the one thing the owner writes
+    out.append('<div class="vision"><div class="k">Long-term goal</div>'
                f'<div class="vt">{_esc(root["title"])}</div></div>')
     if root.get("note"):
         out.append(f'<div class="ask">{_esc(root["note"])}</div>')
@@ -485,7 +530,7 @@ def _body(model: dict) -> str:
         feat = feature_of.get(next_task["id"], {})
         out.append('<div class="next"><div class="k">Next run</div>'
                    f'<div class="nt">{_esc(_humanize(next_task["title"]))}</div>'
-                   + (f'<div class="nm">for {_esc(feat.get("title"))}</div>'
+                   + (f'<div class="nm">in {_esc(feat.get("title"))}</div>'
                       if feat.get("title") else "")
                    + (f'<div class="np">{_esc(next_task.get("detail"))}</div>'
                       if next_task.get("detail") else "")
@@ -496,62 +541,60 @@ def _body(model: dict) -> str:
                                f'target: {_targets(next_task.get("target"))}'])
                    + "</div>")
 
-    # 3. only actionable asks, in plain words
-    asks = model.get("asks") or []
-    if asks:
-        out.append(f'<h2>Waiting on you <span class="count">{len(asks)}</span></h2>')
-        for a in asks:
-            what, how = adapt.ask_text(a)
-            out.append('<div class="ask">' + _esc(what)
-                       + (_details("how to fix it", [how]) if how else "") + "</div>")
-
-    # 4. ONE hierarchy: goal -> feature -> task. No separate queue list.
-    goals_ = [c for c in root.get("children") or []
-              if c.get("kind") != "task" and c.get("status") != "history"]
-    all_features = [f for g in goals_ for f in (g.get("children") or [])
-                    if f.get("kind") != "task"]
-    all_leaves = [t for g in goals_ for t in _task_ids(g)]
-    out.append('<h2>The plan <span class="count">'
-               f'{len(all_features)} features · {len(all_leaves)} tasks'
-               '</span></h2>')
-    empty_goals = []
-    for g in goals_:
-        features = [c for c in g.get("children") or [] if c.get("kind") != "task"]
-        direct = [c for c in g.get("children") or [] if c.get("kind") == "task"]
-        if direct and not features:
-            # a flat plan (a milestone holding tasks directly): render it as the
-            # feature card, not as an empty goal that hides its work
-            out.append(_feature_card(g, order))
-            continue
-        if not features:
-            empty_goals.append(g)
-            continue
-        now = [f for f in features if f.get("status") != "parked"]
-        later = [f for f in features if f.get("status") == "parked"]
-        out.append('<div class="goal"><div class="goal-h">'
-                   f'<span class="gt">{_esc(g["title"])}</span>'
-                   + (_pill(g.get("status")) if g.get("kind") == "goal" else "")
-                   + "</div>"
-                   + (f'<div class="goal-o">{_esc(g.get("outcome"))}</div>'
+    # 3. tier 2 — sub-goals, the ends, with the features that serve each
+    out.append('<h2>Sub-goals <span class="count">the ends · order is '
+               'priority</span></h2>')
+    out.append('<div class="subgoals">')
+    for g in goals:
+        served = [f for f in features if g["id"] in (f.get("serves") or [])]
+        n_tasks = sum(len([t for t in f.get("children") or []
+                           if t.get("kind") == "task"]) for f in served)
+        n_done = sum(1 for f in served for t in f.get("children") or []
+                     if t.get("kind") == "task" and t.get("status") == "shipped")
+        pct = round(100 * n_done / n_tasks) if n_tasks else 0
+        chips = "".join(
+            f'<span class="chip">{_esc(_short(f["title"], 34))}'
+            + (f' <em>P{f["phase"]}</em>' if f.get("phase") else "")
+            + "</span>" for f in served)
+        out.append('<div class="sg"><div class="sg-h">'
+                   f'<span class="sgt">{_esc(g["title"])}</span>'
+                   + _pill(g.get("status")) + "</div>"
+                   + (f'<div class="sgo">{_esc(g.get("outcome"))}</div>'
                       if g.get("outcome") else "")
-                   + _details("technical detail", [f'id: {g.get("id")}'])
+                   + f'<div class="bar"><i style="width:{pct}%"></i></div>'
+                   f'<div class="prog">{n_done} of {n_tasks} tasks built · '
+                   f'{len(served)} feature{"s" if len(served) != 1 else ""}'
+                   '</div>'
+                   + (f'<div class="sg-feats">{chips}</div>' if chips else
+                      '<div class="sgo" style="margin-top:8px">No feature yet.</div>')
                    + "</div>")
-        for f in now:
-            out.append(_feature_card(f, order))
-        if later:
-            out.append('<details class="laterwrap"><summary>Set aside for later '
-                       f'({len(later)})</summary>')
-            for f in later:
-                out.append(_feature_card(f, order))
+    out.append("</div>")
+
+    # 4. tiers 3–4 — features grouped into phase lanes, each holding its tasks
+    goalless = [f for f in features if not f.get("serves")]
+    lanes: dict[object, list[dict]] = {}
+    for f in features:
+        lanes.setdefault(f.get("phase"), []).append(f)
+    ordered = sorted([p for p in lanes if p is not None])
+    ordered += [None] if None in lanes else []
+    for ph in ordered:
+        lane = lanes[ph]
+        lane_tasks = sum(len([t for t in f.get("children") or []
+                              if t.get("kind") == "task"]) for f in lane)
+        if ph == 2:
+            out.append('<details class="laterwrap"><summary>Phase 2 — later '
+                       f'({len(lane)} features · {lane_tasks} tasks)</summary>')
+        else:
+            label = f"Phase {ph}" if ph else "The plan"
+            out.append(f'<h2>{label} <span class="count">{len(lane)} features · '
+                       f'{lane_tasks} tasks</span></h2>')
+        for f in lane:
+            out.append(_feature_card(f, order, goal_title))
+        if ph == 2:
             out.append("</details>")
-    if empty_goals:
-        names = " · ".join(_esc(x["title"]) for x in empty_goals)
-        out.append('<div class="none" style="margin-top:22px">No features yet — '
-                   + names + "</div>")
 
     # 5. history is a footnote, not a list that competes with the plan
-    history = [c for c in root.get("children") or []
-               if c.get("kind") != "task" and c.get("status") == "history"]
+    history = [b for b in _all_branches(root) if b.get("status") == "history"]
     shipped = [t for h in history for t in _task_ids(h)]
     shipped += [t for t in all_tasks if t.get("status") == "shipped"]
     seen: set[str] = set()
@@ -581,17 +624,24 @@ def _body(model: dict) -> str:
     return "".join(out)
 
 
-def _feature_card(f: dict, order: dict) -> str:
+def _feature_card(f: dict, order: dict, goal_title: dict) -> str:
     tasks = [c for c in f.get("children") or [] if c.get("kind") == "task"]
     tasks.sort(key=lambda t: (t.get("status") == "shipped",
                               order.get(t["id"], 999)))
     status = str(f.get("status") or "")
     out = [f'<div class="feat {_esc(status)}"><div class="feat-h">'
            f'<div class="feat-t">{_esc(f["title"])}</div>'
+           + (f'<span class="pill phase">Phase {f["phase"]}</span>'
+              if f.get("phase") else "")
            + _pill(status)
            + (f'<span class="prog">{_esc(f.get("progress"))}</span>'
               if f.get("progress") else "")
            + "</div>"]
+    serves = [goal_title.get(x, x) for x in (f.get("serves") or [])]
+    if serves:
+        out.append('<div class="serves">Serves: '
+                   + "".join(f'<span class="chip">{_esc(s)}</span>' for s in serves)
+                   + "</div>")
     if f.get("outcome"):
         out.append(f'<div class="feat-o">{_esc(f["outcome"])}</div>')
     if f.get("bar") is not None:
@@ -599,19 +649,21 @@ def _feature_card(f: dict, order: dict) -> str:
     if tasks:
         out.append('<div class="tasks">')
         for t in tasks:
-            out.append(_task_row(t, order))
+            out.append(_task_row(t, order, f.get("title", "")))
         out.append("</div>")
     else:
         out.append('<div class="none">No task queued for this feature.</div>')
     if f.get("measures"):
         out.append(_details("how we will know it is done", f["measures"]))
-    tech = [f'id: {f.get("id")}', f'status: {status or "—"}']
+    tech = [f'id: {f.get("id")}', f'status: {status or "—"}',
+            f'phase: {f.get("phase") or "—"}',
+            'serves: ' + (", ".join(f.get("serves") or []) or "—")]
     out.append(_details("technical detail", tech))
     out.append("</div>")
     return "".join(out)
 
 
-def _task_row(t: dict, order: dict) -> str:
+def _task_row(t: dict, order: dict, feature_label: str = "") -> str:
     shipped = t.get("status") == "shipped"
     is_next = bool(t.get("is_next"))
     cls = "shipped" if shipped else ("next" if is_next else "")
@@ -628,6 +680,8 @@ def _task_row(t: dict, order: dict) -> str:
            + (f' <span class="pill done">v{_esc(t.get("version"))}</span>'
               if shipped and t.get("version") else "")
            + "</div>"]
+    if feature_label:
+        out.append(f'<div class="tf">in {_esc(_short(feature_label, 56))}</div>')
     if t.get("detail"):
         out.append(f'<div class="tm">{_esc(_short(t["detail"], 150))}</div>')
     tech = [f'id: {t["id"]}',

@@ -18,6 +18,20 @@ no owner ask, every move recorded for review), `devteam doctor` blocks a flat
 plan, and the planner may move any branch below the goal (`goal_changes`). A new
 app gets the three sub-goals as soon as its long-term goal exists.
 
+
+### Sub-goals are outcomes; phases are scope lanes
+
+A **sub-goal** is an end (why): *A great experience*, *Users stay*, *Users pay* — each
+with one number. A **phase** is a scope slice over features (when): Phase 1 must work
+end to end at launch; Phase 2 waits. They are different axes, so **a phase is never a
+sub-goal**.
+
+A feature records `phase` and `serves[]` — the one or more sub-goals it advances. That
+is how the plan page lists a feature under two sub-goals without duplicating it. A task
+belongs to exactly one feature (`advances=<feature id>`). The page renders all four
+tiers and groups features into phase lanes; it never shows a separate task list that
+competes with the hierarchy.
+
 ## Done is earned, not exhausted (owner directive 2026-11-09)
 
 When the last task of a feature ships, the feature is not done — it is **built**.
