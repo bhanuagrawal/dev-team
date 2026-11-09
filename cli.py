@@ -2130,7 +2130,7 @@ def cmd_ux_video(args: argparse.Namespace) -> int:
     """Record declared flows on the app and react to the motion, not just the pixels."""
     project = resolve_project(args.project)
     log = RunLog(project, "ux-video-" + today())
-    from team import ux_video
+    from team import ux_audit, ux_video
     res = ux_video.run(project, only=getattr(args, "flow", None),
                        everything=getattr(args, "all", False), log=log,
                        avd=getattr(args, "avd", None),
@@ -2157,7 +2157,8 @@ def cmd_ux_video(args: argparse.Namespace) -> int:
         for x in r.get("reactions") or []:
             print(f"  {x.get('at', ''):6} {x.get('line', '')}")
         if r.get("premium"):
-            print("  premium: " + " · ".join(r["premium"][:3]))
+            print("  premium: " + " · ".join(
+                t for t in (ux_audit.as_line(x) for x in r["premium"][:3]) if t))
         for g in r.get("gripes") or []:
             elem = f" [{g.get('element')}]" if g.get("element") else ""
             print(f"  {'🚨' if g['severity'] == 'P0_BLUNDER' else '⚠️ ' if g['severity'] == 'P1_DEGRADED' else '✦'} "
@@ -2189,7 +2190,7 @@ def cmd_ux_flow(args: argparse.Namespace) -> int:
     """Goal-declared journeys, navigated by a vision model, judged as a person."""
     project = resolve_project(args.project)
     log = RunLog(project, "ux-flow-" + today())
-    from team import ux_flow
+    from team import ux_audit, ux_flow
     res = ux_flow.run(project, only=getattr(args, "flow", None), log=log,
                       avd=getattr(args, "avd", None),
                       keep_emulator=getattr(args, "keep_emulator", False),
@@ -2215,7 +2216,8 @@ def cmd_ux_flow(args: argparse.Namespace) -> int:
         for x in r.get("reactions") or []:
             print(f"  {x.get('at', ''):8} {x.get('line', '')}")
         if r.get("premium"):
-            print("  premium: " + " · ".join(r["premium"][:3]))
+            print("  premium: " + " · ".join(
+                t for t in (ux_audit.as_line(x) for x in r["premium"][:3]) if t))
         for d in r.get("defects") or []:
             elem = f" [{d.get('element')}]" if d.get("element") else ""
             print(f"  · {d.get('severity', '')}{elem} {d.get('line', '')}")
@@ -2254,7 +2256,8 @@ def cmd_ux_audit(args: argparse.Namespace) -> int:
         for x in r.get("reactions") or []:
             print(f"  {x.get('at','')}  {x.get('line','')}")
         if r.get("premium"):
-            print("  premium: " + " · ".join(r["premium"][:3]))
+            print("  premium: " + " · ".join(
+                t for t in (ux_audit.as_line(x) for x in r["premium"][:3]) if t))
         for g in r.get("gripes") or []:
             sev = g.get("severity", "")
             elem = f" [{g.get('element')}]" if g.get("element") else ""

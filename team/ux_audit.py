@@ -33,6 +33,7 @@ import json
 import re
 import subprocess
 from pathlib import Path
+from typing import Any
 
 from .core import now_iso, pipeline_dir, profile_of
 
@@ -823,10 +824,28 @@ def audit_surface(project: Path, row: dict, prev: dict | None = None, log=None) 
         "model": cfg.get("model", ""),
         "audited_at": now_iso(),
         "reactions": reactions,
-        "premium": result.get("premium") or [],
+        # The prompt asks for one line per strength, but a model sometimes answers
+        # with an object ({"text": ...}) instead. Normalise at STORE time: every
+        # reader (the CLI, the planner prompt, the report) treats these as prose,
+        # and a dict there crashed `ux-audit` after the audit had already saved
+        # (seen 2026-11-09, two screens in a row).
+        "premium": [t for t in (as_line(x) for x in (result.get("premium") or [])) if t],
         "verdict": result.get("verdict", ""),
         "gripes": _demote_unverifiable_still(gripes),
     }
+
+
+def as_line(item: Any) -> str:
+    """One readable line for a model-returned strength (str or object)."""
+    if isinstance(item, dict):
+        for key in ("text", "line", "title", "point", "what", "detail"):
+            value = item.get(key)
+            if isinstance(value, str) and value.strip():
+                return value.strip()
+        return ", ".join(
+            f"{k}: {v}" for k, v in item.items() if isinstance(v, (str, int, float))
+        ).strip()
+    return str(item).strip() if item is not None else ""
 
 
 DEVICE_DIR = "ux_device"
