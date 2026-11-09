@@ -116,6 +116,9 @@ _RAW: list[tuple[str, str, str, str, str, bool]] = [
      "worktree registry", "uncommitted work (parks it instead)", True),
     ("design", "build", "synthesize or enforce docs/design.md style law",
      "docs/design.md, theme tokens", "no design source and no --apply", True),
+    ("design-consult", "build", "ask the designer for ONE task; the answer is cached "
+                                "against the current Stitch/manifest/design fingerprint",
+     ".pipeline/design_consult.json", "unknown task; bad answer JSON", True),
     ("revamp", "build", "PRD/design re-imagination and legacy purge (destructive)",
      "docs/PRD.md, docs/design.md, code (with --purge-codebase)",
      "a purge outside a worktree; no PRD source", True),
