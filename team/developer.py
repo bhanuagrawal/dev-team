@@ -417,40 +417,30 @@ def build_prompt(project: Path, profile: dict, task: dict, task_paths: list[str]
 
 def design_brief(project: Path, profile: dict, task: dict,
                  focus_paths: list[str]) -> dict:
-    """Is a design required for this task, which one exists, and what to do if none.
+    """Ask the designer, do not assume.
 
-    Owner directive (2026-11-09): a task tied to a design is BUILT from it, and a
-    task that needs a design does not improvise one in code. All three answers come
-    from disk and from `design.should_invoke_stitch` — never from an agent's memory.
+    The plan records intent; the authority is a consultation with the designer
+    against the CURRENT Stitch project + docs/design.md (owner directive
+    2026-11-09). A task with no recorded answer is not "ready" and is not "na" —
+    it is PENDING, and the developer must ask before writing UI. A recorded
+    answer goes STALE when the Stitch project, manifest or design doc changes.
     """
-    from . import design as design_mod
+    from . import designer
 
-    described = " ".join(str(x) for x in (
-        (task.get("surface") or {}).get("label", ""), task.get("reason", ""),
-        task.get("whatsnew", ""), " ".join(focus_paths)))
-    # The PLAN is the authority when it records design readiness: a task marked
-    # ready/derive/na must not be re-judged by keyword heuristics, and a task
-    # marked needed must not start by improvising in code.
-    explicit = str(task.get("design") or "").strip().lower()
-    if explicit == "needed":
-        required, why = True, "the plan marks this task as needing a design"
-    elif explicit in ("ready", "derive", "na"):
-        required = False
-        why = {"ready": "a Stitch screen covers this feature",
-               "derive": "the design system and existing components cover it",
-               "na": "the plan marks this as logic/data work"}[explicit]
-    else:
-        required, why = design_mod.should_invoke_stitch(described, list(focus_paths))
+    st = designer.status(project, task)
+    state = st.get("state")
+    required = state in ("pending", "stale") or (
+        state == "answered" and st.get("decision") == "new_screen")
 
     available: list[dict] = []
-    if (project / design_mod.DESIGN_DOC_REL).is_file():
-        available.append({"kind": "design_doc", "path": design_mod.DESIGN_DOC_REL,
+    if (project / "docs" / "design.md").is_file():
+        available.append({"kind": "design_doc", "path": "docs/design.md",
                           "use": "the style law — read it before writing UI"})
     stitch = profile.get("design") or {}
     if stitch.get("stitch_project_id"):
         available.append({"kind": "stitch_project",
                           "id": stitch["stitch_project_id"],
-                          "use": "generate or refresh the screen inside this project"})
+                          "use": "the designer reads this project; do not guess its screens"})
     if stitch.get("design_system_id"):
         available.append({"kind": "stitch_design_system", "id": stitch["design_system_id"]})
     manifest = project / ".pipeline" / "stitch_manifest.json"
@@ -460,31 +450,42 @@ def design_brief(project: Path, profile: dict, task: dict,
         except Exception:
             screens = []
         if screens:
-            available.append({"kind": "stitch_manifest", "path": ".pipeline/stitch_manifest.json",
+            available.append({"kind": "stitch_manifest",
+                              "path": ".pipeline/stitch_manifest.json",
                               "screens": [s.get("title") for s in screens[:8]]})
 
-    block: dict = {"required": required, "why": why, "available": available}
-    if available and required:
-        block["action"] = ("build from the design above; a new or redesigned screen "
-                           "matches it instead of inventing a parallel visual language")
-    elif available:
-        block["action"] = ("this task does not need a new design — follow the existing "
-                           "tokens and components")
-    elif required:
-        block["action"] = ("NO DESIGN EXISTS and this task needs one. Generate it in "
-                           "Stitch BEFORE writing the screen, adopt it into "
-                           "docs/design.md, then implement against it. Do not invent "
-                           "the visual language in code.")
-        block["generate_with"] = [
-            f"devteam stitch-prompt {project.name} --screen <screen>  # locked screen prompt",
-            f"devteam stitch-screen {project.name} --screen <screen> --generate  # projects it in Stitch",
-            f"devteam design {project.name}  # writes docs/design.md + registers it in conventions",
-        ]
+    label = designer.task_label(task)
+    command = f"devteam design-consult {project.name} --task {label} --prompt"
+    if state == "not_applicable":
+        action = "no design needed for this task (logic/data/CI work)"
+        why = st.get("reason") or "no UI targets"
+    elif state in ("pending", "stale"):
+        why = st.get("reason") or "the designer has not answered for this task"
+        action = ("ASK THE DESIGNER before writing UI. Run: " + command
+                  + "; then record the answer with --record. If the answer is "
+                    "'new_screen', generate it in Stitch and adopt it into "
+                    "docs/design.md before writing UI. Do not invent a visual language.")
+    elif st.get("decision") == "existing_screen":
+        why = st.get("reason") or "an existing screen covers this task"
+        screen = st.get("screen") or {}
+        action = (f"build from the existing screen '{screen.get('title') or 'named by the designer'}'"
+                  + (f" (id {screen.get('id')})" if screen.get("id") else "")
+                  + "; do not redesign it")
+    elif st.get("decision") == "derive":
+        why = st.get("reason") or "the design system covers this task"
+        action = "follow docs/design.md tokens/components; no new screen"
+    elif st.get("decision") == "new_screen":
+        why = st.get("reason") or "no existing screen covers this task"
+        screen = st.get("screen") or {}
+        action = (f"a new screen is required '{screen.get('title') or 'named by the designer'}': "
+                  "generate/adopt it into docs/design.md BEFORE writing UI")
     else:
-        block["action"] = "no design needed for this task (logic/data/CI work)"
-    if explicit == "na":
-        block["action"] = "no design needed for this task (logic/data/CI work)"
-    return block
+        why = "design decision unclear"
+        action = "ask the designer: " + command
+
+    return {"required": required, "status": st, "why": why,
+            "available": available, "action": action,
+            "consult_command": command}
 
 
 def _design_contract(project: Path, profile: dict, task: dict,

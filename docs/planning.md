@@ -32,18 +32,24 @@ belongs to exactly one feature (`advances=<feature id>`). The page renders all f
 tiers and groups features into phase lanes; it never shows a separate task list that
 competes with the hierarchy.
 
-### Design readiness is an attribute, not a phase
+### Design is consulted, not hardcoded
 
-A feature records `design` — one of `ready` (a Stitch screen exists), `derive`
-(the design system + existing components cover it), `needed` (no screen exists),
-or `na` (backend/data work). UI tasks inherit the feature's status; a `needed`
-feature gets a **design task queued before its build task**. `ready` and
-`derive` tasks build against `docs/design.md` and the Stitch project; they do not
-improvise a new visual language.
+A per-feature `ready/derive/needed` label is a snapshot of a design that can
+change the next day. The plan records at most an **intent** ("reuse the detail
+screen"); the authority is the **designer**, who reads the CURRENT Stitch
+project, `.pipeline/stitch_manifest.json` and `docs/design.md` for THIS task.
 
-The first design gate is the law itself: when the Stitch project changes, the
-`design-regenerate-from-stitch` task runs before any UI task, because every
-developer prompt reads `docs/design.md`.
+- The developer asks: `devteam design-consult <project> --task <label> --prompt`.
+- The designer answers `existing_screen`, `derive`, `new_screen` or
+  `not_applicable`, and the answer is recorded with a fingerprint of the design
+  state (`--record`).
+- If the Stitch project, manifest or design doc changes, the answer is **stale**
+  and the developer must ask again. A `new_screen` answer blocks UI code until
+  the screen is generated in Stitch and adopted into `docs/design.md`.
+- Backend/data tasks are `not_applicable` from their targets; no designer call.
+
+`docs/design.md` must itself be current: `design-regenerate-from-stitch` runs
+before any UI task when the Stitch project changes.
 
 ### Priority interrupts pause a phase; they never re-plan it
 

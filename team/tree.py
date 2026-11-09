@@ -223,8 +223,46 @@ def build(project) -> dict:
                           s.get("task_id", "")),
                str(s.get("advances") or ""))
     _annotate(root)
+    _annotate_design(project, root)
     return {"root": root, "generated_at": now_iso(), "changes": changes,
             "asks": asks, "goal_less": False}
+
+
+def _annotate_design(project, root: dict) -> None:
+    """Attach the CURRENT designer answer to each feature.
+
+    No hardcoded ready/derive/needed: a feature with UI tasks is `pending` until
+    the designer is asked, and `stale` when the Stitch project or design doc
+    changed after the answer. Features with no UI tasks are `not_applicable`.
+    """
+    from . import designer
+
+    def walk(n: dict) -> None:
+        if n.get("kind") == "task":
+            return
+        if n.get("kind") != "vision":
+            tasks = [c for c in n.get("children") or [] if c.get("kind") == "task"]
+            if not tasks:
+                n["design_consult"] = {"state": "no_work"}
+                for c in n.get("children") or []:
+                    walk(c)
+                return
+            ui = [t for t in tasks if designer.is_ui_task(t)]
+            if not ui:
+                n["design_consult"] = {"state": "not_applicable"}
+            else:
+                states = [designer.status(project, t) for t in ui]
+                answered = next((x for x in states if x.get("state") == "answered"), None)
+                if answered:
+                    n["design_consult"] = answered
+                elif any(x.get("state") == "stale" for x in states):
+                    n["design_consult"] = {"state": "stale"}
+                else:
+                    n["design_consult"] = {"state": "pending"}
+        for c in n.get("children") or []:
+            walk(c)
+
+    walk(root)
 
 
 def _annotate(node: dict) -> tuple[int, int]:
@@ -343,9 +381,11 @@ _HTML = """<!doctype html>
  .pill.resume {{ background:#fdf1e3; color:#9a4b06; }}
  .designsum {{ color:var(--soft); font-size:12.5px; margin:14px 0 0; }}
  .designbadge {{ margin-top:7px; }}
- .pill.design.ready {{ background:#e9f7ef; color:#14764a; }}
+ .pill.design.pending {{ background:#fdf1e3; color:#9a4b06; }}
+ .pill.design.stale {{ background:#fdecec; color:#b42318; }}
+ .pill.design.answered {{ background:#e9f7ef; color:#14764a; }}
  .pill.design.derive {{ background:#f3f1ec; color:#4b5563; }}
- .pill.design.needed {{ background:#fdf1e3; color:#9a4b06; }}
+ .pill.design.new_screen {{ background:#fdf1e3; color:#9a4b06; }}
  .subgoals {{ display:grid; grid-template-columns:repeat(auto-fit,minmax(250px,1fr));
               gap:10px; }}
  .sg {{ background:var(--card); border:1px solid var(--line); border-radius:14px;
@@ -582,19 +622,17 @@ def _body(model: dict) -> str:
             first_plan["_resume"] = True
         out.append("</div>")
 
-    # 2c. design readiness across the plan (an attribute, not a phase)
-    dst = [f.get("design") or {} for f in features]
-    n_ready = sum(1 for d in dst if d.get("status") == "ready")
-    n_derive = sum(1 for d in dst if d.get("status") == "derive")
-    needed_feats = [f for f in features if (f.get("design") or {}).get("status") == "needed"]
-    n_needed = len(needed_feats)
+    # 2c. design is CONSULTED, not hardcoded: show the current state per feature
+    cons = [f.get("design_consult") or {} for f in features]
+    ui = [d for d in cons if d.get("state") in ("pending", "stale", "answered")]
+    answered = [d for d in ui if d.get("state") == "answered"]
+    n_na = sum(1 for d in cons if d.get("state") == "not_applicable")
     if features:
-        where = ""
-        if n_needed and all(f.get("phase") == 2 for f in needed_feats):
-            where = " (all Phase 2)"
         out.append('<div class="designsum">Design: '
-                   f'{n_ready} ready from Stitch · {n_derive} derived from the system · '
-                   f'{n_needed} need a screen{where}</div>')
+                   f'{len(ui)} UI feature{"s" if len(ui) != 1 else ""} ask the designer at build time · '
+                   f'{len(answered)} answered'
+                   + (f' · {n_na} backend-only' if n_na else '')
+                   + '</div>')
 
     # 3. tier 2 — sub-goals, the ends, with the features that serve each
     out.append('<h2>Sub-goals <span class="count">the ends · order is '
@@ -701,13 +739,23 @@ def _feature_card(f: dict, order: dict, goal_title: dict) -> str:
         out.append('<div class="serves">Serves: '
                    + "".join(f'<span class="chip">{_esc(s)}</span>' for s in serves)
                    + "</div>")
-    d = f.get("design") or {}
-    if d.get("status") in ("ready", "derive", "needed"):
-        label = {"ready": "Design · " + str(d.get("source") or "Stitch"),
-                 "derive": "Design · derived",
-                 "needed": "Design · needed"}[d["status"]]
+    d = f.get("design_consult") or {}
+    state = str(d.get("state") or "")
+    if state in ("pending", "stale", "answered"):
+        if state == "pending":
+            label, cls = "Design · ask the designer", "pending"
+        elif state == "stale":
+            label, cls = "Design · ask again (design changed)", "stale"
+        else:
+            decision = str(d.get("decision") or "")
+            screen = d.get("screen") or {}
+            label = {"existing_screen": "Design · " + str(screen.get("title") or "existing screen"),
+                     "derive": "Design · derive from system",
+                     "new_screen": "Design · new screen required",
+                     "not_applicable": "Design · no UI"}.get(decision, "Design · " + decision)
+            cls = decision if decision in ("derive", "new_screen") else "answered"
         out.append(f'<div class="designbadge"><span class="pill design '
-                   f'{_esc(d["status"])}">{_esc(label)}</span></div>')
+                   f'{_esc(cls)}">{_esc(label)}</span></div>')
     if f.get("outcome"):
         out.append(f'<div class="feat-o">{_esc(f["outcome"])}</div>')
     if f.get("bar") is not None:

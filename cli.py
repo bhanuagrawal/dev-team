@@ -2379,6 +2379,67 @@ def cmd_design(args: argparse.Namespace) -> int:
     return 0
 
 
+def _design_task(project: Path, key: str) -> dict:
+    """A task spec if it has been picked, else the queue entry with that label."""
+    try:
+        spec = task_spec_path(project, key)
+    except SystemExit:
+        spec = None
+    if spec is not None and spec.is_file():
+        return load_json(spec) or {}
+    for q in state_of(project).get("queue") or []:
+        if str(q.get("label") or "") == key:
+            t = q.get("target")
+            targets = t if isinstance(t, list) else ([t] if t else [])
+            return {"surface": {"label": q.get("label"), "targets": targets},
+                    "problem": q.get("problem"), "user_sees": q.get("user_sees"),
+                    "reason": q.get("reason"), "done_when": q.get("done_when")}
+    raise SystemExit(f"no task spec or queue entry named '{key}' "
+                     f"(known: {[q.get('label') for q in state_of(project).get('queue') or []]})")
+
+
+def cmd_design_consult(args: argparse.Namespace) -> int:
+    """Ask the designer for ONE task, or record the answer it gave.
+
+    The plan does not hardcode "ready/derive/needed": the developer asks, the
+    designer reads the CURRENT Stitch project + docs/design.md, and the answer is
+    cached against a fingerprint. If the design changes, the old answer is stale.
+    """
+    project = resolve_project(args.project)
+    from team import designer
+    task = _design_task(project, args.task)
+
+    if args.record:
+        raw = sys.stdin.read() if args.record == "-" else Path(args.record).read_text()
+        try:
+            answer = json.loads(raw)
+            rec = designer.record(project, task, answer)
+        except Exception as exc:
+            raise SystemExit(f"could not record the designer answer: {exc}")
+        print(json.dumps(rec, indent=2))
+        return 0
+
+    if args.prompt:
+        brief = designer.compile_brief(project, task)
+        if args.json:
+            print(json.dumps(brief, indent=2))
+        else:
+            print(brief["prompt"])
+        return 0
+
+    st = designer.status(project, task)
+    if args.json:
+        print(json.dumps(st, indent=2))
+    else:
+        print(designer.line(project, task))
+        if st["state"] in ("pending", "stale"):
+            print(f"  ask the designer: devteam design-consult {project.name} "
+                  f"--task {args.task} --prompt")
+            print(f"  then record:      devteam design-consult {project.name} "
+                  f"--task {args.task} --record <answer.json>")
+    return 0
+
+
 def cmd_competition(args: argparse.Namespace) -> int:
     """Execute competitive intelligence and market reconnaissance for an app."""
     project = resolve_project(args.project)
@@ -4387,6 +4448,14 @@ def main() -> None:
     des.add_argument("--topic", help="focus topic or aesthetic thesis (defaults to app vision)")
     des.add_argument("--force", action="store_true", help="overwrite existing docs/design.md with fresh synthesis")
     des.set_defaults(fn=cmd_design)
+    dc = sub.add_parser("design-consult",
+                        help="ask the designer for one task; the answer is cached against the current Stitch state")
+    dc.add_argument("project")
+    dc.add_argument("--task", required=True, help="task id or queue label")
+    dc.add_argument("--prompt", action="store_true", help="print the designer prompt")
+    dc.add_argument("--record", help="path to the designer's JSON answer ('-' for stdin)")
+    dc.add_argument("--json", action="store_true", help="machine-readable output")
+    dc.set_defaults(fn=cmd_design_consult)
     comp = sub.add_parser("competition", help="run competitive recon on rivals, pricing models, and weakness analysis")
     comp.add_argument("project")
     comp.add_argument("--term", help="search term for competitor discovery (defaults to vision-derived domain)")
