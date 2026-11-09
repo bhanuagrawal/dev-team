@@ -140,7 +140,8 @@ def build(project) -> dict:
         mid = str(raw["id"])
         node = {"kind": kind, "id": mid,
                 "title": str(raw.get("title") or mid),
-                "status": ((st.get(mid, "pending") if kind in ("milestone", "goal")
+                "status": ((st.get(mid, "pending")
+                            if kind in ("milestone", "goal", "subgoal")
                             else "")
                            or str(raw.get("status") or "")
                            or (PROPOSED if kind not in ("milestone", "goal")
@@ -284,113 +285,93 @@ def render_text(model: dict) -> str:
 _HTML = """<!doctype html>
 <html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>{title} — where we are going</title>
+<title>{title} — plan</title>
 <style>
- :root {{ --bg:#fcfbf9; --ink:#1b1e24; --soft:#6c7480; --line:#e7e3dc;
-          --good:#1f9d63; --now:#2f6fed; }}
+ :root {{ --bg:#fbfaf7; --card:#ffffff; --ink:#191c22; --soft:#6b7280;
+          --line:#e7e2d9; --now:#2f6fed; --good:#1f9d63; --later:#b45309;
+          --wash:#f4f7ff; }}
  * {{ box-sizing:border-box; }}
- body {{ max-width:820px; margin:0 auto; padding:42px 22px 90px; background:var(--bg);
-        color:var(--ink); font:16px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",
-        Roboto,sans-serif; -webkit-font-smoothing:antialiased; }}
- h1 {{ font-size:24px; margin:0 0 6px; letter-spacing:-.015em; }}
- .sub {{ color:var(--soft); font-size:14px; margin:0 0 30px; }}
- h2 {{ font-size:12px; font-weight:600; text-transform:uppercase; letter-spacing:.09em;
-       color:var(--soft); margin:36px 0 12px; }}
- .count {{ color:var(--soft); font-weight:400; letter-spacing:0; text-transform:none; }}
- .goal {{ background:#fff; border:1px solid var(--line); border-left:3px solid var(--now);
-         border-radius:10px; padding:19px 21px; font-size:19px; font-weight:600; line-height:1.45; }}
- .goal .who {{ display:block; font-size:12px; font-weight:500; color:var(--soft);
-               text-transform:uppercase; letter-spacing:.07em; margin-bottom:7px; }}
- .row {{ display:flex; gap:12px; align-items:flex-start; background:#fff;
-         border:1px solid var(--line); border-radius:10px; padding:13px 16px; margin-bottom:8px; }}
- .row.quiet {{ background:#fdfdfc; }}
- .row.done {{ background:transparent; border-color:transparent; padding:7px 16px;
-              margin-bottom:0; }}
- .row .n {{ color:var(--soft); font-variant-numeric:tabular-nums; min-width:18px; }}
- .row .body {{ flex:1; min-width:0; }}
- .t {{ font-weight:600; }}
- .row.done .t {{ font-weight:400; color:#3c434e; }}
- .m {{ color:var(--soft); font-size:14px; margin-top:3px; }}
- .m b {{ color:#4b5461; font-weight:600; }}
- .dot {{ width:8px; height:8px; border-radius:50%; flex:0 0 auto; margin-top:8px;
-         background:#cfd4db; }}
- .row.done .dot {{ background:var(--good); }}
- .dot.now {{ background:var(--now); }}
- .pill {{ font-size:12px; border-radius:999px; padding:2px 10px; white-space:nowrap;
-          background:#f2f1ef; color:#6c7480; }}
- .pill.now {{ background:#eaf1ff; color:#2050c8; }}
- .pill.done {{ background:#eaf7f0; color:#177a4c; }}
- .bar {{ height:5px; background:#eeebe5; border-radius:99px; overflow:hidden;
-         max-width:260px; margin:9px 0 4px; }}
- .bar > i {{ display:block; height:100%; background:var(--good); }}
- .ask {{ background:#fff8ec; border:1px solid #f2e0c2; border-radius:10px;
-         padding:14px 17px; margin-bottom:9px; }}
- .change {{ background:#f4f7ff; border:1px solid #dde6fb; border-radius:10px;
-            padding:14px 17px; margin-bottom:26px; }}
- details {{ margin-top:7px; }}
- summary {{ cursor:pointer; color:var(--soft); font-size:13px; }}
- summary::marker {{ color:#c3c8d0; }}
- .inner {{ color:var(--soft); font-size:13px; margin-top:7px; }}
- .inner li {{ margin:0 0 5px; }}
- .empty {{ color:var(--soft); font-size:14px; background:#fff; border:1px dashed var(--line);
-           border-radius:10px; padding:14px 16px; }}
- .foot {{ color:var(--soft); font-size:13px; margin-top:44px; border-top:1px solid var(--line);
-          padding-top:16px; }}
- code {{ background:#f4f2ee; padding:1px 5px; border-radius:4px; font-size:13px; }}
+ body {{ max-width:900px; margin:0 auto; padding:40px 22px 80px;
+        background:var(--bg); color:var(--ink);
+        font:16px/1.6 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
+        -webkit-font-smoothing:antialiased; }}
+ .eyebrow {{ font-size:12px; text-transform:uppercase; letter-spacing:.12em; color:var(--soft); }}
+ h1 {{ font-size:30px; line-height:1.2; margin:6px 0 30px; letter-spacing:-.02em; }}
+ h2 {{ font-size:13px; font-weight:700; text-transform:uppercase; letter-spacing:.1em;
+       color:var(--soft); margin:40px 0 12px; display:flex; gap:9px; align-items:baseline; }}
+ h2 .count {{ font-weight:400; letter-spacing:0; text-transform:none; color:#9aa1ab; }}
+ .vision {{ background:var(--card); border:1px solid var(--line); border-left:4px solid var(--ink);
+           border-radius:14px; padding:20px 22px; }}
+ .vision .k, .next .k {{ font-size:11px; font-weight:700; letter-spacing:.11em;
+                          text-transform:uppercase; color:var(--soft); margin-bottom:6px; }}
+ .vision .vt {{ font-size:20px; font-weight:650; line-height:1.45; }}
+ .next {{ background:var(--wash); border:1px solid #dbe6ff; border-left:4px solid var(--now);
+          border-radius:14px; padding:18px 20px; margin-top:14px; }}
+ .next .nt {{ font-size:18px; font-weight:750; }}
+ .next .nm {{ color:var(--soft); font-size:13px; margin-top:2px; }}
+ .next .np {{ color:#374151; font-size:14px; margin-top:9px; }}
+ .ask {{ background:#fff8ec; border:1px solid #f0dcb8; border-radius:12px;
+         padding:13px 16px; margin:10px 0; font-size:14px; }}
+ .goal {{ margin-top:30px; }}
+ .goal-h {{ display:flex; gap:10px; align-items:baseline; flex-wrap:wrap;
+            border-bottom:1px solid var(--line); padding-bottom:8px; }}
+ .goal-h .gt {{ font-size:18px; font-weight:750; }}
+ .goal-o {{ color:var(--soft); font-size:14px; margin:7px 0 2px; }}
+ .feat {{ background:var(--card); border:1px solid var(--line); border-radius:14px;
+          padding:17px 20px; margin:10px 0; }}
+ .feat.active {{ border-left:4px solid var(--now); }}
+ .feat.done {{ border-left:4px solid var(--good); }}
+ .feat.parked {{ border-left:4px solid var(--later); }}
+ .feat-h {{ display:flex; gap:10px; align-items:center; flex-wrap:wrap; }}
+ .feat-t {{ font-size:16.5px; font-weight:700; flex:1; min-width:220px; line-height:1.35; }}
+ .feat-o {{ color:var(--soft); font-size:14px; margin-top:6px; }}
+ .pill {{ font-size:11.5px; font-weight:600; border-radius:999px; padding:2px 9px;
+          background:#f3f1ec; color:#6b7280; white-space:nowrap; }}
+ .pill.now {{ background:#eaf1ff; color:#1d4fd7; }}
+ .pill.done {{ background:#e9f7ef; color:#14764a; }}
+ .pill.later {{ background:#fdf1e3; color:#9a4b06; }}
+ .bar {{ height:5px; background:#f0ede7; border-radius:99px; overflow:hidden;
+         max-width:300px; margin:12px 0 2px; }}
+ .bar i {{ display:block; height:100%; background:var(--good); }}
+ .prog {{ color:var(--soft); font-size:12px; }}
+ .tasks {{ margin:15px 0 0; border-left:2px solid #efece5; padding-left:15px; }}
+ .task {{ display:flex; gap:11px; padding:9px 0; border-top:1px solid #f4f1eb; }}
+ .task:first-child {{ border-top:0; padding-top:2px; }}
+ .tn {{ flex:0 0 24px; height:24px; border-radius:50%; background:#f2efe9;
+        color:var(--soft); font-size:12px; font-weight:700; display:flex;
+        align-items:center; justify-content:center; margin-top:1px; }}
+ .task.next .tn {{ background:var(--now); color:#fff; }}
+ .task.shipped .tn {{ background:#e9f7ef; color:#14764a; }}
+ .tt {{ font-weight:650; font-size:14.5px; line-height:1.4; }}
+ .task.shipped .tt {{ font-weight:500; color:#4b5563; }}
+ .tm {{ color:var(--soft); font-size:13px; margin-top:2px; }}
+ .none {{ color:var(--soft); font-size:14px; padding:6px 0; }}
+ details {{ margin-top:6px; }}
+ summary {{ cursor:pointer; color:var(--soft); font-size:12.5px; }}
+ summary::marker {{ color:#c3c0b8; }}
+ .inner {{ color:var(--soft); font-size:13px; margin-top:6px; }}
+ .inner li {{ margin:0 0 4px; }}
+ .log {{ background:transparent; border-top:1px solid var(--line); margin-top:44px;
+         padding-top:14px; }}
+ .foot {{ color:var(--soft); font-size:12.5px; margin-top:34px;
+          border-top:1px solid var(--line); padding-top:14px; }}
+ code {{ background:#f3f1ec; padding:1px 5px; border-radius:4px; font-size:12.5px; }}
+ @media (max-width:620px) {{
+   body {{ padding:26px 14px 60px; }} h1 {{ font-size:24px; }}
+   .feat {{ padding:14px 15px; }} .vision, .next {{ padding:16px; }}
+ }}
 </style></head><body>
+<div class="eyebrow">{title} · plan</div>
 <h1>{h1}</h1>
-<p class="sub">{lede}</p>
 {body}
 <p class="foot">{foot}</p>
 </body></html>
 """
 
 
-def _collect(model: dict) -> dict:
-    """One pass over the tree model → the page's business sections.
-
-    The recursive model stays the single source (the terminal view walks the same
-    object); this only regroups it into what a non-engineer reads: the plan, the
-    queue in build order, what is done, and what sits before the plan existed."""
-    branches: list[dict] = []
-    queue: list[dict] = []
-    done: list[dict] = []
-    earlier: list[dict] = []
-
-    def walk(n: dict, depth: int, path: list[str]) -> None:
-        kind = n.get("kind")
-        here = path + ([n["title"]] if kind != "vision" else [])
-        if kind in ("milestone", "subgoal", "branch") and n.get("status") != "history":
-            # "Earlier work" is history, not a plan item: its leaves belong to the
-            # done list, and counting it as a goal would inflate the plan.
-            branches.append({**n, "depth": depth, "path": path})
-        for c in n.get("children") or []:
-            if c.get("kind") != "task":
-                walk(c, depth + (0 if kind == "vision" else 1), here)
-                continue
-            rec = {**c, "for": here[-1] if here else "",
-                   "in_history": n.get("status") == "history"}
-            # WHAT SHIPPED IS DONE, WHAT IS QUEUED IS WAITING — position in the
-            # tree never decides that. (Filing pending work under "done" because
-            # it sat in the pre-goal bucket is how a project looks finished with
-            # six items still waiting.)
-            if c.get("status") == "shipped":
-                done.append(rec)
-            else:
-                queue.append(rec)
-
-    walk(model["root"], 0, [])
-    for rec in queue + done + earlier:
-        rec["title"] = _humanize(rec.get("title"))
-    queue.sort(key=lambda r: r.get("order", 0))
-    done.sort(key=lambda r: str(r.get("date") or ""), reverse=True)
-    return {"branches": branches, "queue": queue, "done": done, "earlier": earlier}
-
-
 def _short(title: str, n: int = 42) -> str:
-    """The branch label repeated on six queue rows must not be the six-verb
-    sentence it is in the plan: first clause only (the full text stays in the
-    technical detail)."""
+    """One-line summary: first clause only, ellipsized. The full text stays in
+    the technical detail behind a click."""
     t = str(title or "")
     for sep in (" — ", " – ", ": ", " ("):
         if sep in t:
@@ -399,13 +380,18 @@ def _short(title: str, n: int = 42) -> str:
     return t if len(t) <= n else t[:n - 1].rstrip() + "…"
 
 
+_ACRONYMS = {"qr": "QR", "prd": "PRD", "rpc": "RPC", "ui": "UI", "api": "API",
+             "ml": "ML", "ai": "AI", "sdui": "SDUI", "a2a": "A2A", "kmp": "KMP"}
+
+
 def _humanize(label: str) -> str:
     """Old ledger rows sometimes recorded an internal slug as the label
-    (`ux-ax1-first-run-value`). Show it readably rather than as a code — the page
+    (`ux-ax1-first-run-value`). Show it readably rather than as code — the page
     is for the owner; the raw label stays in the technical detail."""
     t = str(label or "")
     if " " not in t and ("-" in t or "_" in t):
-        t = t.replace("-", " ").replace("_", " ").strip()
+        words = t.replace("-", " ").replace("_", " ").split()
+        t = " ".join(_ACRONYMS.get(w.lower(), w) for w in words).strip()
         return t[:1].upper() + t[1:]
     return t
 
@@ -418,123 +404,217 @@ def _details(summary: str, items: list[str]) -> str:
             f'<div class="inner"><ul>{body}</ul></div></details>')
 
 
+def _targets(value) -> str:
+    if isinstance(value, (list, tuple)):
+        return ", ".join(str(v) for v in value) or "—"
+    return str(value or "—")
+
+
+def _pill(status: str) -> str:
+    words = {"active": "In progress", "done": "Done", "pending": "Waiting",
+             "parked": "Later", "proposed": "Suggested", "history": "History",
+             "queued": "Queued", "shipped": "Built"}
+    words["pending"] = "Planned"
+    cls = {"active": "now", "done": "done", "parked": "later",
+           "proposed": "later"}.get(status, "")
+    return (f'<span class="pill {cls}">'
+            f'{_esc(words.get(status, status or "—"))}</span>')
+
+
+def _task_ids(node: dict) -> list[dict]:
+    out: list[dict] = []
+    for c in node.get("children") or []:
+        if c.get("kind") == "task":
+            out.append(c)
+        else:
+            out.extend(_task_ids(c))
+    return out
+
+
 def _body(model: dict) -> str:
     root = model["root"]
-    col = _collect(model)
     out: list[str] = []
 
-    # 1. the team's own note: it changed the plan (never a request for approval)
-    changes = model.get("changes") or []
-    if changes:
-        items = [f'{e.get("action")} — {e.get("why")} ({str(e.get("at"))[:10]}, '
-                 f'by {e.get("by")})' for e in changes]
-        out.append(f'<div class="change"><b>The team changed the plan '
-                   f'{len(changes)}x since you last looked.</b> Nothing is waiting '
-                   f'on you — this is so you can disagree:'
-                   + _details("show the changes", items) + "</div>")
+    # order is the build order: the queue head is the only entry a run builds
+    order = {t["id"]: int(t.get("order") or 0) for t in _task_ids(root)
+             if t.get("status") != "shipped" and t.get("order") is not None}
+    all_tasks = _task_ids(root)
+    next_task = next((t for t in all_tasks if t.get("is_next")), None)
+    feature_of: dict[str, dict] = {}
 
-    # 2. the goal — the one thing the owner writes
-    goal = root["title"]
-    if model.get("goal_less") or not (root.get("children") or []):
-        out.append('<h2>The goal</h2><div class="goal">'
-                   '<span class="who">you set this — nobody else may change it</span>'
-                   f'{_esc(goal)}</div>')
-        if root.get("note"):
-            out.append(f'<div class="empty" style="margin-top:10px">'
-                       f'{_esc(root["note"])}</div>')
-    else:
-        out.append('<h2>The goal <span class="count">yours — nobody else changes '
-                   'it</span></h2>')
-        out.append(f'<div class="goal">{_esc(goal)}</div>')
+    def index_features(n: dict) -> None:
+        for c in n.get("children") or []:
+            if c.get("kind") != "task":
+                for t in c.get("children") or []:
+                    if t.get("kind") == "task":
+                        feature_of[t["id"]] = c
+                index_features(c)
+    index_features(root)
 
-    # 3. what needs the owner before the plan is worth reading
+    # 1. the one thing the owner writes
+    out.append('<div class="vision"><div class="k">The goal</div>'
+               f'<div class="vt">{_esc(root["title"])}</div></div>')
+    if root.get("note"):
+        out.append(f'<div class="ask">{_esc(root["note"])}</div>')
+
+    # 2. what one run builds next
+    if next_task:
+        feat = feature_of.get(next_task["id"], {})
+        out.append('<div class="next"><div class="k">Next run</div>'
+                   f'<div class="nt">{_esc(_humanize(next_task["title"]))}</div>'
+                   + (f'<div class="nm">for {_esc(feat.get("title"))}</div>'
+                      if feat.get("title") else "")
+                   + (f'<div class="np">{_esc(next_task.get("detail"))}</div>'
+                      if next_task.get("detail") else "")
+                   + _details("technical detail",
+                              [f'id: {next_task["id"]}',
+                               f'type: {next_task.get("task_kind") or "—"}',
+                               f'advances: {next_task.get("advances") or "—"}',
+                               f'target: {_targets(next_task.get("target"))}'])
+                   + "</div>")
+
+    # 3. only actionable asks, in plain words
     asks = model.get("asks") or []
     if asks:
-        out.append('<h2>Waiting on you <span class="count">'
-                   f'{len(asks)}</span></h2>')
+        out.append(f'<h2>Waiting on you <span class="count">{len(asks)}</span></h2>')
         for a in asks:
             what, how = adapt.ask_text(a)
-            body = _esc(what) + (_details("how to fix it", [how]) if how else "")
-            out.append(f'<div class="ask">{body}</div>')
+            out.append('<div class="ask">' + _esc(what)
+                       + (_details("how to fix it", [how]) if how else "") + "</div>")
 
-    # 4. the plan: the goals under it, in order
-    if col["branches"]:
-        working = [b for b in col["branches"] if b.get("status") == "active"]
-        out.append(f'<h2>The plan <span class="count">{len(col["branches"])} '
-                   f'goal{"s" if len(col["branches"]) != 1 else ""}, '
-                   f'{len(working)} in progress</span></h2>')
-        for b in col["branches"]:
-            status = b.get("status", "")
-            if status == "active":
-                pill, dot = "now", "now"
-            elif b.get("status") == "done" or b.get("progress", "").endswith("all of them"):
-                pill, dot = "done", "done"
-            else:
-                pill, dot = "", ""
-            who = ("you" if b.get("decided_by") == "owner"
-                   else "the team" if b.get("decided_by") == "agent" else "")
-            meta = []
-            if b.get("outcome"):
-                meta.append(f'<div class="m">{_esc(b["outcome"])}</div>')
-            if b.get("bar") is not None:
-                meta.append(f'<div class="bar"><i style="width:{int(b["bar"])}%"></i>'
-                            f'</div><div class="m">{_esc(b.get("progress", ""))}</div>')
-            if b.get("measures"):
-                meta.append(_details("how we will know it is done", b["measures"]))
-            tech = ([f'id: {b["id"]}', f'set by: {who or "—"}']
-                    + [f'status: {b.get("status")}'])
-            meta += [_details("technical detail", tech)]
-            style = f' style="margin-left:{min(int(b.get("depth") or 0), 3) * 26}px"'
-            out.append(f'<div class="row quiet"{style}><span class="dot {dot}"></span>'
-                       f'<div class="body"><div class="t">{_esc(b["title"])}'
-                       + (f' <span class="pill {pill}">{_esc(goals.STATUS_WORDS.get(b.get("status"), b.get("status")))}</span>' if pill else "")
-                       + "</div>" + "".join(meta) + "</div></div>")
-
-    # 5. the queue — what gets built, in order, one per night
-    out.append('<h2>The queue <span class="count">'
-               + (f'{len(col["queue"])} waiting — one is built per night, top first'
-                  if col["queue"] else "empty — the team refills it before the next run")
-               + "</span></h2>")
-    if not col["queue"]:
-        out.append('<div class="empty">Nothing waiting right now.</div>')
-    for i, leaf in enumerate(col["queue"], 1):
-        why = ([leaf["detail"]] if leaf.get("detail") else [])
-        tech = [f'type: {leaf.get("task_kind") or "—"}',
-                f'serves: {leaf.get("for") or "—"}',
-                f'goal id: {leaf.get("advances") or "—"}',
-                f'target: {leaf.get("target")}']
-        out.append(f'<div class="row"><span class="n">{i}</span>'
-                   f'<div class="body"><div class="t">{_esc(leaf["title"])}'
-                   + (f' <span class="pill now">next</span>' if leaf.get("is_next") else "")
-                   + "</div><div class=\"m\">"
-                   + (f'for: <b>{_esc(_short(leaf.get("for")))}</b>'
-                      if leaf.get("for") and not leaf.get("in_history")
-                      else "not tied to a goal yet (none is set)")
+    # 4. ONE hierarchy: goal -> feature -> task. No separate queue list.
+    goals_ = [c for c in root.get("children") or []
+              if c.get("kind") != "task" and c.get("status") != "history"]
+    all_features = [f for g in goals_ for f in (g.get("children") or [])
+                    if f.get("kind") != "task"]
+    all_leaves = [t for g in goals_ for t in _task_ids(g)]
+    out.append('<h2>The plan <span class="count">'
+               f'{len(all_features)} features · {len(all_leaves)} tasks'
+               '</span></h2>')
+    empty_goals = []
+    for g in goals_:
+        features = [c for c in g.get("children") or [] if c.get("kind") != "task"]
+        direct = [c for c in g.get("children") or [] if c.get("kind") == "task"]
+        if direct and not features:
+            # a flat plan (a milestone holding tasks directly): render it as the
+            # feature card, not as an empty goal that hides its work
+            out.append(_feature_card(g, order))
+            continue
+        if not features:
+            empty_goals.append(g)
+            continue
+        now = [f for f in features if f.get("status") != "parked"]
+        later = [f for f in features if f.get("status") == "parked"]
+        out.append('<div class="goal"><div class="goal-h">'
+                   f'<span class="gt">{_esc(g["title"])}</span>'
+                   + (_pill(g.get("status")) if g.get("kind") == "goal" else "")
                    + "</div>"
-                   + _details("why the team picked this", why)
-                   + _details("technical detail", tech)
-                   + "</div></div>")
+                   + (f'<div class="goal-o">{_esc(g.get("outcome"))}</div>'
+                      if g.get("outcome") else "")
+                   + _details("technical detail", [f'id: {g.get("id")}'])
+                   + "</div>")
+        for f in now:
+            out.append(_feature_card(f, order))
+        if later:
+            out.append('<details class="laterwrap"><summary>Set aside for later '
+                       f'({len(later)})</summary>')
+            for f in later:
+                out.append(_feature_card(f, order))
+            out.append("</details>")
+    if empty_goals:
+        names = " · ".join(_esc(x["title"]) for x in empty_goals)
+        out.append('<div class="none" style="margin-top:22px">No features yet — '
+                   + names + "</div>")
 
-    # 6. what is already done
-    if col["done"] or col["earlier"]:
-        total = len(col["done"]) + len(col["earlier"])
-        out.append(f'<h2>Already done <span class="count">{total} shipped</span></h2>')
-        for leaf in col["done"] + col["earlier"]:
-            tech = [f'serves: {leaf.get("for") or "—"}',
-                    f'task: {leaf.get("task_id") or leaf.get("title")}',
-                    f'target: {leaf.get("target")}']
-            if leaf.get("detail"):
-                tech.append(f'why: {leaf["detail"]}')
-            note = (" — done before this plan existed"
-                    if leaf.get("in_history") else "")
-            out.append(f'<div class="row done"><span class="dot done"></span>'
-                       f'<div class="body"><div class="t">{_esc(leaf["title"])}'
-                       + (f' <span class="pill done">v{_esc(leaf.get("version"))}</span>'
-                          if leaf.get("version") else "")
-                       + f'</div><div class="m">{_esc(leaf.get("date") or "")}'
-                       f'{_esc(note)}'
-                       + _details("technical detail", tech) + "</div></div></div>")
+    # 5. history is a footnote, not a list that competes with the plan
+    history = [c for c in root.get("children") or []
+               if c.get("kind") != "task" and c.get("status") == "history"]
+    shipped = [t for h in history for t in _task_ids(h)]
+    shipped += [t for t in all_tasks if t.get("status") == "shipped"]
+    seen: set[str] = set()
+    uniq = []
+    for t in shipped:
+        if t["id"] not in seen:
+            seen.add(t["id"])
+            uniq.append(t)
+    if uniq:
+        out.append('<details class="log"><summary>Already shipped '
+                   f'({len(uniq)})</summary><div class="inner"><ul>')
+        for t in uniq:
+            v = f' · v{_esc(t["version"])}' if t.get("version") else ""
+            d = f' · {_esc(str(t.get("date"))[:10])}' if t.get("date") else ""
+            out.append(f'<li>{_esc(_humanize(t["title"]))}{v}{d}</li>')
+        out.append("</ul></div></details>")
 
+    changes = model.get("changes") or []
+    if changes:
+        items = [f'{e.get("action")} — {e.get("why")} '
+                 f'({str(e.get("at"))[:10]}, by {e.get("by")})' for e in changes]
+        out.append(f'<details class="log"><summary>Plan changes '
+                   f'({len(changes)})</summary><div class="inner"><ul>'
+                   + "".join(f"<li>{_esc(i)}</li>" for i in items)
+                   + "</ul></div></details>")
+
+    return "".join(out)
+
+
+def _feature_card(f: dict, order: dict) -> str:
+    tasks = [c for c in f.get("children") or [] if c.get("kind") == "task"]
+    tasks.sort(key=lambda t: (t.get("status") == "shipped",
+                              order.get(t["id"], 999)))
+    status = str(f.get("status") or "")
+    out = [f'<div class="feat {_esc(status)}"><div class="feat-h">'
+           f'<div class="feat-t">{_esc(f["title"])}</div>'
+           + _pill(status)
+           + (f'<span class="prog">{_esc(f.get("progress"))}</span>'
+              if f.get("progress") else "")
+           + "</div>"]
+    if f.get("outcome"):
+        out.append(f'<div class="feat-o">{_esc(f["outcome"])}</div>')
+    if f.get("bar") is not None:
+        out.append(f'<div class="bar"><i style="width:{int(f["bar"])}%"></i></div>')
+    if tasks:
+        out.append('<div class="tasks">')
+        for t in tasks:
+            out.append(_task_row(t, order))
+        out.append("</div>")
+    else:
+        out.append('<div class="none">No task queued for this feature.</div>')
+    if f.get("measures"):
+        out.append(_details("how we will know it is done", f["measures"]))
+    tech = [f'id: {f.get("id")}', f'status: {status or "—"}']
+    out.append(_details("technical detail", tech))
+    out.append("</div>")
+    return "".join(out)
+
+
+def _task_row(t: dict, order: dict) -> str:
+    shipped = t.get("status") == "shipped"
+    is_next = bool(t.get("is_next"))
+    cls = "shipped" if shipped else ("next" if is_next else "")
+    if shipped:
+        marker = "✓"
+    elif t["id"] in order:
+        marker = str(order[t["id"]] + 1)
+    else:
+        marker = "·"
+    out = [f'<div class="task {cls}"><span class="tn">{marker}</span>'
+           '<div class="tb"><div class="tt">'
+           f'{_esc(_humanize(t["title"]))}'
+           + (' <span class="pill now">next</span>' if is_next else "")
+           + (f' <span class="pill done">v{_esc(t.get("version"))}</span>'
+              if shipped and t.get("version") else "")
+           + "</div>"]
+    if t.get("detail"):
+        out.append(f'<div class="tm">{_esc(_short(t["detail"], 150))}</div>')
+    tech = [f'id: {t["id"]}',
+            f'type: {t.get("task_kind") or "—"}',
+            f'advances: {t.get("advances") or "—"}',
+            f'target: {_targets(t.get("target"))}']
+    out.append(_details("technical detail", tech))
+    if t.get("detail") and len(str(t["detail"])) > 150:
+        out.append(_details("full reason", [str(t["detail"])]))
+    out.append("</div></div>")
     return "".join(out)
 
 
@@ -544,8 +624,7 @@ def _esc(s) -> str:
 
 
 def render_html(model: dict, title: str) -> str:
-    batched = ("The goal you set, the team's plan under it, and the queue a nightly "
-               "run works through from the top. Technical detail is behind a click.")
+    batched = ("One goal, one plan, one build order: goal → feature → task. Technical detail is behind a click.")
     foot = ("Rebuilt automatically every run from the team's own records in this "
             "project. Disagree with anything? Tell the team — it changes, and you "
             f"are told — or run <code>devteam goal &lt;project&gt; revert</code>. "
@@ -553,7 +632,7 @@ def render_html(model: dict, title: str) -> str:
             "item, is generated by code: no LLM writes it and nothing here is "
             "tuned for looks.")
     return _HTML.format(title=_esc(title),
-                        h1=f"{_esc(title)} — where we are going",
+                        h1="Where we are going",
                         lede=batched, foot=foot, body=_body(model))
 
 
