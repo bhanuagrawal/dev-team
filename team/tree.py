@@ -421,6 +421,29 @@ def _pill(status: str) -> str:
             f'{_esc(words.get(status, status or "—"))}</span>')
 
 
+def _collect(model: dict) -> dict:
+    """Compatibility summary used by team/publish.py and older callers.
+
+    The page itself renders the nested tree directly; this keeps the flat
+    counts (branches, queue, done) available without duplicating the walk.
+    """
+    branches: list[dict] = []
+    queue: list[dict] = []
+    done: list[dict] = []
+
+    def walk(n: dict) -> None:
+        if n.get("kind") == "task":
+            (done if n.get("status") == "shipped" else queue).append(n)
+            return
+        if n.get("kind") != "vision" and n.get("status") != "history":
+            branches.append(n)
+        for c in n.get("children") or []:
+            walk(c)
+
+    walk(model["root"])
+    return {"branches": branches, "queue": queue, "done": done, "earlier": []}
+
+
 def _task_ids(node: dict) -> list[dict]:
     out: list[dict] = []
     for c in node.get("children") or []:

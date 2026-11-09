@@ -246,8 +246,9 @@ def _subject(project: Path) -> str:
     """A commit subject that says what the pointer is pointing at, from the data."""
     from . import tree as tree_mod
     col = tree_mod._collect(tree_mod.build(project))
-    return (f"chore(plan): {len(col['branches'])} goals, {len(col['queue'])} queued, "
-            f"{len(col['done']) + len(col['earlier'])} shipped")
+    features = [b for b in col["branches"] if b.get("kind") != "goal"]
+    return (f"chore(plan): {len(features)} features, {len(col['queue'])} queued, "
+            f"{len(col['done'])} shipped")
 
 
 def _message(project: Path) -> str:
