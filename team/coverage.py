@@ -247,6 +247,15 @@ def collect(tree: Path, profile: dict | None = None) -> dict:
 
     unit_tests = _references(tree, UNIT_TEST_SETS)
     all_tests = unit_tests + "\n" + _references(tree, UI_TEST_SETS)
+    # A test file's NAME is evidence: `PassportScreenUiTest.kt` is a test of
+    # PassportScreen even when its body mounts the screen through a container,
+    # so the composable never appears as a standalone word (the class name runs
+    # the identifier into `UiTest`, which the word-boundary matcher rejects).
+    # Count the exact `<Type>Test` / `<Type>UiTest` stems; no prefix matching,
+    # so `Book` can never be credited by `BookCoverUiTest`.
+    test_stems = {
+        p.stem for p in _source_files(tree, UNIT_TEST_SETS + UI_TEST_SETS)
+    }
     if not all_tests.strip():
         ui_count = sum(1 for f in main_files if _is_ui(f.relative_to(tree)))
         unit_count = sum(
@@ -299,13 +308,15 @@ def collect(tree: Path, profile: dict | None = None) -> dict:
             names.add(f.stem)
         if _is_ui(rel):
             ui_tot += 1
-            if _reached(names, all_tests):
+            if _reached(names, all_tests) or any(
+                    f"{n}Test" in test_stems or f"{n}UiTest" in test_stems for n in names):
                 ui_cov += 1
             elif len(ui_missing) < 6:
                 ui_missing.append(str(rel))
         else:
             unit_tot += 1
-            if _reached(names, unit_tests):
+            if _reached(names, unit_tests) or any(
+                    f"{n}Test" in test_stems for n in names):
                 unit_cov += 1
             elif len(unit_missing) < 6:
                 unit_missing.append(str(rel))
