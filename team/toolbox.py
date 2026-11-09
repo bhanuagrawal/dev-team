@@ -51,10 +51,15 @@ _RAW: list[tuple[str, str, str, str, str, bool]] = [
      "nothing; --open writes .pipeline/goals.html", "no vision", True),
     ("doctor", "orient", "every gate the team can check, as READY/BLOCKED",
      ".pipeline/runs/ log", "never — it reports", True),
+    ("capabilities", "orient", "each team capability, checked against this project",
+     ".pipeline/targets-draft.json (owner approves)", "nothing", True),
     ("adapt", "orient", "bring the project up to the current team (shape, tree, CI)",
      "profile/state shape, .pipeline/*", "a project it cannot read", True),
     ("coverage", "orient", "unit + UI coverage against the 100% floor",
      "nothing", "nothing", True),
+    ("asks", "orient", "review every open ask/flag and say who can do it (rule table)",
+     "nothing; --strict exits 1 while an ask is agent work",
+     "nothing — it reports", True),
     ("ux-plan", "orient", "which screens need a UX audit now",
      "nothing", "no declared targets", True),
     ("storefront-status", "orient", "what the last storefront run actually did",
@@ -171,6 +176,8 @@ _RAW: list[tuple[str, str, str, str, str, bool]] = [
      "docs (with --fix)", "nothing", True),
     ("onboard", "ops", "create a project's .pipeline profile from its layout",
      ".pipeline/profile.json", "unknown layout", True),
+    ("keystore-backup", "ops", "back up the release keystore off-repo and verify it",
+     "Google Drive + ~/.config/devteam/keystores", "no backup destination", True),
     # ---- internal ---------------------------------------------------------- #
     ("run-headless", "internal", "a host runs one task end-to-end",
      "everything the run touches", "—", False),
@@ -199,12 +206,17 @@ for _item in _RAW:
 
 
 def commands_in_cli() -> list[str]:
-    """Every verb the parser registers. The source is the authority, not this file."""
+    """Every verb the parser registers. The source is the authority, not this file.
+
+    Multi-line registrations exist (`sub.add_parser(` then the name on the next
+    line — keystore-backup, asks), so the whitespace between the call and the
+    literal is part of the pattern. A single-line-only regex silently missed two
+    live verbs the first time this check was written (2026-11-09)."""
     try:
         src = CLI_PY.read_text()
     except OSError:
         return []
-    return re.findall(r'sub\.add_parser\("([a-z0-9-]+)"', src)
+    return re.findall(r'sub\.add_parser\(\s*["\']([a-z0-9-]+)["\']', src)
 
 
 def drift() -> list[str]:
