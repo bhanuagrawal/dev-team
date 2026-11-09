@@ -7,6 +7,7 @@ Zero project names — generic across all Android / KMP projects.
 from __future__ import annotations
 
 import datetime
+import html
 import json
 import re
 import struct
@@ -89,8 +90,11 @@ def _launcher_label(src: Path) -> str | None:
         if not found:
             continue
         raw = found.group(1).strip()
+        # A manifest/string-resource label is XML: `&amp;` is what aapt decodes
+        # into "&" on the device. Compare what Android INSTALLS, not the escaped
+        # source, or a title like "ZenList: Habits & Goals" can never pass.
         if not raw.startswith("@string/"):
-            return raw
+            return html.unescape(raw)
         key = raw.split("/", 1)[1]
         for strings in manifest.parent.glob("res/values*/strings.xml"):
             try:
@@ -101,7 +105,7 @@ def _launcher_label(src: Path) -> str | None:
                 rf"<string\s+name=\"{re.escape(key)}\"\s*>(.*?)</string>",
                 body, re.S)
             if value:
-                return value.group(1).strip()
+                return html.unescape(value.group(1).strip())
     return None
 
 
