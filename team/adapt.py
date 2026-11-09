@@ -120,9 +120,6 @@ def needed(project: Path) -> list[str]:
         fixable = sum(1 for c in deadc if _relocated(c))
         out.append(f"{len(deadc)} convention path(s) missing"
                    + (f" ({fixable} repairable automatically)" if fixable else ""))
-    design_doc = project / "docs" / "design.md"
-    if design_doc.exists() and not any(str(c).endswith("docs/design.md") for c in profile.get("conventions", [])):
-        out.append("docs/design.md exists on disk but is not registered in conventions")
     return out
 
 
@@ -272,19 +269,11 @@ def run(project: Path, log: RunLog | None = None, apply: bool = True) -> dict:
             "fix .pipeline/profile.json['conventions'] — the team auto-repairs "
             "paths it can trace, and leaves the ambiguous ones to you"))
 
-    # 7b. design system convention (docs/design.md) ------------------------
-    design_doc = project / "docs" / "design.md"
-    if design_doc.exists():
-        resolved_str = str(design_doc.resolve())
-        has_design = any(str(c).endswith("docs/design.md") or c == resolved_str for c in conventions)
-        if not has_design:
-            conventions.append(resolved_str)
-            profile["conventions"] = conventions
-            note("registered docs/design.md in conventions (enforces design system style law)")
-    else:
-        asks.append(ask(
-            "no docs/design.md found — the developer agent builds screens without an enforced design system",
-            f"run `devteam design {project.name}` to research category standards and synthesize docs/design.md"))
+    # 7b. design source: the Stitch project + its exported screens -------------
+    # There is no docs/design.md. A markdown style law let an agent claim design
+    # compliance while the running screen matched nothing (owner directive
+    # 2026-11-09). The authority is the Stitch screen (index.html + screen.png in
+    # .pipeline/stitch/screens/<id>/); a UI task without one is not ready.
 
     # 7c. gradle wrapper timeout: 10s default is flaky under CI download loads
     wrapper_rel = "gradle/wrapper/gradle-wrapper.properties"

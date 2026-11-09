@@ -114,8 +114,8 @@ _RAW: list[tuple[str, str, str, str, str, bool]] = [
      ".pipeline/runs/ log, verify id", "any gate red", True),
     ("worktree-prune", "build", "remove trees whose work is safe elsewhere",
      "worktree registry", "uncommitted work (parks it instead)", True),
-    ("design", "build", "synthesize or enforce docs/design.md style law",
-     "docs/design.md, theme tokens", "no design source and no --apply", True),
+    ("stitch-export", "build", "download every Stitch screen (HTML + screenshot) into docs/stitch — the design spec",
+     "docs/stitch/**, .pipeline/stitch_manifest.json", "no stitch_project_id; Stitch unavailable", True),
     ("design-consult", "build", "ask the designer for ONE task; the answer is cached "
                                 "against the current Stitch/manifest/design fingerprint",
      ".pipeline/design_consult.json", "unknown task; bad answer JSON", True),

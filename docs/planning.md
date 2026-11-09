@@ -37,7 +37,10 @@ competes with the hierarchy.
 A per-feature `ready/derive/needed` label is a snapshot of a design that can
 change the next day. The plan records at most an **intent** ("reuse the detail
 screen"); the authority is the **designer**, who reads the CURRENT Stitch
-project, `.pipeline/stitch_manifest.json` and `docs/design.md` for THIS task.
+project and its exported screens for THIS task. There is **no `docs/design.md`**:
+a markdown style law let agents claim design compliance while the running screen
+matched nothing (owner directive 2026-11-09). The Stitch screen — exported
+`index.html` + `screen.png` under `docs/stitch/screens/<id>/` — is the spec.
 
 - The developer asks: `devteam design-consult <project> --task <label> --prompt`.
 - The designer answers `existing_screen`, `derive`, `new_screen` or
@@ -45,11 +48,13 @@ project, `.pipeline/stitch_manifest.json` and `docs/design.md` for THIS task.
   state (`--record`).
 - If the Stitch project, manifest or design doc changes, the answer is **stale**
   and the developer must ask again. A `new_screen` answer blocks UI code until
-  the screen is generated in Stitch and adopted into `docs/design.md`.
+  the screen is generated in Stitch and exported into
+  `docs/stitch/screens/<id>/` before any UI code is written.
 - Backend/data tasks are `not_applicable` from their targets; no designer call.
 
-`docs/design.md` must itself be current: `design-regenerate-from-stitch` runs
-before any UI task when the Stitch project changes.
+The exported screen set must be current: re-export the Stitch screens before a
+UI task when the project changes. A UI task with no matching exported screen is
+not ready — "derive it from tokens" is not an answer.
 
 ### Priority interrupts pause a phase; they never re-plan it
 

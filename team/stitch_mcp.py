@@ -240,3 +240,52 @@ def download(screen: dict[str, Any]) -> tuple[bytes, str]:
         meta = out.get("imageMetadata") or {}
         return base64.b64decode(out["image"]), str(meta.get("mimeType") or "application/octet-stream")
     raise StitchError("Stitch returned neither html nor image bytes")
+
+
+def export_screens(project_id: str, out_dir: Path, log=None) -> dict[str, Any]:
+    """Download every screen's HTML and screenshot into a tracked directory.
+
+    The Stitch screen is the design spec (owner directive 2026-11-09: there is no
+    docs/design.md). A spec that lives only in the Stitch cloud cannot be read by
+    a worktree, diffed in review, or compared to a render — so the export is a
+    deliverable, committed beside the code.
+    """
+    log = log or (lambda *_: None)
+    screens = list_screens(project_id)
+    out_dir = Path(out_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    manifest: list[dict[str, Any]] = []
+    for s in screens:
+        sid = str(s.get("name") or "").split("/")[-1]
+        title = str(s.get("title") or sid)
+        if not sid:
+            continue
+        screen_dir = out_dir / sid
+        screen_dir.mkdir(parents=True, exist_ok=True)
+        entry: dict[str, Any] = {"id": sid, "title": title,
+                                 "surface": s.get("surface") or ""}
+        html_name = str((s.get("htmlCode") or {}).get("name") or "")
+        if html_name:
+            try:
+                html = call("download_file", {"name": html_name})
+                text = html.get("html") or ""
+                if text:
+                    (screen_dir / "index.html").write_text(text)
+                    entry["html"] = f"screens/{sid}/index.html"
+            except StitchError as exc:
+                log(f"  ! {title}: html export failed — {exc}")
+        shot_name = str((s.get("screenshot") or {}).get("name") or "")
+        if shot_name:
+            try:
+                shot = call("download_file", {"name": shot_name})
+                b64 = shot.get("image") or ""
+                if b64:
+                    (screen_dir / "screen.png").write_bytes(base64.b64decode(b64))
+                    entry["screenshot"] = f"screens/{sid}/screen.png"
+            except StitchError as exc:
+                log(f"  ! {title}: screenshot export failed — {exc}")
+        manifest.append(entry)
+        log(f"  ✓ {title} → {screen_dir}")
+    return {"project_id": project_id,
+            "synced_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+            "canonical_screens": manifest}

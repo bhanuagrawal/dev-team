@@ -728,8 +728,14 @@ def run_store_readiness_audit(project: Path, tree: Path | None = None) -> list[R
             fix="Render composables and compile marketing posters via `devteam storefront-build <project> --poster`",
         ))
 
-        # Storefront Screenshots Freshness Gate: screenshots must not be older than docs/design.md
-        design_file = src / "docs" / "design.md"
+        # Storefront Screenshots Freshness Gate: screenshots must not be older than
+        # the design source. There is no docs/design.md (retired 2026-11-09): the
+        # Stitch screen set is the design, so its manifest/screenshots are the clock.
+        design_file = src / "docs" / "stitch" / "manifest.json"
+        if not design_file.is_file():
+            design_file = src / ".pipeline" / "stitch_manifest.json"
+        if not design_file.is_file():
+            design_file = src / "docs" / "design.md"   # legacy projects only
         if design_file.is_file() and shots:
             design_mtime = design_file.stat().st_mtime
             oldest_shot_mtime = min(s.stat().st_mtime for s in shots)
@@ -754,7 +760,8 @@ def run_store_readiness_audit(project: Path, tree: Path | None = None) -> list[R
                     except Exception:
                         pass
             if is_stale and comp_ts is not None:
-                visual = _design_visual_change_since(src, "docs/design.md", comp_ts)
+                visual = _design_visual_change_since(
+                    src, str(design_file.relative_to(src)), comp_ts)
                 if visual is False:
                     is_stale = False
                     fresh_because_visual_unchanged = True
@@ -764,11 +771,11 @@ def run_store_readiness_audit(project: Path, tree: Path | None = None) -> list[R
                 passed=not is_stale,
                 severity="BLOCKER" if is_stale else "INFO",
                 detail=(
-                    "Screenshots are fresh relative to docs/design.md's visual tokens "
+                    "Screenshots are fresh relative to the design source's visual tokens "
                     "(only prose changed since the last composition)"
                     if fresh_because_visual_unchanged
-                    else ("Screenshots are fresh relative to docs/design.md" if not is_stale else (
-                        f"Screenshots in {shots_dir.relative_to(src)} are older than docs/design.md — "
+                    else ("Screenshots are fresh relative to the design source" if not is_stale else (
+                        f"Screenshots in {shots_dir.relative_to(src)} are older than the Stitch design source — "
                         "listing depicts obsolete pre-revamp UI/palette"
                     ))
                 ),

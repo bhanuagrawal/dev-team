@@ -101,7 +101,7 @@ off-machine (you generate; they never generate).
    see what users do" (instrumentation), the third a retention/traction number.
    The pipeline then orders every release against these — see the dev-team
    skill's GOAL MODE section.
-   **Also write `docs/design.md` via Research & Stitch MCP (Mandatory Design Law):**
+   **Design every screen in Stitch and export it (the only design source):**
    Design is never done in the dark or by guessing. The design flow is two-phase:
    1. *Research First:* Run market & UX research (`devteam market <project>` / Tavily) to establish
       category standards, high-contrast dark mode requirements, and competitor benchmark layouts.
@@ -113,8 +113,11 @@ off-machine (you generate; they never generate).
    3. *Refinements Loop Back to Stitch:* Once the workflow understands the design, further screen
       refinements or variants go back to Stitch (`generate_variants`, `edit_screens`, `apply_design_system`)
       to keep code tokens and visual mockups aligned.
-   4. *Enforce in Code:* Register `docs/design.md` in `profile.json['conventions']`. Every Compose screen
-      must consume tokens from this design module. No app is scaffolded with default/unstyled UI.
+   4. *Export and enforce:* export every screen into `.pipeline/stitch/screens/<id>/`
+      (`index.html` + `screen.png`) and list them in `.pipeline/stitch_manifest.json`.
+      A Compose screen is built against that export and its render is compared to it.
+      There is no `docs/design.md`; tokens alone are not a design. A screen with no
+      Stitch export is not ready to build.
    **Also stamp `"profile_schema": 2`** (the team's current data shape) so the
    project is born current. From then on `devteam adapt <project>` — step 0 of
    every workflow run — keeps it that way as the team itself changes; a project

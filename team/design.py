@@ -441,6 +441,11 @@ def ensure_design(project: Path,
     If missing or force=True, researches category benchmarks via Tavily, synthesizes
     the design specification, writes docs/design.md, and updates profile conventions.
     """
+    # RETIRED (owner directive 2026-11-09): no docs/design.md is authored or
+    # enforced. The Stitch screen (exported HTML + screenshot) is the spec.
+    return {"status": "retired", "path": "",
+            "note": "design.md is not a design source; use the Stitch screens"}
+
     design_file = project / "docs" / "design.md"
     profile = profile_of(project)
     conventions = list(profile.get("conventions", []))

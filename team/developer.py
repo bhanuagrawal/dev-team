@@ -420,10 +420,10 @@ def design_brief(project: Path, profile: dict, task: dict,
     """Ask the designer, do not assume.
 
     The plan records intent; the authority is a consultation with the designer
-    against the CURRENT Stitch project + docs/design.md (owner directive
-    2026-11-09). A task with no recorded answer is not "ready" and is not "na" —
-    it is PENDING, and the developer must ask before writing UI. A recorded
-    answer goes STALE when the Stitch project, manifest or design doc changes.
+    against the CURRENT Stitch project and its exported screens (owner directive
+    2026-11-09). There is no docs/design.md: the Stitch screen's HTML and
+    screenshot are the spec, and the app render must match them. A task with no
+    recorded answer is PENDING and the developer must ask before writing UI.
     """
     from . import designer
 
@@ -433,9 +433,6 @@ def design_brief(project: Path, profile: dict, task: dict,
         state == "answered" and st.get("decision") == "new_screen")
 
     available: list[dict] = []
-    if (project / "docs" / "design.md").is_file():
-        available.append({"kind": "design_doc", "path": "docs/design.md",
-                          "use": "the style law — read it before writing UI"})
     stitch = profile.get("design") or {}
     if stitch.get("stitch_project_id"):
         available.append({"kind": "stitch_project",
@@ -443,7 +440,9 @@ def design_brief(project: Path, profile: dict, task: dict,
                           "use": "the designer reads this project; do not guess its screens"})
     if stitch.get("design_system_id"):
         available.append({"kind": "stitch_design_system", "id": stitch["design_system_id"]})
-    manifest = project / ".pipeline" / "stitch_manifest.json"
+    manifest = project / "docs" / "stitch" / "manifest.json"
+    if not manifest.is_file():
+        manifest = project / ".pipeline" / "stitch_manifest.json"
     if manifest.is_file():
         try:
             screens = json.loads(manifest.read_text()).get("canonical_screens") or []
@@ -451,8 +450,13 @@ def design_brief(project: Path, profile: dict, task: dict,
             screens = []
         if screens:
             available.append({"kind": "stitch_manifest",
-                              "path": ".pipeline/stitch_manifest.json",
+                              "path": "docs/stitch/manifest.json",
                               "screens": [s.get("title") for s in screens[:8]]})
+    snapshots = project / "docs" / "stitch" / "screens"
+    if snapshots.is_dir():
+        available.append({"kind": "stitch_snapshots", "path": "docs/stitch/screens",
+                          "use": "each screen's exported index.html + screen.png is the spec; "
+                                 "match its layout, type, spacing and imagery"})
 
     label = designer.task_label(task)
     command = f"devteam design-consult {project.name} --task {label} --prompt"
@@ -463,22 +467,22 @@ def design_brief(project: Path, profile: dict, task: dict,
         why = st.get("reason") or "the designer has not answered for this task"
         action = ("ASK THE DESIGNER before writing UI. Run: " + command
                   + "; then record the answer with --record. If the answer is "
-                    "'new_screen', generate it in Stitch and adopt it into "
-                    "docs/design.md before writing UI. Do not invent a visual language.")
+                    "'new_screen', generate it in Stitch and export its snapshot "
+                    "(docs/stitch/screens/<id>/index.html + screen.png) before writing UI. "
+                    "Do not invent a visual language and do not build from tokens alone.")
     elif st.get("decision") == "existing_screen":
         why = st.get("reason") or "an existing screen covers this task"
         screen = st.get("screen") or {}
         action = (f"build from the existing screen '{screen.get('title') or 'named by the designer'}'"
                   + (f" (id {screen.get('id')})" if screen.get("id") else "")
-                  + "; do not redesign it")
-    elif st.get("decision") == "derive":
-        why = st.get("reason") or "the design system covers this task"
-        action = "follow docs/design.md tokens/components; no new screen"
+                  + "; open its snapshot in docs/stitch/screens/ and match layout, type, "
+                    "spacing and imagery. Do not redesign it.")
     elif st.get("decision") == "new_screen":
         why = st.get("reason") or "no existing screen covers this task"
         screen = st.get("screen") or {}
         action = (f"a new screen is required '{screen.get('title') or 'named by the designer'}': "
-                  "generate/adopt it into docs/design.md BEFORE writing UI")
+                  "generate it in Stitch and export its snapshot BEFORE writing UI; "
+                  "the app render must match that screen, not a token description")
     else:
         why = "design decision unclear"
         action = "ask the designer: " + command

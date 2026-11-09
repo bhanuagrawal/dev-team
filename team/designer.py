@@ -9,11 +9,11 @@ project, the manifest and docs/design.md, and answers for THIS task.
 
 Contract:
 - `brief()` compiles the designer prompt from disk: project id, design system,
-  canonical screens, design-doc hash, the task. The host agent runs the designer
+  canonical screens, their exported snapshots, the task. The host agent runs the designer
   (native subagent or the `designer` role), optionally using the Stitch MCP.
 - `record()` stores the designer's answer with a fingerprint of the design state.
 - `status()` returns answered | pending | stale | not_applicable. If the Stitch
-  project, manifest or design doc changed, an old answer is STALE — ask again.
+  project or the manifest changed, an old answer is STALE — ask again.
 - The developer prompt and `devteam design-consult` read this module; no keyword
   heuristics and no hardcoded per-feature status.
 """
@@ -26,7 +26,7 @@ from typing import Any
 
 from .core import load_json, now_iso, pipeline_dir, profile_of, save_json
 
-DECISIONS = ("existing_screen", "derive", "new_screen", "not_applicable")
+DECISIONS = ("existing_screen", "new_screen", "not_applicable")
 
 _UI_TARGET_MARKERS = (
     "composeApp/src", "androidMain", "commonMain", "src/main/java",
@@ -40,12 +40,11 @@ def design_profile(project: Path) -> dict:
 
 
 def manifest(project: Path) -> dict:
+    """The screen set: docs/stitch/manifest.json is the tracked source."""
+    tracked = project / "docs" / "stitch" / "manifest.json"
+    if tracked.is_file():
+        return load_json(tracked) or {}
     return load_json(pipeline_dir(project) / "stitch_manifest.json") or {}
-
-
-def design_doc_hash(project: Path) -> str:
-    p = project / "docs" / "design.md"
-    return hashlib.sha256(p.read_bytes()).hexdigest()[:12] if p.is_file() else ""
 
 
 def fingerprint(project: Path) -> str:
@@ -57,7 +56,9 @@ def fingerprint(project: Path) -> str:
          "system": d.get("design_system_id"),
          "screens": m.get("canonical_screens") or [],
          "synced_at": m.get("synced_at") or m.get("updated_at"),
-         "design_doc": design_doc_hash(project)},
+         "snapshots": sorted(
+             p.name for p in (project / "docs" / "stitch" / "screens").glob("*")
+             if p.is_dir()) if (project / "docs" / "stitch" / "screens").is_dir() else []},
         sort_keys=True, default=str,
     )
     return hashlib.sha256(payload.encode()).hexdigest()[:16]
@@ -125,7 +126,7 @@ def compile_brief(project: Path, task: dict) -> dict:
 CURRENT DESIGN STATE
 - Stitch project: {d.get("stitch_project_id") or "(not registered)"}
 - Design system: {d.get("design_system_id") or "(not registered)"}
-- Design law: docs/design.md (sha {design_doc_hash(project) or "missing"})
+- Snapshot dir: docs/stitch/screens/<screen-id>/ (screen.png + index.html)
 - Canonical screens:
 {screen_lines}
 
@@ -139,14 +140,12 @@ Before answering, inspect the live Stitch project with the Stitch MCP tools and
 refresh the manifest if it is stale. Then choose exactly ONE:
 1. existing_screen — an existing screen covers it; name the screen id/title and
    what to reuse. Do not redesign it.
-2. derive — no new screen; docs/design.md and existing components cover it;
-   name the tokens/components to follow.
-3. new_screen — no screen covers it. Give the screen title and a locked prompt
+2. new_screen — no screen covers it. Give the screen title and a locked prompt
    that can be generated in Stitch. The developer must adopt it before writing UI.
-4. not_applicable — no UI surface.
+3. not_applicable — no UI surface.
 
 Answer as JSON only:
-{{"decision":"existing_screen|derive|new_screen|not_applicable",
+{{"decision":"existing_screen|new_screen|not_applicable",
   "screen":{{"id":"...","title":"..."}},
   "reason":"one short paragraph",
   "actions":["what the developer must do"],
@@ -193,8 +192,6 @@ def line(project: Path, task: dict) -> str:
     d = st.get("decision")
     if d == "existing_screen":
         return f'design: use {st.get("screen", {}).get("title") or "the existing screen"}'
-    if d == "derive":
-        return "design: derive from docs/design.md"
     if d == "new_screen":
         return f'design: new screen required — {st.get("screen", {}).get("title") or "not named"}'
     return f"design: {d}"

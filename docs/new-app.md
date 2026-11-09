@@ -11,14 +11,15 @@ When building and shipping a brand-new app MVP in one go, the agent MUST execute
    - Perform competitive recon and write `docs/COMPETITION_RESEARCH.md` (minimum 5 competitors with pricing, weaknesses, and differentiation).
 2. **Initial UI Design & Stitch MCP:**
    - Initial UI is designed via **Stitch MCP** (`generate_screen_from_text` or `create_design_system_from_design_md`), NEVER invented blindly.
-   - Design tokens, typography, and color palette written into `docs/design.md`.
+   - Every screen exported into `docs/stitch/screens/<id>/` (index.html +
+     screen.png). Those exports are the design spec; there is no docs/design.md.
 3. **Single Source of Truth Plan (the goal tree, not a file):**
    - The plan is the tree in `.pipeline/{profile,state}.json`: vision → goals → milestones → the queue. Create it with `devteam vision` + the planner, never by hand-writing a markdown plan — `docs/plan.md` was a second copy that drifted and is retired.
    - Run `devteam adapt <project>` to sync the tree, and `devteam publish <project>` to put its one published page (`docs/goals.html`, served by GitHub Pages) on `main`.
 4. **Code Implementation:**
    - 100% native platform code (Compose / Kotlin).
    - Real offline persistence, real domain logic (no mocks, no fake static data).
-   - All screens adhere to `docs/design.md` tokens.
+   - All screens are rendered against their Stitch export, not built from tokens.
 6. **Services & Telemetry:**
    - Firebase: Project created, SHA-1 and SHA-256 registered, `google-services.json` committed.
    - GA4: Property and Data Stream created, linked to app package.

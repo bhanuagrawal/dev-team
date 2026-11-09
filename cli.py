@@ -2361,7 +2361,15 @@ def cmd_market(args: argparse.Namespace) -> int:
 
 
 def cmd_design(args: argparse.Namespace) -> int:
-    """Synthesize or enforce docs/design.md style law for an app."""
+    """RETIRED (owner directive 2026-11-09): docs/design.md is not a design source.
+
+    The Stitch project and its exported screens are the only visual authority.
+    Kept as a named function so an old script fails with a sentence, not a
+    traceback.
+    """
+    print("`devteam design` is retired: there is no docs/design.md. The Stitch "
+          "project + .pipeline/stitch/screens/<id>/ are the design source.")
+    return 0
     project = resolve_project(args.project)
     log = RunLog(project, "design-" + today())
     from team import design
@@ -4443,11 +4451,11 @@ def main() -> None:
                     help="collect signals and write the planner prompt instead of calling a model")
     lp.add_argument("--focus", help="scoped review request for this cycle's planner")
     lp.set_defaults(fn=cmd_loop)
-    des = sub.add_parser("design", help="synthesize or enforce docs/design.md style law for an app")
-    des.add_argument("project")
-    des.add_argument("--topic", help="focus topic or aesthetic thesis (defaults to app vision)")
-    des.add_argument("--force", action="store_true", help="overwrite existing docs/design.md with fresh synthesis")
-    des.set_defaults(fn=cmd_design)
+    se = sub.add_parser("stitch-export",
+                        help="download every Stitch screen (HTML + screenshot) into docs/stitch — the design spec")
+    se.add_argument("project")
+    se.add_argument("--no-commit", action="store_true")
+    se.set_defaults(fn=cmd_stitch_export)
     dc = sub.add_parser("design-consult",
                         help="ask the designer for one task; the answer is cached against the current Stitch state")
     dc.add_argument("project")
@@ -4944,6 +4952,41 @@ def main() -> None:
 
     args = ap.parse_args()
     sys.exit(args.fn(args) or 0)
+
+
+def cmd_stitch_export(args: argparse.Namespace) -> int:
+    """Export every Stitch screen (HTML + screenshot) into the project.
+
+    There is no docs/design.md (owner directive 2026-11-09): the Stitch screen is
+    the design spec, so it must exist in the repo where a worktree, a diff and a
+    render comparison can all reach it.
+    """
+    project = resolve_project(args.project)
+    profile = profile_of(project)
+    pid = ((profile.get("design") or {}).get("stitch_project_id") or "").split("/")[-1]
+    if not pid:
+        raise SystemExit("no design.stitch_project_id in .pipeline/profile.json")
+    from team import stitch_mcp
+    out = project / "docs" / "stitch"
+    print(f"exporting Stitch project {pid} → {out}")
+    manifest = stitch_mcp.export_screens(pid, out / "screens", log=print)
+    (out / "manifest.json").write_text(json.dumps(manifest, indent=2, ensure_ascii=False) + "\n")
+    # Keep the pipeline's legacy copy in step; docs/stitch is the tracked source.
+    (pipeline_dir(project) / "stitch_manifest.json").write_text(
+        json.dumps(manifest, indent=2, ensure_ascii=False) + "\n")
+    print(f"manifest: {out / 'manifest.json'} ({len(manifest['canonical_screens'])} screen(s))")
+    if not args.no_commit:
+        import subprocess as _sp
+        _sp.run(["git", "add", "docs/stitch", ".pipeline/stitch_manifest.json"], cwd=project)
+        r = _sp.run(["git", "commit", "-m",
+                     "design(stitch): export the screen set as the design spec",
+                     "--", "docs/stitch", ".pipeline/stitch_manifest.json"],
+                    cwd=project, capture_output=True, text=True)
+        if r.returncode == 0:
+            print("committed: docs/stitch + manifest (push it before a release)")
+        else:
+            print("nothing to commit (or commit refused): " + (r.stderr or "").strip()[:160])
+    return 0
 
 
 if __name__ == "__main__":
