@@ -405,10 +405,8 @@ def _whatsnew_text(task: dict, max_chars: int = WHATS_NEW_MAX_CHARS) -> str:
         text = explicit if explicit.endswith("\n") else explicit + "\n"
     else:
         label = _short_label((task.get("surface", {}) or {}).get("label"))
-        raw_label = (task.get("surface", {}) or {}).get("label")
         ttype = task.get("type", "motion")
-        if (_is_internal_label(label) or _is_internal_copy(label)
-                or label_was_truncated(raw_label)):
+        if _generic_note_reason(task):
             # An id — or a sentence about declared screens, scenes and assertions,
             # or a label cut to a fragment — is not a release note: say what
             # actually changed for the user instead of printing the pipeline's
@@ -432,6 +430,32 @@ def _normalize_task(task) -> dict:
     if isinstance(task, str):
         return {"type": "motion", "surface": {"label": task}}
     return task if isinstance(task, dict) else {}
+
+
+def _generic_note_reason(task) -> str | None:
+    """Why this task's DERIVED note falls back to the generic under-the-hood copy.
+
+    None when the note can be derived from the label (or the spec carries an
+    explicit `whatsnew`). Shared by `_whatsnew_text` (which ships the fallback)
+    and `write_whatsnew` (which must SAY it did), because on 2026-11-10 those two
+    disagreed: a label that read "stop rendering a Drag button beside Preview"
+    tripped the engineering-vocabulary filter, the release shipped "Under-the-hood
+    reliability and performance improvements" for a release that visibly changed a
+    screen, and the run log only printed a character count — so nobody knew the
+    note said nothing until the build was already on the internal track.
+    """
+    task = _normalize_task(task)
+    if _explicit_whatsnew(task):
+        return None
+    surface = task.get("surface", {}) or {}
+    label = _short_label(surface.get("label"))
+    if _is_internal_label(label):
+        return "the task label is a pipeline id, not store copy"
+    if _is_internal_copy(label):
+        return "the task label uses engineering words"
+    if label_was_truncated(surface.get("label")):
+        return "the task label would ship as a truncated fragment"
+    return None
 
 
 def _explicit_whatsnew(task) -> str:
@@ -570,10 +594,12 @@ def write_whatsnew(worktree: Path, task, log: RunLog | None = None) -> str | Non
             f"note — writing the release's own copy")
     cap = whatsnew_max_chars(profile)
     text = _whatsnew_text(task, cap)
-    if log and not explicit and _is_internal_label(
-            _short_label((task.get("surface", {}) or {}).get("label"))):
-        log("whatsnew: task label is an internal id — shipping the generic "
-            "under-the-hood note; add a user-facing `whatsnew` to the task spec")
+    if log:
+        reason = _generic_note_reason(task)
+        if reason:
+            log(f"whatsnew: {reason} — shipping the GENERIC under-the-hood note, "
+                "which tells a user nothing; put the user-facing line in the task "
+                "spec's (or queue entry's) `whatsnew`")
     if log:
         raw = _whatsnew_text(task, 10 ** 9)
         if len(raw) > cap:
