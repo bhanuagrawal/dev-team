@@ -80,6 +80,16 @@ files modified in the checkout with no commit behind them. A store upload must
 describe a commit: `store-publish` refuses a dirty asset tree rather than putting
 frames on Play that exist in no revision.
 
+**Generated artefacts are deliverables, and a batch of work is not one release.**
+A Stitch screen export (`docs/stitch/**`), a regenerated store asset, or a report
+page is committed in the same turn it is produced — an ignored path in the commit
+command is a failed commit, not a finished one; read back `git log` on the remote.
+When a run builds a set of screens on one branch and deliberately does **not**
+release it yet, every finished screen is still committed and pushed to
+`dt/<task-id>`, and the report names that ref and its commit. "It is on the
+branch, not on `main`" is a complete answer only when the branch is at origin and
+the report says so; an unreleased branch is not an uncommitted one.
+
 **Cross-repo changes land in dependency order.** A change that touches both this
 repo and a project: (1) commit and push the team-general fix here, (2) regenerate
 the project's CI from the template (`devteam ci <project> --write`), (3) release

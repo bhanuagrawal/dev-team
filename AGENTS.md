@@ -22,7 +22,7 @@ the sequence yourself — there is no route table to look for. `devteam admit` i
 the only way a request becomes work; if it flags, the owner (or you, for a
 missing kind/milestone) answers before anything executes.
 
-## The four laws
+## The five laws
 
 1. **Never edit project code on `main`.** Every task runs in
    `.pipeline/worktrees/<task-id>` on branch `dt/<task-id>`, cut from
@@ -39,6 +39,23 @@ missing kind/milestone) answers before anything executes.
    pushed ref before your turn ends. "Clean tree" is not the test — **"does this
    exist anywhere but this disk"** is. Work you did not write (the owner's WIP) is
    reported, never committed on their behalf.
+5. **Commit every artefact, and say which ref holds it.** Code is not the only
+   thing a run produces; the rent is paid per artefact, in the same turn:
+   - a finished task on a worktree branch → commit **and push** `dt/<task-id>`
+     even when it is not released. *Unreleased is not uncommitted.* The report
+     names the ref (`main` or `dt/<task-id>`) and its commit: "done" on a branch
+     nobody pushed is a rumour.
+   - a generated design spec, screen export, store asset, listing copy or report
+     page → commit it in the project (`docs/stitch/**`, `distribution/**`,
+     `docs/**`). A generated artefact that exists only on disk is not a
+     deliverable, and an ignored path is not an excuse.
+   - work you are abandoning, or a tree you are about to prune → commit and push
+     it to its branch first; never delete the only copy.
+   - a rule, gate or pipeline change in this repo → commit and push **here** in
+     the same turn.
+   A command that writes into a project is not finished when it prints; it is
+   finished when `git log` on the remote shows the commit. A dirty worktree, or a
+   branch that is not at origin, is a failed run even when the code is "done".
 
 ## Pages — read the one the command names
 
