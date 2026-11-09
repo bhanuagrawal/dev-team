@@ -3,6 +3,15 @@
 Loaded by: `devteam tools` · `devteam status` · `devteam takeover`.
 Read this when you are about to run work, not when you are choosing it.
 
+**Changed something outside the pipeline?** (a file in the checkout, a commit
+pushed by hand, a design doc, a screen) — run `devteam replan <project>`. It
+detects what moved, **adopts it (never reverts the owner's work)**, re-shapes the
+project and re-derives the queue, then stamps the delivery sha the new plan is
+built from. `devteam status` prints `plan base:`; when main has moved past it,
+that line names `replan` — a plan is never followed against a main it was not
+built from. Nothing is deleted: every adoption is logged in `state.adoptions` and
+every queue verdict in `state.queue_events`.
+
 ## The one loop (any agent, any app)
 
 ```bash

@@ -67,6 +67,10 @@ _RAW: list[tuple[str, str, str, str, str, bool]] = [
     # ---- plan -------------------------------------------------------------- #
     ("plan", "plan", "THE PLANNER: reconcile the queue against signal and the tree",
      "state.queue, goal log, .pipeline/research.json", "no vision; flat tree", True),
+    ("replan", "plan", "an OUT-OF-BAND change (the owner edited or pushed by hand): "
+                       "detect → adopt (never revert) → adapt → re-plan",
+     "state.adoptions, state.plan_base_sha, queue, profile shape",
+     "nothing to adopt still re-plans; a planner refusal is reported", True),
     ("research", "plan", "the planner's engine, raw: collectors + one synthesis",
      ".pipeline/research.json", "no synthesis path (still collects)", True),
     ("market", "plan", "Tavily market/competitor research for a thesis or feature",

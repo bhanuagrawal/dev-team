@@ -1872,6 +1872,16 @@ def cmd_status(args: argparse.Namespace) -> None:
     # Where the work is going (deterministic, LLM-free): vision → milestone →
     # queue. A project with no goal tree prints a one-line goal-less notice.
     print(goals.goal_block(profile, state))
+    # Is the plan still built on what main serves? An owner can change the project
+    # outside the pipeline at any time (that is allowed — `devteam replan` adopts
+    # it); what must never happen is a plan silently followed against a main it
+    # was not built from.
+    base = str(state.get("plan_base_sha") or "")
+    if base and ref.get("ref_sha") and not str(ref["ref_sha"]).startswith(base[:12]):
+        print(f"plan base:  {base} — main has moved to {str(ref['ref_sha'])[:12]}; "
+              f"run `devteam replan {profile['name']}` (it adopts, never reverts)")
+    elif base:
+        print(f"plan base:  {base} (the delivery ref the plan was built from)")
     # The plan is reviewed by one agent on every run (step 2). Show when that
     # last happened, so a skipped review is visible instead of silent.
     from team import research as research_mod
@@ -3535,10 +3545,20 @@ def cmd_admit(args: argparse.Namespace) -> int:
     team/admit.py for why the keyword classifier (`devteam route`) was retired.
     """
     project = resolve_project(args.project)
-    from team.core import delivery_notice
+    from team.core import delivery_notice, save_state, state_of
     from team import admit as admit_mod
 
     print(delivery_notice(project))
+    if args.clear:
+        state = state_of(project)
+        removed = len(state.get("admit_log") or [])
+        state["admit_log"] = []
+        save_state(project, state)
+        print(f"admit: cleared {removed} recorded flag(s) — they no longer show in `status`")
+        return 0
+    if not args.query:
+        print("admit: --query is required (the owner's words, verbatim)", file=sys.stderr)
+        return 2
     res = admit_mod.admit(project, args.query, args.kind, args.advances,
                           args.why, args.verdict, dry_run=args.dry_run)
     if args.json:
@@ -3549,6 +3569,19 @@ def cmd_admit(args: argparse.Namespace) -> int:
             print()
             print(res["impact"])
     return 0 if (res.get("ok") or res.get("verdict") == "precheck") else 2
+
+
+def cmd_replan(args: argparse.Namespace) -> int:
+    """OUT-OF-BAND CHANGE → detect, adopt, adapt, re-plan. The plan moves, never the owner."""
+    project = resolve_project(args.project)
+    from team.core import delivery_notice
+    from team import replan as replan_mod
+
+    print(delivery_notice(project))
+    log = RunLog(project, "replan-" + today())
+    res = replan_mod.run(project, log, use_llm=not args.no_llm, apply=not args.dry_run)
+    print(replan_mod.format_result(res, project.name))
+    return 0
 
 
 def cmd_tools(args: argparse.Namespace) -> int:
@@ -4500,7 +4533,7 @@ def main() -> None:
                              "then pin it at the queue head — or flag it and queue "
                              "nothing (nothing is executed without an 'aligned' verdict)")
     rt.add_argument("project")
-    rt.add_argument("--query", required=True, help="the owner's words, verbatim")
+    rt.add_argument("--query", help="the owner's words, verbatim (required unless --clear)")
     rt.add_argument("--kind", choices=sorted(_ADMIT_KINDS),
                     help="what kind of work this is (the agent decides; code validates)")
     rt.add_argument("--advances", default="", help="the milestone id this serves")
@@ -4509,6 +4542,9 @@ def main() -> None:
                     help="the agent's alignment call; omit for the pre-check")
     rt.add_argument("--dry-run", action="store_true",
                     help="run every check, queue nothing")
+    rt.add_argument("--clear", action="store_true",
+                    help="drop the recorded FLAGs (the owner answered or dismissed "
+                         "them) — they would otherwise show in `status` forever")
     rt.add_argument("--json", action="store_true", help="machine-readable result")
     rt.set_defaults(fn=cmd_admit)
     tl = sub.add_parser("tools",
@@ -4518,6 +4554,14 @@ def main() -> None:
     tl.add_argument("--all", action="store_true", help="include host plumbing")
     tl.add_argument("--json", action="store_true", help="machine-readable inventory")
     tl.set_defaults(fn=cmd_tools)
+    rpl = sub.add_parser("replan",
+                         help="an out-of-band change (owner edit, hand push): detect "
+                              "it, ADOPT it (never revert), re-shape the project and "
+                              "re-derive the queue — then stamp what the plan is built on")
+    rpl.add_argument("project")
+    rpl.add_argument("--dry-run", action="store_true", help="report only, write nothing")
+    rpl.add_argument("--no-llm", action="store_true", help="collect and write the planner prompt instead")
+    rpl.set_defaults(fn=cmd_replan)
     sb = sub.add_parser("storefront-build",
                         help="THE storefront asset pass: render, compose the designed frame, composite, gate, publish — in one deterministic order")
     sb.add_argument("project")
