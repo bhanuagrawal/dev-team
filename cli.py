@@ -1209,12 +1209,10 @@ def cmd_release(args: argparse.Namespace) -> int:
         log("release candidate: NOT CALLED YET — nothing recorded; the agent that made "
             f"this change calls `devteam rc {project.name} --version {name} --yes|--no`")
 
-    # UI TESTS ARE PART OF THE CHANGE, and release is the second, unavoidable
-    # answer for an agent that skipped `verify`. Diff-scoped, no Gradle — it
-    # reads the worktree against the same dt-base verify uses. Refuse BEFORE the
-    # bump, so a UI change with no UI test never becomes a tag/CI build. Unit
-    # tests are retired (owner policy 2026-11-10): only UI files owe a test.
-    from team import code_tests
+    # NO TEST GATE AT RELEASE EITHER. Tests are retired (owner policy
+    # 2026-11-10): there is no suite to require in the diff, so this is not a
+    # second answer for anything. What release still refuses on is the ux-flow
+    # audit below — the one gate that proves a person can use the build.
     from team import verify as gates_mod
     _base = ""
     for _ref in ("refs/heads/dt-base", "dt-base^{commit}",
@@ -1223,21 +1221,12 @@ def cmd_release(args: argparse.Namespace) -> int:
                                cwd=worktree, capture_output=True, text=True).stdout.strip()
         if _base:
             break
-    if _base:
-        _ok_tests, _test_msg = code_tests.gate(
-            worktree, gates_mod.changed_files(worktree, _base))
-        if not _ok_tests:
-            log("test gate: BLOCKED — " + _test_msg)
-            print(json.dumps({"delivered": False, "version": name,
-                              "error": "test gate: " + _test_msg, "ci": {}},
-                             indent=2))
-            return 1
 
     # THE UX-FLOW AUDIT IS THE RELEASE AUDIT (owner policy 2026-11-10), and
     # release is the second, unavoidable answer for an agent that skipped
-    # `verify` — the same reason the UI test gate runs here. It reads the
-    # recorded walks, so it is cheap; it refuses BEFORE the bump so an
-    # unwalked or stuck journey never becomes a tag and a CI build. No other
+    # `verify`. It reads the recorded walks, so it is cheap; it refuses BEFORE
+    # the bump so an unwalked or stuck journey never becomes a tag and a CI
+    # build. No other
     # audit gates a release: ux-audit, ux-video, storefront review and design
     # drift are advisory.
     if _base:

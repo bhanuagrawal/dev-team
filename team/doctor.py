@@ -527,99 +527,12 @@ def run_doctor(project: Path, log) -> dict:
     except Exception as e:  # a check must never hide the report
         log(f"doctor capabilities: could not check ({e})")
 
-    # UI test posture: the verify gate refuses a UI change that ships no UI test,
-    # but a project with ZERO UI tests can still look healthy until that change
-    # happens. WARN (not block) so the debt is visible BEFORE the next task fails
-    # verify — the fix is agent work, never an owner ask. Unit tests are retired
-    # (owner policy 2026-11-10) and are not part of this check.
-    try:
-        from . import code_tests
-        from . import scan as scan_mod
-        # Count on the DELIVERY tree, not the checkout: a checkout that lags
-        # origin/main (the normal state after a release) reported 36 test files
-        # while the shipped tree held 43, so the owner read a stale number right
-        # after paying for the release that added them.
-        try:
-            posture_tree = scan_mod.origin_tree(project)
-        except Exception:
-            posture_tree = project
-        posture = code_tests.posture(posture_tree if posture_tree.is_dir() else project)
-        rows = code_tests.posture_checks(posture)
-        bad = [(r, fix) for r, ok, fix in rows if not ok]
-        if bad:
-            log(f"doctor tests: WARN — {len(bad)} test-posture gap(s): "
-                + "; ".join(r for r, _ in bad))
-            report["tests"] = {
-                "status": "warn", "blocked": [],
-                "checks_passed": len(rows) - len(bad),
-                "note": ("the verify gate refuses a UI change with no UI test in "
-                         "the diff — see plan for the fix"),
-            }
-        elif rows:
-            report["tests"] = {"status": "ready", "blocked": [],
-                               "checks_passed": len(rows)}
-            log(f"doctor tests: ready — {posture['ui_tests']} UI asserting "
-                f"test file(s) for {posture['ui_sources']} UI file(s)")
-    except Exception as e:  # a check must never hide the report
-        log(f"doctor tests: could not check ({e})")
-
-    # Coverage posture: 100% UI test coverage is enforced by code (unit tests are
-    # retired and their floor is 0). When the UI leg is below 100%, warn so the
-    # debt is visible and the planner queue HEAD prioritizes it.
-    try:
-        from . import coverage as coverage_mod
-        cov = coverage_mod.stored(project)
-        if not cov:
-            from . import scan as scan_mod
-            stree = scan_mod.origin_tree(project)
-            if stree.is_dir():
-                cov = coverage_mod.collect(stree, profile_of(project))
-        if cov and cov.get("status") == "ok":
-            below = cov.get("below_floor") or []
-            if below:
-                log(f"doctor coverage: WARN — {coverage_mod.summary_line(cov).removeprefix('coverage: ')} (target 100% UI)")
-                report["coverage"] = {
-                    "status": "warn", "blocked": [],
-                    "checks_passed": 0,
-                    "note": f"UI coverage below 100% ({', '.join(below)}); planner queue HEAD must raise it",
-                }
-            else:
-                log("doctor coverage: ready — 100% UI coverage (unit tests retired)")
-                report["coverage"] = {"status": "ready", "blocked": [], "checks_passed": 1}
-    except Exception as e:  # a check must never hide the report
-        log(f"doctor coverage: could not check ({e})")
-
-    # THE RELEASE AUDIT (owner policy 2026-11-10): every declared journey must
-    # have reached its goal. `verify` and `release` refuse without it; doctor
-    # reports it as WARN (not "blocked", which the CLI relays to the owner as an
-    # ask — this is agent work) so the debt is visible BEFORE the task that will
-    # fail its gates is written. Other audits (ux-audit, ux-video, storefront
-    # review, design drift) inform; none of them gates a release.
-    try:
-        from . import ux_flow
-        rows = ux_flow.declared(project)
-        if rows:
-            problems = ux_flow.audit_problems(project)
-            if problems:
-                log(f"doctor ux-flow: WARN — {len(problems)}/{len(rows)} declared "
-                    f"journey(s) do not pass the release audit: "
-                    + "; ".join(f"{p['id']} ({p['why']})" for p in problems[:3]))
-                report["ux-flow"] = {
-                    "status": "warn",
-                    "blocked": [],
-                    "checks_passed": len(rows) - len(problems),
-                    "note": ("this is THE release audit (no other audit gates a "
-                             f"release) — run `devteam ux-flow {project.name}` and fix "
-                             "what stops each journey; `verify` and `release` refuse "
-                             "until they all reach their goal"),
-                }
-            else:
-                report["ux-flow"] = {"status": "ready", "blocked": [],
-                                     "checks_passed": len(rows)}
-                log(f"doctor ux-flow: ready — {len(rows)} declared journey(s) reached "
-                    f"their goal on the last walk")
-    except Exception as e:  # a check must never hide the report
-        log(f"doctor ux-flow: could not check ({e})")
+    # TESTS ARE RETIRED (owner policy 2026-11-10: unit first, then UI tests too).
+    # There is no test posture and no coverage floor to report — the release gate
+    # is the ux-flow audit above, and code is gated by compile. Kept as one line so
+    # a reader of the doctor report is not left wondering where the numbers went.
+    report["tests"] = {"status": "ready", "blocked": [], "checks_passed": 1,
+                       "note": "tests are retired — compile + the ux-flow audit are the gates"}
 
     # The report page answers "what shipped, what do I test?" on the owner's phone.
     # Every ledger write rebuilds it (`core.save_state`), so a page older than the

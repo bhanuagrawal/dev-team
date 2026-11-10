@@ -272,31 +272,21 @@ def _check_targets_are_paths(task_paths: list[str]) -> None:
 
 
 def _test_contract(project: Path) -> str:
-    """The test requirement the verify gate enforces, with real test paths.
+    """No tests. Owner policy 2026-11-10 retired the suite, unit and UI alike.
 
-    Appended to every developer prompt instead of a new `{placeholder}`: projects
-    may override prompts/*.md, and a fresh placeholder would KeyError inside an
-    owner's own template. The gate itself is `team/code_tests.py`; this only
-    tells the developer where the gate expects the files.
+    Kept as a function (and called from the same place) so an owner's custom
+    `prompts/*.md` template that expects the placeholder cannot break: it now
+    says plainly that the change owes no test and that none will be run.
     """
-    from . import code_tests
-    unit, ui = code_tests.suggest_test_dirs(project)
-    ui_txt = ", ".join(ui) or "the project's UI-test source set"
-    return f"""
-
-UI TESTS ARE PART OF THIS DIFF — `devteam verify` REFUSES the change without them.
-Unit tests are RETIRED: do not add one, and do not treat a logic-only change as
-owing a test.
-  - A UI file (a @Composable, Activity/Fragment/Dialog/View, or layout XML) you
-    add or change MUST be named by a UI test you also add or change in this same
-    task. The gate reads the diff, not your summary.
-  - The UI test must use createComposeRule/createAndroidComposeRule (Robolectric
-    or on-device) or Espresso/UiAutomator, WITH at least one assertion.
-  - A logic-only production file (ViewModel, repository, use case) needs no test
-    file: it is exercised through the screens that use it.
-  - A screenshot/render with no assertion is NOT a test and does not count.
-  - Test files under {ui_txt} (UI) are always the right place for the tests this
-    change owes. Never weaken an existing test to make the gate pass.
+    return """
+NO TESTS. The team retired the test suite (owner policy 2026-11-10): do not add a
+unit test, do not add a UI/Compose test, and do not create a test file to satisfy
+anything. `devteam verify` neither requires nor runs one.
+  - A screen is proven by the ux-flow audit: a vision model walks the journey on a
+    device. A change that compiles but cannot be used is caught there, not here.
+  - Code is proven by the compile gate.
+  - Do not weaken or delete an existing test as part of a feature change either —
+    the suite is being removed once, deliberately, not piecemeal by feature work.
 """
 
 

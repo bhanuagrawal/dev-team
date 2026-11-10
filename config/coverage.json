@@ -1,5 +1,5 @@
 {
-  "_comment": "Planner coverage floors, in percent. OWNER POLICY 2026-11-10: unit tests are retired — the unit floor is 0 (measured for information only, it can never block). 100% UI test coverage is enforced by code. A project may override its own in profile['coverage'] {unit_floor, ui_floor} — that is a project fact and belongs in the project. Code-enforced in team/research.py (_validate): when the UI leg is below 100%, the plan's queue HEAD must be the executable entry that raises UI coverage (its 'target' names src/androidTest/** or src/test/** and friends), unless a delivery fire (red CI or a store rejection) outranks it.",
+  "_comment": "OWNER POLICY 2026-11-10: tests are RETIRED — unit first, then UI tests too ('get rid of them completely'). Both floors are 0 and can never block: the planner may still MEASURE what a test suite would have covered, and the number is informational only. Nothing in the team requires, writes or runs a test suite; a screen is proven by the ux-flow audit (a vision model walking the journey on a device) and code by the compile gate. A project may override profile['coverage'] {unit_floor, ui_floor}, but raising a floor re-introduces a gate the owner has removed.",
   "unit_floor": 0,
-  "ui_floor": 100
+  "ui_floor": 0
 }

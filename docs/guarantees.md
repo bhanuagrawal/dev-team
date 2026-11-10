@@ -24,21 +24,18 @@ refuses.
    `devteam design-consult … --record`, and a `new_screen` answer must have its
    snapshot exported in the same change. Building a screen from tokens alone is
    what the gate refuses.
-   `verify` also runs: team-generic, localization, brand, the diff-scoped **UI test
-   gate** (a changed UI file must be named by a Compose/Espresso test with an
-   assertion in the same diff — a screenshot render does not count; a logic-only
-   file owes no test), release-note freshness (the note may not repeat the last
-   shipped one), compile, UI/integration tests (off-device). **Unit tests are
-   retired** (owner policy 2026-11-10): none are required and none are run as a
-   gate. `release` re-runs the UI test gate before the version bump, so skipping
-   `verify` does not skip it. **100% UI test coverage is enforced by code**:
-   `config/coverage.json` and `team/coverage.py` set the UI floor at 100% (the
-   unit leg is measured for information only, floor 0); when UI coverage is below
-   100%, the planner (`team/research.py`) is code-gated to make raising coverage
-   the **topmost priority** (`queue[0]`), rejecting any plan whose head does not
-   target UI tests. Version/signing/SDK changes and new
-   libraries are the reviewer's diff to catch — say so in the handover when a task
-   touches them.
+   **TESTS ARE RETIRED — ALL OF THEM** (owner policy 2026-11-10, restated as
+   "get rid of them completely"). There is no unit-test gate, no UI-test gate, no
+   test run in `verify` and no coverage floor: `config/coverage.json` carries
+   0/0 and a raised floor would re-introduce a gate the owner removed. A change
+   is proven by (a) the **compile gate**, (b) the **ux-flow audit** for a screen,
+   and (c) the store/design gates for what a reader is shown. The old diff-scoped
+   UI-test requirement is gone with the suites themselves; `team/code_tests.py`
+   now only classifies a diff as UI or not, which the design gate needs.
+   `verify` also runs: team-generic, localization, brand, release-note freshness
+   (the note may not repeat the last shipped one), the design gate, and compile.
+   Version/signing/SDK changes and new libraries are the reviewer's diff to
+   catch — say so in the handover when a task touches them.
 9. **Ask the owner only what no agent can decide** (freeze-worthy incidents,
    discard-vs-keep on their WIP, direction). Never ask about promotion — the
    owner triggers it with their own words; the agent never raises it. Whether an

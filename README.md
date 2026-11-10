@@ -184,10 +184,10 @@ broken path.
 
 The orchestrator develops the task inside `WORKTREE_PATH` directly (universal default
 across Claude Code, OpenCode, Antigravity, Cursor) adhering to the developer prompt,
-conventions, and target allow-list. Developers write automated UI tests & hierarchy assertions
-(ensuring no sibling view bounds overlap and all text container dimensions fully enclose their
-measured text bounds). In multi-agent environments, the orchestrator may optionally spawn a
-native subagent or run headless (`cli.py run-headless`).
+conventions, and target allow-list. Developers write no tests: the suite is retired
+(owner policy 2026-11-10), so a change carries the app code and nothing else. In multi-agent
+environments the orchestrator may optionally spawn a native subagent or run headless
+(`cli.py run-headless`).
 
 ### Step 7 — trust nothing: gates (code)
 
@@ -199,13 +199,13 @@ agent's report:
 - **localization** — every newly referenced string resource exists in every
   locale the project ships;
 - **brand** — an icon change carries its recorded provenance;
-- **UI tests are part of the change** — a changed UI file must be named by a
-  Compose/Espresso test with an assertion (a screenshot render with no assertion
-  does not count); a logic-only change owes no test, because unit tests are
-  retired. `release` re-runs this gate before the version bump;
+- **no tests** — the suite is retired (owner policy 2026-11-10: unit first, then
+  UI too). No test file is required, none is run, and there is no coverage floor.
+  A screen is proven by the ux-flow audit, code by the compile gate;
+- **design** — a UI diff needs a recorded design answer (find a Stitch screen or
+  get one created);
 - **store note** — the release note may not repeat the last shipped one;
-- **compile**, then **UI/integration tests** off-device (a single retry, for the
-  one known flaky suite). Unit tests are neither required nor run as a gate;
+- **compile**;
 - **emulator hygiene** (warn-only) — see *Safety rails*.
 
 FAIL → The orchestrator fixes the failure in the worktree (or re-prompts the subagent with the failure output, max 2 attempts total), then the run records `failed` and alarms.

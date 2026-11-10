@@ -741,19 +741,13 @@ def verify_all(project: Path, worktree: Path, base: str, log, gradle: bool = Tru
         failures.append(msg)
         return False, failures
 
-    # UI TESTS ARE PART OF THE DIFF (owner directive 2026-11-05; unit tests
-    # retired 2026-11-10). A run shipped a signature field whose only exercise was
-    # a screenshot render; compile + `testDebugUnitTest` were green because nothing
-    # asserted anything. The gate reads the diff: a changed UI file must be named by
-    # a Compose/Espresso test with an assertion in the SAME diff. A logic-only file
-    # needs nothing; unit tests are not required. Cheap (file reads), so it runs
-    # before Gradle and names the exact file the developer must add.
-    from . import code_tests
-    ok, msg = code_tests.gate(worktree, files)
-    log("ui tests: ok — " + msg if ok else "ui tests: FAIL — " + msg)
-    if not ok:
-        failures.append(msg)
-        return False, failures
+    # TESTS ARE RETIRED (owner policy 2026-11-10, restated for UI tests: "get rid
+    # of them completely"). The team no longer writes, requires or runs a test
+    # suite: a change is proven by the compile gate and, for a screen, by the
+    # ux-flow audit — a vision model walking the journey on a device. `verify`
+    # therefore has no test gate and no coverage floor to check. What the gate
+    # still reads from test-looking files is only the diff CLASSIFIER used by the
+    # design gate (`code_tests.is_ui_source`), which is not a test requirement.
 
     # Store note: the text a user sees on the listing is a deliverable too, and
     # a repeated one is a defect the code can detect exactly. Runs before the
@@ -782,7 +776,9 @@ def verify_all(project: Path, worktree: Path, base: str, log, gradle: bool = Tru
         return False, failures
 
     if not gradle:
-        return True, []
+        # --skip-gradle still answers the file-level gates it just ran: a refusal
+        # collected above is a refusal, not "nothing to report".
+        return (not failures), failures
 
     # Compile gate
     ok, msg = gradle_task(worktree, profile["verify"]["compile"], 900, log)
@@ -790,15 +786,11 @@ def verify_all(project: Path, worktree: Path, base: str, log, gradle: bool = Tru
         failures.append(msg)
         return False, failures
 
-    # UI/INTEGRATION TEST GATE (owner policy 2026-11-10): unit tests are retired.
-    # The one test pass is the project's UI suites, off-device — see
-    # integration_check. It never runs a unit-only class: when the project's legacy
-    # JVM test task is the harness, the include list is filtered to the classes the
-    # diff gate above counts as UI tests.
-    ok, msg = integration_check(worktree, profile, log)
-    if not ok:
-        failures.append(msg)
-        return False, failures
+    # NO TEST PASS. Tests are retired (owner policy 2026-11-10): the suite is gone
+    # from the projects and from this gate. A regression is caught by the compile
+    # gate, by the store/design gates, or by the ux-flow audit walking the real
+    # journey. `integration_check` stays on disk for a project that still wants a
+    # test run, but nothing here calls it.
     # A GATE THAT APPENDS WITHOUT RETURNING STILL FAILS THE RUN. The flow gate
     # collects instead of returning early so compile/tests still produce their
     # evidence in the same pass — but that meant `verify` printed "VERIFY: PASS"
