@@ -46,7 +46,26 @@ def refs(path: Path) -> list[str]:
         text = path.read_text(errors="ignore")
     except OSError:
         return []
-    return sorted(set(re.findall(r"R\.string\.([a-z0-9_]+)", text)))
+    return sorted(set(re.findall(r"R\.string\.([a-z0-9_]+)", strip_comments(text))))
+
+
+_LINE_COMMENT = re.compile(r"//[^\n]*")
+_BLOCK_COMMENT = re.compile(r"/\*.*?\*/", re.S)
+
+
+def strip_comments(text: str) -> str:
+    """A resource name is a REFERENCE only in code; in a comment it is prose.
+
+    A doc comment that explains which keys a screen owns (`the pause_phase_*`
+    resources, or an old `// R.string.legacy_title`) is a note to the next
+    reader, not a string the app must ship. Scanning it as a reference made the
+    gate red on a file whose real references were all defined, which reads like
+    a missing translation and sends the agent hunting in the wrong file. String
+    literals are left alone: a `//` inside one only shortens the scan, never the
+    reference before it.
+    """
+    return _LINE_COMMENT.sub("", _BLOCK_COMMENT.sub("", text))
+
 
 
 def defined_in(f: Path) -> set[str]:
