@@ -1337,9 +1337,15 @@ def cmd_record(args: argparse.Namespace) -> None:
         # previous version, and the next plan review re-queues shipped work
         # (seen 2026-11-01: v1.0.24 wrote no rows because v1.0.23 had already
         # shipped the same ui/screens + feature/summary + commonTest targets).
-        already = {(s.get("target"), str(s.get("version") or ""))
-                   for s in state.get("shipped", [])}
         version_key = str(args.version or "?")
+        # Dedupe is per (target, version) so a concurrent run cannot write twice.
+        # With no version there is nothing to dedupe ON: two different doc tasks
+        # that share a path collapsed into one row, and the second delivery
+        # vanished from the ledger (seen 2026-11-10: the design copy-fix task
+        # wrote no rows because the redesign had used the same "?" version).
+        already = ({(s.get("target"), str(s.get("version") or ""))
+                    for s in state.get("shipped", [])}
+                   if version_key not in ("", "?") else set())
         # ONE run may carry several queue entries (pick clubs a thin head with
         # same-milestone followers). Every delivered entry must land in the
         # ledger under ITS OWN label, or `already_delivered` cannot recognise it
