@@ -102,6 +102,25 @@ def _rpc(method: str, params: dict[str, Any] | None = None,
     return data.get("result") or {}
 
 
+def ping(timeout: int = 8) -> tuple[bool, str]:
+    """Is the Stitch MCP answering right now?
+
+    The tools the agent sees come from the host's MCP connection, not from this
+    module: when that connection blips (ECONNRESET, a 5xx, a restart), the
+    session's tool catalog silently loses `stitch.*` and every design task looks
+    impossible. This check answers the only question that matters - can we reach
+    the endpoint with the key we hold - so a dead MCP is REPORTED, not
+    discovered halfway through a task.
+    """
+    url = os.environ.get("STITCH_MCP_URL") or DEFAULT_URL
+    try:
+        res = _rpc("tools/list", {}, timeout=timeout)
+        n = len(res.get("tools") or [])
+        return (n > 0, f"{n} tool(s) at {url}")
+    except Exception as exc:  # noqa: BLE001 - a probe must never raise
+        return (False, f"{url}: {str(exc)[:140]}")
+
+
 def call(tool: str, arguments: dict[str, Any], timeout: int = 300) -> dict[str, Any]:
     """Invoke one Stitch tool and return its structured payload.
 
@@ -146,6 +165,19 @@ def create_project(title: str) -> str:
 def get_project(project_id: str) -> dict[str, Any]:
     pid = _clean_project_id(project_id)
     return call("get_project", {"name": f"projects/{pid}"})
+
+
+def ping(timeout: int = 10) -> int:
+    """How many tools the Stitch MCP answers with, right now.
+
+    The host loads MCP tools once per catalog rebuild; a remote server that is
+    slow or restarting silently loses its tools for that turn (seen 2026-11-10:
+    stitch vanished mid-run after ECONNRESET). This client talks to the same
+    endpoint over plain HTTP and is the path scripted work should use, so a
+    dropped catalog never blocks a design task.
+    """
+    r = _rpc("tools/list", {}, timeout=timeout)
+    return len(r.get("tools") or [])
 
 
 def list_screens(project_id: str) -> list[dict[str, Any]]:
@@ -391,18 +423,27 @@ def download(screen: dict[str, Any]) -> tuple[bytes, str]:
     raise StitchError("Stitch returned neither html nor image bytes")
 
 
-def export_one_screen(screen: dict[str, Any], out_dir: Path, log=None) -> dict[str, Any] | None:
-    """Download one screen's HTML and screenshot into <out_dir>/<id>/."""
+def export_one_screen(screen: dict[str, Any], out_dir: Path, log=None,
+                      *, logical_id: str | None = None) -> dict[str, Any] | None:
+    """Download one screen into <out_dir>/<logical_id>/.
+
+    `edit_screens` FORKS: a tweak returns a new screen id and the old one stays in
+    the project. If the export took the new id as its directory, every tweak would
+    add a second copy of the same surface to the repo. `logical_id` keeps the
+    stable name (the manifest entry) and the live Stitch id is recorded beside it.
+    """
     log = log or (lambda *_: None)
     sid = str(screen.get("name") or "").split("/")[-1]
     title = str(screen.get("title") or sid)
     if not sid:
         return None
+    dir_id = str(logical_id or sid)
     out_dir = Path(out_dir)
-    screen_dir = out_dir / sid
+    screen_dir = out_dir / dir_id
     screen_dir.mkdir(parents=True, exist_ok=True)
     entry: dict[str, Any] = {
-        "id": sid,
+        "id": dir_id,
+        "stitch_id": sid,
         "title": title,
         "surface": screen.get("surface") or "",
     }
@@ -415,7 +456,7 @@ def export_one_screen(screen: dict[str, Any], out_dir: Path, log=None) -> dict[s
             text = html.get("html") or ""
             if text:
                 (screen_dir / "index.html").write_text(text)
-                entry["html"] = f"screens/{sid}/index.html"
+                entry["html"] = f"screens/{dir_id}/index.html"
         except StitchError as exc:
             log(f"  ! {title}: html export failed — {exc}")
     shot_name = str((screen.get("screenshot") or {}).get("name") or "")
@@ -425,7 +466,7 @@ def export_one_screen(screen: dict[str, Any], out_dir: Path, log=None) -> dict[s
             b64 = shot.get("image") or ""
             if b64:
                 (screen_dir / "screen.png").write_bytes(base64.b64decode(b64))
-                entry["screenshot"] = f"screens/{sid}/screen.png"
+                entry["screenshot"] = f"screens/{dir_id}/screen.png"
         except StitchError as exc:
             log(f"  ! {title}: screenshot export failed — {exc}")
     log(f"  ✓ {title} → {screen_dir}")

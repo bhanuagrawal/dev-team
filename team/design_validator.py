@@ -227,6 +227,77 @@ def audit_design_drift(
     }
 
 
+# A tweak is asked for in words, and Stitch complies about 90% of the time: one
+# instruction in ten is silently dropped, and nothing in a "preservation" score
+# notices, because the layout is intact. These two checks close that gap: the
+# change actually landed, and nothing the product forbids came back with it.
+_BANNED_RULES: list[tuple[str, str]] = [
+    (r"\bescrow\b", "escrow does not exist - deposits settle in person"),
+    (r"\bautomatically refunded\b", "no automatic refund exists"),
+    (r"\bsplit fee\b", "no fees exist"),
+    (r"\bzero deposits\b", "deposits exist (200/400/500)"),
+    (r"\bswap pass\b", "invented artefact"),
+    (r"\b(?:tier 1|sovereign)\b", "invented tier"),
+    (r"\bcalibrated monthly\b", "invented mechanism"),
+    (r"\bvery good\b", "condition is Brand New / Like New / Well-Loved"),
+    (r"\bgood condition\b", "condition is Brand New / Like New / Well-Loved"),
+    (r"\bmi\b", "miles - bands in km only"),
+]
+
+_DECIMAL_KM = re.compile(r"\b(\d+\.\d+)\s?km\b", re.I)
+
+
+def banned_present(text: str) -> list[str]:
+    """Product-forbidden copy found in a rendered screen, as readable reasons."""
+    low = re.sub(r"\s+", " ", text or "").lower()
+    hits = [why for pat, why in _BANNED_RULES if re.search(pat, low)]
+    # The only decimal band the product allows is 1.5 km; anything else is an
+    # exact distance wearing a unit.
+    for value in _DECIMAL_KM.findall(text or ""):
+        if value != "1.5":
+            hits.append(f"decimal distance {value} km - use a band")
+    return sorted(set(hits))
+
+
+def assert_change_applied(baseline_html: str, tweaked_html: str,
+                          change_request: str) -> list[str]:
+    """Instructions the tweak was asked for and did not carry out.
+
+    Reads the request the way it is written: a quoted phrase near delete/remove/
+    drop/replace must be GONE; a quoted phrase named as a replacement must be
+    PRESENT. Returns the survivors, so the caller can re-issue just those.
+    """
+    def _text(html: str) -> str:
+        import html as _html
+        t = re.sub(r"<(script|style)[^>]*>.*?</\1>", " ", html or "", flags=re.S | re.I)
+        t = re.sub(r"<[^>]+>", " ", t)
+        return re.sub(r"\s+", " ", _html.unescape(t)).lower()
+
+    after = _text(tweaked_html)
+    req = change_request or ""
+    req_low = req.lower()
+    survivors: list[str] = []
+    for phrase in re.findall(r"[\"'“”‘’]([^\"'“”‘’]{3,80})[\"'“”‘’]", req):
+        needle = re.sub(r"\s+", " ", phrase).strip().lower()
+        if not needle:
+            continue
+        # Is this phrase being removed, or being introduced?
+        idx = req_low.find(needle)
+        before = req_low[max(0, idx - 120): idx]
+        immediate = before[-16:]
+        # "replace A WITH B" introduces B; "delete A" removes A.
+        introduced = any(op in immediate for op in ("with", "to ", "into", "as "))
+        removing = (not introduced) and any(
+            op in before for op in ("delete", "remove", "drop", "hide"))
+        if removing:
+            if needle in after:
+                survivors.append(f"still present: \"{phrase.strip()}\"")
+        else:
+            if needle not in after:
+                survivors.append(f"never landed: \"{phrase.strip()}\"")
+    return survivors
+
+
 def audit_tweak_drift(
     project: Path,
     baseline_html: str,
@@ -317,6 +388,11 @@ def audit_tweak_drift(
         change_request, tweaked_html, tokens, baseline_text=baseline_html
     )
 
+    # Two checks a preservation score cannot make: did the instruction land, and
+    # did anything forbidden come back with the new render.
+    unapplied_changes = assert_change_applied(baseline_html, tweaked_html, change_request)
+    banned_present_reasons = banned_present(tweaked_text)
+
     total_base = len(kept_controls) + len(dropped_controls) + len(kept_headings) + len(dropped_headings)
     kept_base = len(kept_controls) + len(kept_headings)
     preservation_score = 45 if total_base == 0 else int((kept_base / total_base) * 45)
@@ -327,7 +403,11 @@ def audit_tweak_drift(
     overall_score = preservation_score + realization_score + hallucination_score + craft_score
 
     dropped_ratio = (len(dropped_controls) + len(dropped_headings)) / total_base if total_base else 0.0
-    if dropped_ratio > 0.35 or overall_score < 65:
+    if banned_present_reasons or unapplied_changes:
+        verdict = "FAIL"
+        status = ("FORBIDDEN COPY RENDERED" if banned_present_reasons
+                  else "TWEAK INSTRUCTION NOT APPLIED")
+    elif dropped_ratio > 0.35 or overall_score < 65:
         verdict = "FAIL"
         status = "OVERSTEPPING OR MISS DETECTED" if dropped_ratio > 0.35 else "TWEAK DRIFT DETECTED"
     elif overall_score >= 85 and not dropped_controls and not hallucinated_features:
@@ -347,6 +427,19 @@ def audit_tweak_drift(
         remediation_directives.append(f"Remove unrequested additions: {', '.join(hallucinated_features)}.")
     if anti_pattern_violations:
         remediation_directives.append(f"Fix craft violations: {', '.join(anti_pattern_violations)}.")
+    if unapplied_changes:
+        remediation_directives.append("Apply the instruction that did not land: "
+                                      + "; ".join(unapplied_changes))
+    if banned_present_reasons:
+        remediation_directives.append("Remove copy the product forbids: "
+                                      + "; ".join(banned_present_reasons))
+
+    retry_prompt = ""
+    if unapplied_changes or banned_present_reasons:
+        retry_prompt = (
+            "Keep layout, spacing, colours and components identical. Text only. "
+            "Apply exactly these and change nothing else: "
+            + "; ".join(unapplied_changes + banned_present_reasons) + ".")
 
     remediation_prompt = ""
     if remediation_directives:
@@ -374,7 +467,10 @@ def audit_tweak_drift(
         "missed_terms": missed_terms,
         "hallucinated_features": hallucinated_features,
         "anti_pattern_violations": anti_pattern_violations,
+        "unapplied_changes": unapplied_changes,
+        "banned_present": banned_present_reasons,
         "remediation_prompt": remediation_prompt,
+        "retry_prompt": retry_prompt,
     }
 
 

@@ -665,6 +665,15 @@ def goal_block(profile: dict, state: dict) -> str:
 
     lines.append("FEATURES  (what we build — in order, top = next)")
     counter = {"n": 0}
+    queue = state.get("queue") or []
+
+    def _feat_rank(node: dict) -> tuple:
+        """Queued work first, in queue order; then unbuilt; done sinks."""
+        nid = str(node.get("id") or "")
+        done = str(st.get(nid) or node.get("status") or "") in ("done", "shipped")
+        spots = [i for i, q in enumerate(queue)
+                 if str(q.get("advances") or "") == nid]
+        return (done, min(spots) if spots else 10 ** 5, 0)
 
     def emit(node: dict, serves: list[int], depth: int) -> None:
         counter["n"] += 1
@@ -684,20 +693,27 @@ def goal_block(profile: dict, state: dict) -> str:
     for top in p["milestones"]:
         if str(top.get("kind") or "") == GOAL_KIND:
             gid = str(top.get("id") or "")
-            for c in top.get("children") or []:
-                if isinstance(c, dict) and c.get("id"):
-                    emit(c, [num[gid]] if gid in num else [], 0)
+            kids = [c for c in (top.get("children") or [])
+                    if isinstance(c, dict) and c.get("id")]
+            kids.sort(key=_feat_rank)
+            for c in kids:
+                emit(c, [num[gid]] if gid in num else [], 0)
         else:
             emit(top, [], 0)
     if counter["n"] == 0:
         lines.append("  (none yet)")
     lines.append("")
 
-    queue = state.get("queue") or []
     lines.append("TASKS  (what runs next — in order; only #1 ships per run)")
-    if not queue:
+    # A label already in the shipped ledger is delivered work: pick skips it, so
+    # the page must too, or it names a delivered task as the next run.
+    _delivered = {str(x.get("label") or "").strip().lower()
+                  for x in (state.get("shipped") or [])}
+    pending = [q for q in queue
+               if str(q.get("label") or "").strip().lower() not in _delivered]
+    if not pending:
         lines.append("  (empty — the next plan fills it)")
-    for i, q in enumerate(queue[:6], 1):
+    for i, q in enumerate(pending[:6], 1):
         tag = "  ← NEXT RUN" if i == 1 else ""
         lines.append(f"  {i}. {q.get('label')}{tag}")
         prob = str(q.get("problem") or "").strip()
@@ -706,7 +722,7 @@ def goal_block(profile: dict, state: dict) -> str:
         dw = [str(x) for x in (q.get("done_when") or []) if str(x).strip()]
         if dw:
             lines.append("       done when: " + "; ".join(dw[:3]))
-    if len(queue) > 6:
+    if len(pending) > 6:
         lines.append(f"  … {len(queue) - 6} more queued")
 
     act = active_milestone(profile, state)
@@ -919,6 +935,8 @@ def apply_one(profile: dict, change: dict, by: str = "agent") -> tuple[str, str,
                "why": why[:300]}
         if change.get("outcome"):
             new["outcome"] = str(change["outcome"])
+        if isinstance(change.get("phase"), int):
+            new["phase"] = change["phase"]
         meas = list(change.get("measures") or [])
         if change.get("measure"):
             meas.append({"text": change["measure"]})

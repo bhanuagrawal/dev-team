@@ -228,7 +228,7 @@ def chain_preview(queue: list[dict]) -> list[dict]:
     review block). Only entry type/target/delivery decide here; `pick` is the
     authority and adds the motion-obsolete check."""
     def ok(q: dict) -> bool:
-        return (q.get("type") in ("bugfix", "feature", "motion")
+        return (q.get("type") in ("bugfix", "feature", "motion", "visual")
                 and bool(q.get("target")))
 
     return declared_chain(queue, ok) if queue else []
@@ -360,7 +360,7 @@ def next_task(project: Path, seq: int, supervised: bool = False) -> dict | None:
     queue = state.get("queue") or []
 
     def _eligible(q: dict) -> bool:
-        return (q.get("type") in ("bugfix", "feature", "motion")
+        return (q.get("type") in ("bugfix", "feature", "motion", "visual")
                 and q.get("target")
                 and not already_delivered(q, state))
 

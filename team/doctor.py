@@ -362,6 +362,23 @@ def run_doctor(project: Path, log) -> dict:
                              "checks_passed": 0}
         log(f"doctor toolbox: BLOCKED — {e}")
 
+    # The design MCP is a REMOTE server loaded once per catalog rebuild. When it
+    # blips, the host silently serves a tool set with no stitch.* and the run
+    # reads as "Stitch is broken" (seen 2026-11-10). Probe it here so a dead MCP
+    # is reported rather than discovered halfway through a design task.
+    try:
+        from . import stitch_mcp
+        n = stitch_mcp.ping()
+        report["design"] = {"status": "ready", "tools": n}
+        log(f"doctor design: ready (Stitch MCP answers, {n} tools)")
+    except Exception as e:  # noqa: BLE001 - a probe must never hide the report
+        report["design"] = {"status": "blocked", "fix": "check network / the MCP url + key; "
+                            "scripted design work can also use team.stitch_mcp directly",
+                            "error": str(e)[:160]}
+        log(f"doctor design: BLOCKED — Stitch MCP did not answer ({str(e)[:120]}); "
+            "the host's tool catalog will be missing stitch.* this turn — use "
+            "`python3 -c \"from team import stitch_mcp; stitch_mcp.ping()\"` to check")
+
     # The project's CI is GENERATED from the team template (AGENTS.md #4). A copy
     # that disagrees with its generator is a workflow nobody reviewed, and the next
     # `ci --write` silently rewrites it — so the drift is invisible without this.

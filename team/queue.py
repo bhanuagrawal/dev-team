@@ -95,11 +95,19 @@ def verdict_for(old: dict, incoming: list[dict],
         if _norm(nlabel) == _norm(olabel):
             return ("superseded", "the same task re-queued under an updated entry",
                     nlabel)
-        # Same kind of work on an overlapping target is folded into the new task.
-        if otargs and ntargs and otype and otype == ntype and (otargs & ntargs):
-            shared = ", ".join(sorted(otargs & ntargs))
+        # Same kind of work on the SAME surface, serving the SAME milestone, is
+        # folded into the new task. Two tasks that advance different features
+        # are different work even when they touch the same module: in a
+        # single-module app every feature touches composeApp/**, so target
+        # overlap alone folded the library task into the wishes task and
+        # silently deleted it (2026-11-10).
+        same_milestone = (str(old.get("advances") or "")
+                          == str(new.get("advances") or ""))
+        if (otargs and ntargs and otype and otype == ntype
+                and otargs == ntargs and same_milestone):
+            shared = ", ".join(sorted(otargs))
             return ("superseded",
-                    f"same type ({ntype}) on {shared} — folded into the new task",
+                    f"same type ({ntype}) on exactly {shared} — folded into the new task",
                     nlabel)
     return ("keep", "", "")
 
