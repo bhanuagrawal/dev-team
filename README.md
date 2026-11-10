@@ -199,12 +199,13 @@ agent's report:
 - **localization** — every newly referenced string resource exists in every
   locale the project ships;
 - **brand** — an icon change carries its recorded provenance;
-- **tests are part of the change** — every changed production file must be named
-  by a test file in the same diff; a changed UI file must be named by a
+- **UI tests are part of the change** — a changed UI file must be named by a
   Compose/Espresso test with an assertion (a screenshot render with no assertion
-  does not count). `release` re-runs this gate before the version bump;
+  does not count); a logic-only change owes no test, because unit tests are
+  retired. `release` re-runs this gate before the version bump;
 - **store note** — the release note may not repeat the last shipped one;
-- **compile**, then **tests** (a single retry, for the one known flaky suite);
+- **compile**, then **UI/integration tests** off-device (a single retry, for the
+  one known flaky suite). Unit tests are neither required nor run as a gate;
 - **emulator hygiene** (warn-only) — see *Safety rails*.
 
 FAIL → The orchestrator fixes the failure in the worktree (or re-prompts the subagent with the failure output, max 2 attempts total), then the run records `failed` and alarms.
