@@ -35,6 +35,7 @@ DEFAULT_PORT = 54399
 OWNER_ID = "11111111-1111-1111-1111-111111111111"
 READER_ID = "22222222-2222-2222-2222-222222222222"
 MOCK_TOKEN = "mock-session-token"
+MOCK_TRANSACTION_ID = "11111111-2222-3333-4444-555555555555"
 
 # The listing ids are stable so a request can be traced from the card to the RPC.
 BOOKS = [
@@ -221,6 +222,41 @@ class _Handler(BaseHTTPRequestHandler):
         # /api/v1/books/{listing_id}; without it a card that is on screen cannot
         # be opened ("Failed to load book details: not found"), and the borrow
         # journey dead-ends on a listing the reader can see (2026-11-10).
+        if path == "/api/v1/trades/live":
+            # The transaction a cold start should reopen; empty until this audit
+            # has actually asked for a book.
+            self._json({"transactionId": getattr(self.server, "state", {}).get("trade", "")})
+            return
+
+        if path.startswith("/api/v1/trades/") and path.endswith("/meetup"):
+            tx = path.split("/api/v1/trades/")[-1].rsplit("/meetup", 1)[0]
+            self._json({
+                "transaction_id": tx or MOCK_TRANSACTION_ID,
+                "status": "REQUESTED",
+                "viewer_role": "BORROWER",
+                "book": {"listing_id": BOOKS[0]["listing_id"],
+                         "isbn": BOOKS[0].get("isbn") or "",
+                         "title": BOOKS[0]["title"], "author": BOOKS[0]["author"],
+                         "cover_url": BOOKS[0].get("cover_url"),
+                         "condition": BOOKS[0].get("condition") or "LIKE_NEW",
+                         "listing_type": BOOKS[0].get("listing_type") or "TEMPORARY_LEND",
+                         "max_borrow_days": 21},
+                "other_reader": {"user_id": OWNER_ID,
+                                 "username": BOOKS[0].get("owner_username") or "sneha_kora",
+                                 "trust_score": 82.0,
+                                 "location_name": BOOKS[0].get("location_name") or "Indiranagar"},
+                "midpoint": {"label": "Between you and Indiranagar 100ft Rd",
+                             "distance_meters": 600},
+                "venue": {"venue_id": "venue-1", "name": "Third Wave Coffee",
+                          "address": "100ft Road, Indiranagar", "venue_type": "CAFE",
+                          "distance_meters": 600, "walk_minutes": 8,
+                          "opening_hours": "08:00–23:00", "community_handshakes": 42},
+                "alternates": [],
+                "accepted_at": None,
+                "alternate_suggested_at": None,
+            })
+            return
+
         if path.startswith("/api/v1/books/"):
             lid = path.rsplit("/", 1)[-1]
             book = next((b for b in BOOKS if b["listing_id"] == lid), None)
@@ -300,6 +336,23 @@ class _Handler(BaseHTTPRequestHandler):
 
         if path == "/auth/v1/user":
             self._json({"id": READER_ID, "email": "audit@bookswap.test"})
+            return
+
+        if path == "/api/v1/trades/request":
+            # Opening the loan: the client posts the listing id and expects the
+            # transaction it just created. Without this, "Borrow 21d" 404s and the
+            # borrow journey ends before the pickup step.
+            tx = MOCK_TRANSACTION_ID
+            try:
+                self.server.state["trade"] = tx
+            except Exception:
+                pass
+            self._json({"success": True, "transactionId": tx,
+                        "message": "Request sent to the keeper."})
+            return
+
+        if path.startswith("/api/v1/trades/") and path.endswith("/meetup"):
+            self._json({"ok": True})
             return
 
         if path in ("/auth/v1/signup", "/auth/v1/token"):
@@ -427,6 +480,7 @@ class MockServer:
             httpd = ThreadingHTTPServer(("0.0.0.0", 0), _Handler)
             self.port = httpd.server_address[1]
         httpd.requests = []          # type: ignore[attr-defined]
+        httpd.state = {"trade": ""}  # type: ignore[attr-defined]
         httpd.daemon_threads = True  # type: ignore[attr-defined]
         self.httpd = httpd
         self.thread = threading.Thread(target=httpd.serve_forever, daemon=True)
