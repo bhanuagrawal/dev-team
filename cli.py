@@ -3036,7 +3036,22 @@ def cmd_storefront_scenes(args: argparse.Namespace) -> int:
     if do_all or getattr(args, "render", False):
         print("~ rendering composables off-device (AGP layoutlib)")
         tree = None
-        if getattr(args, "from_checkout", False):
+        if getattr(args, "tree", None):
+            # A RUN MUST BE ABLE TO SEE ITS OWN PIXELS. By default this renders the
+            # delivery tree (correct: a screenshot is a claim about the shipped app),
+            # and that default is why a polish run used to judge the PREVIOUS build:
+            # its worktree was invisible to the renderer, so the evidence could only
+            # be refreshed after the release that made it stale (2026-11-10). Pointing
+            # the renderer at the run's own tree lets the loop render, react, fix and
+            # re-render before anything ships. It is explicitly NOT delivery evidence:
+            # once the work is on origin/main, re-render from the delivery tree.
+            tree = Path(args.tree).expanduser().resolve()
+            if not (tree / ".git").exists():
+                print(f"  ✗ --tree {tree} is not a git tree (no .git)")
+                return 2
+            print(f"  DELIVERY: --tree {tree} — this render describes THAT tree, not "
+                  f"the app CI ships; re-render from origin/main once it is merged")
+        elif getattr(args, "from_checkout", False):
             tree = project
             print("  DELIVERY: --from-checkout — screenshots will describe the local "
                   "checkout, NOT the app CI ships")
@@ -4869,6 +4884,11 @@ def main() -> None:
     sfp.add_argument("--status", action="store_true", help="show scene bindings and provenance")
     sfp.add_argument("--force", action="store_true", help="overwrite the harness and existing framed screenshots")
     sfp.add_argument("--dry-run", action="store_true", help="print Gradle wiring changes without writing them")
+    sfp.add_argument("--tree", metavar="PATH",
+                     help="render this tree (e.g. a dt/<task> worktree) instead of the "
+                          "delivery ref — so a run can react to its own pixels before "
+                          "release; NOT delivery evidence, re-render from origin/main "
+                          "after the merge")
     sfp.add_argument("--from-checkout", action="store_true",
                      help="render the local checkout instead of origin/main (screenshots then describe unshipped code)")
     sfp.set_defaults(fn=cmd_storefront_scenes)
