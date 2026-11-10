@@ -1708,6 +1708,8 @@ def cmd_goal(args: argparse.Namespace) -> int:
             new["outcome"] = args.outcome
         if args.measure:
             new["measures"] = [{"text": m} for m in args.measure]
+        if args.phase:
+            new["phase"] = args.phase
         kids = goals.holder_list(profile, parent)
         if kids is None:
             raise SystemExit(f"no branch '{parent}' to add under "
@@ -1752,15 +1754,44 @@ def cmd_goal(args: argparse.Namespace) -> int:
             kids.remove(raw)
         (goals.holder_list(profile, args.parent or "vision") or []).append(raw)
         node_id = args.id
+
+    elif action == "phase":
+        raw, _parent = goals.raw_node(profile, args.id or "")
+        if raw is None:
+            raise SystemExit(f"no goal or sub-goal with id '{args.id}'")
+        if args.phase not in (1, 2):
+            raise SystemExit("--phase must be 1 (launch) or 2 (after launch); a "
+                             "feature with no phase is not buildable, so it "
+                             "cannot be cleared")
+        raw["phase"] = args.phase
+        node_id = args.id
+
+    elif action == "update":
+        raw, _parent = goals.raw_node(profile, args.id or "")
+        if raw is None:
+            raise SystemExit(f"no goal or sub-goal with id '{args.id}'")
+        if args.title:
+            raw["title"] = args.title
+        if args.outcome:
+            raw["outcome"] = args.outcome
+        if args.measure:
+            # --measure replaces the whole list: a branch whose measures still
+            # describe a retired feature is worse than no measures at all.
+            raw["measures"] = [{"text": m} for m in args.measure]
+        if args.status:
+            raw["status"] = args.status
+        node_id = args.id
     else:
         raise SystemExit("goal needs an action: add | park | set-status | retire | "
-                         "reparent | revert | review | log")
+                         "reparent | phase | revert | review | log")
 
     after = profile.get("goals") or {}
     human = {"add": f"added under {args.parent or 'vision'}",
              "park": "set aside", "set-status": f"status → {args.status}",
              "retire": "removed from the plan",
-             "reparent": f"moved under {args.parent}"}.get(action, action)
+             "reparent": f"moved under {args.parent}",
+             "phase": f"phase → {args.phase}",
+             "update": "restated"}.get(action, action)
     e = goals.change(state, human, node_id, args.why or "(no reason given)",
                      before="", after="", by=args.by)
     e["goals_before"], e["goals_after"] = before, after
@@ -4892,7 +4923,8 @@ def main() -> None:
     g = sub.add_parser("goal")
     g.add_argument("project")
     g.add_argument("action", choices=["add", "park", "set-status", "retire",
-                                      "reparent", "revert", "review", "log", "verdict"])
+                                      "reparent", "revert", "review", "log",
+                                      "verdict", "phase", "update"])
     g.add_argument("--met", choices=["yes", "no"],
                    help="verdict: whether the milestone's measures are met NOW")
     g.add_argument("--evidence", help="verdict: the probe or artifact that decides it")
@@ -4903,6 +4935,10 @@ def main() -> None:
                    choices=["goal", "subgoal", "milestone"])
     g.add_argument("--status", help="set-status: active|pending|done|parked|proposed")
     g.add_argument("--outcome", help="add: what will be true when this is done")
+    g.add_argument("--phase", type=int, choices=[1, 2],
+                   help="add/phase: which scope lane this feature ships in "
+                        "(1 = launch, 2 = after launch); a feature with no phase "
+                        "renders in an unbuildable lane")
     g.add_argument("--measure", action="append",
                    help="add: how we will know (repeatable, plain words)")
     g.add_argument("--why", help="the reason the team is changing the plan")
