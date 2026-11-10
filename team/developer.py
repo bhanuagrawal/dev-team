@@ -430,7 +430,7 @@ def design_brief(project: Path, profile: dict, task: dict,
     st = designer.status(project, task)
     state = st.get("state")
     required = state in ("pending", "stale") or (
-        state == "answered" and st.get("decision") == "new_screen")
+        state == "answered" and st.get("decision") in ("new_screen", "tweak_screen"))
 
     available: list[dict] = []
     stitch = profile.get("design") or {}
@@ -477,6 +477,15 @@ def design_brief(project: Path, profile: dict, task: dict,
                   + (f" (id {screen.get('id')})" if screen.get("id") else "")
                   + "; open its snapshot in docs/stitch/screens/ and match layout, type, "
                     "spacing and imagery. Do not redesign it.")
+    elif st.get("decision") == "tweak_screen":
+        why = st.get("reason") or "an existing screen covers this surface and needs a targeted tweak"
+        screen = st.get("screen") or {}
+        sid = screen.get("id") or "<screen-id>"
+        tweak_hint = st.get("tweak") or "<change>"
+        action = (f"tweak the existing screen '{screen.get('title') or sid}' (id {sid}) IN PLACE — "
+                  f"do NOT redesign from scratch: run `devteam stitch-tweak {project.name} "
+                  f"--screen-id {sid} --change {tweak_hint!r}` (exports updated snapshot into "
+                  "docs/stitch/screens/), then update the code to match that snapshot.")
     elif st.get("decision") == "new_screen":
         why = st.get("reason") or "no existing screen covers this task"
         screen = st.get("screen") or {}

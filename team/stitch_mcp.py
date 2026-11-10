@@ -123,6 +123,18 @@ def call(tool: str, arguments: dict[str, Any], timeout: int = 300) -> dict[str, 
     return result
 
 
+def _clean_project_id(project_id: str) -> str:
+    return str(project_id or "").strip().split("/")[-1]
+
+
+def _clean_screen_id(screen_id: str) -> str:
+    return str(screen_id or "").strip().split("/")[-1]
+
+
+def _clean_asset_id(asset_id: str) -> str:
+    return str(asset_id or "").strip().split("/")[-1]
+
+
 def create_project(title: str) -> str:
     project = call("create_project", {"title": title})
     name = str(project.get("name") or "")
@@ -131,9 +143,92 @@ def create_project(title: str) -> str:
     return name
 
 
+def get_project(project_id: str) -> dict[str, Any]:
+    pid = _clean_project_id(project_id)
+    return call("get_project", {"name": f"projects/{pid}"})
+
+
 def list_screens(project_id: str) -> list[dict[str, Any]]:
-    out = call("list_screens", {"projectId": project_id})
+    pid = _clean_project_id(project_id)
+    out = call("list_screens", {"projectId": pid})
     return list(out.get("screens") or [])
+
+
+def get_screen(project_id: str, screen_id: str) -> dict[str, Any]:
+    raw = str(screen_id or "").strip()
+    if raw.startswith("projects/") and "/screens/" in raw:
+        name = raw
+    else:
+        name = f"projects/{_clean_project_id(project_id)}/screens/{_clean_screen_id(raw)}"
+    return call("get_screen", {"name": name})
+
+
+def list_design_systems(project_id: str = "") -> list[dict[str, Any]]:
+    params: dict[str, Any] = {}
+    pid = _clean_project_id(project_id)
+    if pid:
+        params["projectId"] = pid
+    out = call("list_design_systems", params)
+    return list(out.get("designSystems") or out.get("design_systems") or [])
+
+
+def apply_design_system(project_id: str, asset_id: str,
+                        screen_instance_ids: list[dict[str, str]] | None = None) -> dict[str, Any]:
+    """Apply an existing Stitch design system to screen instances without redesigning."""
+    pid = _clean_project_id(project_id)
+    aid = _clean_asset_id(asset_id)
+    instances = list(screen_instance_ids or [])
+    if not instances:
+        proj = get_project(pid)
+        for inst in proj.get("screenInstances") or []:
+            iid = str(inst.get("id") or "")
+            src = str(inst.get("sourceScreen") or "")
+            if iid and src:
+                instances.append({"id": iid, "sourceScreen": src})
+    if not instances:
+        raise StitchError(f"no screen instances found in project {pid} to apply design system {aid}")
+    return call("apply_design_system", {
+        "projectId": pid,
+        "assetId": aid,
+        "selectedScreenInstances": instances,
+    })
+
+
+def _extract_screens(res: dict[str, Any]) -> list[dict[str, Any]]:
+    designs = []
+    for comp in res.get("outputComponents") or []:
+        design = (comp or {}).get("design") or {}
+        designs.extend(design.get("screens") or [])
+    return [s for s in designs if (s.get("htmlCode") or {}).get("name")]
+
+
+def _pick_screen(res: dict[str, Any], prefer_square: bool = False) -> dict[str, Any] | None:
+    with_art = _extract_screens(res)
+    if not with_art:
+        return None
+    if prefer_square:
+        for s in reversed(with_art):
+            if str(s.get("width")) == str(s.get("height")) and s.get("width"):
+                return s
+    return with_art[-1]
+
+
+def _poll_changed_screens(project_id: str, before: dict[str, str],
+                          timeout: int = 900, interval: int = 20) -> list[dict[str, Any]]:
+    """Poll list_screens for newly created or updated screens after a slow/dropped call."""
+    pid = _clean_project_id(project_id)
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        time.sleep(interval)
+        changed = []
+        for s in list_screens(pid):
+            name = str(s.get("name") or "")
+            html_name = str((s.get("htmlCode") or {}).get("name") or "")
+            if html_name and before.get(name) != html_name:
+                changed.append(s)
+        if changed:
+            return changed
+    return []
 
 
 def generate_icon(project_id: str, prompt: str, *, device: str = "AGNOSTIC",
@@ -145,10 +240,13 @@ def generate_icon(project_id: str, prompt: str, *, device: str = "AGNOSTIC",
     instead of re-asking (a retry would produce a second, competing icon).
     Uses GEMINI_3_8_FLASH for maximum precision and layout craft.
     """
+    pid = _clean_project_id(project_id)
     say = log or (lambda *_: None)
+    before = {str(s.get("name") or ""): str((s.get("htmlCode") or {}).get("name") or "")
+              for s in list_screens(pid)}
     try:
         res = call("generate_screen_from_text", {
-            "projectId": project_id, "prompt": prompt, "deviceType": device,
+            "projectId": pid, "prompt": prompt, "deviceType": device,
             "modelId": "GEMINI_3_8_FLASH",
         }, timeout=timeout)
         screen = _pick_screen(res, prefer_square=True)
@@ -157,30 +255,25 @@ def generate_icon(project_id: str, prompt: str, *, device: str = "AGNOSTIC",
         say("  stitch: generated but returned no screen reference — polling the project")
     except StitchError as exc:
         say(f"  stitch: generation call did not return ({str(exc)[:160]}) — polling the project")
-    deadline = time.time() + timeout
-    seen = {s.get("name") for s in list_screens(project_id)}
-    while time.time() < deadline:
-        time.sleep(20)
-        for s in list_screens(project_id):
-            if s.get("name") not in seen and s.get("htmlCode"):
-                return s
+    changed = _poll_changed_screens(pid, before, timeout=timeout)
+    if changed:
+        return changed[-1]
     raise StitchError(
         f"Stitch produced no icon screen within {timeout}s — the project is "
-        f"{project_id}; `brand --design` resumes by adopting its newest screen")
+        f"{pid}; `brand --design` resumes by adopting its newest screen")
 
 
 def generate_screen(project_id: str, prompt: str, *, device: str = "MOBILE",
                     model_id: str = "GEMINI_3_8_FLASH",
                     design_system: str | None = None,
                     timeout: int = 900, log=None) -> dict[str, Any]:
-    """Ask Stitch for a mobile screen design using Gemini 3.8 Flash.
-
-    Applies the anti-AI craft prompt, calls generate_screen_from_text with
-    modelId=GEMINI_3_8_FLASH, and returns the generated screen metadata.
-    """
+    """Ask Stitch for a new mobile screen design using Gemini 3.8 Flash."""
+    pid = _clean_project_id(project_id)
     say = log or (lambda *_: None)
+    before = {str(s.get("name") or ""): str((s.get("htmlCode") or {}).get("name") or "")
+              for s in list_screens(pid)}
     params: dict[str, Any] = {
-        "projectId": project_id,
+        "projectId": pid,
         "prompt": prompt,
         "deviceType": device,
         "modelId": model_id,
@@ -195,31 +288,87 @@ def generate_screen(project_id: str, prompt: str, *, device: str = "MOBILE",
         say("  stitch: generated but returned no screen reference — polling the project")
     except StitchError as exc:
         say(f"  stitch: generation call did not return ({str(exc)[:160]}) — polling the project")
-    deadline = time.time() + timeout
-    seen = {s.get("name") for s in list_screens(project_id)}
-    while time.time() < deadline:
-        time.sleep(20)
-        for s in list_screens(project_id):
-            if s.get("name") not in seen and s.get("htmlCode"):
-                return s
+    changed = _poll_changed_screens(pid, before, timeout=timeout)
+    if changed:
+        return changed[-1]
     raise StitchError(
-        f"Stitch produced no screen within {timeout}s for project {project_id}")
+        f"Stitch produced no screen within {timeout}s for project {pid}")
 
 
-def _pick_screen(res: dict[str, Any], prefer_square: bool = False) -> dict[str, Any] | None:
-    designs = []
-    for comp in res.get("outputComponents") or []:
-        design = (comp or {}).get("design") or {}
-        designs.extend(design.get("screens") or [])
-    with_art = [s for s in designs if (s.get("htmlCode") or {}).get("name")]
-    if not with_art:
-        return None
-    # For icon generation, prefer square artboards.
-    if prefer_square:
-        for s in reversed(with_art):
-            if str(s.get("width")) == str(s.get("height")) and s.get("width"):
-                return s
-    return with_art[-1]
+def edit_screens(project_id: str, screen_ids: list[str], prompt: str, *,
+                 device: str = "MOBILE", model_id: str = "GEMINI_3_8_FLASH",
+                 timeout: int = 900, log=None) -> list[dict[str, Any]]:
+    """Apply a targeted tweak to existing Stitch screen(s) via edit_screens (never retries)."""
+    pid = _clean_project_id(project_id)
+    ids = [_clean_screen_id(sid) for sid in screen_ids if str(sid or "").strip()]
+    if not ids:
+        raise StitchError("edit_screens requires at least one screen id")
+    say = log or (lambda *_: None)
+    before = {str(s.get("name") or ""): str((s.get("htmlCode") or {}).get("name") or "")
+              for s in list_screens(pid)}
+    params: dict[str, Any] = {
+        "projectId": pid,
+        "selectedScreenIds": ids,
+        "prompt": prompt,
+        "deviceType": device,
+        "modelId": model_id,
+    }
+    try:
+        res = call("edit_screens", params, timeout=timeout)
+        screens = _extract_screens(res)
+        if screens:
+            return screens
+        say("  stitch: edit_screens returned no screen reference — polling for updated screen")
+    except StitchError as exc:
+        say(f"  stitch: edit_screens did not return ({str(exc)[:160]}) — polling (no retry)")
+    changed = _poll_changed_screens(pid, before, timeout=timeout)
+    if changed:
+        return changed
+    raise StitchError(
+        f"Stitch edit_screens produced no updated screen within {timeout}s for {pid} ({ids})")
+
+
+def generate_variants(project_id: str, screen_ids: list[str], prompt: str, *,
+                      creative_range: str = "REFINE",
+                      aspects: list[str] | None = None,
+                      variant_count: int = 1,
+                      device: str = "MOBILE", model_id: str = "GEMINI_3_8_FLASH",
+                      timeout: int = 900, log=None) -> list[dict[str, Any]]:
+    """Generate controlled variants of existing screen(s), defaulting to REFINE."""
+    pid = _clean_project_id(project_id)
+    ids = [_clean_screen_id(sid) for sid in screen_ids if str(sid or "").strip()]
+    if not ids:
+        raise StitchError("generate_variants requires at least one screen id")
+    say = log or (lambda *_: None)
+    before = {str(s.get("name") or ""): str((s.get("htmlCode") or {}).get("name") or "")
+              for s in list_screens(pid)}
+    variant_opts: dict[str, Any] = {
+        "creativeRange": creative_range,
+        "variantCount": max(1, min(5, int(variant_count))),
+    }
+    if aspects:
+        variant_opts["aspects"] = list(aspects)
+    params: dict[str, Any] = {
+        "projectId": pid,
+        "selectedScreenIds": ids,
+        "prompt": prompt,
+        "variantOptions": variant_opts,
+        "deviceType": device,
+        "modelId": model_id,
+    }
+    try:
+        res = call("generate_variants", params, timeout=timeout)
+        screens = _extract_screens(res)
+        if screens:
+            return screens
+        say("  stitch: generate_variants returned no screen reference — polling")
+    except StitchError as exc:
+        say(f"  stitch: generate_variants did not return ({str(exc)[:160]}) — polling (no retry)")
+    changed = _poll_changed_screens(pid, before, timeout=timeout)
+    if changed:
+        return changed
+    raise StitchError(
+        f"Stitch generate_variants produced no variant within {timeout}s for {pid} ({ids})")
 
 
 def download(screen: dict[str, Any]) -> tuple[bytes, str]:
@@ -242,7 +391,49 @@ def download(screen: dict[str, Any]) -> tuple[bytes, str]:
     raise StitchError("Stitch returned neither html nor image bytes")
 
 
-def export_screens(project_id: str, out_dir: Path, log=None) -> dict[str, Any]:
+def export_one_screen(screen: dict[str, Any], out_dir: Path, log=None) -> dict[str, Any] | None:
+    """Download one screen's HTML and screenshot into <out_dir>/<id>/."""
+    log = log or (lambda *_: None)
+    sid = str(screen.get("name") or "").split("/")[-1]
+    title = str(screen.get("title") or sid)
+    if not sid:
+        return None
+    out_dir = Path(out_dir)
+    screen_dir = out_dir / sid
+    screen_dir.mkdir(parents=True, exist_ok=True)
+    entry: dict[str, Any] = {
+        "id": sid,
+        "title": title,
+        "surface": screen.get("surface") or "",
+    }
+    if screen.get("deviceType"):
+        entry["deviceType"] = screen["deviceType"]
+    html_name = str((screen.get("htmlCode") or {}).get("name") or "")
+    if html_name:
+        try:
+            html = call("download_file", {"name": html_name})
+            text = html.get("html") or ""
+            if text:
+                (screen_dir / "index.html").write_text(text)
+                entry["html"] = f"screens/{sid}/index.html"
+        except StitchError as exc:
+            log(f"  ! {title}: html export failed — {exc}")
+    shot_name = str((screen.get("screenshot") or {}).get("name") or "")
+    if shot_name:
+        try:
+            shot = call("download_file", {"name": shot_name})
+            b64 = shot.get("image") or ""
+            if b64:
+                (screen_dir / "screen.png").write_bytes(base64.b64decode(b64))
+                entry["screenshot"] = f"screens/{sid}/screen.png"
+        except StitchError as exc:
+            log(f"  ! {title}: screenshot export failed — {exc}")
+    log(f"  ✓ {title} → {screen_dir}")
+    return entry
+
+
+def export_screens(project_id: str, out_dir: Path, *,
+                   screen_ids: set[str] | None = None, log=None) -> dict[str, Any]:
     """Download every screen's HTML and screenshot into a tracked directory.
 
     The Stitch screen is the design spec (owner directive 2026-11-09: there is no
@@ -251,41 +442,19 @@ def export_screens(project_id: str, out_dir: Path, log=None) -> dict[str, Any]:
     deliverable, committed beside the code.
     """
     log = log or (lambda *_: None)
-    screens = list_screens(project_id)
+    pid = _clean_project_id(project_id)
+    screens = list_screens(pid)
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
+    wanted = {_clean_screen_id(s) for s in screen_ids} if screen_ids else None
     manifest: list[dict[str, Any]] = []
     for s in screens:
         sid = str(s.get("name") or "").split("/")[-1]
-        title = str(s.get("title") or sid)
-        if not sid:
+        if wanted and sid not in wanted:
             continue
-        screen_dir = out_dir / sid
-        screen_dir.mkdir(parents=True, exist_ok=True)
-        entry: dict[str, Any] = {"id": sid, "title": title,
-                                 "surface": s.get("surface") or ""}
-        html_name = str((s.get("htmlCode") or {}).get("name") or "")
-        if html_name:
-            try:
-                html = call("download_file", {"name": html_name})
-                text = html.get("html") or ""
-                if text:
-                    (screen_dir / "index.html").write_text(text)
-                    entry["html"] = f"screens/{sid}/index.html"
-            except StitchError as exc:
-                log(f"  ! {title}: html export failed — {exc}")
-        shot_name = str((s.get("screenshot") or {}).get("name") or "")
-        if shot_name:
-            try:
-                shot = call("download_file", {"name": shot_name})
-                b64 = shot.get("image") or ""
-                if b64:
-                    (screen_dir / "screen.png").write_bytes(base64.b64decode(b64))
-                    entry["screenshot"] = f"screens/{sid}/screen.png"
-            except StitchError as exc:
-                log(f"  ! {title}: screenshot export failed — {exc}")
-        manifest.append(entry)
-        log(f"  ✓ {title} → {screen_dir}")
-    return {"project_id": project_id,
+        entry = export_one_screen(s, out_dir, log=log)
+        if entry:
+            manifest.append(entry)
+    return {"project_id": pid,
             "synced_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
             "canonical_screens": manifest}

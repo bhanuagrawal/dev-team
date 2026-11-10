@@ -113,8 +113,9 @@ off-machine (you generate; they never generate).
    3. *Refinements Loop Back to Stitch:* Once the workflow understands the design, further screen
       refinements or variants go back to Stitch (`generate_variants`, `edit_screens`, `apply_design_system`)
       to keep code tokens and visual mockups aligned.
-   4. *Export and enforce:* export every screen into `.pipeline/stitch/screens/<id>/`
-      (`index.html` + `screen.png`) and list them in `.pipeline/stitch_manifest.json`.
+   4. *Export and enforce:* export every screen into `docs/stitch/screens/<id>/`
+      (`index.html` + `screen.png`) and list them in `docs/stitch/manifest.json`
+      (via `devteam stitch-export <project>`).
       A Compose screen is built against that export and its render is compared to it.
       There is no `docs/design.md`; tokens alone are not a design. A screen with no
       Stitch export is not ready to build.

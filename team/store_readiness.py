@@ -1277,15 +1277,36 @@ def run_store_readiness_audit(project: Path, tree: Path | None = None) -> list[R
         fix="Run `devteam revamp <project>` to synthesize a comprehensive docs/PRD.md anchored to profile vision",
     ))
 
-    design_file = src / "docs/design.md"
-    has_design = design_file.is_file() and len(design_file.read_text(errors="ignore").strip()) >= 500
+    stitch_manifest = src / "docs/stitch/manifest.json"
+    if not stitch_manifest.is_file():
+        stitch_manifest = src / ".pipeline/stitch_manifest.json"
+    stitch_screens_dir = src / "docs/stitch/screens"
+    has_stitch_exports = stitch_screens_dir.is_dir() and (
+        any(stitch_screens_dir.glob("*/index.html")) or any(stitch_screens_dir.glob("*/screen.png"))
+    )
+    stitch_count = 0
+    if stitch_manifest.is_file():
+        try:
+            sm_data = json.loads(stitch_manifest.read_text())
+            stitch_count = len(sm_data.get("canonical_screens") or [])
+        except Exception:
+            stitch_count = 0
+    legacy_design_file = src / "docs/design.md"
+    has_legacy_design = legacy_design_file.is_file() and len(legacy_design_file.read_text(errors="ignore").strip()) >= 500
+    has_design = (stitch_count > 0 and has_stitch_exports) or has_legacy_design
+    if stitch_count > 0 and has_stitch_exports:
+        design_detail = f"Stitch design spec present ({stitch_count} canonical screen(s) exported in docs/stitch/)"
+    elif has_legacy_design:
+        design_detail = "Legacy docs/design.md present (consider exporting Stitch screens via devteam stitch-export)"
+    else:
+        design_detail = "No exported Stitch screens (docs/stitch/manifest.json + screens/) found"
     checks.append(ReadinessCheck(
         category="Discovery & Product Architecture",
-        name="Design System Specification (docs/design.md)",
+        name="Visual Design Spec (Stitch exports)",
         passed=has_design,
         severity="BLOCKER" if not has_design else "INFO",
-        detail="Authoritative design tokens & typography specification present" if has_design else "docs/design.md is missing or incomplete",
-        fix="Run `devteam design <project>` to synthesize domain-differentiated design tokens",
+        detail=design_detail,
+        fix="Run `devteam stitch-export <project>` after generating/curating screens in Stitch",
     ))
 
     return checks

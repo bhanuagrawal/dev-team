@@ -273,7 +273,7 @@ def run(project: Path, log: RunLog | None = None, apply: bool = True) -> dict:
     # There is no docs/design.md. A markdown style law let an agent claim design
     # compliance while the running screen matched nothing (owner directive
     # 2026-11-09). The authority is the Stitch screen (index.html + screen.png in
-    # .pipeline/stitch/screens/<id>/); a UI task without one is not ready.
+    # docs/stitch/screens/<id>/); a UI task without one is not ready.
 
     # 7c. gradle wrapper timeout: 10s default is flaky under CI download loads
     wrapper_rel = "gradle/wrapper/gradle-wrapper.properties"

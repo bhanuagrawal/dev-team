@@ -85,7 +85,7 @@ commands, in order, with the reasoning and the failure branches.
       features — polish a lot"*, and *"look and feel usually doesn't change in one run"*).
       So the unit is the SCREEN and the trigger is a fingerprint, never a per-release
       ritual: `devteam ux-plan <project>` compares each screen's **visual** hash (its
-      composables + theme/tokens + `docs/design.md`) and **behaviour** hash (the
+      composables + theme/tokens + Stitch manifest/tokens) and **behaviour** hash (the
       view-model/state/repository files that feed it) with the last audit.
       - neither changed → `unchanged`, cost zero — which is the normal case;
       - visual changed (new screen, new dialog/empty state) → audit **that screen**;
@@ -174,8 +174,8 @@ commands, in order, with the reasoning and the failure branches.
 7. DEVELOP THE TASK — Two execution paths:
    (A) DIRECT ORCHESTRATOR DEVELOPMENT (Universal Default — works in Claude Code, OpenCode, Antigravity, Cursor):
        - You (the orchestrator) perform the implementation directly inside `WORKTREE_PATH`.
-       - Read the TASK_SPEC first, then the project's conventions (`docs/design.md`, `profile.conventions`) and the nearest existing feature, and match its architecture (MVI/MVVM, DI, navigation, design tokens). Load the platform skills you have (android-code, android-build, android-test).
-       - Design: `context.design` in the spec says whether this task needs a design, which one already exists (docs/design.md, Stitch project id, stitch_manifest), and — when none does — the exact commands that generate one (`stitch-prompt` → `stitch-screen --generate` → `design`). A design-required task is built from that design; never invent a visual language in code.
+       - Read the TASK_SPEC first, then the project's conventions (`profile.conventions`, `docs/stitch/screens/<id>/`) and the nearest existing feature, and match its architecture (MVI/MVVM, DI, navigation, design tokens). Load the platform skills you have (android-code, android-build, android-test).
+       - Design: `context.design` in the spec says whether this task needs a design consultation (`devteam design-consult`), which Stitch screen already exists (`docs/stitch/manifest.json`, `docs/stitch/screens/<id>/`), and when UI changes are needed: prefer `devteam stitch-tweak` (`edit_screens` / `REFINE` variants) to update an existing screen in place rather than `stitch-screen --generate` (complete redesign). A design-required task is built from that exported snapshot; never invent a visual language in code.
        - There is no file allow-list: you own the whole project for this task. Change any file the task needs, and retire a surface the task replaces (old screen, its route, its references) in the same change. NEVER edit on `main` directly — work only in `WORKTREE_PATH`.
        - UI/UX Excellence & Hierarchy Assertions: design for the real-world physical context of use (glanceability from 15ft, outdoor glare, one-handed reachability). Never ship raw wireframe/canvas prototypes or flat unstyled low-contrast text. Use cohesive design tokens (high-contrast palette, tabular display typography, modern squircles 16-24dp, tactile press feedback) and complete lifecycle states (empty guidance, active interaction, frictionless undo recovery, repeat/rematch loops). Whenever adding or modifying UI screens, components, or interactive flows, write automated UI tests (in the project's test set, e.g. `commonTest` or `androidTest`) verifying layout math, interaction states, and user flows. Run automated UI hierarchy assertions to ensure no sibling view bounds overlap and all text container dimensions fully enclose their measured text bounds.
        - Do not change release knobs (versionName, versionCode, signing, targetSdk) unless the task says so — nothing checks this automatically now.

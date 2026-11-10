@@ -5,7 +5,7 @@ Why this exists (owner directive 2026-11-09): a per-feature `design: ready|
 derive|needed` label is a snapshot of a design that can change the next day. The
 plan records *intent* ("this needs to reuse the detail screen" at most); the
 authority is a consultation with the designer, who reads the CURRENT Stitch
-project, the manifest and docs/design.md, and answers for THIS task.
+project and its exported manifest, and answers for THIS task.
 
 Contract:
 - `brief()` compiles the designer prompt from disk: project id, design system,
@@ -14,8 +14,8 @@ Contract:
 - `record()` stores the designer's answer with a fingerprint of the design state.
 - `status()` returns answered | pending | stale | not_applicable. If the Stitch
   project or the manifest changed, an old answer is STALE — ask again.
-- The developer prompt and `devteam design-consult` read this module; no keyword
-  heuristics and no hardcoded per-feature status.
+- Prefer `tweak_screen` (`stitch-tweak` -> `edit_screens` / `generate_variants`)
+  over `new_screen` whenever an existing screen already covers the surface.
 """
 from __future__ import annotations
 
@@ -26,7 +26,7 @@ from typing import Any
 
 from .core import load_json, now_iso, pipeline_dir, profile_of, save_json
 
-DECISIONS = ("existing_screen", "new_screen", "not_applicable")
+DECISIONS = ("existing_screen", "tweak_screen", "new_screen", "not_applicable")
 
 _UI_TARGET_MARKERS = (
     "composeApp/src", "androidMain", "commonMain", "src/main/java",
@@ -106,7 +106,7 @@ def status(project: Path, task: dict) -> dict:
     if str(rec.get("fingerprint") or "") != fp:
         return {"task": label, "state": "stale", "fingerprint": fp,
                 "previous": rec,
-                "reason": "the Stitch project, manifest or design doc changed since the answer"}
+                "reason": "the Stitch project or manifest changed since the answer"}
     return {"task": label, "state": "answered", "fingerprint": fp, **rec}
 
 
@@ -137,16 +137,22 @@ TASK
 - targets: {", ".join(targets) or "—"}
 
 Before answering, inspect the live Stitch project with the Stitch MCP tools and
-refresh the manifest if it is stale. Then choose exactly ONE:
-1. existing_screen — an existing screen covers it; name the screen id/title and
-   what to reuse. Do not redesign it.
-2. new_screen — no screen covers it. Give the screen title and a locked prompt
-   that can be generated in Stitch. The developer must adopt it before writing UI.
-3. not_applicable — no UI surface.
+refresh the manifest if it is stale. Then choose the LEAST DESTRUCTIVE option (ONE):
+1. existing_screen — an existing screen covers it with no design change needed; name
+   the screen id/title and what to reuse. Do not redesign it.
+2. tweak_screen — an existing screen already covers this surface and only needs a
+   targeted tweak (add/adjust/refine elements while preserving the rest). Name the
+   existing screen id/title and give the exact surgical change for `devteam stitch-tweak`
+   (uses `edit_screens` / `generate_variants --range REFINE`). Do NOT redesign from scratch.
+3. new_screen — no existing screen covers this surface at all. Give the screen title
+   and a locked prompt for `devteam stitch-screen --generate` (passing the project's
+   design system). Export its snapshot before writing UI.
+4. not_applicable — no UI surface.
 
 Answer as JSON only:
-{{"decision":"existing_screen|new_screen|not_applicable",
+{{"decision":"existing_screen|tweak_screen|new_screen|not_applicable",
   "screen":{{"id":"...","title":"..."}},
+  "tweak":"exact surgical change instruction if tweak_screen, else empty string",
   "reason":"one short paragraph",
   "actions":["what the developer must do"],
   "fingerprint":"{fingerprint(project)}"}}
@@ -162,13 +168,14 @@ def record(project: Path, task: dict, answer: dict) -> dict:
     decision = str(answer.get("decision") or "").strip()
     if decision not in DECISIONS:
         raise ValueError(f"decision must be one of {DECISIONS}, got {decision!r}")
-    if decision in ("existing_screen", "new_screen") and not (
-            (answer.get("screen") or {}).get("title")):
-        raise ValueError("existing_screen/new_screen need screen.title")
+    if decision in ("existing_screen", "tweak_screen", "new_screen") and not (
+            (answer.get("screen") or {}).get("title") or (answer.get("screen") or {}).get("id")):
+        raise ValueError(f"{decision} needs screen.title or screen.id")
     rec = {
         "task": label,
         "decision": decision,
         "screen": answer.get("screen") or {},
+        "tweak": str(answer.get("tweak") or "")[:1000],
         "reason": str(answer.get("reason") or "")[:1000],
         "actions": [str(a) for a in (answer.get("actions") or [])][:10],
         "fingerprint": fingerprint(project),
@@ -192,6 +199,9 @@ def line(project: Path, task: dict) -> str:
     d = st.get("decision")
     if d == "existing_screen":
         return f'design: use {st.get("screen", {}).get("title") or "the existing screen"}'
+    if d == "tweak_screen":
+        return (f'design: tweak {st.get("screen", {}).get("title") or "the existing screen"} '
+                f'(apply targeted Stitch edit, do not redesign)')
     if d == "new_screen":
         return f'design: new screen required — {st.get("screen", {}).get("title") or "not named"}'
     return f"design: {d}"

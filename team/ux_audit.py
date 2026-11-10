@@ -7,7 +7,7 @@ is waste. But a NEW screen (or a changed one) ships with nobody judging it, and 
 app drifts into inconsistency one orphan screen at a time. The unit is therefore
 the SCREEN, and the trigger is a fingerprint, not a calendar:
 
-  visual     the screen's composables + the theme/token files + docs/design.md
+  visual     the screen's composables + the theme/token files + Stitch manifest/tokens
   behaviour  the state/view-model/repository files that feed that screen
 
 Neither changed → the pixels and the feel are identical: say "unchanged" and spend
@@ -90,19 +90,24 @@ def theme_paths(project: Path) -> list[Path]:
     """
     declared = ((profile_of(project).get("ux") or {}).get("theme_files") or [])
     out = [project / d for d in declared if (project / d).exists()]
+    stitch_refs = [
+        project / "docs" / "stitch" / "manifest.json",
+        project / "docs" / "stitch" / "tokens.json",
+        project / "docs" / "design.md",  # legacy fallback only
+    ]
     if out:
-        design = project / "docs" / "design.md"
-        if design.exists():
-            out.append(design)
+        for ref in stitch_refs:
+            if ref.exists():
+                out.append(ref)
         return out
     for p in project.rglob("*.kt"):
         if "__pycache__" in p.parts or "/build/" in str(p):
             continue
         if p.name.lower() in THEME_NAMES:
             out.append(p)
-    design = project / "docs" / "design.md"
-    if design.exists():
-        out.append(design)
+    for ref in stitch_refs:
+        if ref.exists():
+            out.append(ref)
     return out
 
 

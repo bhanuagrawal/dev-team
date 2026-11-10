@@ -4,7 +4,7 @@ Ensures that when an owner requests an app revamp or rebuild from scratch:
 1. Anchors strictly to the immutable long-term vision (`profile.goals.vision`).
 2. Re-imagines the core loop, product architecture, and monetization via `docs/PRD.md`.
 3. Runs deep competitive recon via `team.competition` -> `docs/COMPETITION_RESEARCH.md`.
-4. Synthesizes a domain-differentiated design system via `team.design` -> `docs/design.md`.
+4. Prepares Stitch design workflow (no docs/design.md — Stitch exports are the spec).
 5. Mechanically purges and archives obsolete legacy UI layers so old composables cannot survive.
 6. Invalidates stale pre-revamp marketing caches (icons, posters, banners) to force fresh asset creation.
 7. Keeps both the project repository and pipeline synchronized.
@@ -275,8 +275,8 @@ def run_revamp(project: Path,
     # 2. Run competitive research
     comp_report = competition.research_competitors(project, force=force, log=log)
 
-    # 3. Synthesize domain-differentiated design system
-    design_report = design.ensure_design(project, topic=focus, force=force, log=log)
+    # 3. Design source note (docs/design.md is retired; Stitch exports are the spec)
+    design_report = {"status": "stitch", "note": "use stitch-screen / stitch-tweak + stitch-export"}
 
     # 4. Invalidate stale marketing assets
     cleared_assets = invalidate_storefront_assets(project, log=log)
@@ -299,11 +299,12 @@ def run_revamp(project: Path,
         "purged_legacy_code_count": len(purged_code),
         "next_steps": [
             f"1. Start worktree: `devteam worktree-start {project.name} --task-id revamp-core-loop`",
-            f"2. Build native screens following docs/design.md tokens",
-            f"3. Verify: `devteam verify {project.name} --worktree <wt> --task-spec .pipeline/tasks/revamp-core-loop.json`",
-            f"4. Release: `devteam release {project.name} --worktree <wt> --task-spec .pipeline/tasks/revamp-core-loop.json`",
-            f"5. Fresh brand & posters: `devteam brand {project.name} --design --publish --yes`",
-            f"6. Fresh posters: `devteam storefront-build {project.name} --poster --force && devteam store-publish {project.name} --yes`",
+            f"2. Update/generate Stitch screens (`stitch-tweak` for edits, `stitch-screen --generate` for new) and `devteam stitch-export {project.name}`",
+            f"3. Build native screens matching `docs/stitch/screens/<id>/`",
+            f"4. Verify: `devteam verify {project.name} --worktree <wt> --task-spec .pipeline/tasks/revamp-core-loop.json`",
+            f"5. Release: `devteam release {project.name} --worktree <wt> --task-spec .pipeline/tasks/revamp-core-loop.json`",
+            f"6. Fresh brand & posters: `devteam brand {project.name} --design --publish --yes`",
+            f"7. Fresh posters: `devteam storefront-build {project.name} --poster --force && devteam store-publish {project.name} --yes`",
         ],
     }
     if log:

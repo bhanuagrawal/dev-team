@@ -435,90 +435,85 @@ def ensure_design(project: Path,
                   topic: str = "",
                   force: bool = False,
                   log: RunLog | None = None) -> dict[str, Any]:
-    """Ensure docs/design.md exists and is bound into profile conventions.
+    """RETIRED (owner directive 2026-11-09): docs/design.md is not a design source.
 
-    If docs/design.md exists and force=False, ensures it is registered in conventions.
-    If missing or force=True, researches category benchmarks via Tavily, synthesizes
-    the design specification, writes docs/design.md, and updates profile conventions.
+    The Stitch project and its exported screens under docs/stitch/screens/<id>/
+    are the only visual authority.
     """
-    # RETIRED (owner directive 2026-11-09): no docs/design.md is authored or
-    # enforced. The Stitch screen (exported HTML + screenshot) is the spec.
     return {"status": "retired", "path": "",
             "note": "design.md is not a design source; use the Stitch screens"}
 
-    design_file = project / "docs" / "design.md"
-    profile = profile_of(project)
-    conventions = list(profile.get("conventions", []))
-    resolved_design = str(design_file.resolve())
 
-    already_registered = any(str(c).endswith("docs/design.md") or c == resolved_design for c in conventions)
+def _hex_luminance(hex_color: str) -> float | None:
+    h = (hex_color or "").strip().lstrip("#")
+    if len(h) != 6:
+        return None
+    try:
+        r, g, b = int(h[0:2], 16) / 255.0, int(h[2:4], 16) / 255.0, int(h[4:6], 16) / 255.0
+    except ValueError:
+        return None
+    return 0.2126 * r + 0.7152 * g + 0.0722 * b
 
-    if design_file.exists() and not force:
-        if not already_registered:
-            if log:
-                log(f"~ registering existing {DESIGN_DOC_REL} in conventions")
-            conventions.append(resolved_design)
-            profile["conventions"] = conventions
-            save_json(pipeline_dir(project) / "profile.json", profile)
-            adapt.run(project, log=log)
-        return {
-            "status": "exists",
-            "path": str(design_file),
-            "registered": True
-        }
 
-    # Synthesize design spec
-    if log:
-        log(f"~ synthesizing {DESIGN_DOC_REL} for {project.name}")
+def _tokens_from_stitch_html(project: Path) -> dict[str, str]:
+    """Extract real palette & typography tokens from exported Stitch HTML."""
+    screens_dir = project / "docs" / "stitch" / "screens"
+    if not screens_dir.is_dir():
+        return {}
+    html_files = sorted(screens_dir.glob("*/index.html"))
+    if not html_files:
+        return {}
 
-    query = _category_query(project, topic)
-    market_report = tavily.search_market(project, query, log=log)
-    
-    answer = market_report.get("answer", "")
-    sources = market_report.get("sources", [])
-    vision = (profile.get("goals") or {}).get("vision", "").strip()
-    archetype = detect_domain_archetype(project, topic)
-
-    content = _build_design_template(
-        project_name=project.name,
-        vision=vision,
-        category_summary=answer,
-        sources=sources,
-        archetype=archetype,
-    )
-
-    design_file.parent.mkdir(parents=True, exist_ok=True)
-    design_file.write_text(content)
-
-    if log:
-        log(f"  wrote {design_file.relative_to(project)} ({len(content)} chars)")
-
-    # Register in conventions
-    if not already_registered:
-        conventions.append(resolved_design)
-        profile["conventions"] = conventions
-        save_json(pipeline_dir(project) / "profile.json", profile)
-
-    # Adapt to sync state & verify
-    adapt.run(project, log=log)
-
-    return {
-        "status": "created",
-        "path": str(design_file),
-        "query": query,
-        "sources": len(sources),
-        "registered": True
-    }
+    extracted: dict[str, str] = {}
+    for hp in html_files:
+        text = hp.read_text(errors="ignore")
+        # Parse tailwind-config colors/fontFamily when present
+        colors_m = re.search(r'"colors"\s*:\s*\{([^}]+)\}', text, re.S)
+        if colors_m:
+            block = colors_m.group(1)
+            cmap = dict(re.findall(r'"([a-z0-9\-]+)"\s*:\s*"(#[0-9a-fA-F]{6})"', block, re.I))
+            mapping = {
+                "background": "surface_base",
+                "surface": "surface_base",
+                "surface-container": "surface_elevated",
+                "surface-container-low": "surface_elevated",
+                "surface-container-high": "surface_highlight",
+                "surface-container-highest": "surface_highlight",
+                "primary": "primary_accent",
+                "secondary": "secondary_accent",
+                "tertiary": "warning_accent",
+                "on-surface": "text_primary",
+                "on-background": "text_primary",
+                "on-surface-variant": "text_secondary",
+            }
+            for src_k, dst_k in mapping.items():
+                if src_k in cmap and dst_k not in extracted:
+                    extracted[dst_k] = cmap[src_k]
+        fonts_m = re.search(r'"fontFamily"\s*:\s*\{([^}]+)\}', text, re.S)
+        if fonts_m:
+            fblock = fonts_m.group(1)
+            fmap = re.findall(r'"([a-z0-9\-]+)"\s*:\s*\[\s*"([^"]+)"', fblock, re.I)
+            for fk, fv in fmap:
+                fl = fk.lower()
+                if ("headline" in fl or "display" in fl) and "headline_font" not in extracted:
+                    extracted["headline_font"] = fv
+                elif ("body" in fl or "title" in fl) and "body_font" not in extracted:
+                    extracted["body_font"] = fv
+                elif "label" in fl and "label_font" not in extracted:
+                    extracted["label_font"] = fv
+        if extracted:
+            break
+    return extracted
 
 
 def extract_design_tokens(project: Path) -> dict[str, str]:
-    """Extract authoritative design tokens from docs/design.md.
+    """Extract authoritative design tokens from Stitch artifacts, then legacy fallback.
 
-    The token table is `| `BrandPrimary` | `#E8442A` | role |`, so the NAME cell is
-    matched exactly. A substring test on the whole line is wrong and was observed
-    wrong: `OnBrandPrimary` (the colour of text ON the accent) contains
-    `BrandPrimary`, so it overwrote it — every generated poster, icon and Stitch
-    prompt was then seeded with a near-black "accent".
+    Priority:
+    1. `.pipeline/stitch_tokens.json` or `docs/stitch/tokens.json`
+    2. Exported Stitch HTML (`docs/stitch/screens/*/index.html`)
+    3. Legacy `docs/design.md` (if present)
+    4. Domain archetype fallback
     """
     arch = detect_domain_archetype(project)
     tokens = {
@@ -533,11 +528,42 @@ def extract_design_tokens(project: Path) -> dict[str, str]:
         "headline_font": arch["headline_font"],
         "body_font": arch["body_font"],
         "label_font": arch["label_font"],
+        "theme_mode": arch.get("theme_mode", "light"),
+        "source": "archetype",
     }
+
+    # 1. Explicit Stitch token JSON
+    for tok_path in (pipeline_dir(project) / "stitch_tokens.json",
+                     project / "docs" / "stitch" / "tokens.json"):
+        if tok_path.is_file():
+            try:
+                raw = json.loads(tok_path.read_text())
+                if isinstance(raw, dict):
+                    for k, v in raw.items():
+                        if k in tokens and isinstance(v, str) and v.strip():
+                            tokens[k] = v.strip()
+                    tokens["source"] = "stitch_tokens"
+                    lum = _hex_luminance(tokens["surface_base"])
+                    if lum is not None:
+                        tokens["theme_mode"] = "dark" if lum < 0.35 else "light"
+                    return tokens
+            except Exception:
+                pass
+
+    # 2. Exported Stitch screen HTML
+    html_tokens = _tokens_from_stitch_html(project)
+    if html_tokens:
+        tokens.update(html_tokens)
+        tokens["source"] = "stitch_html"
+        lum = _hex_luminance(tokens["surface_base"])
+        if lum is not None:
+            tokens["theme_mode"] = "dark" if lum < 0.35 else "light"
+        return tokens
+
+    # 3. Legacy docs/design.md fallback (older projects only)
     design_doc = project / "docs/design.md"
     if not design_doc.is_file():
         return tokens
-    import re
     text = design_doc.read_text(errors="ignore")
 
     roles = {
@@ -549,10 +575,6 @@ def extract_design_tokens(project: Path) -> dict[str, str]:
         "brandsecondary": "secondary_accent",
         "receivingaccent": "secondary_accent",
         "accentwarning": "warning_accent",
-        # Material-style tables name the same roles differently: a project whose
-        # design.md says `background`/`accent` was seeded from the DEFAULTS
-        # (#0A0E14 / #00E676) — another app's palette — so every generated icon
-        # was designed against the wrong colours.
         "background": "surface_base",
         "surface": "surface_elevated",
         "surfacehigh": "surface_highlight",
@@ -570,6 +592,10 @@ def extract_design_tokens(project: Path) -> dict[str, str]:
                 tokens[key] = m.group(2)
                 matched = True
     if matched:
+        tokens["source"] = "design_doc"
+        lum = _hex_luminance(tokens["surface_base"])
+        if lum is not None:
+            tokens["theme_mode"] = "dark" if lum < 0.35 else "light"
         return tokens
 
     # Docs that are not a token table still carry colours on labelled lines.
@@ -581,123 +607,309 @@ def extract_design_tokens(project: Path) -> dict[str, str]:
             continue
         if "SurfaceBase" in line or "background:" in line.lower():
             tokens["surface_base"] = hex_val
+            tokens["source"] = "design_doc"
         elif "SurfaceElevatedHigh" in line or "surface-high:" in line.lower():
             tokens["surface_highlight"] = hex_val
         elif "SurfaceElevated" in line or "surface:" in line.lower():
             tokens["surface_elevated"] = hex_val
         elif "BrandPrimary" in line or "ServingAccent" in line or "accent:" in line.lower():
             tokens["primary_accent"] = hex_val
+            tokens["source"] = "design_doc"
         elif "BrandSecondary" in line or "ReceivingAccent" in line or "accent-coral:" in line.lower():
             tokens["secondary_accent"] = hex_val
         elif "warning:" in line.lower() or "AccentWarning" in line:
             tokens["warning_accent"] = hex_val
+    lum = _hex_luminance(tokens["surface_base"])
+    if lum is not None:
+        tokens["theme_mode"] = "dark" if lum < 0.35 else "light"
     return tokens
 
 
-def should_invoke_stitch(task_description: str, files_affected: list[str] | None = None) -> tuple[bool, str]:
-    """Evaluate whether an incoming task requires Stitch MCP or should proceed in code/state.
+def recommend_stitch_mode(
+    task_description: str,
+    has_existing_screen: bool = False,
+    files_affected: list[str] | None = None,
+) -> dict[str, str]:
+    """Choose the least destructive Stitch action: bypass | tweak | variants | new_screen.
 
-    RATIONALE:
-    - Invoke Stitch MCP when:
-      * Creating an entirely new screen or user flow.
-      * Major UI/UX redesign or spatial layout overhaul.
-      * Defining brand assets (App Icon, Store Banner, Brand Identity).
-      * Synthesizing high-contrast design system tokens for a greenfield app.
-    - Bypass Stitch MCP when:
-      * Bug fixes in business logic, rule engines, or state machines.
-      * Data layer, local database, or network/API persistence.
-      * Minor UI tweaks, margin/padding adjustments, copy changes.
-      * Existing screen already matches docs/design.md tokens.
+    Prefers targeted tweaks (`edit_screens` / `generate_variants` REFINE) over
+    complete redesign (`generate_screen_from_text`) whenever an existing screen
+    already covers the surface.
     """
-    desc = task_description.lower()
-    
-    # Strong signals to invoke Stitch
-    stitch_triggers = [
-        "new screen", "create screen", "design screen", "ui redesign", "ux overhaul",
-        "brand asset", "app icon", "feature graphic", "marketing mockup", "design system",
-        "new layout", "visual language", "stitch"
-    ]
-    for trigger in stitch_triggers:
-        if trigger in desc:
-            return True, f"Triggered by '{trigger}': Task involves substantial visual or screen architecture design."
+    desc = (task_description or "").lower()
 
-    # Strong signals to bypass Stitch
     code_only_triggers = [
-        "bug", "fix", "crash", "state", "viewmodel", "logic", "unit test",
+        "bug", "crash", "viewmodel", "logic", "unit test",
         "persistence", "database", "sql", "gradle", "ci", "workflow", "publish",
-        "typo", "copy tweak", "padding", "refactor"
+        "typo", "refactor",
     ]
+    new_or_redesign_triggers = [
+        "new screen", "create screen", "from scratch", "ground-up",
+        "complete redesign", "full redesign", "ux overhaul", "revamp",
+        "app icon", "feature graphic", "brand asset",
+    ]
+    tweak_triggers = [
+        "tweak", "adjust", "refine", "polish", "spacing", "padding",
+        "contrast", "alignment", "button", "copy", "label", "badge",
+        "empty state", "dialog", "sheet", "chip", "card", "gripe",
+        "update screen", "visual", "layout", "color", "font", "hierarchy",
+    ]
+    variant_triggers = ["variant", "explore", "alternative", "options"]
+
+    if any(t in desc for t in new_or_redesign_triggers) or re.search(r"\b(?:new|add|build|create)\b.{0,24}\bscreen\b", desc):
+        # Even for "ui redesign" on an existing screen, warn toward tweak unless truly new/revamp.
+        is_explicit_new = (
+            any(t in desc for t in ("new screen", "create screen", "from scratch", "ground-up", "revamp", "app icon", "feature graphic"))
+            or bool(re.search(r"\b(?:new|create)\b.{0,24}\bscreen\b", desc))
+        )
+        if has_existing_screen and not is_explicit_new:
+            return {
+                "mode": "tweak",
+                "reason": "Existing screen covers this surface — apply targeted edit_screens tweak instead of complete redesign.",
+            }
+        return {
+            "mode": "new_screen",
+            "reason": "Task explicitly requires a new screen, brand asset, or ground-up revamp.",
+        }
+
+    if has_existing_screen and any(t in desc for t in variant_triggers):
+        return {
+            "mode": "variants",
+            "reason": "Existing screen present and alternatives requested — use generate_variants (REFINE).",
+        }
+
+    if any(t in desc for t in tweak_triggers):
+        return {
+            "mode": "tweak" if has_existing_screen else "new_screen",
+            "reason": (
+                "Visual/layout adjustment on an existing surface — use Stitch edit_screens to tweak in place."
+                if has_existing_screen
+                else "Visual task with no existing Stitch screen — generate initial screen."
+            ),
+        }
+
     for trigger in code_only_triggers:
-        if trigger in desc and not any(t in desc for t in ["redesign", "new screen"]):
-            return False, f"Bypassing Stitch: Task '{trigger}' is purely state, logic, or minor code maintenance."
+        if trigger in desc:
+            return {
+                "mode": "bypass",
+                "reason": f"Bypassing Stitch: '{trigger}' is logic, state, or code maintenance.",
+            }
 
-    # Check files affected if provided
     if files_affected:
-        has_new_screen_file = any("screen" in f.lower() or "ui" in f.lower() for f in files_affected)
-        if has_new_screen_file:
-            return True, "Affected files indicate a new or major UI screen surface."
+        has_ui_file = any("screen" in f.lower() or "/ui/" in f.lower() for f in files_affected)
+        if has_ui_file:
+            return {
+                "mode": "tweak" if has_existing_screen else "new_screen",
+                "reason": (
+                    "Affected files touch an existing UI screen — prefer targeted Stitch tweak if visual structure changes."
+                    if has_existing_screen
+                    else "Affected files indicate a new UI screen surface."
+                ),
+            }
 
-    return False, "Default: Task does not explicitly require new visual architecture."
+    return {"mode": "bypass", "reason": "Default: Task does not require Stitch changes."}
+
+
+def should_invoke_stitch(task_description: str, files_affected: list[str] | None = None) -> tuple[bool, str]:
+    """Backwards-compatible wrapper over `recommend_stitch_mode`."""
+    rec = recommend_stitch_mode(task_description, files_affected=files_affected)
+    return rec["mode"] != "bypass", rec["reason"]
 
 
 def curate_stitch_manifest(project: Path, screens_inventory: list[dict[str, Any]]) -> dict[str, Any]:
-    """Maintain a curated, canonical manifest of Stitch screens to avoid junk accumulation.
+    """Maintain a generic, canonical manifest of Stitch screens (no hardcoded domain keywords).
 
-    Rules:
-    - Every screen instance on Stitch canvas must map to a canonical app surface.
-    - Throwaway variants and outdated experiments must not clutter the project canvas.
-    - Saves canonical manifest to .pipeline/stitch_manifest.json.
+    - Preserves already-approved canonical entries and exported file paths from
+      `docs/stitch/manifest.json`.
+    - Flags obvious scratch/draft experiments (`scratch`, `draft`, `untitled`, `tmp`,
+      `deprecated`, `backup`) and duplicate older titles unless already approved.
+    - Saves to `docs/stitch/manifest.json` AND `.pipeline/stitch_manifest.json`.
     """
-    manifest_path = pipeline_dir(project) / "stitch_manifest.json"
-    manifest_path.parent.mkdir(parents=True, exist_ok=True)
+    tracked_path = project / "docs" / "stitch" / "manifest.json"
+    tracked_path.parent.mkdir(parents=True, exist_ok=True)
+    legacy_path = pipeline_dir(project) / "stitch_manifest.json"
+    legacy_path.parent.mkdir(parents=True, exist_ok=True)
 
-    canonical_screens = []
-    unmapped_or_stale = []
+    existing_by_id: dict[str, dict[str, Any]] = {}
+    existing_project_id = ""
+    existing_synced_at = ""
+    if tracked_path.is_file():
+        try:
+            old = json.loads(tracked_path.read_text())
+            existing_project_id = str(old.get("project_id") or "")
+            existing_synced_at = str(old.get("synced_at") or "")
+            for s in old.get("canonical_screens") or []:
+                if s.get("id"):
+                    existing_by_id[str(s["id"])] = s
+        except Exception:
+            pass
 
-    # Screens explicitly matching the current release architecture / atmosphere
-    # or core canonical assets without scratch/experimental modifiers
-    scratch_tokens = ["shader", "loading", "idle", "edit mode", "widget management", "test", "scratch", "draft", "oled minimalist"]
+    scratch_words = ("scratch", "draft", "untitled", "deprecated", "backup", "throwaway", "experiment")
+
+    canonical_screens: list[dict[str, Any]] = []
+    stale_screens: list[dict[str, Any]] = []
+    seen_titles: dict[str, int] = {}
 
     for s in screens_inventory:
-        title = s.get("title", "")
-        screen_id = s.get("name", "").split("/")[-1] if "/" in s.get("name", "") else s.get("id", "")
+        title = str(s.get("title") or "").strip()
+        raw_name = str(s.get("name") or "")
+        screen_id = raw_name.split("/")[-1] if "/" in raw_name else str(s.get("id") or "")
+        if not screen_id:
+            continue
         t_low = title.lower()
+        is_scratch = any(re.search(rf"\b{re.escape(w)}\b", t_low) for w in scratch_words)
+        prev = existing_by_id.get(screen_id) or {}
 
-        is_scratch = any(st in t_low for st in scratch_tokens)
-        is_atmosphere_2 = "atmosphere 2.0" in t_low
-        is_obsidian_studio = "obsidian" in t_low
-        is_canonical_core = any(tok in t_low for tok in [
-            "icon", "banner", "scoreboard", "summary", "setup", "design.md",
-            "feature graphic", "storefront", "app drawer", "digital wellbeing",
-            "screen time", "premium paywall", "pdf", "compress", "merge",
-            "split", "convert", "rearrange", "workbench", "workstation",
-            "document", "toolbox", "page studio"
-        ]) and not is_scratch
-
-        if (is_atmosphere_2 or is_obsidian_studio or is_canonical_core) and not is_scratch:
-            canonical_screens.append({
+        if is_scratch and screen_id not in existing_by_id:
+            stale_screens.append({
                 "id": screen_id,
-                "title": title,
-                "type": s.get("deviceType") or "CANONICAL",
-                "status": "APPROVED",
-            })
-        else:
-            unmapped_or_stale.append({
-                "id": screen_id,
-                "title": title,
+                "title": title or screen_id,
                 "status": "CANDIDATE_FOR_CLEANUP",
             })
+            continue
 
+        entry: dict[str, Any] = {
+            "id": screen_id,
+            "title": title or prev.get("title") or screen_id,
+            "surface": prev.get("surface") or s.get("surface") or "",
+            "type": s.get("deviceType") or prev.get("type") or "MOBILE",
+            "status": "APPROVED",
+        }
+        screen_dir = project / "docs" / "stitch" / "screens" / screen_id
+        if (screen_dir / "index.html").is_file():
+            entry["html"] = f"screens/{screen_id}/index.html"
+        elif prev.get("html"):
+            entry["html"] = prev["html"]
+        if (screen_dir / "screen.png").is_file():
+            entry["screenshot"] = f"screens/{screen_id}/screen.png"
+        elif prev.get("screenshot"):
+            entry["screenshot"] = prev["screenshot"]
+
+        norm_title = re.sub(r"\s+", " ", t_low)
+        if norm_title and norm_title in seen_titles and screen_id not in existing_by_id:
+            # Duplicate title: move the earlier non-pinned duplicate to stale unless pinned
+            prev_idx = seen_titles[norm_title]
+            prev_entry = canonical_screens[prev_idx]
+            if prev_entry["id"] not in existing_by_id:
+                stale_screens.append({
+                    "id": prev_entry["id"],
+                    "title": prev_entry["title"],
+                    "status": "CANDIDATE_FOR_CLEANUP",
+                })
+                canonical_screens[prev_idx] = entry
+                continue
+        seen_titles[norm_title] = len(canonical_screens)
+        canonical_screens.append(entry)
+
+    profile = profile_of(project)
+    pid = existing_project_id or str((profile.get("design") or {}).get("stitch_project_id") or "").split("/")[-1]
     manifest = {
         "project": project.name,
+        "project_id": pid,
+        "synced_at": existing_synced_at or now_iso(),
         "updated_at": now_iso(),
         "canonical_screens": canonical_screens,
-        "stale_screens": unmapped_or_stale,
+        "stale_screens": stale_screens,
         "screen_count": len(canonical_screens),
-        "stale_count": len(unmapped_or_stale),
+        "stale_count": len(stale_screens),
     }
-    save_json(manifest_path, manifest)
+    save_json(tracked_path, manifest)
+    save_json(legacy_path, manifest)
     return manifest
+
+
+def extract_html_summary(html_text: str) -> dict[str, list[str]]:
+    """Extract headings, interactive button/link labels, and nav labels from Stitch HTML."""
+    if not html_text:
+        return {"headings": [], "controls": []}
+    cleaned = re.sub(r"<(script|style)[^>]*>.*?</\1>", " ", html_text, flags=re.S | re.I)
+
+    def _strip_tags(s: str) -> str:
+        import html as _html
+        # Drop material symbol icon names wrapped in <span class="material-symbols...">
+        s = re.sub(r'<span[^>]*material-symbols[^>]*>.*?</span>', " ", s, flags=re.S | re.I)
+        s = re.sub(r"<[^>]+>", " ", s)
+        s = _html.unescape(s)
+        return re.sub(r"\s+", " ", s).strip()
+
+    headings: list[str] = []
+    for m in re.finditer(r"<h[1-4][^>]*>(.*?)</h[1-4]>", cleaned, flags=re.S | re.I):
+        t = _strip_tags(m.group(1))
+        if t and len(t) <= 80 and t not in headings:
+            headings.append(t)
+
+    controls: list[str] = []
+    for m in re.finditer(r"<(?:button|a)[^>]*>(.*?)</(?:button|a)>", cleaned, flags=re.S | re.I):
+        t = _strip_tags(m.group(1))
+        if t and len(t) <= 60 and t not in controls:
+            controls.append(t)
+
+    return {"headings": headings[:12], "controls": controls[:20]}
+
+
+def compile_stitch_tweak_prompt(
+    project: Path,
+    change_request: str,
+    *,
+    screen_title: str = "",
+    screen_id: str = "",
+    preserve: list[str] | None = None,
+    baseline_html: str = "",
+) -> str:
+    """Compile a surgical, non-destructive tweak prompt for Stitch `edit_screens`."""
+    profile = profile_of(project)
+    name = profile.get("name") or project.name
+    tokens = extract_design_tokens(project)
+    summary = extract_html_summary(baseline_html)
+
+    preserve_lines: list[str] = []
+    for item in (preserve or []):
+        if str(item).strip():
+            preserve_lines.append(f"- {str(item).strip()}")
+    if summary["headings"]:
+        preserve_lines.append(f"- Existing headings/sections: {', '.join(summary['headings'][:6])}")
+    if summary["controls"]:
+        preserve_lines.append(f"- Existing interactive controls/CTAs (keep intact unless the tweak changes them): {', '.join(summary['controls'][:10])}")
+    if not preserve_lines:
+        preserve_lines.append("- Keep the existing spatial layout, navigation structure, typography, and color palette intact.")
+
+    target_label = screen_title or screen_id or "Target Screen"
+    preserve_block = "\n".join(preserve_lines)
+
+    return f"""TARGET SCREEN: {target_label} ({name})
+OPERATION: SURGICAL IN-PLACE TWEAK — DO NOT REDESIGN FROM SCRATCH.
+
+REQUESTED CHANGE (apply ONLY this change):
+{change_request.strip()}
+
+PRESERVE EXISTING DESIGN (DO NOT REMOVE OR REINVENT):
+{preserve_block}
+- Keep the existing theme ({tokens.get('theme_mode', 'light')} ground {tokens['surface_base']}, elevated {tokens['surface_elevated']}, primary accent {tokens['primary_accent']}, typography {tokens['headline_font']} / {tokens['body_font']}).
+- Do NOT add unrequested features (no sign-in/OAuth walls, no ads/upgrade banners, no extra nav bars, no search bars unless explicitly requested above).
+- Do NOT use Lorem Ipsum or placeholder numbers where real labels are specified.
+- Maintain >= 48dp touch targets, >= 4.5:1 text contrast, and clean 1px structural borders (no glowing neon blur halos).
+"""
+
+
+def _target_context_for_screen(project: Path, profile: dict, screen_type: str) -> dict[str, Any]:
+    """Derive generic screen context from the project's own targets, PRD, and manifest."""
+    st = screen_type.lower().strip()
+    targets = [t for t in (profile.get("targets") or []) if isinstance(t, dict)]
+    matched_target = None
+    for t in targets:
+        label = str(t.get("label") or "").lower()
+        if st and (st == label or st in label):
+            matched_target = t
+            break
+
+    prd_excerpt = ""
+    prd_path = project / "docs" / "PRD.md"
+    if prd_path.is_file():
+        prd_text = prd_path.read_text(errors="ignore")
+        lines = [ln.strip() for ln in prd_text.splitlines() if ln.strip() and not ln.startswith("#")]
+        prd_excerpt = " ".join(lines[:6])[:400]
+
+    return {"target": matched_target, "prd_excerpt": prd_excerpt}
 
 
 def compile_stitch_screen_prompt(
@@ -705,301 +917,54 @@ def compile_stitch_screen_prompt(
     screen_type: str = "main",
     spec: dict[str, Any] | None = None,
 ) -> str:
-    """Compile an authoritative, anti-generic screen prompt for Stitch MCP.
+    """Compile an authoritative, project-generic screen prompt for Stitch MCP.
 
-    CORE PRINCIPLES:
-    1. Pre-Locked Product Logic & CTAs: Every interactive element, button label,
-       and state transition is defined upfront. Stitch must NOT improvise feature scope.
-    2. Concrete Real-World Data: Zero dummy lorem ipsum. Exact scores, metrics,
-       names, and telemetries are provided.
-    3. UI/UX Realization Only: Layout craftsmanship, spatial hierarchy, typography
-       contrast, radiant state auras, and tactile surfaces are delegated to Stitch.
-    4. Anti-Generic Mandate: Explicit negative constraints ban standard Material 3 /
-       Bootstrap cookie-cutter white cards, unstyled grey borders, and tiny buttons.
+    Reads the project's own profile, targets, PRD, and extracted Stitch tokens —
+    zero hardcoded domain/app examples in team code.
     """
     profile = profile_of(project)
     name = profile.get("name") or project.name
     vision = (profile.get("goals") or {}).get("vision", "").strip()
     tokens = extract_design_tokens(project)
-
-    st = screen_type.lower().strip()
     arch = detect_domain_archetype(project)
-    arch_key = arch.get("key", "modern_dark")
-
-    is_pdf = arch_key == "technical_studio" or "pdf" in name.lower() or "document" in vision.lower()
-    is_court_sports = arch_key == "court_athletic" or "scoreboard" in vision.lower() or "tennis" in vision.lower()
-    is_zen_focus = arch_key == "zen_focus" or any(k in vision.lower() for k in ["launcher", "focus", "meditation", "calm", "breathe", "detox"])
+    ctx = _target_context_for_screen(project, profile, screen_type)
+    target = ctx.get("target") or {}
 
     if spec:
-        screen_title = spec.get("title", f"{name} Screen")
+        screen_title = spec.get("title", f"{name} - {screen_type}")
         context_desc = spec.get("context", vision)
-        layout_zones = spec.get("zones", [])
-        ctas = spec.get("ctas", [])
-        telemetry = spec.get("telemetry", {})
+        layout_zones = list(spec.get("zones") or [])
+        ctas = list(spec.get("ctas") or [])
+        telemetry = dict(spec.get("telemetry") or {})
         aesthetic = spec.get("aesthetic", arch["aesthetic"])
-    elif is_zen_focus:
-        aesthetic = arch["aesthetic"]
-        # Distinguish between habit/routine/intention tracker vs minimalist launcher
-        prd_text = (project / "docs/PRD.md").read_text(errors="ignore") if (project / "docs/PRD.md").is_file() else ""
-        is_routine_tracker = "routine" in prd_text.lower() or "streak" in prd_text.lower() or "routine" in vision.lower()
-        if is_routine_tracker and st in ("main", "home", "hub", "core"):
-            screen_title = f"{name} - Daily Routines & Intentions"
-            context_desc = f"Primary calm daily routine and goal dashboard for {name}. Distraction-free, warm stone daylight canvas with intentional progress and checklist."
-            layout_zones = [
-                f"1. Top Quiet Header: Wordmark '{name.upper()}' in {tokens['headline_font']}, date in warm slate ({tokens['text_secondary']}), and streak badge ('7-Day Streak').",
-                f"2. Daily Progress Hero Card: Warm tactile surface ({tokens['surface_elevated']}) with 1px border ({tokens['surface_highlight']}), showing circular completion ring in forest sage ({tokens['primary_accent']}) displaying '4 of 6 Completed' and encouragement subtext.",
-                f"3. Active Daily Intentions List: Clean vertical stack of routine items (e.g. 'Morning Walk', 'Deep Work • 90m', 'Hydration', 'Evening Reading'). Each row features a tactile checkbox, title, and time category chip in {tokens['secondary_accent']}.",
-                f"4. Quick Add & Focus Dock: Thumb-accessible bottom action deck with 'ADD INTENTION' primary button and 'WEEKLY RECAP' secondary action.",
-            ]
-            ctas = [
-                "Intention Checkbox (Toggles completion with immediate tactile haptic state)",
-                "Add Intention Button (Primary CTA -> Opens new routine item bottom sheet)",
-                "Weekly Recap Action (Opens streak telemetry and review)",
-            ]
-            telemetry = {
-                "Today Completion": "4 of 6 (67%)",
-                "Current Streak": "7 Days",
-                "Best Streak": "21 Days",
-            }
-        elif st in ("main", "home", "hub", "core", "launcher"):
-            screen_title = f"{name} - Intentional Home & Breathing Anchor"
-            context_desc = f"Primary calm launch surface for {name}. Distraction-free, warm stone canvas with intentional breathing anchor and essential apps."
-            layout_zones = [
-                f"1. Top Quiet Header: Wordmark '{name.upper()}' in {tokens['headline_font']}, date in warm slate ({tokens['text_secondary']}), and subtle battery indicator.",
-                f"2. Center Breathing Anchor Hero: Tactile geometric breath circle in forest sage ({tokens['primary_accent']}) with soft ambient contour, displaying '38m Intentional Use Left' and daily pickup count '12 Pickups'.",
-                f"3. Essential Apps List: Clean distraction-free vertical list of user-prioritized apps with tabular usage limit badges (e.g. 'Messages', 'Phone', 'Calendar', 'Reading • 25m left').",
-                f"4. Bottom Serenity Dock: Thumb-accessible pill buttons for 'Take a Breath Pause' (in {tokens['primary_accent']}) and 'All Apps Drawer'.",
-            ]
-            ctas = [
-                "App Item (Launches app or triggers conscious pause friction)",
-                "Breath Pause Button (Primary CTA -> Opens guided conscious breathing circle)",
-                "Apps Drawer Pill (Opens full categorized app list)",
-            ]
-            telemetry = {
-                "Today Screen Time": "42 mins (Down 64%)",
-                "Intentional Pickups": "12",
-                "Active Mode": "Intentional Detox",
-            }
-        elif st in ("pause", "breathe", "limits", "friction"):
-            screen_title = f"{name} - Conscious Friction & Breath Pause"
-            context_desc = f"Calm intentional pause overlay triggered before opening distracting apps, interrupting mindless dopamine loops."
-            layout_zones = [
-                f"1. Top Context Bar: Close 'X' button and subtle prompt 'CONSCIOUS PAUSE'.",
-                f"2. Breathing Meditation Sphere: Concentric pulsating circle in forest sage ({tokens['primary_accent']}) guiding the user to inhale and exhale.",
-                f"3. Friction Countdown & Intentional Prompt: 'Take 2 deep breaths...' countdown timer in bold {tokens['headline_font']} numerals, followed by 'Opening Instagram'.",
-                f"4. Conscious Choice Action Deck: High-contrast buttons:",
-                f"   - Primary Action: 'OPEN WITH 15M LIMIT' in solid {tokens['primary_accent']} with high-contrast text.",
-                f"   - Secondary Action: 'STEP AWAY (CLOSE)' in elevated surface {tokens['surface_elevated']} with 1px border.",
-            ]
-            ctas = [
-                "Breathe & Wait (User observes the calming pulse rhythm)",
-                "Open With Limit Button (Primary CTA -> Unlocks app for timed session)",
-                "Step Away Button (Dismisses pause and returns to home screen)",
-            ]
-            telemetry = {
-                "Target App": "Social App",
-                "Pause Duration": "5 seconds remaining",
-                "Session Limit": "15 minutes",
-            }
-        else:
-            screen_title = f"{name} - Digital Wellbeing & Focus Limits"
-            context_desc = f"App limits, bedtime monochrome schedule, and distraction detox settings for {name}."
-            layout_zones = [
-                f"1. Top Navigation Bar: Back button, title 'FOCUS & DETOX', reset defaults pill.",
-                f"2. Usage Telemetry Card: Weekly phone time comparison chart in {tokens['surface_elevated']} with sage {tokens['primary_accent']} progress bars.",
-                f"3. App Friction Limit Rows: Modular cards with app title, toggle switch, and interactive session duration slider (5m, 15m, 30m).",
-                f"4. Bedtime Grayscale Switch: Elevated card with toggle for automatic evening monochrome mode.",
-                f"5. Save Action Button: Full-width button 'APPLY FOCUS SHIELD' in solid {tokens['primary_accent']}.",
-            ]
-            ctas = [
-                "App Limit Slider (Adjusts allowed minutes per session)",
-                "Grayscale Toggle (Enables night detox)",
-                "Apply Focus Shield (Saves and locks configuration)",
-            ]
-            telemetry = {
-                "Time Saved This Week": "4 hrs 18 mins",
-                "Apps Restricted": "6 apps",
-                "Monochrome Schedule": "10:30 PM - 7:00 AM",
-            }
-    elif is_pdf:
-        aesthetic = arch["aesthetic"]
-        if st in ("main", "home", "hub", "core"):
-            screen_title = f"{name} - Precision PDF Workstation (Home)"
-            context_desc = f"Primary central workstation for {name}. High-contrast daylight tool hub with tactile cards, clean file telemetry, and zero bloat."
-            layout_zones = [
-                f"1. Top Context Header: Wordmark '{name.upper()}' in {tokens['headline_font']}, privacy chip '100% OFFLINE • ON-DEVICE' with status dot, and settings button.",
-                f"2. Primary Featured Hero Card: 'Smart Lossless Compress' featured card with 1px {tokens['primary_accent']} border, 'Reduce up to 88% • Zero Quality Loss' tag, and instant 'SELECT PDF' CTA button.",
-                f"3. 2x2 Core Tools Grid: Elevated clean cards ({tokens['surface_elevated']}) with rounded corners and distinct tool icons:",
-                f"   - Merge PDFs: Badge '2+ files', combines multiple documents into one.",
-                f"   - Split PDF: Visual page range cutter icon with extract preview.",
-                f"   - Convert: Dual toggle pill ('PDF ⇄ Images') with format selector.",
-                f"   - Rearrange: Tactile drag-and-drop icon with page reorder overview.",
-                f"4. Recent Documents Shelf: Clean technical document rows showing filename, page count ('24 pages'), file size ('3.8 MB'), timestamp ('Edited 2h ago'), and quick action dots.",
-                f"5. Grounded Dock Bar: Fixed bottom bar with Tools, Compress, Recents, and Settings.",
-            ]
-            ctas = [
-                "Select PDF Document (Primary hero CTA -> Launches file picker)",
-                "Merge PDFs (Combines multiple documents into one)",
-                "Split PDF (Visual page range cutter)",
-                "Convert (Format selector)",
-                "Rearrange (Tactile drag-and-drop page reorder)",
-            ]
-            telemetry = {
-                "Engine": "Smart Lossless Compress",
-                "Reduction": "-88%",
-            }
-        elif st in ("compress", "shrink", "optimize"):
-            screen_title = f"{name} - Smart Lossless Compress"
-            context_desc = f"On-device PDF compression studio with interactive reduction slider and live telemetry."
-            layout_zones = [
-                f"1. Top Navigation Bar: Back button, title 'Smart Compress', engine badge 'LOSSLESS HYBRID', reset button.",
-                f"2. File Inspection Card: Document thumbnail, title 'Annual_Report_2026.pdf', size '18.4 MB', 48 pages, vector data indicator.",
-                f"3. Tactile Compression Slider: 3 segmented levels ('Print Hi-Fi ~40%', 'Recommended Balanced ~88%', 'Extreme ~95%') with active {tokens['primary_accent']} slider rail.",
-                f"4. Live Telemetry & Projected Output Card: Output projection '18.4 MB → 2.1 MB', savings badge '-88% (Saved 16.3 MB)'.",
-                f"5. Primary Action CTA: 'COMPRESS PDF NOW' button with solid {tokens['primary_accent']} fill and estimated time '~1.4s'.",
-                f"6. Privacy & Security Footer: '100% On-Device Processing • Your file never leaves your phone'.",
-            ]
-            ctas = [
-                "Back Button (Returns to Home)",
-                "Compression Level Slider (Adjusts reduction target)",
-                "Compress PDF Now (Primary CTA -> Executes lossless compression)",
-            ]
-            telemetry = {
-                "Original Size": "18.4 MB (48 Pages)",
-                "Projected Size": "2.1 MB (-88%)",
-                "Engine": "Lossless Vector & Raster Downsampling",
-            }
-        elif st in ("merge", "rearrange", "canvas", "organize"):
-            screen_title = f"{name} - Visual Page Canvas & Reorder"
-            context_desc = f"Tactile multi-page document organizer, page rearranger, and combiner."
-            layout_zones = [
-                f"1. Top Navigation Bar: Back button, screen title 'PAGE STUDIO', page selection count '8 of 24 Selected'.",
-                f"2. Canvas Action Bar: 'Rotate 90°', 'Select All', 'Invert Selection', 'Delete Pages'.",
-                f"3. Visual Multi-Page Grid: 3-column thumbnail grid with drag handles, page numbers, and {tokens['primary_accent']} selection borders.",
-                f"4. Floating Action Deck: 'EXTRACT & MERGE SELECTED' button in solid {tokens['primary_accent']} with subtle elevation shadow.",
-            ]
-            ctas = [
-                "Page Thumbnail (Toggles page selection)",
-                "Rotate 90 Button (Rotates selected pages)",
-                "Extract & Merge Button (Primary CTA -> Combines/exports selected pages)",
-            ]
-            telemetry = {
-                "Document": "Portfolio_Draft_v3.pdf",
-                "Selected Pages": "8 of 24",
-                "Canvas Mode": "Visual Reorder & Extraction",
-            }
-        else:
-            screen_title = f"{name} - Split & Convert Studio"
-            context_desc = f"Extract specific page ranges or convert between PDF and high-res image sets."
-            layout_zones = [
-                f"1. Top Navigation Bar: Back button, title 'CONVERT & SPLIT'.",
-                f"2. Conversion Direction Toggle: Segmented control for 'PDF → IMAGES' vs 'IMAGES → PDF'.",
-                f"3. DPI & Quality Presets: High-contrast selector for 150 DPI (Web), 300 DPI (Print), and Custom.",
-                f"4. Primary Action Button: 'CONVERT NOW' with high-contrast accent styling.",
-            ]
-            ctas = ["Direction Toggle", "DPI Selector", "Convert Now Button"]
-            telemetry = {"Mode": "PDF to Images", "DPI": "300 DPI"}
-    elif is_court_sports and st in ("score", "scoreboard", "main", "core"):
-        aesthetic = arch["aesthetic"]
-        screen_title = f"{name} - Active Court Scoreboard"
-        context_desc = f"Primary active scoring surface for {name}. Engineered for rapid, sweaty-palm court-side glanceability under bright outdoor sunlight or indoor floodlights."
-        layout_zones = [
-            f"1. Top Context Header: Edge-to-edge status bar displaying match mode ('DOUBLES MATCH'), target rule ('PLAY TO 11 • WIN BY 2'), active court ('COURT #4'), and audio callout indicator.",
-            f"2. Primary Interactive Arena (Split Court): Two massive full-bleed cards dividing the viewport vertically (Team 1 vs Team 2):",
-            f"   - Serving Half (Top): Solid active border in {tokens['primary_accent']} with prominent server badge 'SERVER 2 (0-0-2)', team label 'TEAM 1 (Alex & Jordan)', and massive {tokens['headline_font']} score numeral '7'. Tap affordance label: 'TAP TO SCORE POINT'.",
-            f"   - Receiving Half (Bottom): Deep slate surface {tokens['surface_elevated']} with crisp boundary stroke, team label 'TEAM 2 (Marcus & Sam)', and massive {tokens['headline_font']} score numeral '4'. Tap affordance label: 'TAP TO SCORE POINT'.",
-            f"3. Center Court Landmark Divider: Non-Volley Zone (NVZ Kitchen) net divider line with geometric court cues separating the two halves.",
-            f"4. Docked Court-Side Action Bar: Ergonomic thumb-accessible bottom utility deck with 3 distinct touch targets (min 48dp height):",
-            f"   - 'Undo': Circular reverse arrow icon with label 'UNDO'.",
-            f"   - 'Switch Server / Side-Out': High-contrast pill button styled with {tokens['primary_accent']} accent border.",
-            f"   - 'Match Settings': Slate icon button with gear symbol.",
-        ]
-        ctas = [
-            "Team 1 Scoring Zone (Full tap area -> +1 Point to Team 1)",
-            "Team 2 Scoring Zone (Full tap area -> +1 Point to Team 2)",
-            "Undo Button (Reverts last score update and restores previous serving state)",
-            "Switch Server / Side-Out Button (Forces immediate server turnover or side-out)",
-            "Settings Button (Opens match configuration bottom sheet)",
-        ]
-        telemetry = {
-            "Team 1 Score": "7",
-            "Team 2 Score": "4",
-            "Active Server": "Server 2 (Doubles 0-0-2)",
-            "Target Condition": "Play to 11, Win by 2",
-            "Current Audio Call": "7 - 4 - 2",
-        }
-    elif is_court_sports and st in ("summary", "history", "stats", "recap"):
-        aesthetic = arch["aesthetic"]
-        screen_title = f"{name} - Post-Match Victory Summary & Performance Statistics"
-        context_desc = f"Post-game victory celebration and detailed match telemetry breakdown for {name}."
-        layout_zones = [
-            f"1. Top Navigation Bar: Minimal back arrow, screen title 'MATCH RECAP', and court context badge 'COURT #4 • REC ELITE'.",
-            f"2. Victory Hero Card: High-energy celebration card with display headline 'VICTORY — TEAM 1' (Alex Vance & Jordan Reed), solid badge in {tokens['primary_accent']} framing final score '11 - 9', and opponent subline 'Def. Team 2 (Marcus Stone & Sam Rivera)'.",
-            f"3. 4-Card Telemetry Grid: 2x2 modular slate cards ({tokens['surface_elevated']}) with JetBrains Mono numbers:",
-            f"   - Card A: '24:18' (Total Duration)",
-            f"   - Card B: '4' (Side-Outs)",
-            f"   - Card C: '18 Shots' (Longest Rally)",
-            f"   - Card D: '68%' (1st Server Conversion Efficiency)",
-            f"4. Comparative Performance Breakdown: Head-to-head progress bars comparing Team 1 vs Team 2 for side-out conversion, unforced kitchen faults, and momentum streaks.",
-            f"5. Docked Action Deck: Fixed bottom button group:",
-            f"   - Primary High-Impact CTA: 'START NEXT GAME' in solid vibrant {tokens['primary_accent']} with dark bold text.",
-            f"   - Secondary Action CTA: 'SHARE MATCH RECAP' in outlined slate with share glyph.",
-        ]
-        ctas = [
-            "Start Next Game (Primary CTA -> Launches new match setup)",
-            "Share Match Recap (Secondary CTA -> Exports formatted scorecard)",
-            "Back to Home (Header action -> Returns to session dashboard)",
-        ]
-        telemetry = {
-            "Final Score": "11 - 9",
-            "Winner": "Team 1 (Alex Vance & Jordan Reed)",
-            "Duration": "24 mins 18 secs",
-            "Side-Outs": "4",
-            "Serve Efficiency": "Team 1: 68% vs Team 2: 48%",
-        }
-    elif is_court_sports and st in ("setup", "config", "new"):
-        aesthetic = arch["aesthetic"]
-        screen_title = f"{name} - New Match Configuration"
-        context_desc = f"Pre-match ruleset and player configuration screen for {name}."
-        layout_zones = [
-            f"1. Top Navigation Bar: Close button, screen title 'NEW MATCH SETUP', and reset to default pill.",
-            f"2. Match Format Segmented Card: High-contrast selector with chunky hit targets:",
-            f"   - Option 1 (Selected): 'DOUBLES (2v2)' highlighted with vibrant {tokens['primary_accent']} fill.",
-            f"   - Option 2: 'SINGLES (1v1)' in neutral slate.",
-            f"3. Points To Win Card: Segmented 3-option pill row:",
-            f"   - '[ 11 PTS ]' (Active default) • '15 PTS' • '21 PTS'.",
-            f"4. Overtime Rule Card: Dual option cards for 'WIN BY 2' (Traditional USAPA rule) vs 'SUDDEN DEATH (POINT CAP)'.",
-            f"5. Audio & Voice Announce Toggle: Elevated slate card with toggle switch for automatic synthesized score callouts.",
-            f"6. Primary Launch Action: Full-width high-impact CTA button 'START MATCH' in solid {tokens['primary_accent']} with subtle elevation shadow.",
-        ]
-        ctas = [
-            "Format Toggle (Switches between Singles and Doubles rules)",
-            "Score Target Pills (Selects 11, 15, or 21 points)",
-            "Overtime Rule Switch (Toggles Win by 2 vs Sudden Death)",
-            "Audio Announce Toggle (Enables/disables speech synthesis)",
-            "Start Match Button (Primary CTA -> Transitions to scoreboard)",
-        ]
-        telemetry = {
-            "Selected Format": "Doubles (2v2)",
-            "Target Points": "11 Points",
-            "Overtime Mode": "Win by 2",
-            "Audio Scorekeeper": "Enabled",
-        }
     else:
         aesthetic = arch["aesthetic"]
-        screen_title = f"{name} - {screen_type.capitalize()} Screen"
-        context_desc = f"User interface surface for {name}: {vision}"
+        label = str(target.get("label") or screen_type).strip()
+        screen_title = f"{name} - {label.replace('-', ' ').replace('_', ' ').title()}"
+        target_notes = str(target.get("notes") or target.get("description") or "").strip()
+        context_parts = [p for p in (vision, target_notes, ctx.get("prd_excerpt")) if p]
+        context_desc = f"Screen '{label}' for {name}. " + (" ".join(context_parts) if context_parts else "")
         layout_zones = [
-            f"1. Top Context Bar: Clear screen title and navigation.",
-            f"2. Primary Content Section: Structured modular cards using {tokens['surface_elevated']}.",
-            f"3. Action Controls: High-contrast thumb-accessible buttons using {tokens['primary_accent']}.",
+            f"1. Top Context Bar: Clear screen title for '{label}' and focused navigation without clutter.",
+            f"2. Primary Hero / Focal Area: One clear visual anchor aligned with the screen's core user action on {tokens['surface_elevated']}.",
+            f"3. Supporting Content / List Area: Structured, scannable hierarchy using {tokens['surface_base']} canvas and crisp 1px borders ({tokens['surface_highlight']}).",
+            f"4. Primary Action Area: Thumb-accessible primary CTA in {tokens['primary_accent']} (>= 48dp touch target).",
         ]
-        ctas = ["Primary Action Button", "Secondary Action Option"]
-        telemetry = {"Status": "Active"}
+        ctas = list(target.get("ctas") or [])
+        telemetry = dict(target.get("telemetry") or {})
 
     zones_text = "\n".join(layout_zones)
-    ctas_text = "\n".join(f"- {c}" for c in ctas)
-    telemetry_text = "\n".join(f"- {k}: {v}" for k, v in telemetry.items())
+    ctas_text = (
+        "\n".join(f"- {c}" for c in ctas)
+        if ctas
+        else f"- Derive focused, domain-authentic interactive controls for '{label}' (no unrequested auth, ads, or search bars)."
+    )
+    telemetry_text = (
+        "\n".join(f"- {k}: {v}" for k, v in telemetry.items())
+        if telemetry
+        else "- Use realistic domain-authentic labels and values from the app's real state (no Lorem Ipsum)."
+    )
+    theme_mode = tokens.get("theme_mode") or arch.get("theme_mode", "light")
 
     return f"""Title: {screen_title}
 Device: Mobile (390px viewport width, portrait)
@@ -1012,37 +977,29 @@ Platform Aesthetic: {aesthetic}
 All functional CTAs and interaction states are locked upfront. Realize this exact flow without omitting or inventing features:
 {ctas_text}
 
-=== SECTION 3: EXACT DATA TELEMETRY (NO LOREM IPSUM) ===
-Render these exact real-world values into the layout:
+=== SECTION 3: REAL-WORLD COPY & TELEMETRY (NO LOREM IPSUM) ===
 {telemetry_text}
 
 === SECTION 4: SCREEN LAYOUT & SPATIAL ZONES ===
 {zones_text}
 
-=== SECTION 5: STRICT ANTI-AI DESIGN MANDATE & HUMAN CRAFTSMANSHIP ===
-- Domain Archetype: {arch['domain']} (Theme: {arch.get('theme_mode', 'light').upper()})
-- Canvas Base: True background ({tokens['surface_base']}).
-- Card Containers: Elevated surface ({tokens['surface_elevated']}) with crisp 1px structural borders ({tokens.get('surface_highlight', '#E2E8F0')}).
-- Primary Accent: Use {tokens['primary_accent']} purposefully for primary interactive actions and selections.
-- Secondary Accent: Use {tokens['secondary_accent']} for secondary chips, category tags, and status transitions.
-- Warning / Metric Accent: Use warm accent ({tokens['warning_accent']}) for alert confirmations, limits, and telemetry.
+=== SECTION 5: STRICT DESIGN SYSTEM & ANTI-AI CRAFTSMANSHIP ===
+- Theme Mode: {theme_mode.upper()} (token source: {tokens.get('source', 'archetype')})
+- Canvas Base: {tokens['surface_base']}
+- Card Containers: {tokens['surface_elevated']} with crisp 1px structural borders ({tokens.get('surface_highlight', '#E2E8F0')})
+- Primary Accent: {tokens['primary_accent']} for primary interactive actions and selections
+- Secondary Accent: {tokens['secondary_accent']} for secondary chips and category tags
 - Typography Scale:
-  * Numbers & Metric Heroes: Bold {tokens['headline_font']} numerals with tabular spacing.
-  * Headings & Section Titles: Modern {tokens['body_font']} with clear typographic hierarchy.
-  * Status Badges & Pills: Monospaced {tokens['label_font']} with uppercase letter-spacing.
+  * Headlines & Hero Numerals: {tokens['headline_font']} (tabular spacing for live numbers)
+  * Body & Section Titles: {tokens['body_font']}
+  * Labels & Pills: {tokens['label_font']}
 
-- STRICT ANTI-AI MANDATES (DO NOT MAKE THIS LOOK LIKE AI-GENERATED ART):
-  * ❌ NO GLOWING NEON HALOS OR RADIANT AURAS: Never place cyan, green, or magenta blur halos around cards or buttons. Real human apps do not use glowing neon borders. Use clean 1px hairline borders (e.g. rgba(0,0,0,0.08) in light mode, rgba(255,255,255,0.08) in dark mode) and soft diffuse shadows.
-  * ❌ NO WALL OF IDENTICAL CARDS: Do not stack 4 identical rounded rectangles with identical padding. Create intentional layout hierarchy (hero visual anchor, asymmetrical lists, floating pill bars, horizontal carousels, expandable sections).
-  * ❌ NO PSEUDO-TECH BADGE SPAM: Do not plaster "ENGINE V4.2 PRO", "AI OPTIMIZED", "100% OFFLINE • PRIVATE", or meaningless status dot indicators everywhere unless explicitly requested.
-  * ❌ NO DEFAULT PITCH-BLACK + CYAN SAAS LOOK: Respect the curated domain palette ({tokens['surface_base']} ground + {tokens['primary_accent']} accent).
-  * ❌ NO LOW-CONTRAST GREY TEXT: Secondary text must maintain 4.5:1 WCAG AA contrast against surface base.
-  * ❌ NO CRAMPED TOUCH TARGETS: Every interactive button or tap zone must be at least 48dp x 48dp.
+- STRICT ANTI-AI MANDATES:
+  * NO GLOWING NEON HALOS OR RADIANT AURAS around cards or buttons; use clean 1px hairline borders and soft diffuse shadows.
+  * NO WALL OF IDENTICAL CARDS: create clear visual hierarchy with one primary focal point.
+  * NO PSEUDO-TECH BADGE SPAM or unrequested auth/ads/search bars.
+  * NO LOW-CONTRAST TEXT: maintain >= 4.5:1 WCAG AA contrast against the ground ({tokens['surface_base']}).
+  * NO CRAMPED TOUCH TARGETS: every interactive target >= 48dp x 48dp.
   * {arch['anti_patterns']}
-
-- HUMAN-GRADE DESIGN PRINCIPLES:
-  * Inspired by category-defining mobile craft (Apple HIG, Linear, Things 3, Headspace, Notion, Arc).
-  * Generous breathing room and padding (16dp-24dp), giving UI elements space to breathe.
-  * Clear visual anchor: ONE prominent hero element or focal point that guides the eye.
 """
 

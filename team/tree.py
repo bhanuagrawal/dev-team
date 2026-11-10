@@ -384,6 +384,7 @@ _HTML = """<!doctype html>
  .pill.design.pending {{ background:#fdf1e3; color:#9a4b06; }}
  .pill.design.stale {{ background:#fdecec; color:#b42318; }}
  .pill.design.answered {{ background:#e9f7ef; color:#14764a; }}
+ .pill.design.tweak_screen {{ background:#eff6ff; color:#1d4ed8; }}
  .pill.design.derive {{ background:#f3f1ec; color:#4b5563; }}
  .pill.design.new_screen {{ background:#fdf1e3; color:#9a4b06; }}
  .subgoals {{ display:grid; grid-template-columns:repeat(auto-fit,minmax(250px,1fr));
@@ -750,10 +751,11 @@ def _feature_card(f: dict, order: dict, goal_title: dict) -> str:
             decision = str(d.get("decision") or "")
             screen = d.get("screen") or {}
             label = {"existing_screen": "Design · " + str(screen.get("title") or "existing screen"),
+                     "tweak_screen": "Design · tweak " + str(screen.get("title") or "existing screen"),
                      "derive": "Design · derive from system",
                      "new_screen": "Design · new screen required",
                      "not_applicable": "Design · no UI"}.get(decision, "Design · " + decision)
-            cls = decision if decision in ("derive", "new_screen") else "answered"
+            cls = decision if decision in ("derive", "tweak_screen", "new_screen") else "answered"
         out.append(f'<div class="designbadge"><span class="pill design '
                    f'{_esc(cls)}">{_esc(label)}</span></div>')
     if f.get("outcome"):

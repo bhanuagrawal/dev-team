@@ -2379,22 +2379,7 @@ def cmd_design(args: argparse.Namespace) -> int:
     traceback.
     """
     print("`devteam design` is retired: there is no docs/design.md. The Stitch "
-          "project + .pipeline/stitch/screens/<id>/ are the design source.")
-    return 0
-    project = resolve_project(args.project)
-    log = RunLog(project, "design-" + today())
-    from team import design
-    res = design.ensure_design(project, topic=args.topic or "", force=args.force, log=log)
-    if res.get("status") == "exists":
-        print(f"\nDesign System: already active at {res['path']}")
-        print(f"Registered in .pipeline/profile.json conventions (mandatory read for developer agent).")
-        print(f"Use --force to re-synthesize from fresh market research.")
-    else:
-        print(f"\nDesign System synthesized and enforced:")
-        print(f"  Doc: {res['path']}")
-        print(f"  Query: {res.get('query')}")
-        print(f"  Market Sources: {res.get('sources', 0)}")
-        print(f"  Registered in .pipeline/profile.json conventions.")
+          "project + docs/stitch/screens/<id>/ are the design source.")
     return 0
 
 
@@ -3984,6 +3969,65 @@ def _package_of(project: Path) -> str:
         return ""
 
 
+def _upsert_stitch_manifest_entry(project: Path, root: Path, pid: str, entry: dict) -> None:
+    """Insert or update one screen entry in docs/stitch/manifest.json and .pipeline copy."""
+    out = root / "docs" / "stitch"
+    out.mkdir(parents=True, exist_ok=True)
+    mpath = out / "manifest.json"
+    try:
+        manifest = json.loads(mpath.read_text()) if mpath.is_file() else {}
+    except Exception:
+        manifest = {}
+    screens = list(manifest.get("canonical_screens") or [])
+    idx = next((i for i, s in enumerate(screens) if str(s.get("id")) == str(entry.get("id"))), None)
+    if idx is not None:
+        merged = {**screens[idx], **entry}
+        screens[idx] = merged
+    else:
+        screens.append(entry)
+    manifest["project"] = project.name
+    manifest["project_id"] = pid
+    manifest["synced_at"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+    manifest["canonical_screens"] = screens
+    payload = json.dumps(manifest, indent=2, ensure_ascii=False) + "\n"
+    mpath.write_text(payload)
+    p_copy = pipeline_dir(project) / "stitch_manifest.json"
+    p_copy.parent.mkdir(parents=True, exist_ok=True)
+    p_copy.write_text(payload)
+
+
+def _resolve_stitch_screen_entry(project: Path, screen_ref: str, *, stitch_pid: str = "") -> dict | None:
+    """Resolve a screen id or title query from docs/stitch/manifest.json, then live Stitch."""
+    q = (screen_ref or "").strip().lower()
+    if not q:
+        return None
+    for mpath in (project / "docs" / "stitch" / "manifest.json",
+                  pipeline_dir(project) / "stitch_manifest.json"):
+        if not mpath.is_file():
+            continue
+        try:
+            screens = json.loads(mpath.read_text()).get("canonical_screens") or []
+        except Exception:
+            screens = []
+        for s in screens:
+            sid = str(s.get("id") or "").lower()
+            title = str(s.get("title") or "").lower()
+            surface = str(s.get("surface") or "").lower()
+            if q == sid or q == title or q == surface or q in title:
+                return s
+    if stitch_pid:
+        try:
+            from team import stitch_mcp
+            for s in stitch_mcp.list_screens(stitch_pid):
+                sid = str(s.get("name") or "").split("/")[-1]
+                title = str(s.get("title") or "")
+                if q == sid.lower() or q == title.lower() or q in title.lower():
+                    return {"id": sid, "title": title, "surface": s.get("surface") or "", "_raw": s}
+        except Exception:
+            pass
+    return None
+
+
 def cmd_stitch_prompt(args: argparse.Namespace) -> int:
     project = resolve_project(args.project)
     from team.design import compile_stitch_screen_prompt
@@ -4005,11 +4049,25 @@ def cmd_stitch_screen(args: argparse.Namespace) -> int:
     screen_type = getattr(args, "screen", "main")
     device = getattr(args, "device", "MOBILE")
     model_id = getattr(args, "model", "GEMINI_3_8_FLASH")
+    force = getattr(args, "force", False)
+    wt = getattr(args, "worktree", None)
+    root = Path(wt).resolve() if wt else project
     prompt = compile_stitch_screen_prompt(project, screen_type=screen_type)
 
+    profile = profile_of(project)
+    design_cfg = profile.get("design") or {}
+    stitch_pid = str(design_cfg.get("stitch_project_id") or "")
+    design_system = str(design_cfg.get("design_system_id") or "") or None
+
+    existing = _resolve_stitch_screen_entry(project, screen_type, stitch_pid=stitch_pid)
+    if existing and getattr(args, "generate", False) and not force:
+        print(f"  ! Existing Stitch screen matches '{screen_type}': {existing.get('title')} (id: {existing.get('id')})")
+        print("    Prefer a targeted in-place tweak instead of generating a new screen from scratch:")
+        print(f"    python3 cli.py stitch-tweak {project.name} --screen-id {existing.get('id')} --change \"<your tweak>\"")
+        print("    Pass --force if you genuinely want to generate a brand-new screen.")
+        return 1
+
     if getattr(args, "generate", False):
-        profile = profile_of(project)
-        stitch_pid = (profile.get("design") or {}).get("stitch_project_id", "")
         if not stitch_pid:
             print(f"  ✗ No stitch_project_id declared in {project.name}/.pipeline/profile.json under 'design'.")
             print("    Please set 'stitch_project_id' in profile.json first.")
@@ -4017,22 +4075,25 @@ def cmd_stitch_screen(args: argparse.Namespace) -> int:
         clean_pid = stitch_pid.split("/")[-1]
         print(f"Generating Stitch screen '{screen_type}' for project {clean_pid} using {model_id}...")
         try:
-            screen = stitch_mcp.generate_screen(clean_pid, prompt, device=device, model_id=model_id, log=print)
-            raw, mime = stitch_mcp.download(screen)
-            out_dir = project / ".pipeline/stitch_screens"
-            out_dir.mkdir(parents=True, exist_ok=True)
-            suffix = ".html" if "html" in mime else ".svg" if "svg" in mime else ".png"
-            out_file = out_dir / f"{screen_type}{suffix}"
-            out_file.write_bytes(raw)
-            print(f"✓ Saved generated Stitch screen -> {out_file.relative_to(project)} ({mime}, {len(raw)} bytes)")
-
-            content = raw.decode(errors="ignore") if ("html" in mime or "svg" in mime) else ""
-            if content:
-                report = audit_design_drift(project, prompt_text=prompt, generated_content=content, screen_name=screen_type)
+            screen = stitch_mcp.generate_screen(
+                clean_pid, prompt, device=device, model_id=model_id,
+                design_system=design_system, log=print,
+            )
+            screens_dir = root / "docs" / "stitch" / "screens"
+            entry = stitch_mcp.export_one_screen(screen, screens_dir, log=print)
+            if not entry:
+                print("  ✗ Stitch returned a screen without a valid id.")
+                return 1
+            _upsert_stitch_manifest_entry(project, root, clean_pid, entry)
+            html_rel = entry.get("html")
+            if html_rel:
+                content = (root / "docs" / "stitch" / html_rel).read_text(errors="ignore")
+                report = audit_design_drift(project, prompt_text=prompt, generated_content=content, screen_name=entry.get("title") or screen_type)
                 print("\n" + format_drift_report(report))
                 if report.get("verdict") == "FAIL":
-                    print("  ✗ Generated screen drifted or violated anti-AI rules.")
+                    print("  ✗ Generated screen drifted or violated craft rules.")
                     return 1
+            print(f"✓ Exported screen + updated docs/stitch/manifest.json in {root}")
             return 0
         except stitch_mcp.StitchError as exc:
             print(f"STITCH GENERATION FAILED: {exc}")
@@ -4046,51 +4107,187 @@ def cmd_stitch_screen(args: argparse.Namespace) -> int:
         print(prompt)
         print("=" * 65)
         print(f"~ prompt saved -> {out.relative_to(project)}")
-        print("  To generate via Stitch MCP using Gemini 3.8 Flash, run:")
-        print(f"  python3 cli.py stitch-screen {project.name} --screen {screen_type} --generate")
+        if existing:
+            print(f"  NOTE: Existing screen '{existing.get('title')}' (id: {existing.get('id')}) already matches '{screen_type}'.")
+            print(f"  Prefer tweaking it: python3 cli.py stitch-tweak {project.name} --screen-id {existing.get('id')} --change \"<tweak>\"")
+        else:
+            print("  To generate via Stitch MCP using Gemini 3.8 Flash, run:")
+            print(f"  python3 cli.py stitch-screen {project.name} --screen {screen_type} --generate")
         return 0
+
+
+def cmd_stitch_tweak(args: argparse.Namespace) -> int:
+    """Apply a targeted in-place tweak to an existing Stitch screen rather than a full redesign."""
+    project = resolve_project(args.project)
+    from team.design import compile_stitch_tweak_prompt
+    from team import stitch_mcp
+    from team.design_validator import audit_tweak_drift, format_drift_report
+
+    profile = profile_of(project)
+    stitch_pid = str((profile.get("design") or {}).get("stitch_project_id") or "")
+    clean_pid = stitch_pid.split("/")[-1]
+    if not clean_pid:
+        print(f"  ✗ No stitch_project_id declared in {project.name}/.pipeline/profile.json under 'design'.")
+        return 1
+
+    wt = getattr(args, "worktree", None)
+    root = Path(wt).resolve() if wt else project
+    screen_ref = getattr(args, "screen_id", None) or getattr(args, "screen", None) or ""
+    if not screen_ref:
+        print("  ✗ Provide --screen-id <id> or --screen <title/id> to target an existing screen.")
+        return 1
+
+    entry = _resolve_stitch_screen_entry(project, screen_ref, stitch_pid=clean_pid)
+    sid = str((entry or {}).get("id") or screen_ref).split("/")[-1]
+    screen_title = str((entry or {}).get("title") or sid)
+
+    # Load baseline HTML locally first, else from Stitch
+    baseline_path = root / "docs" / "stitch" / "screens" / sid / "index.html"
+    if not baseline_path.is_file():
+        baseline_path = project / "docs" / "stitch" / "screens" / sid / "index.html"
+    baseline_html = baseline_path.read_text(errors="ignore") if baseline_path.is_file() else ""
+    if not baseline_html and not getattr(args, "dry_run", False):
+        try:
+            live_screen = stitch_mcp.get_screen(clean_pid, sid)
+            raw, mime = stitch_mcp.download(live_screen)
+            if "html" in mime:
+                baseline_html = raw.decode(errors="ignore")
+            screen_title = str(live_screen.get("title") or screen_title)
+        except Exception:
+            pass
+
+    change = str(getattr(args, "change", "") or "").strip()
+    if not change:
+        print("  ✗ Provide --change \"<surgical tweak instruction>\".")
+        return 1
+
+    preserve = list(getattr(args, "preserve", None) or [])
+    tweak_prompt = compile_stitch_tweak_prompt(
+        project,
+        change,
+        screen_title=screen_title,
+        screen_id=sid,
+        preserve=preserve,
+        baseline_html=baseline_html,
+    )
+
+    if getattr(args, "dry_run", False):
+        print(f"STITCH SURGICAL TWEAK PROMPT ({project.name.upper()} • {screen_title}):")
+        print("=" * 65)
+        print(tweak_prompt)
+        print("=" * 65)
+        return 0
+
+    mode = getattr(args, "mode", "auto")
+    device = getattr(args, "device", "MOBILE")
+    model_id = getattr(args, "model", "GEMINI_3_8_FLASH")
+    creative_range = getattr(args, "range", "REFINE")
+    aspects = list(getattr(args, "aspects", None) or []) or None
+    variants = int(getattr(args, "variants", 1) or 1)
+
+    print(f"Tweaking Stitch screen '{screen_title}' ({sid}) via mode={mode}...")
+    updated_screens: list[dict] = []
+    try:
+        if mode == "refine":
+            updated_screens = stitch_mcp.generate_variants(
+                clean_pid, [sid], tweak_prompt,
+                creative_range=creative_range, aspects=aspects,
+                variant_count=variants, device=device, model_id=model_id, log=print,
+            )
+        else:
+            try:
+                updated_screens = stitch_mcp.edit_screens(
+                    clean_pid, [sid], tweak_prompt,
+                    device=device, model_id=model_id, log=print,
+                )
+            except stitch_mcp.StitchError as exc:
+                if mode == "edit":
+                    raise
+                print(f"  ! edit_screens unavailable/failed ({str(exc)[:120]}); falling back to generate_variants(REFINE)...")
+                updated_screens = stitch_mcp.generate_variants(
+                    clean_pid, [sid], tweak_prompt,
+                    creative_range="REFINE", aspects=aspects,
+                    variant_count=1, device=device, model_id=model_id, log=print,
+                )
+    except stitch_mcp.StitchError as exc:
+        print(f"STITCH TWEAK FAILED: {exc}")
+        return 1
+
+    if not updated_screens:
+        print("  ✗ Stitch returned no updated screen.")
+        return 1
+
+    screens_dir = root / "docs" / "stitch" / "screens"
+    best_screen = updated_screens[-1]
+    exported = None
+    if not getattr(args, "no_export", False):
+        for sc in updated_screens:
+            ex = stitch_mcp.export_one_screen(sc, screens_dir, log=print)
+            if ex:
+                _upsert_stitch_manifest_entry(project, root, clean_pid, ex)
+                exported = ex
+        if exported and exported.get("html"):
+            new_html = (root / "docs" / "stitch" / exported["html"]).read_text(errors="ignore")
+        else:
+            raw, _ = stitch_mcp.download(best_screen)
+            new_html = raw.decode(errors="ignore")
+    else:
+        raw, _ = stitch_mcp.download(best_screen)
+        new_html = raw.decode(errors="ignore")
+
+    report = audit_tweak_drift(
+        project,
+        baseline_html=baseline_html,
+        tweaked_html=new_html,
+        change_request=change,
+        screen_name=str(best_screen.get("title") or screen_title),
+        preserve=preserve,
+    )
+    print("\n" + format_drift_report(report))
+
+    if not getattr(args, "no_export", False) and not getattr(args, "no_commit", False) and root == project:
+        import subprocess as _sp
+        _sp.run(["git", "add", "docs/stitch"], cwd=project)
+        r = _sp.run(["git", "commit", "-m",
+                     f"design(stitch): tweak {screen_title}", "--", "docs/stitch"],
+                    cwd=project, capture_output=True, text=True)
+        if r.returncode == 0:
+            print("committed: docs/stitch (push it before a release)")
+
+    return 1 if report.get("verdict") == "FAIL" else 0
 
 
 def cmd_stitch_curate(args: argparse.Namespace) -> int:
     project = resolve_project(args.project)
     from team.design import curate_stitch_manifest
-    screens = []
+    from team import stitch_mcp
+
+    screens: list[dict] = []
     if getattr(args, "screens_json", None) and Path(args.screens_json).is_file():
-        import json
         raw = json.loads(Path(args.screens_json).read_text())
         screens = raw.get("screens", raw if isinstance(raw, list) else [])
     else:
-        # Fall back to saved metadata JSON files under projects/*/screens/
-        devteam_dir = Path(__file__).resolve().parent
-        p_name = project.name.lower()
-        # Vocabulary the project itself declares — the team must not know what any
-        # project "is", only what its profile says.
-        try:
-            _prof = profile_of(project)
-            vision = ((_prof.get("goals") or {}).get("vision") or "") + " " + (_prof.get("name") or "")
-        except Exception:
-            vision = project.name
         profile = profile_of(project)
-        stitch_pid = profile.get("design", {}).get("stitch_project_id", "")
-        for pdir in sorted((devteam_dir / "projects").glob("*/screens/*.json")):
+        stitch_pid = str((profile.get("design") or {}).get("stitch_project_id") or "")
+        if stitch_pid:
             try:
-                import json
-                meta = json.loads(pdir.read_text())
-                pid = pdir.parent.parent.name
-                t_low = meta.get("title", "").lower()
-                # If project explicitly declares stitch_project_id, match it
-                if stitch_pid and pid == stitch_pid:
-                    screens.append(meta)
-                elif not stitch_pid:
-                    # No declared stitch_project_id: match the screen to the project by
-                    # SHARED VOCABULARY from its own name + vision, never by a hardcoded
-                    # domain word — the team does not know what any project "is".
-                    p_tokens = set(re.findall(r"[a-z]{4,}", p_name))
-                    p_tokens |= set(re.findall(r"[a-z]{4,}", vision.lower()))
-                    if p_tokens & set(re.findall(r"[a-z]{4,}", t_low)):
-                        screens.append(meta)
-            except Exception:
-                continue
+                screens = stitch_mcp.list_screens(stitch_pid)
+            except stitch_mcp.StitchError as exc:
+                print(f"  ! could not query live Stitch project ({exc}); falling back to local manifest/exports")
+        if not screens:
+            for mpath in (project / "docs" / "stitch" / "manifest.json",
+                          pipeline_dir(project) / "stitch_manifest.json"):
+                if mpath.is_file():
+                    try:
+                        screens = json.loads(mpath.read_text()).get("canonical_screens") or []
+                        if screens:
+                            break
+                    except Exception:
+                        pass
+        if not screens and (project / "docs" / "stitch" / "screens").is_dir():
+            for d in sorted((project / "docs" / "stitch" / "screens").iterdir()):
+                if d.is_dir():
+                    screens.append({"id": d.name, "title": d.name})
 
     manifest = curate_stitch_manifest(project, screens)
     print("STITCH CANVAS CURATION MANIFEST")
@@ -4098,34 +4295,89 @@ def cmd_stitch_curate(args: argparse.Namespace) -> int:
     print(f"PROJECT: {manifest.get('project')}")
     print(f"CANONICAL SCREENS ({manifest.get('screen_count')}):")
     for s in manifest.get("canonical_screens", []):
-        print(f"  ✓ {s.get('id')[:12]}: {s.get('title')}")
+        print(f"  ✓ {str(s.get('id'))[:12]}: {s.get('title')}")
     print(f"\nCANDIDATES FOR CLEANUP / OBSOLETE ({manifest.get('stale_count')}):")
     for s in manifest.get("stale_screens", []):
-        print(f"  ✗ {s.get('id')[:12]}: {s.get('title')}")
+        print(f"  ✗ {str(s.get('id'))[:12]}: {s.get('title')}")
     print("=" * 60)
-    print(f"Saved canonical manifest to: {project}/.pipeline/stitch_manifest.json")
+    print(f"Saved canonical manifest to: {project}/docs/stitch/manifest.json")
     return 0
 
 
 def cmd_validate_design(args: argparse.Namespace) -> int:
     project = resolve_project(args.project)
     from team.design import compile_stitch_screen_prompt
-    from team.design_validator import audit_design_drift, format_drift_report
+    from team.design_validator import audit_design_drift, audit_tweak_drift, format_drift_report
+
     screen_type = getattr(args, "screen", "main")
-    prompt = compile_stitch_screen_prompt(project, screen_type=screen_type)
-
     content = ""
+    resolved_path: Path | None = None
+    resolved_title = screen_type
     target_file = getattr(args, "file", None)
-    if target_file and Path(target_file).is_file():
-        content = Path(target_file).read_text(errors="ignore")
-    else:
-        t_dir = project / ".pipeline/storefront_templates"
-        for candidate in (t_dir / f"{screen_type}.html", t_dir / "01_hero.html", project / "docs/design.md"):
-            if candidate.is_file():
-                content = candidate.read_text(errors="ignore")
-                break
 
-    report = audit_design_drift(project, prompt_text=prompt, generated_content=content, screen_name=screen_type)
+    if target_file:
+        p = Path(target_file)
+        if p.is_file():
+            resolved_path = p
+            content = p.read_text(errors="ignore")
+    else:
+        entry = _resolve_stitch_screen_entry(project, screen_type)
+        if entry:
+            sid = str(entry.get("id") or "")
+            resolved_title = str(entry.get("title") or sid or screen_type)
+            cand = project / "docs" / "stitch" / "screens" / sid / "index.html"
+            if cand.is_file():
+                resolved_path = cand
+                content = cand.read_text(errors="ignore")
+        if not content:
+            for candidate in (
+                project / f".pipeline/stitch_screens/{screen_type}.html",
+                project / f".pipeline/storefront_templates/{screen_type}.html",
+                project / ".pipeline/storefront_templates/01_hero.html",
+            ):
+                if candidate.is_file():
+                    resolved_path = candidate
+                    content = candidate.read_text(errors="ignore")
+                    break
+
+    if not content.strip():
+        print(f"  ✗ No exported Stitch HTML found for '{screen_type}' in {project.name}.")
+        print("    Pass --file <path> or export screens via `devteam stitch-export`.")
+        return 1
+
+    change = getattr(args, "change", None)
+    baseline_file = getattr(args, "baseline", None)
+    if change or baseline_file:
+        baseline_html = ""
+        if baseline_file and Path(baseline_file).is_file():
+            baseline_html = Path(baseline_file).read_text(errors="ignore")
+        elif resolved_path is not None:
+            import subprocess as _sp
+            try:
+                rel = resolved_path.resolve().relative_to(project.resolve()).as_posix()
+                r = _sp.run(["git", "show", f"HEAD:{rel}"], cwd=project, capture_output=True, text=True)
+                if r.returncode == 0:
+                    baseline_html = r.stdout
+            except Exception:
+                pass
+        report = audit_tweak_drift(
+            project,
+            baseline_html=baseline_html,
+            tweaked_html=content,
+            change_request=str(change or ""),
+            screen_name=resolved_title,
+        )
+    else:
+        prompt = ""
+        prompt_file = getattr(args, "prompt_file", None)
+        if prompt_file and Path(prompt_file).is_file():
+            prompt = Path(prompt_file).read_text(errors="ignore")
+        else:
+            p_cand = project / f".pipeline/stitch-prompt-{screen_type}.txt"
+            if p_cand.is_file():
+                prompt = p_cand.read_text(errors="ignore")
+        report = audit_design_drift(project, prompt_text=prompt, generated_content=content, screen_name=resolved_title)
+
     print(format_drift_report(report))
     return 0 if report.get("verdict") in ("PASS", "WARNING") else 1
 
@@ -4962,23 +5214,48 @@ def main() -> None:
     cs.set_defaults(fn=cmd_console)
     stp = sub.add_parser("stitch-prompt", help="compile specific, pre-locked, anti-generic screen prompt for Stitch MCP")
     stp.add_argument("project")
-    stp.add_argument("--screen", default="main", help="screen type: main, scoreboard, summary, setup")
+    stp.add_argument("--screen", default="main", help="screen name or target label (e.g. main, detail, settings)")
     stp.set_defaults(fn=cmd_stitch_prompt)
-    sscr = sub.add_parser("stitch-screen", help="generate or compile human-grade anti-AI Stitch screen via Gemini 3.8 Flash")
+    sscr = sub.add_parser("stitch-screen", help="generate a new Stitch screen (when no existing screen covers the surface)")
     sscr.add_argument("project")
-    sscr.add_argument("--screen", default="main", help="screen type: main, scoreboard, summary, setup")
+    sscr.add_argument("--screen", default="main", help="screen name or target label")
     sscr.add_argument("--device", default="MOBILE", help="target device: MOBILE, DESKTOP, TABLET")
     sscr.add_argument("--model", default="GEMINI_3_8_FLASH", help="model ID (default: GEMINI_3_8_FLASH)")
-    sscr.add_argument("--generate", action="store_true", help="call Stitch MCP to generate screen and download HTML")
+    sscr.add_argument("--generate", action="store_true", help="call Stitch MCP to generate screen and export into docs/stitch")
+    sscr.add_argument("--force", action="store_true", help="generate even if an existing screen matches")
+    sscr.add_argument("--worktree", help="optional worktree path to write docs/stitch into")
     sscr.set_defaults(fn=cmd_stitch_screen)
+    stw = sub.add_parser("stitch-tweak", help="apply a surgical in-place tweak to an existing Stitch screen instead of a full redesign")
+    stw.add_argument("project")
+    stw.add_argument("--screen-id", help="Stitch screen id to edit")
+    stw.add_argument("--screen", help="screen title/id substring to resolve from docs/stitch/manifest.json")
+    stw.add_argument("--change", required=True, help="surgical tweak instruction (what to change; everything else is preserved)")
+    stw.add_argument("--preserve", action="append", default=[], help="explicit control/section to preserve (repeatable)")
+    stw.add_argument("--mode", choices=("auto", "edit", "refine"), default="auto",
+                     help="auto (edit_screens then REFINE fallback), edit (edit_screens only), or refine (generate_variants REFINE)")
+    stw.add_argument("--range", choices=("REFINE", "EXPLORE", "REIMAGINE"), default="REFINE",
+                     help="creativeRange when --mode refine is used (default: REFINE)")
+    stw.add_argument("--aspects", nargs="*", choices=("LAYOUT", "COLOR_SCHEME", "IMAGES", "TEXT_FONT", "TEXT_CONTENT"),
+                     help="variant aspects to adjust when --mode refine is used")
+    stw.add_argument("--variants", type=int, default=1, help="variant count 1-5 when --mode refine is used (default: 1)")
+    stw.add_argument("--device", default="MOBILE", help="target device: MOBILE, DESKTOP, TABLET, AGNOSTIC")
+    stw.add_argument("--model", default="GEMINI_3_8_FLASH", help="model ID (default: GEMINI_3_8_FLASH)")
+    stw.add_argument("--dry-run", action="store_true", help="print the compiled surgical tweak prompt without calling Stitch")
+    stw.add_argument("--no-export", action="store_true", help="skip exporting updated screen to docs/stitch")
+    stw.add_argument("--no-commit", action="store_true", help="skip auto-committing docs/stitch")
+    stw.add_argument("--worktree", help="optional worktree path to write docs/stitch into")
+    stw.set_defaults(fn=cmd_stitch_tweak)
     scur = sub.add_parser("stitch-curate", help="inventory and curate Stitch canvas screens into canonical manifest vs stale candidate screens")
     scur.add_argument("project")
     scur.add_argument("--screens-json", help="path to raw Stitch list_screens JSON dump")
     scur.set_defaults(fn=cmd_stitch_curate)
-    vd = sub.add_parser("validate-design", help="audit Stitch-generated screens for drift against locked prompt specifications")
+    vd = sub.add_parser("validate-design", help="audit Stitch-generated or tweaked screens for drift, overstepping, and misses")
     vd.add_argument("project")
-    vd.add_argument("--screen", default="scoreboard", help="screen type to audit (scoreboard, summary, setup)")
+    vd.add_argument("--screen", default="main", help="screen id, title, or target label to audit")
     vd.add_argument("--file", help="path to generated screen HTML, DOM, or text file")
+    vd.add_argument("--prompt-file", help="optional path to compiled Stitch prompt to verify CTAs/telemetry against")
+    vd.add_argument("--baseline", help="optional baseline HTML path to audit tweak preservation against")
+    vd.add_argument("--change", help="optional tweak request to audit preservation + realization against")
     vd.set_defaults(fn=cmd_validate_design)
 
     args = ap.parse_args()

@@ -43,13 +43,14 @@ matched nothing (owner directive 2026-11-09). The Stitch screen — exported
 `index.html` + `screen.png` under `docs/stitch/screens/<id>/` — is the spec.
 
 - The developer asks: `devteam design-consult <project> --task <label> --prompt`.
-- The designer answers `existing_screen`, `derive`, `new_screen` or
+- The designer answers `existing_screen`, `tweak_screen`, `new_screen` or
   `not_applicable`, and the answer is recorded with a fingerprint of the design
-  state (`--record`).
-- If the Stitch project, manifest or design doc changes, the answer is **stale**
-  and the developer must ask again. A `new_screen` answer blocks UI code until
-  the screen is generated in Stitch and exported into
-  `docs/stitch/screens/<id>/` before any UI code is written.
+  state (`--record`). Prefer `tweak_screen` (`devteam stitch-tweak`) over
+  `new_screen` whenever an existing screen already covers the surface.
+- If the Stitch project or manifest changes, the answer is **stale**
+  and the developer must ask again. A `new_screen` or `tweak_screen` answer
+  blocks UI code until the screen is generated/tweaked in Stitch and exported
+  into `docs/stitch/screens/<id>/` before any UI code is written.
 - Backend/data tasks are `not_applicable` from their targets; no designer call.
 
 The exported screen set must be current: re-export the Stitch screens before a

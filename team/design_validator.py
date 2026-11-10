@@ -1,12 +1,11 @@
 """Design Drift Validator & Screen Fidelity Auditor for Stitch MCP designs.
 
-Audits generated screens against the authoritative prompt specification:
-1. Feature Fidelity: Verifies that ALL pre-locked CTAs, controls, and telemetry exist.
-2. Drift & Hallucination Detection: Catches features or CTAs invented by Stitch that
-   were NOT in the prompt (e.g. unwanted auth buttons, extra nav bars, ads, unasked features).
-3. Anti-Generic & Brand Law: Checks that the design respects high-contrast OLED dark law
-   and does not regress to stock Material 3 / Bootstrap cookie-cutter templates.
-4. Generates an exact correction / remediation prompt if drift is detected.
+Audits generated or tweaked screens against the prompt specification or baseline HTML:
+1. Feature Fidelity / Change Realization: Verifies required CTAs/telemetry or requested tweaks landed.
+2. Preservation (Anti-Overstepping): On tweaks, checks that untouched baseline controls and headings survived.
+3. Drift & Hallucination Detection: Catches unprompted features (unwanted OAuth, ads, cart, search bars).
+4. Craft & Theme Coherence: Checks against artificial neon halos, Lorem Ipsum, and respects the project's actual theme mode (light/warm/dark) rather than assuming dark mode.
+5. Generates a targeted remediation tweak directive if overstepping or a miss is detected.
 
 Zero project names in code — generic across all dev-team projects.
 """
@@ -17,7 +16,61 @@ from pathlib import Path
 from typing import Any
 
 from .core import profile_of
-from .design import extract_design_tokens
+from .design import extract_design_tokens, extract_html_summary
+
+
+_SUSPICIOUS_PATTERNS: list[tuple[str, list[str]]] = [
+    ("Google Sign-In / OAuth", [r"sign[ -]in with google", r"continue with apple", r"oauth"]),
+    ("Social / Sharing Feed", [r"follow friends", r"news feed", r"community stories"]),
+    ("Monetization / Ads", [r"upgrade to premium", r"subscribe now", r"sponsored", r"ad banner"]),
+    ("E-Commerce / Cart", [r"shopping cart", r"checkout", r"\$\d+\.\d\d"]),
+    ("Unasked Search Bar", [r"search players", r"search courts", r"type to search\.\.\."]),
+]
+
+_STOPWORDS = {
+    "the", "and", "for", "with", "that", "this", "from", "into", "onto", "only",
+    "make", "keep", "add", "move", "update", "change", "tweak", "adjust", "fix",
+    "screen", "button", "label", "section", "card", "text", "more", "less",
+    "existing", "current", "should", "without", "instead", "preserve",
+}
+
+
+def _check_craft_and_hallucinations(
+    prompt_text: str,
+    generated_content: str,
+    tokens: dict[str, str],
+    *,
+    baseline_text: str = "",
+) -> tuple[list[str], list[str]]:
+    content_lower = generated_content.lower()
+    hallucinated: list[str] = []
+    for label, patterns in _SUSPICIOUS_PATTERNS:
+        prompt_has_it = any(re.search(pat, prompt_text, re.IGNORECASE) for pat in patterns)
+        baseline_has_it = bool(baseline_text) and any(
+            re.search(pat, baseline_text, re.IGNORECASE) for pat in patterns
+        )
+        gen_has_it = any(re.search(pat, generated_content, re.IGNORECASE) for pat in patterns)
+        if gen_has_it and not prompt_has_it and not baseline_has_it:
+            hallucinated.append(f"{label} (Not requested in prompt)")
+
+    violations: list[str] = []
+    if (
+        re.search(r"box-shadow:[^;]*(?:0\s+0\s+(?:2\d|3\d|4\d|5\d)px|#[0-9a-fA-F]{6}33)", content_lower)
+        or "radiant-aura" in content_lower
+        or "glow-aura" in content_lower
+    ):
+        violations.append("Artificial neon glow / radiant halo detected (Violates human craftsmanship mandate)")
+    if "lorem ipsum" in content_lower:
+        violations.append("Lorem Ipsum dummy copy detected (Violates concrete copy law)")
+
+    # Only enforce exact brand hex when tokens came from actual project artifacts,
+    # not an archetype guess.
+    if tokens.get("source") in ("stitch_tokens", "stitch_html", "design_doc"):
+        accent = tokens["primary_accent"].lower()
+        if accent and accent not in content_lower and "primary" not in content_lower and "accent" not in content_lower:
+            violations.append(f"Missing authoritative brand accent ({tokens['primary_accent']})")
+
+    return hallucinated, violations
 
 
 def _parse_prompt_requirements(prompt_text: str) -> dict[str, Any]:
@@ -25,11 +78,6 @@ def _parse_prompt_requirements(prompt_text: str) -> dict[str, Any]:
     reqs: dict[str, Any] = {
         "expected_ctas": [],
         "expected_telemetry": [],
-        "forbidden_terms": [
-            "lorem ipsum", "dolor sit", "sign in with google", "upgrade to pro",
-            "search bar", "navigation drawer", "shopping cart"
-        ],
-        "brand_tokens": [],
     }
 
     lines = prompt_text.splitlines()
@@ -42,15 +90,16 @@ def _parse_prompt_requirements(prompt_text: str) -> dict[str, Any]:
 
         if "EXACT CTAs" in current_section:
             if line_clean.startswith("- "):
-                # e.g. "- Undo Button (Reverts last score update...)" -> "Undo"
+                if line_clean.lower().startswith("- derive focused"):
+                    continue
                 item = line_clean[2:].split("(")[0].strip()
                 if item:
                     reqs["expected_ctas"].append(item)
-        elif "EXACT DATA TELEMETRY" in current_section:
+        elif "EXACT DATA TELEMETRY" in current_section or "REAL-WORLD COPY" in current_section:
             if line_clean.startswith("- "):
                 parts = line_clean[2:].split(":")
                 val = parts[-1].strip() if len(parts) > 1 else line_clean[2:].strip()
-                if val:
+                if val and not val.lower().startswith("use realistic"):
                     reqs["expected_telemetry"].append(val)
 
     return reqs
@@ -62,27 +111,36 @@ def audit_design_drift(
     generated_content: str,
     screen_name: str = "Screen",
 ) -> dict[str, Any]:
-    """Audit generated screen code or text representation against the prompt spec.
-
-    Args:
-        project: Project root directory
-        prompt_text: The exact prompt sent to Stitch
-        generated_content: The HTML, DOM snapshot, or code returned by Stitch
-        screen_name: Human-readable screen title
-    """
+    """Audit generated screen HTML/code against the prompt spec."""
     profile = profile_of(project)
     name = profile.get("name") or project.name
     tokens = extract_design_tokens(project)
     reqs = _parse_prompt_requirements(prompt_text)
 
+    if not generated_content.strip():
+        return {
+            "mode": "screen",
+            "project": name,
+            "screen": screen_name,
+            "theme_mode": tokens.get("theme_mode", "light"),
+            "overall_score": 0,
+            "verdict": "FAIL",
+            "status": "NO GENERATED CONTENT TO AUDIT",
+            "dimensions": {},
+            "missing_ctas": reqs["expected_ctas"],
+            "found_ctas": [],
+            "missing_telemetry": reqs["expected_telemetry"],
+            "hallucinated_features": [],
+            "anti_pattern_violations": ["Empty screen content"],
+            "remediation_prompt": "",
+        }
+
     content_lower = generated_content.lower()
 
-    # 1. Feature Fidelity Audit (Did Stitch include all required CTAs & Data?)
     missing_ctas = []
     found_ctas = []
     for cta in reqs["expected_ctas"]:
-        # Keyword match (e.g. "Undo Button" -> match "undo")
-        kw = re.sub(r"(?i)\b(button|zone|toggle|switch|pills?|deck|card)\b", "", cta).strip().lower()
+        kw = re.sub(r"(?i)\b(button|zone|toggle|switch|pills?|deck|card|action)\b", "", cta).strip().lower()
         if kw and kw in content_lower:
             found_ctas.append(cta)
         else:
@@ -97,50 +155,26 @@ def audit_design_drift(
         else:
             missing_telemetry.append(tel)
 
-    # 2. Drift & Hallucination Audit (Did Stitch invent unasked features?)
-    hallucinated_features = []
-    suspicious_patterns = [
-        ("Google Sign-In / OAuth", [r"sign[ -]in with google", r"continue with apple", r"oauth"]),
-        ("Social / Sharing Feed", [r"follow friends", r"news feed", r"community stories"]),
-        ("Monetization / Ads", [r"upgrade to premium", r"subscribe now", r"sponsored", r"ad banner"]),
-        ("E-Commerce / Cart", [r"shopping cart", r"checkout", r"\$\d+\.\d\d"]),
-        ("Unasked Search Bar", [r"search players", r"search courts", r"type to search\.\.\."]),
-    ]
+    hallucinated_features, anti_pattern_violations = _check_craft_and_hallucinations(
+        prompt_text, generated_content, tokens
+    )
 
-    for label, patterns in suspicious_patterns:
-        # If this pattern wasn't requested in prompt, but appeared in generated content:
-        prompt_has_it = any(re.search(pat, prompt_text, re.IGNORECASE) for pat in patterns)
-        gen_has_it = any(re.search(pat, generated_content, re.IGNORECASE) for pat in patterns)
-        if gen_has_it and not prompt_has_it:
-            hallucinated_features.append(f"{label} (Not requested in prompt)")
-
-    # 3. Anti-Generic & Brand Token Audit
-    anti_pattern_violations = []
-    if re.search(r"box-shadow:[^;]*(?:0\s+0\s+(?:2\d|3\d|4\d|5\d)px|#[0-9a-fA-F]{6}33)", content_lower) or "radiant-aura" in content_lower or "glow-aura" in content_lower:
-        anti_pattern_violations.append("Artificial neon glow / radiant halo detected (Violates human craftsmanship mandate)")
-    if "lorem ipsum" in content_lower:
-        anti_pattern_violations.append("Lorem Ipsum dummy copy detected (Violates concrete copy law)")
-
-    has_brand_accent = tokens["primary_accent"].lower() in content_lower
-    if not has_brand_accent and "accent" not in content_lower:
-        anti_pattern_violations.append(f"Missing authoritative brand accent ({tokens['primary_accent']})")
-
-    # 4. Scoring Algorithm
-    # 50 pts: CTA Fidelity
     total_ctas = len(reqs["expected_ctas"])
-    cta_score = 50 if total_ctas == 0 else int((len(found_ctas) / total_ctas) * 50)
+    if total_ctas == 0:
+        # Standalone screen audit without pre-locked CTA list: verify real interactive controls exist
+        summary = extract_html_summary(generated_content)
+        has_controls = bool(summary["controls"]) or ("<button" in content_lower) or ("<a " in content_lower)
+        cta_score = 50 if has_controls else 25
+        if has_controls:
+            found_ctas = summary["controls"][:6]
+    else:
+        cta_score = int((len(found_ctas) / total_ctas) * 50)
 
-    # 25 pts: Telemetry Fidelity
     total_tel = len(reqs["expected_telemetry"])
     tel_score = 25 if total_tel == 0 else int((len(found_telemetry) / total_tel) * 25)
 
-    # 15 pts: Zero Hallucinations (5 pts penalty per unasked feature)
-    hallucination_penalty = min(15, len(hallucinated_features) * 5)
-    hallucination_score = max(0, 15 - hallucination_penalty)
-
-    # 10 pts: Brand & Anti-Generic compliance (5 pts penalty per violation)
-    brand_penalty = min(10, len(anti_pattern_violations) * 5)
-    brand_score = max(0, 10 - brand_penalty)
+    hallucination_score = max(0, 15 - min(15, len(hallucinated_features) * 5))
+    brand_score = max(0, 10 - min(10, len(anti_pattern_violations) * 5))
 
     overall_score = cta_score + tel_score + hallucination_score + brand_score
 
@@ -154,7 +188,6 @@ def audit_design_drift(
         verdict = "FAIL"
         status = "SIGNIFICANT DRIFT DETECTED"
 
-    # 5. Formulate Remediation Prompt for Stitch if drift exists
     remediation_directives = []
     if missing_ctas:
         remediation_directives.append(f"Restore missing required CTAs: {', '.join(missing_ctas)}.")
@@ -166,14 +199,16 @@ def audit_design_drift(
     remediation_prompt = ""
     if remediation_directives:
         remediation_prompt = (
-            f"CORRECTION DIRECTIVE FOR {screen_name.upper()}:\n"
+            f"SURGICAL CORRECTION FOR {screen_name.upper()} (EDIT IN PLACE — DO NOT REDESIGN):\n"
             + "\n".join(f"- {d}" for d in remediation_directives)
-            + f"\nEnforce authoritative base canvas ({tokens['surface_base']}) and primary accent ({tokens['primary_accent']}). Maintain human-grade craft with zero AI glowing neon halos."
+            + f"\nPreserve existing layout, palette ({tokens['surface_base']} / {tokens['primary_accent']}), and untouched controls."
         )
 
     return {
+        "mode": "screen",
         "project": name,
         "screen": screen_name,
+        "theme_mode": tokens.get("theme_mode", "light"),
         "overall_score": overall_score,
         "verdict": verdict,
         "status": status,
@@ -192,10 +227,163 @@ def audit_design_drift(
     }
 
 
+def audit_tweak_drift(
+    project: Path,
+    baseline_html: str,
+    tweaked_html: str,
+    change_request: str,
+    screen_name: str = "Screen",
+    preserve: list[str] | None = None,
+) -> dict[str, Any]:
+    """Audit an in-place Stitch tweak for OVERSTEPPING (dropped controls/sections) and MISSES."""
+    profile = profile_of(project)
+    name = profile.get("name") or project.name
+    tokens = extract_design_tokens(project)
+
+    if not tweaked_html.strip():
+        return {
+            "mode": "tweak",
+            "project": name,
+            "screen": screen_name,
+            "theme_mode": tokens.get("theme_mode", "light"),
+            "overall_score": 0,
+            "verdict": "FAIL",
+            "status": "NO TWEAKED CONTENT",
+            "dimensions": {},
+            "dropped_controls": [],
+            "dropped_headings": [],
+            "missed_terms": [],
+            "hallucinated_features": [],
+            "anti_pattern_violations": ["Empty tweaked screen content"],
+            "remediation_prompt": "",
+        }
+
+    import html as _html
+    tweaked_text = re.sub(r"<(script|style)[^>]*>.*?</\1>", " ", tweaked_html, flags=re.S | re.I)
+    tweaked_text = re.sub(r"<[^>]+>", " ", tweaked_text)
+    tweaked_text = _html.unescape(tweaked_text)
+    tweaked_lower = re.sub(r"\s+", " ", tweaked_text).lower()
+    change_lower = (change_request or "").lower()
+
+    base_summary = extract_html_summary(baseline_html)
+    kept_controls: list[str] = []
+    dropped_controls: list[str] = []
+    for ctrl in base_summary["controls"]:
+        cl = ctrl.lower()
+        # Skip checks on items the change request explicitly mentions replacing/removing
+        explicitly_modified = any(
+            w in change_lower for w in re.findall(r"[a-z0-9]{4,}", cl)
+        ) and any(op in change_lower for op in ("remove", "delete", "replace", "rename", "drop", "hide"))
+        if explicitly_modified:
+            continue
+        if cl in tweaked_lower:
+            kept_controls.append(ctrl)
+        else:
+            dropped_controls.append(ctrl)
+
+    kept_headings: list[str] = []
+    dropped_headings: list[str] = []
+    for hd in base_summary["headings"]:
+        hl = hd.lower()
+        explicitly_modified = any(
+            w in change_lower for w in re.findall(r"[a-z0-9]{4,}", hl)
+        ) and any(op in change_lower for op in ("remove", "delete", "replace", "rename", "drop", "hide"))
+        if explicitly_modified:
+            continue
+        if hl in tweaked_lower:
+            kept_headings.append(hd)
+        else:
+            dropped_headings.append(hd)
+
+    for item in (preserve or []):
+        il = str(item).strip().lower()
+        if il and il not in tweaked_lower and item not in dropped_controls:
+            dropped_controls.append(str(item).strip())
+
+    # Change realization check: look for key action/content words from change_request
+    req_terms = [
+        w for w in re.findall(r"[a-z0-9]{4,}", change_lower)
+        if w not in _STOPWORDS
+    ]
+    seen_terms: list[str] = []
+    for w in req_terms:
+        if w not in seen_terms:
+            seen_terms.append(w)
+    req_terms = seen_terms[:8]
+    matched_terms = [w for w in req_terms if w in tweaked_lower]
+    missed_terms = [w for w in req_terms if w not in tweaked_lower]
+
+    hallucinated_features, anti_pattern_violations = _check_craft_and_hallucinations(
+        change_request, tweaked_html, tokens, baseline_text=baseline_html
+    )
+
+    total_base = len(kept_controls) + len(dropped_controls) + len(kept_headings) + len(dropped_headings)
+    kept_base = len(kept_controls) + len(kept_headings)
+    preservation_score = 45 if total_base == 0 else int((kept_base / total_base) * 45)
+    realization_score = 30 if not req_terms else int((len(matched_terms) / len(req_terms)) * 30)
+    hallucination_score = max(0, 15 - min(15, len(hallucinated_features) * 5))
+    craft_score = max(0, 10 - min(10, len(anti_pattern_violations) * 5))
+
+    overall_score = preservation_score + realization_score + hallucination_score + craft_score
+
+    dropped_ratio = (len(dropped_controls) + len(dropped_headings)) / total_base if total_base else 0.0
+    if dropped_ratio > 0.35 or overall_score < 65:
+        verdict = "FAIL"
+        status = "OVERSTEPPING OR MISS DETECTED" if dropped_ratio > 0.35 else "TWEAK DRIFT DETECTED"
+    elif overall_score >= 85 and not dropped_controls and not hallucinated_features:
+        verdict = "PASS"
+        status = "SURGICAL TWEAK PRESERVED"
+    else:
+        verdict = "WARNING"
+        status = "MINOR TWEAK DRIFT"
+
+    remediation_directives = []
+    if dropped_controls or dropped_headings:
+        lost = (dropped_controls + dropped_headings)[:6]
+        remediation_directives.append(f"Restore accidentally removed existing elements: {', '.join(lost)}.")
+    if missed_terms and realization_score < 15:
+        remediation_directives.append(f"Ensure the requested tweak is visibly realized ({change_request.strip()}).")
+    if hallucinated_features:
+        remediation_directives.append(f"Remove unrequested additions: {', '.join(hallucinated_features)}.")
+    if anti_pattern_violations:
+        remediation_directives.append(f"Fix craft violations: {', '.join(anti_pattern_violations)}.")
+
+    remediation_prompt = ""
+    if remediation_directives:
+        remediation_prompt = (
+            f"FOLLOW-UP TWEAK FOR {screen_name.upper()} (KEEP EXISTING DESIGN):\n"
+            + "\n".join(f"- {d}" for d in remediation_directives)
+        )
+
+    return {
+        "mode": "tweak",
+        "project": name,
+        "screen": screen_name,
+        "theme_mode": tokens.get("theme_mode", "light"),
+        "overall_score": overall_score,
+        "verdict": verdict,
+        "status": status,
+        "dimensions": {
+            "preservation": {"score": preservation_score, "max": 45, "kept": kept_base, "total": total_base},
+            "change_realization": {"score": realization_score, "max": 30, "matched": len(matched_terms), "total": len(req_terms)},
+            "hallucination_freedom": {"score": hallucination_score, "max": 15, "penalties": len(hallucinated_features)},
+            "craft_compliance": {"score": craft_score, "max": 10, "violations": len(anti_pattern_violations)},
+        },
+        "dropped_controls": dropped_controls,
+        "dropped_headings": dropped_headings,
+        "missed_terms": missed_terms,
+        "hallucinated_features": hallucinated_features,
+        "anti_pattern_violations": anti_pattern_violations,
+        "remediation_prompt": remediation_prompt,
+    }
+
+
 def format_drift_report(report: dict[str, Any]) -> str:
-    """Format the design drift report into a clean, agent-readable CLI card."""
+    """Format a screen or tweak drift report into a clean CLI card."""
     out = []
-    out.append("DESIGN DRIFT & SCREEN FIDELITY AUDIT")
+    is_tweak = report.get("mode") == "tweak"
+    title = "STITCH TWEAK PRESERVATION & DRIFT AUDIT" if is_tweak else "DESIGN DRIFT & SCREEN FIDELITY AUDIT"
+    out.append(title)
     out.append("=" * 65)
     out.append(f"PROJECT: {report.get('project')}  |  SCREEN: {report.get('screen')}")
     out.append(f"OVERALL FIDELITY: {report.get('overall_score')}/100   [{report.get('verdict')}]   ({report.get('status')})")
@@ -203,22 +391,35 @@ def format_drift_report(report: dict[str, Any]) -> str:
 
     dims = report.get("dimensions", {})
     for k, v in dims.items():
-        title = k.replace("_", " ").title()
+        dim_title = k.replace("_", " ").title()
         sc = v.get("score", 0)
         mx = v.get("max", 0)
         bar = "█" * int((sc / mx) * 15) if mx else ""
         bar = bar.ljust(15, "░")
-        out.append(f"  {title.ljust(25)} {sc:2d}/{mx:2d} [{bar}]")
+        out.append(f"  {dim_title.ljust(25)} {sc:2d}/{mx:2d} [{bar}]")
 
-    out.append("\n[FEATURE INTEGRITY AUDIT]")
-    found = report.get("found_ctas", [])
-    missing = report.get("missing_ctas", [])
-    if found:
-        out.append(f"  ✓ Confirmed CTAs: {', '.join(found)}")
-    if missing:
-        out.append(f"  ✗ MISSING CTAs:   {', '.join(missing)}")
+    if is_tweak:
+        out.append("\n[PRESERVATION & TWEAK CHECK]")
+        dropped = (report.get("dropped_controls") or []) + (report.get("dropped_headings") or [])
+        if dropped:
+            out.append(f"  ✗ OVERSTEPPED (dropped from baseline): {', '.join(dropped[:8])}")
+        else:
+            out.append("  ✓ Baseline Preserved: Existing headings and controls kept intact.")
+        missed = report.get("missed_terms") or []
+        if missed:
+            out.append(f"  ! Terms from tweak request not matched in text: {', '.join(missed)}")
+        else:
+            out.append("  ✓ Requested Tweak Reflected in screen output.")
     else:
-        out.append("  ✓ Zero Missing CTAs: All prompt controls accurately realized.")
+        out.append("\n[FEATURE INTEGRITY AUDIT]")
+        found = report.get("found_ctas", [])
+        missing = report.get("missing_ctas", [])
+        if found:
+            out.append(f"  ✓ Confirmed CTAs: {', '.join(found)}")
+        if missing:
+            out.append(f"  ✗ MISSING CTAs:   {', '.join(missing)}")
+        else:
+            out.append("  ✓ Zero Missing CTAs: All prompt controls accurately realized.")
 
     hallucinated = report.get("hallucinated_features", [])
     if hallucinated:
@@ -229,12 +430,13 @@ def format_drift_report(report: dict[str, Any]) -> str:
         out.append("  ✓ Zero Hallucinations: No unprompted features or rogue buttons added.")
 
     violations = report.get("anti_pattern_violations", [])
+    theme_mode = str(report.get("theme_mode") or "light").upper()
     if violations:
         out.append("\n[AESTHETIC & BRAND VIOLATIONS]")
         for viol in violations:
             out.append(f"  ✗ {viol}")
     else:
-        out.append("  ✓ Brand Coherence: High-contrast OLED dark law strictly respected.")
+        out.append(f"  ✓ Craft & Theme Coherence: {theme_mode} design system respected (zero neon/lorem violations).")
 
     remediation = report.get("remediation_prompt")
     if remediation:
