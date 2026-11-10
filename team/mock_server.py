@@ -217,6 +217,74 @@ class _Handler(BaseHTTPRequestHandler):
             self._json({"id": READER_ID, "email": "audit@bookswap.test"})
             return
 
+        # Layer 1 REST: the book-detail screen's own read. The live route is
+        # /api/v1/books/{listing_id}; without it a card that is on screen cannot
+        # be opened ("Failed to load book details: not found"), and the borrow
+        # journey dead-ends on a listing the reader can see (2026-11-10).
+        if path.startswith("/api/v1/books/"):
+            lid = path.rsplit("/", 1)[-1]
+            book = next((b for b in BOOKS if b["listing_id"] == lid), None)
+            if book is None:
+                self._json({"message": "not found"}, 404)
+                return
+            self._json({
+                "listingId": book["listing_id"],
+                "userId": OWNER_ID,
+                "title": book["title"],
+                "author": book["author"],
+                "coverUrl": book.get("cover_url"),
+                "description": ("A well-kept copy, read once. Happy to lend it to a "
+                                "neighbour and get it back when you are done."),
+                "vibeTags": book.get("vibe_tags") or [],
+                "condition": book.get("condition") or "LIKE_NEW",
+                "listingType": book.get("listing_type") or "TEMPORARY_LEND",
+                "isAvailable": True,
+                "maxBorrowDays": 21,
+                "hasAnnotations": False,
+                "isSmokeFree": True,
+                "publisher": "Tor Books",
+                "format": "Paperback",
+                "publishedYear": 2014,
+                "pageCount": 416,
+                "isPetFree": True,
+                "successfulSwaps": 3,
+                "typicalResponseMinutes": 42,
+                "owner": {
+                    "userId": OWNER_ID,
+                    "username": book.get("owner_username") or "sneha_kora",
+                    "trustScore": book.get("owner_trust_score") or 82.0,
+                    "locationName": book.get("location_name") or "Indiranagar",
+                    "trustTier": "PROVEN",
+                    "trustTierLabel": "Proven reader",
+                    "shieldBadge": "bronze",
+                    "isFrozen": False,
+                },
+                "createdAt": "2026-11-01T09:00:00Z",
+            })
+            return
+
+        if path.startswith("/api/v1/users/") and path.endswith("/shelf"):
+            uid = path.split("/api/v1/users/")[-1].rsplit("/shelf", 1)[0]
+            shelf = [{
+                "listingId": b["listing_id"],
+                "title": b["title"],
+                "author": b["author"],
+                "coverUrl": b.get("cover_url"),
+                "listingType": b.get("listing_type") or "TEMPORARY_LEND",
+                "condition": b.get("condition") or "LIKE_NEW",
+                "isAvailable": True,
+            } for b in BOOKS[:2]]
+            self._json({
+                "user": {"userId": uid or OWNER_ID,
+                         "username": BOOKS[0].get("owner_username") or "sneha_kora",
+                         "trustScore": 82.0, "locationName": "Indiranagar",
+                         "trustTier": "PROVEN", "trustTierLabel": "Proven reader",
+                         "shieldBadge": "bronze", "isFrozen": False},
+                "bookshelfCount": len(shelf), "bookshelf": shelf,
+                "wishlistCount": 0, "wishlist": [],
+            })
+            return
+
         if path == "/rest/v1/profiles":
             self._json([PROFILE])
             return
