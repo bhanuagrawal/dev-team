@@ -118,8 +118,10 @@ next `ci --write` silently rewrites it.
 
 ## Done means
 
-`verify` PASS → `release` delivered (CI green, internal testing updated) →
-`record` + `rc` + `alarm` printed → worktrees pruned → the report quotes the
+`verify` PASS (which includes the mandatory **ux-flow audit**: every declared
+journey walked on this diff and reaching its goal — no other audit gates a
+release, owner policy 2026-11-10) → `release` delivered (CI green, internal
+testing updated) → `record` + `rc` + `alarm` printed → worktrees pruned → the report quotes the
 handover, the flags and the page URLs. Nothing sits uncommitted anywhere:
 `devteam doctor <project>` prints no `uncommitted: WARN` line, and `status`
 shows no `⏸ parked` attempt the report failed to mention.

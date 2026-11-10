@@ -126,8 +126,10 @@ _RAW: list[tuple[str, str, str, str, str, bool]] = [
      ".pipeline/ux_audit.json", "no emulator", True),
     ("ux-video", "build", "record declared journeys on a device",
      ".pipeline/ux_video/*", "no declared flows; no emulator", True),
-    ("ux-flow", "build", "drive goal-declared journeys with a vision model",
-     ".pipeline/ux_flows/*", "no flows; no emulator", True),
+    ("ux-flow", "build", "THE release audit: drive goal-declared journeys with a "
+                         "vision model; every walk must reach its goal",
+     ".pipeline/ux_flows/*", "a journey not walked on this diff; a walk that did not "
+                             "reach its goal; no emulator", True),
     # ---- deliver ----------------------------------------------------------- #
     ("release", "deliver", "version bump → signed AAB → CI → internal testing",
      "version file, tag, CI run, state", "verify not run for this worktree", True),

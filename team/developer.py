@@ -318,16 +318,15 @@ def _flow_contract(project: Path) -> str:
         lines.append(f"  - {f['id']} (surface: {f.get('surface') or '—'}): "
                      f"{str(f.get('goal') or '').strip()[:160]}")
     lines += [
-        "  If your change touches a screen one of these walks, the journey must still",
-        "  reach its goal. Prove it on THIS tree (not main):",
+        "  This is THE release audit (owner policy 2026-11-10): a journey must reach",
+        "  its goal, and no other audit is required. Prove it on THIS tree (not main):",
         "    devteam ux-flow <project> --worktree <this worktree> --flow <id>",
         "  If you ADD a screen or a flow that no journey covers, add its journey to",
         "  docs/ux-flows.json in this same change (id, surface, goal) — an undeclared",
         "  flow is invisible to every later audit.",
-        "  No device available? Say so in your closing note AND put",
-        '  `"flow_impact": "none"` plus `"flow_impact_reason": "…"` in the task spec.',
-        "  `devteam verify` refuses an unexercised journey either way — silently",
-        "  breaking a flow is not an option the gates leave open.",
+        "  There is no excuse field. `verify` and `release` both refuse a journey that",
+        "  was not walked on this diff or whose last walk did not reach its goal; a",
+        "  device that will not boot is a blocker to report, never a reason to ship.",
     ]
     return "\n".join(lines)
 

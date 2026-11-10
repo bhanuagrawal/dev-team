@@ -907,6 +907,40 @@ def status_report(project: Path) -> str:
     return "\n".join(lines)
 
 
+def walk_problem(project: Path, flow: dict) -> str | None:
+    """What keeps this journey from passing the release audit, or None if it passes.
+
+    One place decides what "the ux-flow audit passed" means, so `verify`,
+    `release` and `doctor` cannot disagree: the last walk exists, it did not
+    crash the app, and it reached the declared goal. A walk that stopped at a
+    wall is a FINDING, not a passing audit — that is the whole point of walking
+    the journey (owner policy 2026-11-10: this audit is mandatory for release).
+    """
+    result = run_dir(project) / _slug(str(flow["id"])) / "result.json"
+    if not result.is_file():
+        return "never walked"
+    try:
+        data = json.loads(result.read_text())
+    except Exception as exc:  # an unreadable walk is not a passing walk
+        return f"last walk unreadable ({exc})"
+    crashes = data.get("crashes") or []
+    if crashes:
+        return f"last walk crashed the app ({len(crashes)} crash(es))"
+    if not data.get("goal_reached"):
+        reason = str(data.get("reason") or data.get("verdict") or "").strip()
+        return (f"last walk did not reach the goal ({data.get('outcome') or '?'})"
+                + (f": {reason[:160]}" if reason else ""))
+    return None
+
+
+def audit_problems(project: Path) -> list[dict]:
+    """Every declared journey that does not pass the release audit, with the why."""
+    return [{"id": str(f["id"]), "surface": f.get("surface") or "",
+             "why": problem}
+            for f in declared(project)
+            for problem in [walk_problem(project, f)] if problem]
+
+
 def stale_for_files(project: Path, changed: list[str]) -> list[dict]:
     """Declared journeys whose screen this diff touches, or that never ran.
 

@@ -1233,6 +1233,23 @@ def cmd_release(args: argparse.Namespace) -> int:
                              indent=2))
             return 1
 
+    # THE UX-FLOW AUDIT IS THE RELEASE AUDIT (owner policy 2026-11-10), and
+    # release is the second, unavoidable answer for an agent that skipped
+    # `verify` — the same reason the UI test gate runs here. It reads the
+    # recorded walks, so it is cheap; it refuses BEFORE the bump so an
+    # unwalked or stuck journey never becomes a tag and a CI build. No other
+    # audit gates a release: ux-audit, ux-video, storefront review and design
+    # drift are advisory.
+    if _base:
+        _ok_flow, _flow_msg = gates_mod.flow_gate(
+            project, worktree, task, gates_mod.changed_files(worktree, _base))
+        if not _ok_flow:
+            log("flow gate: BLOCKED — " + _flow_msg)
+            print(json.dumps({"delivered": False, "version": name,
+                              "error": "ux-flow gate: " + _flow_msg, "ci": {}},
+                             indent=2))
+            return 1
+
     # THE STORE-NOTE GATE, BEFORE THE BUMP. The note is the one part a user
     # sees; a build that would repeat the previous release's wording is refused
     # here, while the tree is still clean and the remedy (a `whatsnew` line in
@@ -2338,9 +2355,17 @@ def cmd_ux_flow(args: argparse.Namespace) -> int:
             print(f"  why it stopped: {r['reason']}")
     for f in res["failed"]:
         print(f"✗ failed {f['id']}: {f['reason']}")
+    # THIS IS THE RELEASE AUDIT (owner policy 2026-11-10). A walk that stopped at
+    # a wall is a failed audit, so it must leave a non-zero exit code behind —
+    # the gate cannot be talked past by a fluent closing note.
+    stuck = [r.get("flow") for r in res["run"] if not r.get("goal_reached")]
+    if stuck:
+        print(f"\n✗ ux-flow audit NOT passed — {len(stuck)} journey(s) never reached "
+              f"their goal: {', '.join(str(s) for s in stuck)}. Release refuses until "
+              f"each walk reaches its goal.")
     print(f"\nflow(s) audited {len(res['run'])}/{res['planned']} · stored in "
           f".pipeline/ux_audit.json")
-    return 1 if res["failed"] else 0
+    return 1 if (res["failed"] or stuck) else 0
 
 
 def cmd_ux_audit(args: argparse.Namespace) -> int:

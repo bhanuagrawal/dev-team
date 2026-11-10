@@ -4,9 +4,20 @@ Loaded by: `devteam verify` (its refusal names the failing gate) · `devteam doc
 · `devteam asks`. Nothing here is a reminder: each line names the command that
 refuses.
 
-8. **No automatic guards beyond compile/tests.** Frozen paths, release-knob
-   diffing and dependency declaration were retired by the owner (2026-10-31).
-   `verify` runs: team-generic, localization, brand, the diff-scoped **UI test
+8. **No automatic guards beyond compile/tests — plus the one release audit.**
+   Frozen paths, release-knob diffing and dependency declaration were retired by
+   the owner (2026-10-31).
+   **The UX-FLOW AUDIT IS MANDATORY FOR RELEASE; NO OTHER AUDIT IS** (owner
+   policy 2026-11-10). `verify` and `release` both run it: every journey declared
+   in the project's `docs/ux-flows.json` must have been walked on this diff and
+   must have REACHED ITS GOAL (a walk that stopped at a wall is a finding, not a
+   passing audit), with no crash on the walk. There is no excuse field —
+   `"flow_impact": "none"` was the loophole that let a release ship with unwalked
+   journeys, and it is gone. `devteam ux-flow` exits non-zero on a journey that
+   did not reach its goal, and `doctor` reports the audit as BLOCKED until every
+   walk passes. `ux-audit` stills, `ux-video` replays, storefront review and
+   design drift are **advisory**: they inform the run, they never gate a release.
+   `verify` also runs: team-generic, localization, brand, the diff-scoped **UI test
    gate** (a changed UI file must be named by a Compose/Espresso test with an
    assertion in the same diff — a screenshot render does not count; a logic-only
    file owes no test), release-note freshness (the note may not repeat the last
