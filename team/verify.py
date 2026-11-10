@@ -799,4 +799,10 @@ def verify_all(project: Path, worktree: Path, base: str, log, gradle: bool = Tru
     if not ok:
         failures.append(msg)
         return False, failures
-    return True, failures
+    # A GATE THAT APPENDS WITHOUT RETURNING STILL FAILS THE RUN. The flow gate
+    # collects instead of returning early so compile/tests still produce their
+    # evidence in the same pass — but that meant `verify` printed "VERIFY: PASS"
+    # with the ux-flow refusal listed underneath it (seen 2026-11-10 on the
+    # retire branch, the first run under the new release-audit policy). The
+    # verdict is "no collected failure", never "the last gate was happy".
+    return (not failures), failures
