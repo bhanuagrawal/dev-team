@@ -38,6 +38,17 @@ refuses.
    asserts nothing, is never required by a gate and is never run by `verify`.
    `verify` also runs: team-generic, localization, brand, release-note freshness
    (the note may not repeat the last shipped one), the design gate, and compile.
+   **A store picture may not describe an older build** (owner ask 2026-11-11):
+   `verify` runs `team/storefront_frames.listing_freshness` on every task, and
+   `store-publish` / `store-readiness` / `storefront-status` read the same
+   function. `docs/storefront-frames.json` records what the shipped frames were
+   drawn from — the ref, the last commit that touched the module's sources, the
+   versionName, the scene-spec fingerprint, and a sha256 + size per PNG — and the
+   gate refuses when any of those moved without a re-render, naming the file and
+   `storefront-scenes <project> --render --frame` as the remedy. It runs
+   unconditionally on purpose: the failure it catches is the diff that changed
+   the code and NOT the pictures. A project with no `listing` block is
+   grandfathered, so the gate never invents work for a listing nobody recorded.
    Version/signing/SDK changes and new libraries are the reviewer's diff to
    catch — say so in the handover when a task touches them.
 9. **Ask the owner only what no agent can decide** (freeze-worthy incidents,

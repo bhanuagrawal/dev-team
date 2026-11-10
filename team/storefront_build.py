@@ -701,7 +701,7 @@ def status(project: Path) -> dict[str, Any]:
     if raw_status == "running" and not running:
         raw_status = "interrupted"
     comp = (sfr.load_registry(project).get("composition") or {})
-    listing = project / "distribution/listing/en-US/images/phoneScreenshots"
+    listing = sfr.listing_dir(project)
     shots = sorted(p.name for p in listing.glob("*.png")) if listing.is_dir() else []
 
     blockers: list[str] = []
@@ -721,6 +721,12 @@ def status(project: Path) -> dict[str, Any]:
         blockers.extend(sbf.gate(project))
     except Exception:
         blockers.append("brand provenance could not be read")
+    # Do the shipped frames still describe the build a user installs? Printed
+    # either way, because "the run finished" and "the pictures are current" are
+    # different questions and the second one is what a store upload is asking.
+    fresh_ok, fresh_why = sfr.listing_freshness(project)
+    if not fresh_ok:
+        blockers.append(fresh_why)
 
     return {
         "run": {
@@ -735,6 +741,7 @@ def status(project: Path) -> dict[str, Any]:
         },
         "composition": comp,
         "screenshots": shots,
+        "freshness": {"ok": fresh_ok, "detail": fresh_why},
         "publishable": not blockers,
         "blockers": blockers,
     }
@@ -758,6 +765,10 @@ def format_status(brief: dict[str, Any]) -> str:
         lines.append(f"  watermark:   {len(marks) - len(bad)}/{len(marks)} proved clean"
                      + (f" — UNPROVEN: {', '.join(sorted(bad))}" if bad else ""))
     lines.append(f"  screenshots: {len(brief.get('screenshots') or [])} on disk")
+    fresh = brief.get("freshness") or {}
+    if fresh:
+        lines.append("  freshness:   " + ("CURRENT — " if fresh.get("ok") else "STALE — ")
+                     + str(fresh.get("detail") or ""))
     lines.append("  publishable: " + ("YES" if brief.get("publishable") else "NO"))
     for b in brief.get("blockers") or []:
         lines.append(f"    ✗ {b}")

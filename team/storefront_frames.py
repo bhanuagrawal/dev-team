@@ -59,6 +59,8 @@ SCREEN_W, SCREEN_H = 1080, 2400
 
 REGISTRY_REL = "docs/storefront-frames.json"
 FRAMES_DIR_REL = "docs/frames"
+LISTING_GLOB = "distribution/listing/*/images/phoneScreenshots"
+SPEC_REL = "docs/storefront.json"
 SCREEN_ID = "devteam-screen"
 # A screenshot drawn 2px off its own box is a rounding artefact; drawn 20px off it
 # is a resample. Only the second is a lie, so only the second is refused.
@@ -122,6 +124,242 @@ def assign(project: Path, scene_id: str, frame: str | None) -> dict[str, Any]:
         registry["assign"][str(scene_id)] = slug(frame)
     save_registry(project, registry)
     return registry
+
+
+# --------------------------------------------------------------------------- #
+# listing provenance — which build the shipped frames were drawn from
+#
+# The registry owns every frame composition, so it is also the honest home for
+# "what produced the PNGs Play uploads". A listing image is a claim about a
+# build, and the failure this prevents was observed before: the composer wrote
+# 1620x3200 frames from one revision, composeApp/src moved for six weeks, and
+# the listing kept describing screens the app no longer drew. Recording the
+# provenance is cheap; proving it is what `listing_freshness` does, offline,
+# from files and git.
+# --------------------------------------------------------------------------- #
+def listing_dir(project: Path) -> Path:
+    """The phone-screenshot folder an upload reads, whatever the locale is."""
+    base = project / "distribution/listing"
+    for cand in sorted(base.glob("*/images/phoneScreenshots")):
+        if cand.is_dir():
+            return cand
+    return base / "en-US/images/phoneScreenshots"
+
+
+def _module_of(project: Path) -> str:
+    spec_file = project / SPEC_REL
+    if spec_file.is_file():
+        try:
+            return str(json.loads(spec_file.read_text()).get("module") or "composeApp")
+        except Exception:
+            pass
+    return "composeApp"
+
+
+def ui_source(project: Path) -> str:
+    """The code a screenshot is a picture of: the compose module's sources.
+
+    Taken from the project's own scene spec (`module`), never guessed, so a
+    module rename moves the gate with it instead of silently fingerprinting a
+    directory that no longer exists.
+    """
+    return f"{_module_of(project)}/src"
+
+
+# versionName may be a literal or an env override with a literal default; the
+# literal is the version a plain build installs, which is what the frame shows.
+_VERSION_RE = re.compile(
+    r'versionName\s*=\s*(?:System\.getenv\("VERSION_NAME"\)\s*\?:\s*)?"([^"]+)"')
+
+
+def app_version(project: Path) -> str:
+    module = _module_of(project)
+    for name in ("build.gradle.kts", "build.gradle"):
+        f = project / module / name
+        if not f.is_file():
+            continue
+        m = _VERSION_RE.search(f.read_text(errors="ignore"))
+        if m:
+            return m.group(1).strip()
+    return ""
+
+
+def _git_out(project: Path, args: list[str]) -> str:
+    from .core import git
+
+    try:
+        r = git(args, cwd=project, timeout=60)
+    except Exception:
+        return ""
+    return (r.stdout or "").strip() if r.returncode == 0 else ""
+
+
+def _project_label(project: Path) -> str:
+    """The project's own name, even when the caller hands us a task worktree.
+
+    A remedy that says `storefront-scenes dt-the-store-listing-...-042` is a
+    command nobody can type: the profile above the worktree knows the real name.
+    """
+    from .core import profile_of
+
+    try:
+        return str(profile_of(project).get("name") or project.name)
+    except (Exception, SystemExit):
+        # profile_of raises SystemExit for a path with no profile above it; a
+        # gate must still be able to PRINT its verdict about such a tree.
+        return project.name
+
+
+def png_dims(path: Path) -> tuple[int, int] | None:
+    """(width, height) from a PNG's IHDR, or None when the file is not a PNG."""
+    import struct
+
+    try:
+        head = path.read_bytes()[:24]
+    except OSError:
+        return None
+    if head[:8] == b"\x89PNG\r\n\x1a\n" and head[12:16] == b"IHDR":
+        return struct.unpack(">II", head[16:24])
+    return None
+
+
+def listing_record(project: Path) -> dict[str, Any]:
+    """What the shipped frames were drawn from, as data a re-run reproduces.
+
+    Every field is read from the tree that ships: the delivery ref and the last
+    commit that touched the module's sources (from git), the versionName the
+    build installs (from the module's build file), the scene spec fingerprint the
+    copy came from, and one sha256 + size per PNG actually on disk.
+    """
+    from .storefront_review import spec_fingerprint
+
+    dirp = listing_dir(project)
+    files = []
+    for p in sorted(dirp.glob("*.png")):
+        dims = png_dims(p) or (0, 0)
+        files.append({
+            "name": p.name,
+            "sha256": hashlib.sha256(p.read_bytes()).hexdigest(),
+            "width": dims[0],
+            "height": dims[1],
+        })
+    spec_sha = ""
+    spec_file = project / SPEC_REL
+    if spec_file.is_file():
+        try:
+            spec_sha = spec_fingerprint(json.loads(spec_file.read_text()))
+        except Exception:
+            spec_sha = ""
+    source = ui_source(project)
+    return {
+        "rendered_at": now_iso(),
+        "ref": "origin/main",
+        "ref_sha": _git_out(project, ["rev-parse", "origin/main"]),
+        "ui_path": source,
+        "ui_sha": _git_out(project, ["log", "-1", "--format=%H", "--", source]),
+        "app_version": app_version(project),
+        "spec_sha": spec_sha,
+        "files": files,
+    }
+
+
+def record_listing(project: Path) -> dict[str, Any]:
+    """Stamp the registry with the provenance of the frames just composed."""
+    registry = load_registry(project)
+    block = listing_record(project)
+    registry["listing"] = block
+    save_registry(project, registry)
+    return block
+
+
+def listing_freshness(project: Path) -> tuple[bool, str]:
+    """Do the shipped listing frames still describe the build a user installs?
+
+    A store screenshot is a claim about the app, so it has an expiry: the moment
+    the module's sources, the scene copy, the versionName or the pixels behind a
+    recorded file change, the picture describes a build nobody can install. This
+    is the check that makes that expiry real, and it is deliberately cheap —
+    file reads, PNG headers and three git reads, never a network call or a
+    renderer — so it can run inside `verify` on every task.
+
+    Grandfathered on purpose: no registry, no `listing` block, or no
+    phoneScreenshots directory means this project never recorded provenance, and
+    a gate that invents a failure for projects that never opted in is how a
+    pipeline gets switched off. Returns (ok, human-readable verdict naming the
+    file and the remedy).
+    """
+    registry_file = registry_path(project)
+    if not registry_file.is_file():
+        return True, "no frame registry — no listing provenance to go stale"
+    try:
+        registry = json.loads(registry_file.read_text())
+    except Exception as exc:
+        return True, f"frame registry unreadable ({exc}) — freshness not claimed"
+    block = registry.get("listing") or {}
+    if not block:
+        return True, "no listing provenance recorded yet — nothing to compare"
+    dirp = listing_dir(project)
+    if not dirp.is_dir():
+        return True, "no phoneScreenshots directory — nothing shipped to be stale"
+    on_disk = sorted(dirp.glob("*.png"))
+    if not on_disk:
+        return True, "no phone screenshots on disk — nothing shipped to be stale"
+
+    remedy = f"re-render: devteam storefront-scenes {_project_label(project)} --render --frame"
+    problems: list[str] = []
+    recorded = {str(f.get("name")): f for f in block.get("files") or []}
+
+    for p in on_disk:
+        if p.name not in recorded:
+            problems.append(f"{p.name} was never recorded as drawn (add it by "
+                            "composing the frames, not by hand)")
+            continue
+        meta = recorded[p.name]
+        if meta.get("sha256") and str(meta["sha256"]) != hashlib.sha256(p.read_bytes()).hexdigest():
+            problems.append(f"{p.name} was edited after it was drawn (sha256 differs)")
+        dims = png_dims(p)
+        if dims is None:
+            problems.append(f"{p.name} is not a readable PNG")
+            continue
+        w, h = dims
+        if (w, h) != (CANVAS_W, CANVAS_H):
+            problems.append(f"{p.name} is {w}x{h}, not the {CANVAS_W}x{CANVAS_H} frame Play gets")
+        elif (int(meta.get("width") or 0), int(meta.get("height") or 0)) != (w, h):
+            problems.append(f"{p.name} is recorded at {meta.get('width')}x{meta.get('height')} "
+                            f"but is {w}x{h} on disk")
+    for name in recorded:
+        if not (dirp / name).is_file():
+            problems.append(f"{name} is recorded but missing from disk")
+
+    spec_file = project / SPEC_REL
+    if spec_file.is_file():
+        from .storefront_review import spec_fingerprint
+
+        try:
+            now_spec = spec_fingerprint(json.loads(spec_file.read_text()))
+        except Exception:
+            now_spec = ""
+        if now_spec and str(block.get("spec_sha") or "") != now_spec:
+            problems.append(f"{SPEC_REL} changed since the frames were drawn "
+                            f"({block.get('spec_sha') or 'unrecorded'} -> {now_spec}): the "
+                            "screenshot's copy and the spec now describe different words")
+
+    source = str(block.get("ui_path") or ui_source(project))
+    now_ui = _git_out(project, ["log", "-1", "--format=%H", "--", source])
+    if now_ui and str(block.get("ui_sha") or "") != now_ui:
+        problems.append(f"{source} moved since the frames were drawn "
+                        f"({str(block.get('ui_sha') or 'unrecorded')[:12]} -> {now_ui[:12]}): "
+                        "the screenshots show screens an older commit drew")
+
+    now_version = app_version(project)
+    if now_version and str(block.get("app_version") or "") != now_version:
+        problems.append(f"the app is {now_version} but the frames were drawn from "
+                        f"{block.get('app_version') or 'an unrecorded version'}")
+
+    if problems:
+        return False, "LISTING FRAMES DESCRIBE AN OLDER BUILD: " + "; ".join(problems) + " — " + remedy
+    return True, (f"{len(recorded)} frame(s) match the build they were drawn from "
+                  f"({str(block.get('ref_sha') or '')[:7] or 'ref?'}, {block.get('app_version') or 'version?'})")
 
 
 def visible_text(html: str) -> str:

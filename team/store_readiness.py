@@ -823,6 +823,25 @@ def run_store_readiness_audit(project: Path, tree: Path | None = None) -> list[R
                 fix="Run `devteam storefront-build <project> --poster --force` to regenerate screenshots matching the new design",
             ))
 
+        # Provenance, not mtime. The check above compares the design source's
+        # timestamp with the PNGs, which cannot see the APP's screens moving —
+        # the listing kept describing pre-v1.5.44 screens while every timestamp
+        # compared clean. This one asks the recorded provenance instead: the
+        # ref, the module-source commit, the versionName and the bytes behind
+        # every shipped frame.
+        from . import storefront_frames as _sfr
+
+        fresh_ok, fresh_why = _sfr.listing_freshness(src)
+        checks.append(ReadinessCheck(
+            category="Storefront Graphic Assets",
+            name="Storefront Listing Provenance",
+            passed=fresh_ok,
+            severity="BLOCKER" if not fresh_ok else "INFO",
+            detail=fresh_why,
+            fix=(f"Run `devteam storefront-scenes {project.name} --render --frame` so the "
+                 "listing frames are drawn from the build a user installs"),
+        ))
+
         # Brand Asset Provenance Gate (Rule 5: Stitch icon + Gemini banner)
         from . import storefront_brand as sbf
         brand_issues = sbf.gate(src)

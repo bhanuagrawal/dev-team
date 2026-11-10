@@ -29,7 +29,6 @@ import json
 import os
 import re
 import shutil
-import struct
 import subprocess
 from pathlib import Path
 from typing import Any
@@ -1191,9 +1190,21 @@ def compose_frames(project: Path, log: Any = None, force: bool = False) -> dict[
                             "bytes": out_png.stat().st_size, "status": status})
             if log:
                 log(f"  ✓ frame {out_png.name} ({round(out_png.stat().st_size / 1024, 1)} KB)")
+    # The listing carries its own provenance: which ref, which version, which
+    # scene copy and which bytes each PNG is. `verify` refuses a listing whose
+    # frames no longer match those facts. Recorded only when EVERY planned frame
+    # was written — a partial pass must not stamp the leftovers it did not draw
+    # as if it had.
+    from . import storefront_frames as sfr
+    ok_frames = [w for w in written if w.get("status") == "OK"]
+    recorded = sfr.record_listing(project) if plan and len(ok_frames) == len(plan) else {}
+    if recorded and log:
+        log(f"  = listing provenance recorded ({len(recorded.get('files') or [])} frame(s), "
+            f"{recorded.get('app_version') or 'version?'} @ {str(recorded.get('ref_sha') or '')[:7]})")
     return {"status": "OK", "frames": written,
-            "count": len([w for w in written if w.get("status") == "OK"]),
-            "removed": removed, "stale": stale}
+            "count": len(ok_frames),
+            "removed": removed, "stale": stale,
+            "listing_recorded": bool(recorded)}
 
 
 def _remove_owned_frames(listing: Path, keep: set[str], owned_slugs: set[str]) -> list[str]:
@@ -1214,13 +1225,9 @@ def _remove_owned_frames(listing: Path, keep: set[str], owned_slugs: set[str]) -
 
 
 def _png_dims(path: Path) -> tuple[int, int] | None:
-    try:
-        head = path.read_bytes()[:24]
-        if head[:8] == b"\x89PNG\r\n\x1a\n" and head[12:16] == b"IHDR":
-            return struct.unpack(">II", head[16:24])
-    except Exception:
-        pass
-    return None
+    from .storefront_frames import png_dims
+
+    return png_dims(path)
 
 
 def _app_accent(project: Path, module: Path | None = None) -> str | None:

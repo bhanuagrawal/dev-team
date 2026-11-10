@@ -283,6 +283,25 @@ def storefront_decision_check(worktree: Path, files: list[str]) -> tuple[bool, s
     return True, "review and direction match the scene spec"
 
 
+def storefront_listing_fresh_check(worktree: Path) -> tuple[bool, str]:
+    """The listing's pictures must describe the build a user installs.
+
+    `docs/storefront-frames.json` records what each shipped PNG was drawn from
+    (ref, module-source commit, versionName, scene-spec fingerprint, sha256 and
+    size per file). This asks the project whether those facts still hold. It is
+    separate from `storefront_decision_check` because they fail for different
+    reasons and carry different remedies: the decision gate is about words
+    nobody decided, this one is about pixels drawn from an older build.
+    """
+    from . import storefront_frames as sfr
+
+    try:
+        return sfr.listing_freshness(worktree)
+    except Exception as exc:  # a check that cannot read the tree says so, never "ok"
+        return False, (f"listing freshness could not be read ({exc}) — "
+                       f"re-render: devteam storefront-scenes <project> --render --frame")
+
+
 def flow_gate(project: Path, worktree: Path, spec: dict | None,
               files: list[str]) -> tuple[bool, str]:
     """THE release audit: every declared journey must have passed, on this diff.
@@ -773,6 +792,17 @@ def verify_all(project: Path, worktree: Path, base: str, log, gradle: bool = Tru
     # it only AFTER the release has shipped.
     ok, msg = storefront_decision_check(worktree, files)
     log("storefront: ok — " + msg if ok else "storefront: FAIL — " + msg)
+    if not ok:
+        failures.append(msg)
+        return False, failures
+
+    # Storefront LISTING freshness: the PNGs Play uploads are a claim about a
+    # build. Unconditional (not diff-triggered) because the failure it catches is
+    # the diff that touched the code and NOT the pictures — a gate that only ran
+    # when the listing was edited could never see that. Cheap: file reads, PNG
+    # headers and three git reads; projects that never recorded provenance pass.
+    ok, msg = storefront_listing_fresh_check(worktree)
+    log("storefront listing: ok — " + msg if ok else "storefront listing: FAIL — " + msg)
     if not ok:
         failures.append(msg)
         return False, failures

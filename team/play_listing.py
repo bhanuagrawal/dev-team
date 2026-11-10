@@ -392,6 +392,18 @@ def publish_listing_assets(project: Path, dry_run: bool = True, log: Any = None)
     except Exception:
         blockers.append("the frames' composition record could not be read "
                         "(docs/storefront-frames.json)")
+    # The pictures must describe the build this upload is shipping. `verify`
+    # already refuses a stale listing, but an upload can be run on its own — and
+    # the store is the one place a stale screenshot becomes a claim to users.
+    try:
+        from . import storefront_frames as sfr
+
+        fresh, why = sfr.listing_freshness(root)
+        if not fresh:
+            blockers.append(why)
+    except Exception:
+        blockers.append("listing freshness could not be read "
+                        "(docs/storefront-frames.json)")
     if blockers:
         return {"status": "BLOCKED", "blockers": blockers, "score": report.get("score")}
 
