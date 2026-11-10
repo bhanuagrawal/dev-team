@@ -237,7 +237,13 @@ def tappables(xml: str, pkg: str = "") -> list[dict]:
             continue
         seen.add(key)
         uniq.append(t)
-    return uniq[:14]
+    # Reading order, top to bottom. The old cap of 14 was hit by the filter chips
+    # alone on a feed, so a real button below the fold never reached the vision
+    # model and the journey "stopped" at a control it could not see (2026-11-10:
+    # Request Borrow on a book card). A list that hides a tappable control is a
+    # false audit, so the cap is high enough to include a full mobile screen.
+    uniq.sort(key=lambda t: (t["y"], t["x"]))
+    return uniq[:40]
 
 
 def _pick_field(targets: list[dict], role: str) -> int | None:
