@@ -1426,6 +1426,17 @@ def cmd_record(args: argparse.Namespace) -> None:
         done_rows = [r for r in rows if r["built"]]
         if done_rows:
             print("\n" + closure.format_audit(done_rows))
+            # A GAP closes only when somebody RECORDS a verdict, and the block
+            # above names the gap but not the verb. On 2026-11-10 a shipped proof
+            # task left its branch reading "no evidence" until the orchestrator
+            # went looking for `goal verdict` — so name the command here, for the
+            # branch this run just advanced.
+            for row in done_rows:
+                if row["complete"]:
+                    continue
+                print(f"  close it with: devteam goal {project.name} verdict "
+                      f"--id {row['id']} --met yes|no --evidence \"<the probe that "
+                      f"decides it>\"  (record it once that evidence is on origin/main)")
     except Exception:
         pass
     # Every run ends by handing the owner the page: "where we are now", one paste.
