@@ -928,8 +928,18 @@ def walk_problem(project: Path, flow: dict) -> str | None:
         return f"last walk crashed the app ({len(crashes)} crash(es))"
     if not data.get("goal_reached"):
         reason = str(data.get("reason") or data.get("verdict") or "").strip()
+        hint = ""
+        # A journey that stops at sign-in was walked without the deterministic
+        # backend: a real provider needs a human's credentials, so the walk can
+        # never finish that way. The mock completes the same flow through the
+        # app's own auth seam — say so instead of leaving the reader stuck on a
+        # wall the audit built itself.
+        if re.search(r"credential|sign[ -]?in|oauth|password|log[ -]?in", reason, re.I):
+            hint = (" — walk it with `--mock`: the local backend completes sign-in "
+                    "through the app's own auth seam, which a real provider cannot do "
+                    "without a human's credentials")
         return (f"last walk did not reach the goal ({data.get('outcome') or '?'})"
-                + (f": {reason[:160]}" if reason else ""))
+                + (f": {reason[:160]}" if reason else "") + hint)
     return None
 
 

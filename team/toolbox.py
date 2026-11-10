@@ -116,9 +116,13 @@ _RAW: list[tuple[str, str, str, str, str, bool]] = [
      "worktree registry", "uncommitted work (parks it instead)", True),
     ("stitch-export", "build", "download every Stitch screen (HTML + screenshot) into docs/stitch — the design spec",
      "docs/stitch/**, .pipeline/stitch_manifest.json", "no stitch_project_id; Stitch unavailable", True),
-    ("design-consult", "build", "ask the designer for ONE task; the answer is cached "
-                                "against the current Stitch/manifest fingerprint",
-     ".pipeline/design_consult.json", "unknown task; bad answer JSON", True),
+    ("design-consult", "build", "ask the designer for ONE task — MANDATORY before UI: "
+                                "no UI code without a design, so find it (reuse/tweak a "
+                                "project screen) or get it created (consult → record → "
+                                "export); the answer is cached against the current "
+                                "Stitch/manifest fingerprint",
+     ".pipeline/design_consult.json", "unknown task; bad answer JSON; a UI diff with no "
+                                      "recorded answer (verify refuses)", True),
     ("revamp", "build", "PRD re-imagination and legacy purge (destructive; Stitch holds the visual spec)",
      "docs/PRD.md, code (with --purge-codebase)",
      "a purge outside a worktree; no PRD source", True),
