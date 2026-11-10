@@ -693,8 +693,11 @@ def audit_flow(project: Path, flow: dict, serial: str, log=None,
         # key. Recording the ask here is what lets `ux-flow`, `verify`, `doctor`
         # and `asks` all name the same owner action instead of filing a product
         # defect nobody can fix in code.
-        "unblock": human_block(reason, verdict.get("error")) or "",
-        "blocked_on": "owner" if human_block(reason, verdict.get("error")) else "",
+        # A crash is the APP's, never the owner's: only a walk with no crash on the
+        # device may be handed back as "this needs a human".
+        "unblock": ("" if crashes else human_block(reason, verdict.get("error")) or ""),
+        "blocked_on": ("owner" if (not crashes and human_block(reason, verdict.get("error")))
+                       else ""),
         "stills": [str(p) for p in stills],
         "sheet": str(sheet_path) if sheet_path else "",
         "rubric": RUBRIC,
@@ -905,6 +908,10 @@ _HUMAN_BLOCKS: tuple[tuple[str, str], ...] = (
     (r"install_failed|install failed|not installed|user rejected",
      "approve the app install on the device (a dialog is waiting), then say "
      "\"installed\""),
+    (r"could not capture|never left its launch screen|home launcher|screencap|"
+     r"ui (?:dump|hierarchy) (?:failed|empty)|device offline",
+     "the device stopped answering mid-walk: restart it (or free memory) and say "
+     "\"device restarted\" — the walk re-runs from the start"),
 )
 
 
@@ -933,6 +940,8 @@ def active_block(project: Path) -> dict | None:
             data = json.loads(result.read_text())
         except Exception:
             continue
+        if data.get("crashes"):
+            continue  # a crash is the app's, not the owner's
         ask = data.get("unblock") or human_block(data.get("reason"), data.get("model_error"))
         if ask and not data.get("goal_reached"):
             rows.append({"flow": str(flow["id"]), "ask": ask,
