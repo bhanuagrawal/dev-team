@@ -705,9 +705,15 @@ def goal_block(profile: dict, state: dict) -> str:
     lines.append("")
 
     lines.append("TASKS  (what runs next — in order; only #1 ships per run)")
-    if not queue:
+    # A label already in the shipped ledger is delivered work: pick skips it, so
+    # the page must too, or it names a delivered task as the next run.
+    _delivered = {str(x.get("label") or "").strip().lower()
+                  for x in (state.get("shipped") or [])}
+    pending = [q for q in queue
+               if str(q.get("label") or "").strip().lower() not in _delivered]
+    if not pending:
         lines.append("  (empty — the next plan fills it)")
-    for i, q in enumerate(queue[:6], 1):
+    for i, q in enumerate(pending[:6], 1):
         tag = "  ← NEXT RUN" if i == 1 else ""
         lines.append(f"  {i}. {q.get('label')}{tag}")
         prob = str(q.get("problem") or "").strip()
@@ -716,7 +722,7 @@ def goal_block(profile: dict, state: dict) -> str:
         dw = [str(x) for x in (q.get("done_when") or []) if str(x).strip()]
         if dw:
             lines.append("       done when: " + "; ".join(dw[:3]))
-    if len(queue) > 6:
+    if len(pending) > 6:
         lines.append(f"  … {len(queue) - 6} more queued")
 
     act = active_milestone(profile, state)
