@@ -4027,6 +4027,46 @@ def _upsert_stitch_manifest_entry(project: Path, root: Path, pid: str, entry: di
     p_copy.write_text(payload)
 
 
+def _retire_stitch_screen(project: Path, root: Path, logical_id: str, old_stitch_id: str,
+                          new_stitch_id: str, title: str) -> None:
+    """Record a superseded Stitch screen as retired, and drop its repo copy.
+
+    Stitch has no delete-screen call, so a tweak leaves the old screen in the
+    project. The repo is the source of truth: one directory per surface, one
+    manifest entry per surface, and RETIRED.md naming the dead ids.
+    """
+    out = root / "docs" / "stitch"
+    mpath = out / "manifest.json"
+    try:
+        manifest = json.loads(mpath.read_text()) if mpath.is_file() else {}
+    except Exception:
+        manifest = {}
+    retired = list(manifest.get("retired_screens") or [])
+    retired.append({"id": logical_id, "stitch_id": old_stitch_id, "title": title,
+                    "replaced_by": new_stitch_id,
+                    "retired_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())})
+    manifest["retired_screens"] = retired
+    payload = json.dumps(manifest, indent=2, ensure_ascii=False) + "\n"
+    mpath.write_text(payload)
+    p_copy = pipeline_dir(project) / "stitch_manifest.json"
+    if p_copy.parent.is_dir():
+        p_copy.write_text(payload)
+    import shutil as _sh
+    stray = out / "screens" / old_stitch_id
+    if stray.is_dir() and stray.name != logical_id:
+        _sh.rmtree(stray, ignore_errors=True)
+    ledger = out / "RETIRED.md"
+    lines = ["# Retired Stitch screens", "",
+             "Stitch has no delete-screen call, so an in-place tweak forks the screen",
+             "and the old one stays in the project. These ids are retired: do not",
+             "design against them, do not export them, do not restore them.", "",
+             "| surface | retired stitch id | replaced by | when |",
+             "|---|---|---|---|"]
+    for r in retired:
+        lines.append(f"| {r['id']} | `{r['stitch_id']}` | `{r['replaced_by']}` | {r['retired_at']} |")
+    ledger.write_text("\n".join(lines) + "\n")
+
+
 def _resolve_stitch_screen_entry(project: Path, screen_ref: str, *, stitch_pid: str = "") -> dict | None:
     """Resolve a screen id or title query from docs/stitch/manifest.json, then live Stitch."""
     q = (screen_ref or "").strip().lower()
@@ -4169,13 +4209,17 @@ def cmd_stitch_tweak(args: argparse.Namespace) -> int:
         return 1
 
     entry = _resolve_stitch_screen_entry(project, screen_ref, stitch_pid=clean_pid)
-    sid = str((entry or {}).get("id") or screen_ref).split("/")[-1]
-    screen_title = str((entry or {}).get("title") or sid)
+    # Two ids on purpose: the repo id is stable across tweaks, the Stitch id is
+    # what the API needs. edit_screens FORKS, so conflating them adds a second
+    # copy of the same surface on every tweak.
+    repo_id = str((entry or {}).get("id") or screen_ref).split("/")[-1]
+    sid = str((entry or {}).get("stitch_id") or repo_id).split("/")[-1]
+    screen_title = str((entry or {}).get("title") or repo_id)
 
     # Load baseline HTML locally first, else from Stitch
-    baseline_path = root / "docs" / "stitch" / "screens" / sid / "index.html"
+    baseline_path = root / "docs" / "stitch" / "screens" / repo_id / "index.html"
     if not baseline_path.is_file():
-        baseline_path = project / "docs" / "stitch" / "screens" / sid / "index.html"
+        baseline_path = project / "docs" / "stitch" / "screens" / repo_id / "index.html"
     baseline_html = baseline_path.read_text(errors="ignore") if baseline_path.is_file() else ""
     if not baseline_html and not getattr(args, "dry_run", False):
         try:
@@ -4253,7 +4297,7 @@ def cmd_stitch_tweak(args: argparse.Namespace) -> int:
     exported = None
     if not getattr(args, "no_export", False):
         for sc in updated_screens:
-            ex = stitch_mcp.export_one_screen(sc, screens_dir, log=print)
+            ex = stitch_mcp.export_one_screen(sc, screens_dir, log=print, logical_id=repo_id)
             if ex:
                 _upsert_stitch_manifest_entry(project, root, clean_pid, ex)
                 exported = ex
@@ -4262,6 +4306,12 @@ def cmd_stitch_tweak(args: argparse.Namespace) -> int:
         else:
             raw, _ = stitch_mcp.download(best_screen)
             new_html = raw.decode(errors="ignore")
+        # Stitch has no delete-screen call: the forked-away screen still exists in
+        # the project. Retire it so nobody designs against a dead copy.
+        if sid and str((exported or {}).get("stitch_id") or "") not in ("", sid):
+            _retire_stitch_screen(project, root, repo_id, sid,
+                                  str((exported or {}).get("stitch_id") or ""),
+                                  screen_title)
     else:
         raw, _ = stitch_mcp.download(best_screen)
         new_html = raw.decode(errors="ignore")
@@ -4275,6 +4325,41 @@ def cmd_stitch_tweak(args: argparse.Namespace) -> int:
         preserve=preserve,
     )
     print("\n" + format_drift_report(report))
+
+    # One corrective pass. Stitch obeys about nine instructions in ten; the audit
+    # now names the survivor, so a second edit can be issued against it alone.
+    attempts = 1
+    while (report.get("verdict") == "FAIL" and report.get("retry_prompt")
+           and attempts < 2 and not getattr(args, "no_export", False)):
+        target = str((exported or best_screen).get("stitch_id") or sid)
+        print(f"  \u21bb corrective pass {attempts + 1} on {target}: "
+              f"{str(report['retry_prompt'])[len('Keep layout, spacing, colours and components identical. Text only. '):][:120]}")
+        try:
+            corrected = stitch_mcp.edit_screens(
+                clean_pid, [target], str(report["retry_prompt"]),
+                device=device, model_id=model_id, log=print)
+        except stitch_mcp.StitchError as exc:
+            print(f"  ! corrective pass failed: {str(exc)[:140]}")
+            break
+        if not corrected:
+            break
+        for sc in corrected:
+            ex = stitch_mcp.export_one_screen(sc, screens_dir, log=print, logical_id=repo_id)
+            if ex:
+                _upsert_stitch_manifest_entry(project, root, clean_pid, ex)
+                exported = ex
+        raw, _ = stitch_mcp.download(corrected[-1])
+        new_html = raw.decode(errors="ignore")
+        report = audit_tweak_drift(
+            project,
+            baseline_html=baseline_html,
+            tweaked_html=new_html,
+            change_request=change,
+            screen_name=str(corrected[-1].get("title") or screen_title),
+            preserve=preserve,
+        )
+        print("\n" + format_drift_report(report))
+        attempts += 1
 
     if not getattr(args, "no_export", False) and not getattr(args, "no_commit", False) and root == project:
         import subprocess as _sp

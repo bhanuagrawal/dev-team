@@ -391,18 +391,27 @@ def download(screen: dict[str, Any]) -> tuple[bytes, str]:
     raise StitchError("Stitch returned neither html nor image bytes")
 
 
-def export_one_screen(screen: dict[str, Any], out_dir: Path, log=None) -> dict[str, Any] | None:
-    """Download one screen's HTML and screenshot into <out_dir>/<id>/."""
+def export_one_screen(screen: dict[str, Any], out_dir: Path, log=None,
+                      *, logical_id: str | None = None) -> dict[str, Any] | None:
+    """Download one screen into <out_dir>/<logical_id>/.
+
+    `edit_screens` FORKS: a tweak returns a new screen id and the old one stays in
+    the project. If the export took the new id as its directory, every tweak would
+    add a second copy of the same surface to the repo. `logical_id` keeps the
+    stable name (the manifest entry) and the live Stitch id is recorded beside it.
+    """
     log = log or (lambda *_: None)
     sid = str(screen.get("name") or "").split("/")[-1]
     title = str(screen.get("title") or sid)
     if not sid:
         return None
+    dir_id = str(logical_id or sid)
     out_dir = Path(out_dir)
-    screen_dir = out_dir / sid
+    screen_dir = out_dir / dir_id
     screen_dir.mkdir(parents=True, exist_ok=True)
     entry: dict[str, Any] = {
-        "id": sid,
+        "id": dir_id,
+        "stitch_id": sid,
         "title": title,
         "surface": screen.get("surface") or "",
     }
@@ -415,7 +424,7 @@ def export_one_screen(screen: dict[str, Any], out_dir: Path, log=None) -> dict[s
             text = html.get("html") or ""
             if text:
                 (screen_dir / "index.html").write_text(text)
-                entry["html"] = f"screens/{sid}/index.html"
+                entry["html"] = f"screens/{dir_id}/index.html"
         except StitchError as exc:
             log(f"  ! {title}: html export failed — {exc}")
     shot_name = str((screen.get("screenshot") or {}).get("name") or "")
@@ -425,7 +434,7 @@ def export_one_screen(screen: dict[str, Any], out_dir: Path, log=None) -> dict[s
             b64 = shot.get("image") or ""
             if b64:
                 (screen_dir / "screen.png").write_bytes(base64.b64decode(b64))
-                entry["screenshot"] = f"screens/{sid}/screen.png"
+                entry["screenshot"] = f"screens/{dir_id}/screen.png"
         except StitchError as exc:
             log(f"  ! {title}: screenshot export failed — {exc}")
     log(f"  ✓ {title} → {screen_dir}")
