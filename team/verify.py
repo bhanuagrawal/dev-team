@@ -350,6 +350,87 @@ def flow_gate(project: Path, worktree: Path, spec: dict | None,
         "compiles but cannot be used is not shippable.")
 
 
+def design_gate(project: Path, worktree: Path, spec: dict | None,
+                files: list[str]) -> tuple[bool, str]:
+    """No UI code without a design: find it, or get it created.
+
+    Owner directive 2026-11-10 — an agent may write UI only when a design exists
+    for that surface. "Exists" is not a feeling: it is either a screen the
+    project already owns (docs/stitch/manifest.json + its exported snapshot, to
+    reuse or tweak) or a design the designer produced for THIS task (recorded by
+    `devteam design-consult --record`, with the new screen exported when the
+    answer was `new_screen`). Building a screen out of tokens alone is exactly
+    what this refuses.
+
+    Deterministic and offline: it classifies the diff with the same classifier
+    the UI test gate uses, then reads the recorded answer. It never calls a model.
+    """
+    if not spec:
+        return True, ""  # no task spec — nothing to bind a design answer to
+    from . import code_tests, designer
+    ui_files: list[str] = []
+    for rel in files:
+        path = worktree / rel
+        try:
+            if not path.is_file():
+                continue
+        except OSError:
+            continue
+        if code_tests.is_test_path(rel) or not code_tests.is_production_source(rel):
+            continue
+        try:
+            text = path.read_text(errors="ignore")
+        except OSError:
+            continue
+        if code_tests.is_ui_source(rel, text):
+            ui_files.append(rel)
+    if not ui_files:
+        return True, "no UI file changed — no design needed"
+
+    st = designer.status(project, spec)
+    label = designer.task_label(spec)
+    state = st.get("state")
+    remedy = (
+        "FIND THE DESIGN OR GET IT CREATED — do not write this screen blind: "
+        "if the surface already exists in docs/stitch/manifest.json with a snapshot "
+        "under docs/stitch/screens/<id>/, reuse or tweak it (never redesign it); if it "
+        f"does not, run `devteam design-consult <project> --task {label} --prompt`, "
+        "record the answer with `--record`, and when the answer is `new_screen` generate "
+        "the screen in Stitch and export docs/stitch/screens/<id>/index.html + "
+        "screen.png in THIS same change.")
+    if state == "not_applicable":
+        return True, "the designer says this task has no UI surface"
+    if state in ("pending", "stale"):
+        return False, (
+            "NO DESIGN FOR THIS UI (" + state + ": " + str(st.get("reason") or "") +
+            "). UI files changed: " + ", ".join(ui_files[:4]) + ". " + remedy)
+    if state != "answered":
+        return False, f"design state unreadable ({state}) for {label}. " + remedy
+
+    if str(st.get("decision") or "") == "new_screen":
+        screen = st.get("screen") or {}
+        sid = str(screen.get("id") or "").strip()
+        title = str(screen.get("title") or "").strip()
+        snapshots = project / "docs" / "stitch" / "screens"
+        exported = bool(sid) and (snapshots / sid / "screen.png").is_file()
+        if not exported and title:
+            exported = any(
+                (p / "screen.png").is_file() and
+                title.lower() in (p / "index.html").read_text(errors="ignore").lower()[:4000]
+                for p in snapshots.glob("*") if p.is_dir()) if snapshots.is_dir() else False
+        if not exported:
+            return False, (
+                "NEW SCREEN NOT DESIGNED YET — the designer's answer for this task is "
+                f"`new_screen` ({title or sid or 'unnamed'}) but its exported snapshot is "
+                "not in docs/stitch/screens/. Generate it in Stitch and export "
+                "index.html + screen.png there in this same change; a screen built from "
+                "tokens alone is not a design.")
+        return True, f"new screen designed and exported ({title or sid})"
+    return True, (f"design answered: {st.get('decision')}"
+                  + (f" — {st.get('screen', {}).get('title')}"
+                     if (st.get("screen") or {}).get("title") else ""))
+
+
 def localization_check(project_root: Path, files: list[str]) -> tuple[bool, str]:
     """Expertise-as-script: every NEW R.string reference in Kotlin changes must
     exist in every locale's strings.xml (this app ships 15 locales)."""
@@ -646,6 +727,16 @@ def verify_all(project: Path, worktree: Path, base: str, log, gradle: bool = Tru
 
     ok, msg = brand_check(worktree, files)
     log("brand: ok (" + msg + ")" if ok else "brand: FAIL — " + msg)
+    if not ok:
+        failures.append(msg)
+        return False, failures
+
+    # NO UI CODE WITHOUT A DESIGN (owner directive 2026-11-10): find the design
+    # the project already owns, or get one created, before a screen is written.
+    # Runs on file reads, before the Gradle gates, so a blind screen is refused
+    # cheaply and the remedy (consult → record → export) is named.
+    ok, msg = design_gate(project, worktree, spec, files)
+    log("design: ok — " + msg if ok else "design: FAIL — " + msg)
     if not ok:
         failures.append(msg)
         return False, failures

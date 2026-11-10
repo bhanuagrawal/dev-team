@@ -465,11 +465,16 @@ def design_brief(project: Path, profile: dict, task: dict,
         why = st.get("reason") or "no UI targets"
     elif state in ("pending", "stale"):
         why = st.get("reason") or "the designer has not answered for this task"
-        action = ("ASK THE DESIGNER before writing UI. Run: " + command
-                  + "; then record the answer with --record. If the answer is "
-                    "'new_screen', generate it in Stitch and export its snapshot "
-                    "(docs/stitch/screens/<id>/index.html + screen.png) before writing UI. "
-                    "Do not invent a visual language and do not build from tokens alone.")
+        action = ("NO UI CODE WITHOUT A DESIGN — find it, or get it created "
+                  "(owner directive 2026-11-10). Step 1, look: if the surface already "
+                  "exists in docs/stitch/manifest.json and has an exported snapshot in "
+                  "docs/stitch/screens/<id>/, reuse or tweak that screen and do not "
+                  "redesign it. Step 2, it does not exist: run " + command
+                  + ", then record the answer with --record. If the answer is "
+                    "'new_screen', generate the screen in Stitch and export its snapshot "
+                    "(docs/stitch/screens/<id>/index.html + screen.png) IN THIS SAME CHANGE. "
+                    "Do not invent a visual language and do not build from tokens alone — "
+                    "`devteam verify` REFUSES a UI diff with no recorded design answer.")
     elif st.get("decision") == "existing_screen":
         why = st.get("reason") or "an existing screen covers this task"
         screen = st.get("screen") or {}

@@ -17,6 +17,13 @@ refuses.
    did not reach its goal, and `doctor` reports the audit as BLOCKED until every
    walk passes. `ux-audit` stills, `ux-video` replays, storefront review and
    design drift are **advisory**: they inform the run, they never gate a release.
+   **No UI code without a design** (owner directive 2026-11-10): `verify` also
+   refuses a UI diff whose task has no recorded design answer. Find it or get it
+   created — a surface already in `docs/stitch/manifest.json` with an exported
+   snapshot is reused or tweaked; a surface with none is answered by
+   `devteam design-consult … --record`, and a `new_screen` answer must have its
+   snapshot exported in the same change. Building a screen from tokens alone is
+   what the gate refuses.
    `verify` also runs: team-generic, localization, brand, the diff-scoped **UI test
    gate** (a changed UI file must be named by a Compose/Espresso test with an
    assertion in the same diff — a screenshot render does not count; a logic-only
