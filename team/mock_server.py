@@ -44,7 +44,7 @@ BOOKS = [
         "isbn": "9780765377067",
         "title": "The Three-Body Problem",
         "author": "Cixin Liu",
-        "cover_url": "https://covers.openlibrary.org/b/id/8231856-L.jpg",
+        "cover_url": "https://covers.openlibrary.org/b/isbn/9780000000000-L.jpg",
         "vibe_tags": ["hard sci-fi", "first contact"],
         "listing_type": "TEMPORARY_LEND",
         "condition": "LIKE_NEW",
@@ -59,7 +59,7 @@ BOOKS = [
         "isbn": "9780451524935",
         "title": "1984",
         "author": "George Orwell",
-        "cover_url": "https://covers.openlibrary.org/b/id/8575708-L.jpg",
+        "cover_url": "https://covers.openlibrary.org/b/isbn/9780000000000-L.jpg",
         "vibe_tags": ["dystopian"],
         "listing_type": "PERMANENT_SWAP",
         "condition": "GOOD",
@@ -74,7 +74,7 @@ BOOKS = [
         "isbn": "9780593135204",
         "title": "Project Hail Mary",
         "author": "Andy Weir",
-        "cover_url": "https://covers.openlibrary.org/b/id/10574697-L.jpg",
+        "cover_url": "https://covers.openlibrary.org/b/isbn/9780000000000-L.jpg",
         "vibe_tags": ["sci-fi", "humour"],
         "listing_type": "TEMPORARY_LEND",
         "condition": "BRAND_NEW",
@@ -85,6 +85,15 @@ BOOKS = [
         "owner_trust_score": 98.0,
     },
 ]
+
+# Jackets resolve BY ISBN. A hard-coded Open Library id once put another book's
+# cover under this title and the audit reported a real-looking mismatch ("cover
+# says Their Eyes Were Watching God, title says Three-Body Problem", 2026-11-10).
+for _book in BOOKS:
+    if _book.get("isbn"):
+        _book["cover_url"] = (
+            f"https://covers.openlibrary.org/b/isbn/{_book['isbn']}-L.jpg")
+
 
 PROFILE = {
     "id": READER_ID,
