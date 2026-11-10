@@ -731,7 +731,17 @@ def push_and_deliver(project: Path, worktree: Path, task: dict, new_version: str
         git(["add", "-A"], cwd=worktree)
         rc = git(["commit", "-m", bump_subject(task, new_version)], cwd=worktree)
         if rc.returncode != 0:
-            return {"delivered": False, "error": "bump commit failed", "ci": {}}
+            # A RETRY AFTER A REJECTED PUSH FINDS THE BUMP ALREADY COMMITTED. The
+            # first attempt writes the version bump and then loses the push race;
+            # the second attempt has a clean tree, `git commit` says "nothing to
+            # commit" and the release died with "bump commit failed" even though
+            # the version was sitting in HEAD, ready to push (2026-11-11).
+            dirty = git(["status", "--porcelain"], cwd=worktree).stdout.strip()
+            head_note = git(["log", "-1", "--format=%s"], cwd=worktree).stdout.strip()
+            if dirty:
+                return {"delivered": False, "error": "bump commit failed", "ci": {}}
+            log(f"nothing to commit — the bump is already in HEAD ({head_note[:70]}); "
+                f"pushing it instead of re-bumping")
 
         sha = git(["rev-parse", "HEAD"], cwd=worktree).stdout.strip()
         log(f"pushing {sha[:8]} → origin {branch} "
