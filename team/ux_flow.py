@@ -177,7 +177,7 @@ def declared(project: Path, root: Path | None = None) -> list[dict]:
     step budget had its own audit ignore the change (2026-11-10).
     """
     out = []
-    spec_root = Path(root) if root else project
+    spec_root = Path(root) if root else _delivery_root(project)
     for f in load_spec(spec_root).get("flows") or []:
         if not isinstance(f, dict) or not str(f.get("id") or "").strip():
             continue
@@ -185,6 +185,24 @@ def declared(project: Path, root: Path | None = None) -> list[dict]:
             continue
         out.append(f)
     return out
+
+
+def _delivery_root(project: Path) -> Path:
+    """The tree the journeys are declared in: the DELIVERY ref, not the checkout.
+
+    The checkout lags main (it is the owner's, and stays where they left it), so
+    reading the spec from it walked an older step budget and an older goal than the
+    build under audit (2026-11-11). Falls back to the checkout only when the
+    delivery tree cannot be read.
+    """
+    try:
+        from . import scan as scan_mod
+        tree = scan_mod.origin_tree(project)
+        if tree.is_dir() and (Path(tree) / FLOWS_REL).is_file():
+            return Path(tree)
+    except Exception:
+        pass
+    return project
 
 
 def run_dir(project: Path) -> Path:
