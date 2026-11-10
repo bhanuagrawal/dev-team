@@ -7,7 +7,6 @@ from __future__ import annotations
 import hashlib
 import os
 import re
-import shutil
 import subprocess
 import time
 from pathlib import Path
@@ -17,15 +16,6 @@ from .core import git, profile_of, run
 
 JAVA_HOME = "/Applications/Android Studio.app/Contents/jbr/Contents/Home"
 GRADLE_ENV = {"JAVA_HOME": JAVA_HOME, "TERM": "dumb", "CI": "true"}
-
-# On-device test source sets, Android (`androidTest`) and KMP
-# (`androidInstrumentedTest`) conventions, plus the fallback task when the
-# project has more than one test-bearing module. These vanished when the
-# release-knob block was deleted (2026-10-31): the device gate then crashed with
-# NameError on every project that ships instrumented tests, so no release could
-# be verified. Keep them next to the gate that reads them.
-INSTRUMENTED_DIRS = ("androidInstrumentedTest", "androidTest")
-INSTRUMENTED_TASK_DEFAULT = ":composeApp:connectedDebugAndroidTest"
 
 # --------------------------------------------------------------------------- #
 # release knobs — protect the FIELDS, not the file
@@ -399,155 +389,106 @@ def gradle_task(worktree: Path, task: str, timeout: int, log) -> tuple[bool, str
 
 
 
-def instrumented_modules(worktree: Path) -> list[str]:
-    """Gradle module dirs (first path segment) that ship on-device tests."""
-    mods: set[str] = set()
-    for d in INSTRUMENTED_DIRS:
-        for p in worktree.glob(f"*/src/{d}/**/*.kt"):
-            parts = p.relative_to(worktree).parts
-            if parts:
-                mods.add(parts[0])
-    return sorted(mods)
+def _task_module(task: str) -> str:
+    """The module dir a Gradle task name belongs to ('' when it names none)."""
+    t = task.lstrip(":")
+    return t.split(":")[0] if ":" in t else ""
 
 
-def has_instrumented_tests(worktree: Path) -> bool:
-    """True when the project ships on-device tests. The switch that keeps the
-    device gate from spending a boot on a project (or a change) with nothing to
-    run — the gate's "cheap" half."""
-    return bool(instrumented_modules(worktree))
+def _ui_only_args(task: str, classes: dict[str, list[str]]) -> list[str] | None:
+    """`--tests=<fqcn>` args isolating a task's UI test classes, or None.
 
-
-def default_instrumented_task(worktree: Path) -> str:
-    """The instrumented gradle task to run when the profile declares none.
-
-    Derived from the project layout instead of assumed: `:composeApp:` is the
-    KMP convention but a pure-Android project's module is `:app`, and a
-    hardcoded `:composeApp:connectedDebugAndroidTest` makes the device gate die
-    with "Cannot locate tasks that match ... project 'composeApp' not found" on
-    every single-module project — a guaranteed FAIL that reads like a code
-    failure. With exactly one module shipping instrumented tests, name it; with
-    none or several, fall back to the KMP-typical default (several test-bearing
-    modules is rare and the profile should declare `verify.instrumented`)."""
-    mods = instrumented_modules(worktree)
-    if len(mods) == 1:
-        return f":{mods[0]}:connectedDebugAndroidTest"
-    return INSTRUMENTED_TASK_DEFAULT
-
-
-def available_avds() -> list[str]:
-    """AVD names, via the `android` CLI then the SDK emulator binary. [] means
-    "cannot boot here"; an agent-only machine still runs the pipeline."""
-    out: list[str] = []
-    try:
-        r = run(["android", "emulator", "list"], None, timeout=30)
-        if r.returncode == 0:
-            out = [ln.strip() for ln in r.stdout.splitlines() if ln.strip() and " " not in ln.strip()]
-    except (OSError, subprocess.SubprocessError):
-        out = []
-    if out:
-        return out
-    exe = shutil.which("emulator") or str(Path.home() / "Library/Android/sdk/emulator/emulator")
-    try:
-        r = run([exe, "-list-avds"], None, timeout=30)
-    except (OSError, subprocess.SubprocessError):
-        return []
-    return [ln.strip() for ln in r.stdout.splitlines() if ln.strip()]
-
-
-def _is_test_runner_infra_failure(output: str) -> bool:
-    """True when failure was an inability to boot/connect an emulator or test runner,
-    rather than an assertion failure in an executed test.
-
-    Gradle prints "There were failing tests" for BOTH a real assertion and a run whose
-    device vanished mid-suite (2026-11-05: `device 'emulator-5554' not found` +
-    "Test run failed to complete. Expected 99 tests, received 1" was reported as a test
-    failure, blocking a run whose compile/unit gates were green). So the marker alone
-    cannot decide: a named assertion always wins, then a device/runner signature, then
-    an incomplete run, and only a completed run with failures is a real failure.
+    None means "this task has no UI test classes to run" (skip it) — including a
+    module-less task like `testBuildLogic`, which cannot be attributed to any
+    module's UI tests and must not be run unfiltered.
     """
-    low = output.lower()
-    # A real assertion is a real failure, whatever else the log says.
-    if any(sig in low for sig in ("assertionerror", "comparisonfailure")):
-        return False
-    infra_signatures = (
-        "no connected devices",
-        "deviceexception",
-        "failed to establish session",
-        "device offline",
-        "device not found",
-        "could not connect to",
-        "emulator process has exited early",
-        "running multiple emulators with the same avd",
-        "showing crashdialog to get consent",
-        "not available",
-        "command not found",
-        "missing",
-    )
-    # adb words a vanished device as `device 'emulator-5554' not found`, which the
-    # contiguous "device not found" signature above cannot match.
-    if any(sig in low for sig in infra_signatures) or re.search(
-            r"device '[^']+' not found", low):
-        return True
-    # No device was named, but the suite did not finish: no test was reported as failed
-    # with an assertion, so this is the runner giving up rather than the build failing.
-    if "test run failed to complete" in low or re.search(
-            r"expected \d+ tests?, received \d+", low):
-        return True
-    return False
+    picked = classes.get(_task_module(task)) or []
+    if not picked:
+        return None
+    return [f"--tests={c}" for c in picked]
 
 
-def instrumented_check(worktree: Path, profile: dict, log) -> tuple[bool, str]:
-    """The device gate: run the project's instrumented tests on an emulator.
+def integration_check(worktree: Path, profile: dict, log) -> tuple[bool, str]:
+    """The ONE test pass: UI/integration tests, run off-device.
 
-    Added 2026-10-22, after v1.5.7 shipped a page-render regression that no gate
-    could see. The chain was `compileDebugKotlin` + `testDebugUnitTest`, and that
-    project has ZERO JVM-test sources — so `testDebugUnitTest` ran as NO-SOURCE
-    ("tests green" meant "nothing ran") and the whole verify was compile-only. A
-    runtime-only framework contract (PdfRenderer rejects every bitmap config but
-    ARGB_8888) therefore survived compile, "tests", review and a Play upload, and
-    every user got a spinner that never stops. A compile gate cannot see a
-    contract that is only checked when the code runs on a device.
+    Owner policy (2026-11-10): unit tests are retired. The team requires a UI
+    test for every changed UI file (`code_tests.gate`) and runs only UI tests —
+    a logic-only change adds no test obligation, and the project's unit-only
+    classes are not spent as a gate.
 
-    Deliberately CHEAP (owner, 2026-10-22: "use emulator available on mac, do not
-    test aggressive and waste time"):
-      * no instrumented test sources -> skipped before spending anything;
-      * an emulator already booted (e.g. the owner's) -> reused, never re-booted
-        and never stopped;
-      * otherwise exactly ONE bounded boot through `with-emulator`, whose EXIT
-        trap guarantees teardown on success, failure and timeout, so the run-end
-        leak check stays clean.
-      * failure to RUN the test (no AVD, missing with-emulator, device offline) is
-        NON-BLOCKING (warn-only). Failure of the test ITSELF (assertion/runtime
-        failure) is a HARD BLOCKER.
+    Selection, most explicit first:
+      * `verify.integration_task` — the project names the task; run it as-is
+        (the project owns what it contains);
+      * `verify.test` — the legacy JVM test task, kept as the harness so UI
+        tests that live in a JVM test source set (Robolectric Compose) still
+        run, FILTERED to the classes `code_tests` classifies as UI tests. A
+        unit-only class never executes here.
+      * neither — nothing to run, skipped with a log line.
+
+    Off-device by policy (2026-11-08): booting an emulator inside verify failed
+    for infrastructure reasons and read like a code failure; the device passes
+    (`ux-audit`, `ux-video`, `ux-flow`) own device validation.
     """
-    if not has_instrumented_tests(worktree):
-        log("instrumented: no integration tests in this project — skipped")
+    cfg = dict(profile.get("verify") or {})
+    explicit = str(cfg.get("integration_task") or "").strip()
+    from . import code_tests
+    classes = code_tests.ui_test_classes(worktree)
+    if not classes:
+        log("integration: no asserting UI tests in this project — skipped")
         return True, ""
-    # OWNER POLICY (2026-11-08): an integration test runs OFF a device. A gate that
-    # boots an emulator fails for infrastructure reasons (a hung AVD, a zombie lock,
-    # no snapshot) and reads like a code failure; the device passes (`ux-audit`,
-    # `ux-video`, `ux-flow`) are the ones that own device validation.
-    cfg = profile.get("verify") or {}
-    offdevice = cfg.get("integration_task")
-    if not offdevice:
-        log("instrumented: integration tests run OFF-DEVICE by policy — the device "
-            "passes (ux-audit/ux-video/ux-flow) own device validation; declare "
-            "verify.integration_task to run them on the JVM here")
+    raw = explicit or str(cfg.get("test") or "")
+    tasks = [t for t in re.split(r"[,\s]+", raw.strip()) if t]
+    if not tasks:
+        log("integration: no UI test task declared — skipped (set "
+            "verify.integration_task to run the project's UI tests)")
         return True, ""
-    cfg = dict(cfg)
-    task = str(offdevice)
-    timeout = int(cfg.get("instrumented_timeout", 1200))
-    log(f"~ gradle {task} off-device (JVM/Robolectric, ≤{timeout}s)")
+    try:
+        timeout = int(cfg.get("integration_timeout", 1500))
+    except (TypeError, ValueError):
+        timeout = 1500
     ensure_wrapper_distribution(worktree, log)
-    try:
-        r = run(["./gradlew", task], worktree, timeout=timeout, env=gradle_env(worktree))
-    except subprocess.TimeoutExpired:
-        log(f"~ integration: {task} timed out after {timeout}s off-device — warn-only")
-        return True, ""
-    if r.returncode == 0:
-        log(f"  ok: {task} (off-device)")
-        return True, ""
-    return False, f"{task} FAILED off-device:\n" + ((r.stdout or "") + (r.stderr or ""))[-4000:]
+
+    for task in tasks:
+        filters = _ui_only_args(task, classes) if not explicit else []
+        if filters is None:
+            log(f"integration: {task} carries no UI tests — skipped")
+            continue
+        args = ["./gradlew", task, *filters]
+        label = (f"{len(filters)} UI class(es)" if filters
+                 else "declared integration task")
+        log(f"~ gradle {task} ({label}, off-device, ≤{timeout}s)")
+        try:
+            r = run(args, worktree, timeout=timeout, env=gradle_env(worktree))
+        except subprocess.TimeoutExpired:
+            log(f"~ integration: {task} timed out after {timeout}s — warn-only")
+            continue
+        out = (r.stdout or "") + (r.stderr or "")
+        # A class that a flavour/variant does not compile makes Gradle reject the
+        # whole include list ("No tests found for given includes"). Fall back to
+        # the task as declared rather than blocking on a filter mismatch.
+        if r.returncode != 0 and filters and "No tests found for given includes" in out:
+            log(f"integration: UI class filter did not match a compiled test — "
+                f"running {task} unfiltered")
+            args = ["./gradlew", task]
+            try:
+                r = run(args, worktree, timeout=timeout, env=gradle_env(worktree))
+            except subprocess.TimeoutExpired:
+                log(f"~ integration: {task} timed out after {timeout}s — warn-only")
+                continue
+            out = (r.stdout or "") + (r.stderr or "")
+        if r.returncode != 0:
+            # ONE retry: a Robolectric UI suite has a known non-deterministic flap.
+            log(f"integration: {task} failed once — retry")
+            try:
+                r = run(args, worktree, timeout=timeout, env=gradle_env(worktree))
+            except subprocess.TimeoutExpired:
+                log(f"~ integration: retry timed out after {timeout}s — warn-only")
+                continue
+            if r.returncode != 0:
+                tail = (((r.stdout or "") + (r.stderr or ""))[-4000:])
+                return False, f"{task} FAILED (UI tests, off-device):\n{tail}"
+        log(f"  ok: {task} (UI tests, off-device)")
+    return True, ""
 
 
 
@@ -703,16 +644,16 @@ def verify_all(project: Path, worktree: Path, base: str, log, gradle: bool = Tru
         failures.append(msg)
         return False, failures
 
-    # TESTS ARE PART OF THE DIFF (owner directive 2026-11-05). A run shipped a
-    # signature field whose only exercise was a screenshot render; compile +
-    # `testDebugUnitTest` were green because nothing asserted anything. The gate
-    # reads the diff: every changed production file must be named by a test file
-    # in the SAME diff, and a changed UI file must be named by a Compose/Espresso
-    # test with an assertion. Cheap (file reads), so it runs before Gradle and
-    # names the exact file the developer must add — never a prose reminder.
+    # UI TESTS ARE PART OF THE DIFF (owner directive 2026-11-05; unit tests
+    # retired 2026-11-10). A run shipped a signature field whose only exercise was
+    # a screenshot render; compile + `testDebugUnitTest` were green because nothing
+    # asserted anything. The gate reads the diff: a changed UI file must be named by
+    # a Compose/Espresso test with an assertion in the SAME diff. A logic-only file
+    # needs nothing; unit tests are not required. Cheap (file reads), so it runs
+    # before Gradle and names the exact file the developer must add.
     from . import code_tests
     ok, msg = code_tests.gate(worktree, files)
-    log("tests: ok — " + msg if ok else "tests: FAIL — " + msg)
+    log("ui tests: ok — " + msg if ok else "ui tests: FAIL — " + msg)
     if not ok:
         failures.append(msg)
         return False, failures
@@ -752,21 +693,12 @@ def verify_all(project: Path, worktree: Path, base: str, log, gradle: bool = Tru
         failures.append(msg)
         return False, failures
 
-    # Test gate. Known environment quirk: a non-deterministic Robolectric flap in
-    # UsageDashboardViewModelTest (documented in project AGENTS.md) — so a test
-    # failure gets exactly ONE re-run before we call it a real failure.
-    ok, msg = gradle_task(worktree, profile["verify"]["test"], 1500, log)
-    if not ok:
-        log("tests failed once — retry (possible Robolectric flake, per project docs)")
-        ok, msg2 = gradle_task(worktree, profile["verify"]["test"], 1500, log)
-        if not ok:
-            failures.append(msg + "\n\nRETRY ALSO FAILED:\n" + msg2)
-            return False, failures
-
-    # Device gate: runtime-only contracts (framework API rules, rendering,
-    # permissions) are invisible to compile + JVM tests. Cheap by design — see
-    # instrumented_check. Skipped entirely when the project ships no such tests.
-    ok, msg = instrumented_check(worktree, profile, log)
+    # UI/INTEGRATION TEST GATE (owner policy 2026-11-10): unit tests are retired.
+    # The one test pass is the project's UI suites, off-device — see
+    # integration_check. It never runs a unit-only class: when the project's legacy
+    # JVM test task is the harness, the include list is filtered to the classes the
+    # diff gate above counts as UI tests.
+    ok, msg = integration_check(worktree, profile, log)
     if not ok:
         failures.append(msg)
         return False, failures

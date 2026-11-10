@@ -1209,10 +1209,11 @@ def cmd_release(args: argparse.Namespace) -> int:
         log("release candidate: NOT CALLED YET — nothing recorded; the agent that made "
             f"this change calls `devteam rc {project.name} --version {name} --yes|--no`")
 
-    # TESTS ARE PART OF THE CHANGE, and release is the second, unavoidable
+    # UI TESTS ARE PART OF THE CHANGE, and release is the second, unavoidable
     # answer for an agent that skipped `verify`. Diff-scoped, no Gradle — it
     # reads the worktree against the same dt-base verify uses. Refuse BEFORE the
-    # bump, so a testless change never becomes a tag/CI build.
+    # bump, so a UI change with no UI test never becomes a tag/CI build. Unit
+    # tests are retired (owner policy 2026-11-10): only UI files owe a test.
     from team import code_tests
     from team import verify as gates_mod
     _base = ""

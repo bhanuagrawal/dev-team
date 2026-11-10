@@ -281,22 +281,22 @@ def _test_contract(project: Path) -> str:
     """
     from . import code_tests
     unit, ui = code_tests.suggest_test_dirs(project)
-    unit_txt = ", ".join(unit) or "the project's unit-test source set"
     ui_txt = ", ".join(ui) or "the project's UI-test source set"
     return f"""
 
-TESTS ARE PART OF THIS DIFF — `devteam verify` REFUSES the change without them:
-  - Every production file you add or change MUST be named by a test file you also
-    add or change in this same task. The gate reads the diff, not your summary.
-  - A UI file (a @Composable, Activity/Fragment/Dialog/View, or layout XML) needs
-    a UI test using createComposeRule/createAndroidComposeRule (Robolectric or
-    on-device) or Espresso/UiAutomator, WITH at least one assertion.
-  - Every other production file needs a unit test with @Test and at least one
-    assertion.
+UI TESTS ARE PART OF THIS DIFF — `devteam verify` REFUSES the change without them.
+Unit tests are RETIRED: do not add one, and do not treat a logic-only change as
+owing a test.
+  - A UI file (a @Composable, Activity/Fragment/Dialog/View, or layout XML) you
+    add or change MUST be named by a UI test you also add or change in this same
+    task. The gate reads the diff, not your summary.
+  - The UI test must use createComposeRule/createAndroidComposeRule (Robolectric
+    or on-device) or Espresso/UiAutomator, WITH at least one assertion.
+  - A logic-only production file (ViewModel, repository, use case) needs no test
+    file: it is exercised through the screens that use it.
   - A screenshot/render with no assertion is NOT a test and does not count.
-  - Test files under {unit_txt} (unit) and {ui_txt} (UI) are always the right
-    place for the tests this change owes. Never weaken an existing test to make
-    the gate pass.
+  - Test files under {ui_txt} (UI) are always the right place for the tests this
+    change owes. Never weaken an existing test to make the gate pass.
 """
 
 
@@ -406,7 +406,8 @@ def build_prompt(project: Path, profile: dict, task: dict, task_paths: list[str]
         allowed_paths="\n  - ".join(profile["allowed_paths"]),
         frozen_paths="",
         compile_cmd=v["compile"],
-        test_cmd=v.get("test", "(skip; profile defines no test gate)"),
+        test_cmd=(v.get("integration_task") or v.get("test")
+                  or "(skip; profile defines no UI-test task)"),
         conventions="\n  - ".join(conventions),
         locales=n_locales,
         research_context=research_ctx or "see research.json constraints",
@@ -532,7 +533,7 @@ def task_context(project: Path, profile: dict, task: dict,
     """
     from . import code_tests, ux_flow
 
-    unit, ui = code_tests.suggest_test_dirs(project)
+    _, ui = code_tests.suggest_test_dirs(project)
     v = profile.get("verify") or {}
     st = state_of(project)
 
@@ -566,18 +567,17 @@ def task_context(project: Path, profile: dict, task: dict,
         "locales": profile.get("locales") or None,
         "build": {
             "compile": v.get("compile"),
-            "test": v.get("test"),
-            "unit_test_dirs": unit,
+            "test": v.get("integration_task") or v.get("test"),
             "ui_test_dirs": ui,
         },
-        "tests_enforced_by": "devteam verify",
+        "tests_enforced_by": "devteam verify (UI tests only; unit tests retired)",
         "test_contract": (
-            "Every production file you add or change must be named by a test file "
-            "you also add or change in this same diff. A UI file (Composable, "
-            "Activity/Fragment/Dialog/View, layout XML) needs a UI test using "
+            "UI tests only — unit tests are retired. A UI file (Composable, "
+            "Activity/Fragment/Dialog/View, layout XML) you add or change must be "
+            "named by a UI test you also add or change in the same diff, using "
             "createComposeRule/createAndroidComposeRule or Espresso/UiAutomator, "
-            "with at least one assertion. Everything else needs a unit test with "
-            "@Test and an assertion. A screenshot/render is not a test."),
+            "with at least one assertion. A logic-only file needs no test. A "
+            "screenshot/render is not a test."),
         "design": design_brief(project, profile, task, task_paths),
     }
     reason = str(task.get("reason") or "").strip()

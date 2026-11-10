@@ -6,17 +6,19 @@ refuses.
 
 8. **No automatic guards beyond compile/tests.** Frozen paths, release-knob
    diffing and dependency declaration were retired by the owner (2026-10-31).
-   `verify` runs: team-generic, localization, brand, the diff-scoped **test
-   gate** (every changed production file must be named by a test file in the
-   same diff; a changed UI file must be named by a Compose/Espresso test with an
-   assertion — a screenshot render does not count), release-note freshness (the
-   note may not repeat the last shipped one), compile, unit tests, instrumented
-   tests. `release` re-runs the test gate before the version bump, so skipping
-   `verify` does not skip it. **100% unit and UI test coverage is enforced by
-   code**: `config/coverage.json` and `team/coverage.py` set the floor at 100%;
-   when coverage is below 100%, the planner (`team/research.py`) is code-gated
-   to make raising coverage the **topmost priority** (`queue[0]`), rejecting any
-   plan whose head does not target tests. Version/signing/SDK changes and new
+   `verify` runs: team-generic, localization, brand, the diff-scoped **UI test
+   gate** (a changed UI file must be named by a Compose/Espresso test with an
+   assertion in the same diff — a screenshot render does not count; a logic-only
+   file owes no test), release-note freshness (the note may not repeat the last
+   shipped one), compile, UI/integration tests (off-device). **Unit tests are
+   retired** (owner policy 2026-11-10): none are required and none are run as a
+   gate. `release` re-runs the UI test gate before the version bump, so skipping
+   `verify` does not skip it. **100% UI test coverage is enforced by code**:
+   `config/coverage.json` and `team/coverage.py` set the UI floor at 100% (the
+   unit leg is measured for information only, floor 0); when UI coverage is below
+   100%, the planner (`team/research.py`) is code-gated to make raising coverage
+   the **topmost priority** (`queue[0]`), rejecting any plan whose head does not
+   target UI tests. Version/signing/SDK changes and new
    libraries are the reviewer's diff to catch — say so in the handover when a task
    touches them.
 9. **Ask the owner only what no agent can decide** (freeze-worthy incidents,

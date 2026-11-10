@@ -1,23 +1,20 @@
 """Test-coverage collector — deterministic, no Gradle run, no LLM.
 
-The planner needs two numbers it can spend a release on, measured the same way for
+The planner needs a number it can spend a release on, measured the same way for
 every project:
 
-  unit — of the main-source files that carry behaviour, what share is reached by the
-         JVM test set. File-level on purpose (a source file counts when a test names
-         its type): a project without a JaCoCo task still gets a number, and the
-         number moves the moment a test file is added.
-  ui   — of the UI source files, what share has a test that mounts it. A Robolectric
-         Compose test is a real UI test even though it runs on the JVM, so this
-         counts `src/test` AND `src/androidTest` (and their KMP equivalents).
+  ui   — of the UI source files, what share has a UI/integration test that mounts
+         it. A Robolectric Compose test is a real UI test even though it runs on
+         the JVM, so this counts `src/test` AND `src/androidTest` (and their KMP
+         equivalents).
+
+  unit — RETIRED (owner policy 2026-11-10). It is still MEASURED, for information
+         only: the floor is 0, so it can never hold up a plan or a release. The
+         team requires UI tests, not unit tests.
 
 When a project ALREADY produces a JaCoCo report, its real LINE coverage replaces
 the unit proxy — a project with instrumented line coverage must not be judged by
-an approximation.
-
-The split is by denominator: every main file lands in exactly one of the two, so
-`unit` and `ui` are the two halves of "how much of this codebase is tested", not
-two guesses at the same whole.
+an approximation. It no longer gates anything, for the same reason.
 
 Nothing here knows a project's name or layout beyond the standard Gradle/KMP
 source-set names; a project that needs a different report path or floor declares
@@ -29,10 +26,11 @@ import json
 import re
 from pathlib import Path
 
-# Default floors: 100% unit and UI test coverage required.
-# Code-enforced in team/research.py: when below 100%, the planner MUST make raising
-# coverage the topmost priority (queue HEAD).
-DEFAULT_UNIT_FLOOR = 100
+# Default floors: 100% UI test coverage, and 0% for unit tests (RETIRED, owner
+# policy 2026-11-10 — the unit leg is measured for information only and can never
+# block). Code-enforced in team/research.py: when the UI leg is below 100%, the
+# planner MUST make raising it the topmost priority (queue HEAD).
+DEFAULT_UNIT_FLOOR = 0
 DEFAULT_UI_FLOOR = 100
 
 # Standard Gradle + Kotlin Multiplatform source-set names. Only the ones that hold
