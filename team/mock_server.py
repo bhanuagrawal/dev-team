@@ -230,31 +230,17 @@ class _Handler(BaseHTTPRequestHandler):
 
         if path.startswith("/api/v1/trades/") and path.endswith("/meetup"):
             tx = path.split("/api/v1/trades/")[-1].rsplit("/meetup", 1)[0]
-            self._json({
-                "transaction_id": tx or MOCK_TRANSACTION_ID,
-                "status": "REQUESTED",
-                "viewer_role": "BORROWER",
-                "book": {"listing_id": BOOKS[0]["listing_id"],
-                         "isbn": BOOKS[0].get("isbn") or "",
-                         "title": BOOKS[0]["title"], "author": BOOKS[0]["author"],
-                         "cover_url": BOOKS[0].get("cover_url"),
-                         "condition": BOOKS[0].get("condition") or "LIKE_NEW",
-                         "listing_type": BOOKS[0].get("listing_type") or "TEMPORARY_LEND",
-                         "max_borrow_days": 21},
-                "other_reader": {"user_id": OWNER_ID,
-                                 "username": BOOKS[0].get("owner_username") or "sneha_kora",
-                                 "trust_score": 82.0,
-                                 "location_name": BOOKS[0].get("location_name") or "Indiranagar"},
-                "midpoint": {"label": "Between you and Indiranagar 100ft Rd",
-                             "distance_meters": 600},
-                "venue": {"venue_id": "venue-1", "name": "Third Wave Coffee",
-                          "address": "100ft Road, Indiranagar", "venue_type": "CAFE",
-                          "distance_meters": 600, "walk_minutes": 8,
-                          "opening_hours": "08:00–23:00", "community_handshakes": 42},
-                "alternates": [],
-                "accepted_at": None,
-                "alternate_suggested_at": None,
-            })
+            state = getattr(self.server, "state", {}) or {}
+            accepted = state.get("accepted_at")
+            self._json(meetup_json(tx, status="ACCEPTED" if accepted else "REQUESTED",
+                                   accepted_at=accepted))
+            return
+
+        if path.startswith("/api/v1/handoff/") and path.endswith("/qr"):
+            tx = path.split("/api/v1/handoff/")[-1].rsplit("/qr", 1)[0]
+            self._json({"transaction_id": tx or MOCK_TRANSACTION_ID,
+                        "handoff_secret": "handoff-" + (tx or "mock")[-6:],
+                        "role": "LENDER"})
             return
 
         if path.startswith("/api/v1/books/"):
@@ -352,7 +338,15 @@ class _Handler(BaseHTTPRequestHandler):
             return
 
         if path.startswith("/api/v1/trades/") and path.endswith("/meetup"):
-            self._json({"ok": True})
+            tx = path.split("/api/v1/trades/")[-1].rsplit("/meetup", 1)[0]
+            action = str(body.get("action") or "").lower()
+            accepted = body.get("starts_at") or "2026-11-11T11:00:00+05:30"
+            status = "ACCEPTED" if action in ("accept", "accept_spot", "confirm") else "PROPOSED"
+            try:
+                self.server.state["accepted_at"] = accepted if status == "ACCEPTED" else None
+            except Exception:
+                pass
+            self._json(meetup_json(tx, status=status, accepted_at=accepted if status == "ACCEPTED" else None))
             return
 
         if path in ("/auth/v1/signup", "/auth/v1/token"):
@@ -452,6 +446,41 @@ class _Handler(BaseHTTPRequestHandler):
             self._json({"success": True})
             return
         self._json({"message": f"no mock for rpc {name}"}, 404)
+
+
+def meetup_json(transaction_id: str, status: str = "REQUESTED",
+                accepted_at: str | None = None) -> dict:
+    """The coordinator projection the app renders after accept/propose.
+
+    POST /meetup must answer the SAME projection as GET: the client decodes the
+    response and treats an unchanged/empty body as "the server did not save it"
+    (the audit read that as a dead end, 2026-11-10). One builder, two verbs.
+    """
+    book = BOOKS[0]
+    return {
+        "transaction_id": transaction_id or MOCK_TRANSACTION_ID,
+        "status": status,
+        "viewer_role": "BORROWER",
+        "book": {"listing_id": book["listing_id"], "isbn": book.get("isbn") or "",
+                 "title": book["title"], "author": book["author"],
+                 "cover_url": book.get("cover_url"),
+                 "condition": book.get("condition") or "LIKE_NEW",
+                 "listing_type": book.get("listing_type") or "TEMPORARY_LEND",
+                 "max_borrow_days": 21},
+        "other_reader": {"user_id": OWNER_ID,
+                         "username": book.get("owner_username") or "sneha_kora",
+                         "trust_score": 82.0,
+                         "location_name": book.get("location_name") or "Indiranagar"},
+        "midpoint": {"label": "Between you and Indiranagar 100ft Rd",
+                     "distance_meters": 600},
+        "venue": {"venue_id": "venue-1", "name": "Third Wave Coffee",
+                  "address": "100ft Road, Indiranagar", "venue_type": "CAFE",
+                  "distance_meters": 600, "walk_minutes": 8,
+                  "opening_hours": "08:00-23:00", "community_handshakes": 42},
+        "alternates": [],
+        "accepted_at": accepted_at,
+        "alternate_suggested_at": None,
+    }
 
 
 class MockServer:
