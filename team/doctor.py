@@ -534,6 +534,40 @@ def run_doctor(project: Path, log) -> dict:
     report["tests"] = {"status": "ready", "blocked": [], "checks_passed": 1,
                        "note": "tests are retired — compile + the ux-flow audit are the gates"}
 
+    # THE RELEASE AUDIT (owner policy 2026-11-10): every declared journey must
+    # have reached its goal. `verify` and `release` refuse without it; doctor
+    # reports it as WARN (not "blocked", which the CLI relays to the owner as an
+    # ask), and a walk that stopped on something only a human can clear is named
+    # as the owner's in one line.
+    try:
+        from . import ux_flow
+        rows = ux_flow.declared(project)
+        if rows:
+            problems = ux_flow.audit_problems(project)
+            if problems:
+                log(f"doctor ux-flow: WARN — {len(problems)}/{len(rows)} declared "
+                    f"journey(s) do not pass the release audit: "
+                    + "; ".join(f"{p['id']} ({p['why']})" for p in problems[:3]))
+                report["ux-flow"] = {
+                    "status": "warn", "blocked": [],
+                    "checks_passed": len(rows) - len(problems),
+                    "note": ("this is THE release audit (no other audit gates a "
+                             f"release) — run `devteam ux-flow {project.name}` and fix "
+                             "what stops each journey; `verify` and `release` refuse "
+                             "until they all reach their goal"),
+                }
+            else:
+                report["ux-flow"] = {"status": "ready", "blocked": [],
+                                     "checks_passed": len(rows)}
+                log(f"doctor ux-flow: ready — {len(rows)} declared journey(s) reached "
+                    f"their goal on the last walk")
+            blocked = ux_flow.active_block(project)
+            if blocked:
+                log(f"doctor ux-flow: NEEDS YOU — {blocked['flow']} is blocked, not "
+                    f"failing. {blocked['ask']}")
+    except Exception as e:  # a check must never hide the report
+        log(f"doctor ux-flow: could not check ({e})")
+
     # The report page answers "what shipped, what do I test?" on the owner's phone.
     # Every ledger write rebuilds it (`core.save_state`), so a page older than the
     # ledger means a rebuild FAILED or a writer bypassed the ledger — and the page

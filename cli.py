@@ -2348,12 +2348,28 @@ def cmd_ux_flow(args: argparse.Namespace) -> int:
     # a wall is a failed audit, so it must leave a non-zero exit code behind —
     # the gate cannot be talked past by a fluent closing note.
     stuck = [r.get("flow") for r in res["run"] if not r.get("goal_reached")]
+    # A BLOCKED WALK IS THE OWNER'S, NOT THE DEVELOPER'S. Say it in a block nobody
+    # can mistake for a product verdict, and give the one action that unblocks it
+    # (owner, 2026-11-10: "if ux flow get block it should let me know, I can help
+    # unblock").
+    owner_blocked = [r for r in res["run"] if r.get("unblock") and not r.get("goal_reached")]
+    if owner_blocked:
+        print("\n" + "=" * 70)
+        print("🖐  NEEDS YOU — the ux-flow audit is BLOCKED, not failing")
+        for r in owner_blocked:
+            print(f"   {r.get('flow')}: {str(r.get('reason') or '')[:160]}")
+            print(f"   unblock: {r['unblock']}")
+        print("   When it is done, tell the agent (e.g. \"signed in\" / \"device ready\")")
+        print("   and it re-walks the same journeys.")
+        print("=" * 70)
     if stuck:
         print(f"\n✗ ux-flow audit NOT passed — {len(stuck)} journey(s) never reached "
               f"their goal: {', '.join(str(s) for s in stuck)}. Release refuses until "
               f"each walk reaches its goal.")
     print(f"\nflow(s) audited {len(res['run'])}/{res['planned']} · stored in "
           f".pipeline/ux_audit.json")
+    if owner_blocked:
+        return 2  # blocked on a human, distinct from "the app failed"
     return 1 if (res["failed"] or stuck) else 0
 
 

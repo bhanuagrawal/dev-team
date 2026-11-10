@@ -688,6 +688,13 @@ def audit_flow(project: Path, flow: dict, serial: str, log=None,
         "premium": verdict.get("premium") or [],
         "defects": verdict.get("defects") or [],
         "model_error": verdict.get("error") or "",
+        # A walk can be blocked by something that is NOT the app: a provider that
+        # needs a human's password, a device that will not boot, a missing model
+        # key. Recording the ask here is what lets `ux-flow`, `verify`, `doctor`
+        # and `asks` all name the same owner action instead of filing a product
+        # defect nobody can fix in code.
+        "unblock": human_block(reason, verdict.get("error")) or "",
+        "blocked_on": "owner" if human_block(reason, verdict.get("error")) else "",
         "stills": [str(p) for p in stills],
         "sheet": str(sheet_path) if sheet_path else "",
         "rubric": RUBRIC,
@@ -876,6 +883,61 @@ def run(project: Path, only: str | None = None, log=None, avd: str | None = None
         elif started and log:
             log(f"~ ux-flow: leaving emulator {serial} running (--keep-emulator)")
     return {"planned": len(todo), "run": results, "skipped": skipped, "failed": failed}
+
+
+# WHAT A BLOCKED AUDIT NEEDS A HUMAN FOR. A walk can stop for reasons that are
+# not the app at all — a provider that needs a real password and a 2FA tap, a
+# device that will not boot, a vision model with no key. Those are the owner's to
+# unblock, and the audit says so out loud instead of reporting them as product
+# defects the developer chases for hours (owner, 2026-11-10: "if ux flow get
+# blocked it should let me know, I can help unblock").
+_HUMAN_BLOCKS: tuple[tuple[str, str], ...] = (
+    (r"credential|password|two[ -]?factor|2fa|verification code|sign[ -]?in as",
+     "sign in once on the device with your own account, then tell the agent "
+     "\"signed in\" — the walk continues from that screen"),
+    (r"unauthori[sz]ed|not authorized|adb .*offline|no (?:emulator|device)|"
+     r"emulator .*(?:not boot|did not start|failed to start)|no avd",
+     "get a device in place: start an emulator (`android emulator start <avd>`) or "
+     "plug a phone in, accept the USB debugging prompt, then say \"device ready\""),
+    (r"model|api key|judge could not|no vision",
+     "provide the vision model credentials (`agentconfig`), then say \"model ready\" "
+     "— the audit cannot judge a screenshot without one"),
+    (r"install_failed|install failed|not installed|user rejected",
+     "approve the app install on the device (a dialog is waiting), then say "
+     "\"installed\""),
+)
+
+
+def human_block(*texts: str | None) -> str | None:
+    """The owner action that would unblock this walk, or None if it is not theirs.
+
+    Deterministic and offline: the same sentence on the same evidence always asks
+    the same person for the same thing, so the ask can be printed by `ux-flow`,
+    `verify`, `doctor` and `asks` without any of them guessing.
+    """
+    blob = " ".join(t for t in texts if t).lower()
+    if not blob:
+        return None
+    for pattern, ask in _HUMAN_BLOCKS:
+        if re.search(pattern, blob):
+            return ask
+    return None
+
+
+def active_block(project: Path) -> dict | None:
+    """The first recorded walk that is waiting on the owner, if any."""
+    rows = []
+    for flow in declared(project):
+        result = run_dir(project) / _slug(str(flow["id"])) / "result.json"
+        try:
+            data = json.loads(result.read_text())
+        except Exception:
+            continue
+        ask = data.get("unblock") or human_block(data.get("reason"), data.get("model_error"))
+        if ask and not data.get("goal_reached"):
+            rows.append({"flow": str(flow["id"]), "ask": ask,
+                         "reason": str(data.get("reason") or "")[:200]})
+    return rows[0] if rows else None
 
 
 def status_report(project: Path) -> str:

@@ -342,6 +342,16 @@ def flow_gate(project: Path, worktree: Path, spec: dict | None,
             broken.append(f"{fid} ({problem})")
     if not broken:
         return True, f"{len(flows)} declared journey(s) passed on this diff"
+    blocked = ux_flow.active_block(project)
+    if blocked:
+        # Not the app: a human action unblocks this, so the gate says whose it is
+        # instead of handing the developer a defect it cannot fix in code.
+        return False, (
+            "UX-FLOW AUDIT BLOCKED — this is NOT a product failure. "
+            f"{blocked['flow']}: {blocked['reason']} — the owner can unblock it: "
+            f"{blocked['ask']}. Nothing in the diff can fix this; say so in the "
+            "handover and ask. (`devteam ux-flow <project> --mock` avoids the "
+            "provider wall when the mock can complete the journey.)")
     return False, (
         "UX-FLOW AUDIT NOT PASSED — this is the release audit (owner policy "
         "2026-11-10), so there is no excuse field to fill in: " + "; ".join(broken[:4]) +

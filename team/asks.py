@@ -495,6 +495,20 @@ def open_items(project: Path, flags: list[dict] | None = None) -> list[dict]:
                                    .read_text()).get("upgrades", [])
             except Exception:
                 flags = []
+    # A ux-flow walk that stopped on a human is an OWNER ask by construction: the
+    # audit already names the action (sign in once, start a device, approve the
+    # install). Loaded here so `devteam asks` and the alarm never let it rot.
+    try:
+        from . import ux_flow
+        blocked = ux_flow.active_block(project)
+        if blocked:
+            rows.append({"source": "ux_flow",
+                         "title": f"ux-flow is blocked, not failing — {blocked['flow']}",
+                         "how": blocked["ask"],
+                         "benefit": "the release audit cannot pass until the journey "
+                                    "is walked; nothing in the code can unblock it"})
+    except Exception:
+        pass
     flags = resolve_collector_flags(project, flags)
     for u in flags:
         rows.append({"source": "agent_flag",
