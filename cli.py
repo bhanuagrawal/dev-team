@@ -2328,6 +2328,8 @@ def cmd_ux_flow(args: argparse.Namespace) -> int:
         for x in r.get("reactions") or []:
             kind = f" [{x.get('kind')}]" if x.get("kind") else ""
             print(f"  {x.get('at', ''):8} {x.get('line', '')}{kind}")
+            if x.get("still"):
+                print(f"           frame: {x['still']}")
         if r.get("video"):
             print(f"  video: {r['video']}")
         if r.get("model_calls"):

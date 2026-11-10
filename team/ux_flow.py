@@ -633,6 +633,10 @@ def audit_flow(project: Path, flow: dict, serial: str, log=None,
         decision = _ask(cfg, prompt, still)
         live = decision.get("reaction")
         if isinstance(live, dict) and str(live.get("line") or "").strip():
+            if log:
+                log(f"~ ux-flow: '{fid}' step {step} — "
+                    f"\"{str(live['line']).strip()[:160]}\" "
+                    f"({str(live.get('kind') or 'confusing')})")
             live_reactions.append({
                 "at": f"step {step}",
                 "line": str(live["line"]).strip()[:240],
@@ -832,7 +836,8 @@ def audit_flow(project: Path, flow: dict, serial: str, log=None,
         "goal_reached": bool(verdict.get("goal_reached") or outcome == "done"),
         "verdict": str(verdict.get("verdict") or ""),
         "reactions": (verdict.get("reactions") or []) + [
-            {k: r[k] for k in ("at", "line", "kind")} for r in live_reactions
+            {k: r[k] for k in ("at", "line", "kind", "still") if r.get(k)}
+            for r in live_reactions
             if str(r["line"]).lower() not in
             " ".join(str(x.get("line", "")).lower() for x in (verdict.get("reactions") or []))
         ],
