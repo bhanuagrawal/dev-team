@@ -1,4 +1,4 @@
-"""Tests are part of the change — enforced from the DIFF, not from a promise.
+"""UI tests are part of the change — enforced from the DIFF, not from a promise.
 
 Why this exists (2026-11-05): a run shipped a signature field whose only
 exercise was a screenshot preview. `verify` ran compile + `testDebugUnitTest`,
@@ -6,15 +6,21 @@ both green, so "tested" meant "nothing asserted" and "UI tested" meant a PNG
 nobody checked. The developer prompt asked for tests in prose; the gate never
 read the answer.
 
+OWNER POLICY (2026-11-10): unit tests are RETIRED from the team. The only test
+the pipeline requires is a UI/integration test — the thing a person actually
+sees and taps. A logic-only change carries no test obligation: it is exercised
+through the screens that use it. This module was the unit-test gate; the unit
+half is gone, and only the UI half remains.
+
 This module is the deterministic gate. It reads the task diff, never the
 agent's self-report:
 
-  * every changed production source file must be REFERENCED by a test file that
-    is part of the same diff and contains a real assertion;
   * a changed UI file (a composable, Activity/Fragment/Dialog/View, or a layout
     XML) must be referenced by a UI test in that diff — a Compose rule (JVM
     Robolectric or on-device) or Espresso/UiAutomator — with an assertion.
-    A screenshot render with no assertion is not a test and does not count.
+    A screenshot render with no assertion is not a test and does not count;
+  * a changed non-UI file needs nothing in particular. Any test in the diff that
+    names it satisfies nothing, because nothing is asked of it.
 
 Only the classification ("is this file UI?") is heuristic. The test file being
 in the diff, naming the changed symbol, and asserting are exact. Team code names
@@ -80,6 +86,11 @@ _DECL_RE = re.compile(
     r"\b(?:class|interface|object|fun|val|var|typealias)\s+"
     r"(?:<[^>]*>\s*)?(?:[A-Za-z_][\w.]*\.)?([A-Za-z_]\w*)"
 )
+
+_PACKAGE_RE = re.compile(r"^\s*package\s+([\w.]+)", re.M)
+_CLASS_DECL_RE = re.compile(
+    r"^[ \t]*(?:(?:public|internal|private|protected|open|abstract|final|"
+    r"sealed|data|enum|annotation|inner|value)\s+)*class\s+([A-Za-z_]\w*)", re.M)
 
 
 @dataclass(frozen=True)
@@ -162,6 +173,39 @@ def _read(worktree: Path, rel: str) -> str:
         return (worktree / rel).read_text(errors="ignore")
     except OSError:
         return ""
+
+
+def ui_test_classes(root: Path) -> dict[str, list[str]]:
+    """module dir -> fully-qualified names of the UI test classes it declares.
+
+    `verify` uses this to run the UI half of a JVM test task without dragging the
+    project's unit-only classes along: the owner retired unit tests (2026-11-10)
+    and the team must not spend a gate on them. A class qualifies when it lives
+    in a file this module classifies as an asserting UI test and its name follows
+    the JUnit convention (`*Test`) or matches the file stem — a helper declared
+    in the same file is not a test and is not selected.
+    """
+    out: dict[str, list[str]] = {}
+    root = Path(root)
+    for p in sorted(root.glob("*/src/**/*.kt")):
+        try:
+            rel = p.relative_to(root).as_posix()
+        except ValueError:
+            continue
+        if not is_test_path(rel):
+            continue
+        text = _read(root, rel)
+        if not test_file(rel, text).is_ui:
+            continue
+        pkg = _PACKAGE_RE.search(text)
+        module = rel.split("/")[0]
+        for m in _CLASS_DECL_RE.finditer(text):
+            name = m.group(1)
+            if "Test" not in name and name != p.stem:
+                continue
+            fq = f"{pkg.group(1)}.{name}" if pkg else name
+            out.setdefault(module, []).append(fq)
+    return {k: sorted(dict.fromkeys(v)) for k, v in out.items()}
 
 
 def _names(symbols: tuple[str, ...], text: str) -> bool:
@@ -258,7 +302,12 @@ if __name__ == "__main__":
 # the gate
 # --------------------------------------------------------------------------- #
 def gate(worktree: Path, files: list[str]) -> tuple[bool, str]:
-    """(ok, message). Every changed production file carries a test in the diff."""
+    """(ok, message). Every changed UI file carries a UI test in the diff.
+
+    Unit tests are not required (owner policy 2026-11-10): a logic-only diff
+    passes with no test file at all. The classification still counts the test
+    files in the diff, because a UI test may live in any test source set.
+    """
     sources: list[SourceFile] = []
     tests: list[TestFile] = []
     for rel in files:
@@ -272,64 +321,44 @@ def gate(worktree: Path, files: list[str]) -> tuple[bool, str]:
 
     if not sources:
         return True, "no production source changed"
-    if not tests:
-        unit_dirs, ui_dirs = suggest_test_dirs(worktree)
-        return False, (
-            "TESTS ARE PART OF THE CHANGE — production code changed but no test "
-            "file did.\n"
-            f"  changed: {', '.join(s.path for s in sources[:6])}"
-            f"{' …' if len(sources) > 6 else ''}\n"
-            "  add a @Test with at least one assertion in: "
-            f"{', '.join(unit_dirs) or 'the project test source set'}"
-            + (f"; UI tests in: {', '.join(ui_dirs)}" if ui_dirs else "") + "\n"
-            "  a screenshot/render with no assertion does not count.")
+    ui_sources = [s for s in sources if s.is_ui]
+    if not ui_sources:
+        return True, (f"{len(sources)} source file(s) changed, none UI — "
+                      "no test required (unit tests are retired)")
 
     missing: list[str] = []
-    for src in sources:
-        if src.is_ui:
-            ok = any(t.is_ui and _covered(src, t) for t in tests)
-            if not ok:
-                unit_dirs, ui_dirs = suggest_test_dirs(worktree)
-                where = " or ".join(
-                    x for x in (", ".join(unit_dirs), ", ".join(ui_dirs)) if x
-                ) or "a UI test source set"
-                missing.append(
-                    f"{src.path} (UI): no changed UI test names "
-                    f"{', '.join(src.symbols[:3])} — add a Compose UI test "
-                    f"(createComposeRule/createAndroidComposeRule + assertion) "
-                    f"or Espresso/UiAutomator under {where}; a render with no "
-                    f"assertion does not count")
-        else:
-            ok = any(t.is_asserting and _covered(src, t) for t in tests)
-            if not ok:
-                unit_dirs, _ = suggest_test_dirs(worktree)
-                where = ", ".join(unit_dirs) or "a unit test source set"
-                missing.append(
-                    f"{src.path} (logic): no changed test names "
-                    f"{', '.join(src.symbols[:3])} with @Test + an assertion — "
-                    f"add one under {where}")
+    for src in ui_sources:
+        ok = any(t.is_ui and _covered(src, t) for t in tests)
+        if not ok:
+            _, ui_dirs = suggest_test_dirs(worktree)
+            where = ", ".join(ui_dirs) or "a UI test source set"
+            missing.append(
+                f"{src.path} (UI): no changed UI test names "
+                f"{', '.join(src.symbols[:3])} — add a Compose UI test "
+                f"(createComposeRule/createAndroidComposeRule + assertion) "
+                f"or Espresso/UiAutomator under {where}; a render with no "
+                f"assertion does not count")
 
     if missing:
-        return False, ("TESTS ARE PART OF THE CHANGE — "
-                       f"{len(missing)} file(s) have no matching test in this diff:\n  - "
-                       + "\n  - ".join(missing))
-    ui = sum(1 for s in sources if s.is_ui)
-    return True, (f"{len(sources)} source file(s) carry a changed test "
-                  f"({ui} UI, {len(sources) - ui} logic)")
+        return False, ("UI TESTS ARE PART OF THE CHANGE — "
+                       f"{len(missing)} UI file(s) have no matching UI test in "
+                       "this diff:\n  - " + "\n  - ".join(missing))
+    return True, (f"{len(sources)} source file(s) changed — {len(ui_sources)} UI "
+                  f"file(s) carry a changed UI test (unit tests are not required)")
 
 
 # --------------------------------------------------------------------------- #
 # posture — doctor/capabilities read the same classification
 # --------------------------------------------------------------------------- #
 def posture(root: Path) -> dict:
-    """Counts of production sources and asserting tests on the delivery tree.
+    """Counts of production sources and asserting UI tests on the delivery tree.
 
-    Not a gate; it makes a project's test debt visible BEFORE the next change
+    Not a gate; it makes a project's UI-test debt visible BEFORE the next change
     fails verify. Reads origin/main (via the caller), because the checkout drifts
     and a stale count misleads exactly when a release just changed it.
     """
     sources = ui_sources = 0
-    unit_tests = ui_tests = 0
+    ui_tests = 0
     for p in root.rglob("*"):
         if not p.is_file():
             continue
@@ -348,30 +377,20 @@ def posture(root: Path) -> dict:
                 ui_sources += 1
         elif is_test_path(rel) and rel.endswith(SOURCE_EXTS):
             text = p.read_text(errors="ignore")
-            tf = test_file(rel, text)
-            if tf.is_asserting:
-                unit_tests += 1
-                if tf.is_ui:
-                    ui_tests += 1
-    return {"sources": sources, "ui_sources": ui_sources,
-            "unit_tests": unit_tests, "ui_tests": ui_tests}
+            if test_file(rel, text).is_ui:
+                ui_tests += 1
+    return {"sources": sources, "ui_sources": ui_sources, "ui_tests": ui_tests}
 
 
 def posture_checks(p: dict) -> list[tuple[str, bool, str]]:
     """(requirement, ok, fix) rows for doctor. Empty when there is no code."""
     if not p["sources"]:
         return []
-    rows = [(
-        f"asserting unit tests exist ({p['unit_tests']} test file(s) for "
-        f"{p['sources']} source file(s))",
-        p["unit_tests"] > 0,
-        "every production change must ship a test in the same diff — "
-        "`devteam verify` refuses otherwise")]
-    if p["ui_sources"]:
-        rows.append((
-            f"asserting UI tests exist ({p['ui_tests']} test file(s) for "
-            f"{p['ui_sources']} UI file(s))",
-            p["ui_tests"] > 0,
-            "UI changes need a Compose/Espresso test with assertions — "
-            "a screenshot render is not a test"))
-    return rows
+    if not p["ui_sources"]:
+        return []
+    return [(
+        f"asserting UI tests exist ({p['ui_tests']} test file(s) for "
+        f"{p['ui_sources']} UI file(s))",
+        p["ui_tests"] > 0,
+        "UI changes need a Compose/Espresso test with assertions — "
+        "a screenshot render is not a test")]

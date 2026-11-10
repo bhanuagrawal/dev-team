@@ -1297,13 +1297,14 @@ def _validate(result: dict, research: dict | None = None) -> str | None:
                         "head, so put the executable entry first; the "
                         "investigation may stay queued behind it. The head may be "
                         "an investigation only when nothing executable is queued")
-            # TEST COVERAGE IS A HARD GATE (owner directive 2026-11-05, updated 2026-11-07):
-            # 100% unit and UI test coverage is enforced by code. When either leg is
-            # below 100%, the planner MUST make raising coverage the TOPMOST PRIORITY:
-            # the queue HEAD (queue[0]) must be the executable entry that raises coverage.
-            # A run builds exactly one entry, so when the codebase is below 100% coverage
-            # that build slot goes to raising it. The only exemption is a delivery fire
-            # (red CI / a store rejection), which outranks everything.
+            # UI TEST COVERAGE IS A HARD GATE (owner directive 2026-11-05; unit
+            # tests retired 2026-11-10). 100% UI test coverage is enforced by code.
+            # When the UI leg is below its floor, the planner MUST make raising
+            # coverage the TOPMOST PRIORITY: the queue HEAD (queue[0]) must be the
+            # executable entry that raises coverage. A run builds exactly one entry,
+            # so when the codebase is below 100% UI coverage that build slot goes to
+            # raising it. The only exemption is a delivery fire (red CI / a store
+            # rejection), which outranks everything.
             cov = (research.get("signals", {}).get("coverage") or {})
             cov_below = [k for k in ("unit", "ui") if k in (cov.get("below_floor") or [])]
             if q is result["queue"][0] and cov_below and not (
@@ -1314,11 +1315,12 @@ def _validate(result: dict, research: dict | None = None) -> str | None:
                     detail = ", ".join(
                         f"{k} {(cov.get(k) or {}).get('percent')}% < {floors.get(k, 100)}%"
                         for k in cov_below)
-                    return (f"signals.coverage is below 100% ({detail}): raising coverage is "
-                            "the TOPMOST PRIORITY — the queue HEAD (queue[0]) must be the "
-                            "executable entry that raises coverage — a bugfix/feature whose "
-                            "'target' names the test sources it will write (e.g. 'app/src/test/java/**', "
-                            "'app/src/androidTest/java/**', '.../commonTest/**') plus any "
+                    return (f"signals.coverage is below the floor ({detail}): raising UI "
+                            "coverage is the TOPMOST PRIORITY — the queue HEAD (queue[0]) "
+                            "must be the executable entry that raises coverage — a "
+                            "bugfix/feature whose 'target' names the UI test sources it will "
+                            "write (e.g. 'app/src/androidTest/java/**', "
+                            "'app/src/test/java/**', '.../commonTest/**') plus any "
                             "production path the tests need. Code rejects a head that "
                             "does not, because a run builds only the head. The only "
                             "exemption is a delivery fire (red CI or a store rejection)")
@@ -1803,9 +1805,10 @@ def coverage_prompt_block(sig: dict) -> str:
 
     lines = [
         "- TEST COVERAGE IS A SIGNAL AND A HARD GATE (`signals.coverage`): "
-        f"unit {pct(unit)} against a {floor.get('unit')}% floor, "
-        f"ui {pct(ui)} against a {floor.get('ui')}% floor. "
-        "The team enforces 100% unit and UI test coverage in code.",
+        f"ui {pct(ui)} against a {floor.get('ui')}% floor. Unit tests are RETIRED: "
+        f"the unit leg ({pct(unit)}, floor {floor.get('unit')}%) is measured for "
+        "information only and never blocks. The team enforces 100% UI test coverage "
+        "in code.",
     ]
     if below:
         missing = []
@@ -1814,11 +1817,11 @@ def coverage_prompt_block(sig: dict) -> str:
             if ex:
                 missing.append(f"{leg} e.g. " + ", ".join(ex))
         lines.append(
-            f"  * BELOW 100% COVERAGE ({', '.join(below)}): RAISING COVERAGE IS THE TOPMOST PRIORITY. "
+            f"  * BELOW THE UI FLOOR ({', '.join(below)}): RAISING UI COVERAGE IS THE TOPMOST PRIORITY. "
             "queue[0] (the queue HEAD) MUST be the executable entry that raises it — a bugfix/feature "
-            "whose `target` names the test sources it will write (`.../src/test/**`, "
-            "`.../src/androidTest/**`, `.../commonTest/**`) plus any production path the tests need. "
-            "Code strictly rejects any plan whose queue head does not target tests. Aim at the biggest uncovered "
+            "whose `target` names the UI test sources it will write (`.../src/androidTest/**`, "
+            "`.../src/test/**`, `.../src/commonTest/**`) plus any production path the tests need. "
+            "Code strictly rejects any plan whose queue head does not target UI tests. Aim at the biggest uncovered "
             "area" + (f" ({'; '.join(missing)})." if missing else "."))
         lines.append(
             "  * The ONE exemption: a delivery fire (signals.ci red, or a store "
@@ -1827,8 +1830,8 @@ def coverage_prompt_block(sig: dict) -> str:
             "are how the next change stays shippable.")
     else:
         lines.append(
-            "  * At 100% coverage on both legs: say so in `insights` and spend the run on "
-            "product work. Defend 100% coverage on every diff.")
+            "  * At 100% UI coverage: say so in `insights` and spend the run on "
+            "product work. Defend 100% UI coverage on every UI diff.")
     return "\n".join(lines)
 
 

@@ -510,10 +510,11 @@ def run_doctor(project: Path, log) -> dict:
     except Exception as e:  # a check must never hide the report
         log(f"doctor capabilities: could not check ({e})")
 
-    # Test posture: the verify gate refuses a production change that ships no
-    # test, but a project with ZERO UI tests can still look healthy until that
-    # change happens. WARN (not block) so the debt is visible BEFORE the next
-    # task fails verify — the fix is agent work, never an owner ask.
+    # UI test posture: the verify gate refuses a UI change that ships no UI test,
+    # but a project with ZERO UI tests can still look healthy until that change
+    # happens. WARN (not block) so the debt is visible BEFORE the next task fails
+    # verify — the fix is agent work, never an owner ask. Unit tests are retired
+    # (owner policy 2026-11-10) and are not part of this check.
     try:
         from . import code_tests
         from . import scan as scan_mod
@@ -534,19 +535,20 @@ def run_doctor(project: Path, log) -> dict:
             report["tests"] = {
                 "status": "warn", "blocked": [],
                 "checks_passed": len(rows) - len(bad),
-                "note": ("the verify gate refuses a production change with no "
-                         "matching test in the diff — see plan for the fix"),
+                "note": ("the verify gate refuses a UI change with no UI test in "
+                         "the diff — see plan for the fix"),
             }
         elif rows:
             report["tests"] = {"status": "ready", "blocked": [],
                                "checks_passed": len(rows)}
-            log(f"doctor tests: ready — {posture['unit_tests']} unit / "
-                f"{posture['ui_tests']} UI asserting test file(s)")
+            log(f"doctor tests: ready — {posture['ui_tests']} UI asserting "
+                f"test file(s) for {posture['ui_sources']} UI file(s)")
     except Exception as e:  # a check must never hide the report
         log(f"doctor tests: could not check ({e})")
 
-    # Coverage posture: 100% unit and UI test coverage is enforced by code.
-    # When below 100%, warn so the debt is visible and planner queue HEAD prioritizes it.
+    # Coverage posture: 100% UI test coverage is enforced by code (unit tests are
+    # retired and their floor is 0). When the UI leg is below 100%, warn so the
+    # debt is visible and the planner queue HEAD prioritizes it.
     try:
         from . import coverage as coverage_mod
         cov = coverage_mod.stored(project)
@@ -558,14 +560,14 @@ def run_doctor(project: Path, log) -> dict:
         if cov and cov.get("status") == "ok":
             below = cov.get("below_floor") or []
             if below:
-                log(f"doctor coverage: WARN — {coverage_mod.summary_line(cov).removeprefix('coverage: ')} (target 100%)")
+                log(f"doctor coverage: WARN — {coverage_mod.summary_line(cov).removeprefix('coverage: ')} (target 100% UI)")
                 report["coverage"] = {
                     "status": "warn", "blocked": [],
                     "checks_passed": 0,
-                    "note": f"coverage below 100% ({', '.join(below)}); planner queue HEAD must raise coverage",
+                    "note": f"UI coverage below 100% ({', '.join(below)}); planner queue HEAD must raise it",
                 }
             else:
-                log(f"doctor coverage: ready — 100% unit and UI coverage")
+                log("doctor coverage: ready — 100% UI coverage (unit tests retired)")
                 report["coverage"] = {"status": "ready", "blocked": [], "checks_passed": 1}
     except Exception as e:  # a check must never hide the report
         log(f"doctor coverage: could not check ({e})")

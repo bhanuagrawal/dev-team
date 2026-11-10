@@ -198,7 +198,7 @@ memorise sections; follow the pointer.
 - **Automatic scope/knob/dependency guards are RETIRED (owner directive
   2026-10-31).** There is no `frozen_paths` check, no release-knob diff and no
   dependency-declaration gate. What remains is the task allow-list in the
-  developer prompt plus compile/test/device gates; a bad change is reverted, and
+  developer prompt plus compile/UI-test/device gates; a bad change is reverted, and
   CI only reaches internal testing. Reintroduce a NARROW rule only when a real
   incident names what it prevents.
 - **Emulators are torn down, never abandoned.** A run that needs an AVD records
@@ -230,7 +230,7 @@ memorise sections; follow the pointer.
      that no headless agent can click. Clear `/tmp/android-*/emu-crash-*.db` (the
      pending crash report is what it wants consent to send) and start again.
   Verify the emulator is the problem by checking whether the CODE gates
-  (scope/localization/compile/test) already passed: if they did, the failure is
+  (scope/localization/compile/UI tests) already passed: if they did, the failure is
   device infrastructure, and repairing the AVD is part of the run, not a reason
   to record `failed`.
 

@@ -1,5 +1,5 @@
 {
-  "_comment": "Planner coverage floors, in percent. 100% unit and UI test coverage is enforced by code. A project may override its own in profile['coverage'] {unit_floor, ui_floor} — that is a project fact and belongs in the project. Code-enforced in team/research.py (_validate): when either leg is below 100%, the plan's queue HEAD must be the executable entry that raises coverage (its 'target' names src/test/** or src/androidTest/** and friends), unless a delivery fire (red CI or a store rejection) outranks it.",
-  "unit_floor": 100,
+  "_comment": "Planner coverage floors, in percent. OWNER POLICY 2026-11-10: unit tests are retired — the unit floor is 0 (measured for information only, it can never block). 100% UI test coverage is enforced by code. A project may override its own in profile['coverage'] {unit_floor, ui_floor} — that is a project fact and belongs in the project. Code-enforced in team/research.py (_validate): when the UI leg is below 100%, the plan's queue HEAD must be the executable entry that raises UI coverage (its 'target' names src/androidTest/** or src/test/** and friends), unless a delivery fire (red CI or a store rejection) outranks it.",
+  "unit_floor": 0,
   "ui_floor": 100
 }
