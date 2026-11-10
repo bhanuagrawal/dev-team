@@ -156,10 +156,17 @@ def load_spec(project: Path) -> dict:
     return data if isinstance(data, dict) else {"flows": []}
 
 
-def declared(project: Path) -> list[dict]:
-    """Flows this pass owns: a goal, and no scripted steps."""
+def declared(project: Path, root: Path | None = None) -> list[dict]:
+    """Flows this pass owns: a goal, and no scripted steps.
+
+    [root] is the tree being AUDITED. A run against a worktree must walk the
+    journeys that branch declares, not the ones the checkout happens to hold —
+    the checkout lags main, so a branch that fixes a goal's wording or raises its
+    step budget had its own audit ignore the change (2026-11-10).
+    """
     out = []
-    for f in load_spec(project).get("flows") or []:
+    spec_root = Path(root) if root else project
+    for f in load_spec(spec_root).get("flows") or []:
         if not isinstance(f, dict) or not str(f.get("id") or "").strip():
             continue
         if not str(f.get("goal") or "").strip():
@@ -892,7 +899,7 @@ def run(project: Path, only: str | None = None, log=None, avd: str | None = None
     """Audit every goal-declared flow (or one), on a device this pass owns."""
     from . import emulator
 
-    todo = declared(project)
+    todo = declared(project, root=(Path(worktree) if worktree else None))
     if only:
         todo = [f for f in todo if str(f.get("id")) == only]
         if not todo:
