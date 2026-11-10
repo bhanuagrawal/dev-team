@@ -83,6 +83,10 @@ Choose the SINGLE next action that moves a real user closest to the goal:
             that field. ONLY when CREDENTIALS are listed below; if they are not,
             a text field is a wall for you, not a dead control — choose stuck.
   tap     — an index from the list above
+  scroll  — "down" or "up": reach content below or above the fold. The screenshot
+            shows only the visible part of a screen; a request or continue control
+            is often further down, and a screen is not a dead end until it has been
+            scrolled.
   back    — leave a screen that cannot progress this journey
   done    — the goal is reached on this screen
   stuck   — the app blocks a person here (say what is missing), or the journey
@@ -94,6 +98,7 @@ destructive or payment control.
 Reply with JSON only, no prose, no code fences:
   {{"action": "tap", "index": 2, "why": "one short line"}}
   {{"action": "type", "index": 4, "field": "email", "why": "one short line"}}
+  {{"action": "scroll", "direction": "down", "why": "one short line"}}
   {{"action": "back", "why": "one short line"}}
   {{"action": "done", "why": "what proves the goal is reached"}}
   {{"action": "stuck", "why": "what a person would be unable to do here"}}
@@ -375,6 +380,27 @@ def _wait_past_busy(serial: str, timeout: float = 10.0) -> None:
         time.sleep(0.8)
 
 
+_SCREEN_SIZE: dict[str, tuple[int, int]] = {}
+
+def _screen_size(serial: str) -> tuple[int, int]:
+    """The device's pixel size, asked once — a swipe needs real coordinates."""
+    kept = _SCREEN_SIZE.get(serial)
+    if kept:
+        return kept
+    r = _adb(serial, ["shell", "wm", "size"], timeout=30)
+    text = (r.stdout or "") if isinstance(r.stdout, str) else ""
+    for token in text.replace("Physical size:", " ").replace("Override size:", " ").split():
+        if "x" in token:
+            try:
+                w, h = token.split("x")[:2]
+                size = (int(w), int(h))
+            except Exception:
+                continue
+            _SCREEN_SIZE[serial] = size
+            return size
+    return (1080, 2400)
+
+
 def _window_title(serial: str, pkg: str) -> str:
     """The focused activity's short name — never a fragment of it.
 
@@ -568,6 +594,22 @@ def audit_flow(project: Path, flow: dict, serial: str, log=None,
             steps.append({"n": step, "did": "stopped", "then": reason,
                           "screen": screen, "action": "stuck"})
             break
+        if action == "scroll":
+            direction = str(decision.get("direction") or "down").strip().lower()
+            w, hh = _screen_size(serial)
+            x = w // 2
+            if direction == "up":
+                y0, y1 = int(hh * 0.35), int(hh * 0.80)
+            else:
+                y0, y1 = int(hh * 0.80), int(hh * 0.35)
+            _adb(serial, ["shell", "input", "swipe", str(x), str(y0), str(x), str(y1),
+                          "400"], timeout=45)
+            time.sleep(0.9)
+            steps.append({"n": step, "did": f"scrolled {direction}",
+                          "then": "the screen moved", "screen": screen,
+                          "action": "scroll"})
+            continue
+
         if action == "back":
             _adb(serial, ["shell", "input", "keyevent", "4"], timeout=30)
             time.sleep(1.0)
