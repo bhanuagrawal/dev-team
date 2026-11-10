@@ -2326,7 +2326,12 @@ def cmd_ux_flow(args: argparse.Namespace) -> int:
         for c in r.get("crashes") or []:
             print(f"  🚨 CRASH — {c}")
         for x in r.get("reactions") or []:
-            print(f"  {x.get('at', ''):8} {x.get('line', '')}")
+            kind = f" [{x.get('kind')}]" if x.get("kind") else ""
+            print(f"  {x.get('at', ''):8} {x.get('line', '')}{kind}")
+        if r.get("video"):
+            print(f"  video: {r['video']}")
+        if r.get("model_calls"):
+            print(f"  model calls: {r['model_calls']}")
         if r.get("premium"):
             print("  premium: " + " · ".join(
                 t for t in (ux_audit.as_line(x) for x in r["premium"][:3]) if t))

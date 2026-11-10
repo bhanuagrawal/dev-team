@@ -42,6 +42,7 @@ Nothing here is committed: `.pipeline/` is machine-local, by contract.
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import re
@@ -95,8 +96,16 @@ Choose the SINGLE next action that moves a real user closest to the goal:
 Never repeat an action that already did nothing on this screen. Never tap a
 destructive or payment control.
 
+ALSO, while you are here: when THIS screen made you hesitate — a label you had to
+guess, something that looked broken, a wait that felt wrong, a screen that felt
+unfinished — add one short line in the first person as "reaction" (see the shape
+below). Only when it is true; omit it when the step was obvious. This is the note
+a person would say out loud as they go, and it is read at the exact step it
+happened instead of being reconstructed later.
+
 Reply with JSON only, no prose, no code fences:
-  {{"action": "tap", "index": 2, "why": "one short line"}}
+  {{"action": "tap", "index": 2, "why": "one short line",
+    "reaction": {{"line": "one short line, first person", "kind": "confusing|broken|slow|good"}}}}
   {{"action": "type", "index": 4, "field": "email", "why": "one short line"}}
   {{"action": "scroll", "direction": "down", "why": "one short line"}}
   {{"action": "back", "why": "one short line"}}
@@ -112,6 +121,9 @@ Goal: {goal}
 Outcome: {outcome}
 What happened, step by step:
 {history}
+
+What the user said as they went (their own words, at that step):
+{notes}
 
 The attachment is a contact sheet of the screens that appeared, in order
 (left to right, top to bottom). Judge the JOURNEY, not only the pixels:
@@ -300,6 +312,30 @@ def _label_list(targets: list[dict]) -> str:
 def _adb(serial: str, args: list[str], timeout: int = 60, binary: bool = False):
     from .ux_video import _adb as adb_call
     return adb_call(serial, args, timeout=timeout, binary=binary)
+
+
+def _start_video(serial: str, seconds: int) -> "subprocess.Popen | None":
+    """Record the journey. Evidence a human can review without re-running it."""
+    from .emulator import ADB
+    try:
+        return subprocess.Popen(
+            [ADB, "-s", serial, "shell", "screenrecord", "--time-limit",
+             str(max(15, int(seconds) + 20)), "/sdcard/ux-flow.mp4"],
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    except Exception:
+        return None
+
+
+def _stop_video(serial: str, dest: Path) -> str:
+    """Stop the recording, pull it beside the stills, return its path or ""."""
+    try:
+        _adb(serial, ["shell", "pkill", "-INT", "screenrecord"], timeout=20)
+        time.sleep(1.2)
+        _adb(serial, ["pull", "/sdcard/ux-flow.mp4", str(dest)], timeout=120)
+        _adb(serial, ["shell", "rm", "-f", "/sdcard/ux-flow.mp4"], timeout=20)
+    except Exception:
+        return ""
+    return str(dest) if dest.is_file() and dest.stat().st_size > 0 else ""
 
 
 def _screenshot(serial: str, dest: Path) -> bool:
@@ -527,8 +563,14 @@ def audit_flow(project: Path, flow: dict, serial: str, log=None,
                                 "verdict": result["verdict"]})
         return result
 
+    video_path = out_dir / "video.mp4"
+    _start_video(serial, int(flow.get("seconds") or DEFAULT_SECONDS))
+
     tried: dict[str, set[str]] = {}
     filled: set[str] = set()
+    frame_digests: list[str] = []
+    model_calls = 0
+    live_reactions: list[dict] = []
     typed = 0
     outcome = "budget"
     reason = ""
@@ -547,7 +589,15 @@ def audit_flow(project: Path, flow: dict, serial: str, log=None,
         if not _screenshot(serial, still):
             outcome, reason = "error", "could not capture the screen"
             break
-        stills.append(still)
+        # EVIDENCE HYGIENE: an unchanged frame is the same evidence twice. Keep
+        # one copy instead of storing a duplicate the judge must read again.
+        digest = hashlib.sha1(still.read_bytes()).hexdigest()
+        if stills and digest == frame_digests[-1]:
+            still.unlink(missing_ok=True)
+            still = stills[-1]
+        else:
+            stills.append(still)
+            frame_digests.append(digest)
         if step > 1:
             crash = ux_video._crash_line(serial, pkg)
             if crash:
@@ -579,7 +629,17 @@ def audit_flow(project: Path, flow: dict, serial: str, log=None,
             screen=(f"Screen: {screen}" if screen else ""),
             credentials=credentials,
             targets=_label_list(targets), dead=dead_line)
+        model_calls += 1
         decision = _ask(cfg, prompt, still)
+        live = decision.get("reaction")
+        if isinstance(live, dict) and str(live.get("line") or "").strip():
+            live_reactions.append({
+                "at": f"step {step}",
+                "line": str(live["line"]).strip()[:240],
+                "kind": str(live.get("kind") or "confusing").strip().lower()[:16],
+                "screen": _window_title(serial, pkg),
+                "still": str(still),
+            })
         action = str(decision.get("action") or "").strip().lower()
         _write_record(project, {"flow": fid, "step": step, "verdict": "",
                                 "state": "deciding", "action": action})
@@ -749,8 +809,13 @@ def audit_flow(project: Path, flow: dict, serial: str, log=None,
     elif sheet_path is not None:
         history = "\n".join(f"  {s['n']}. {s['did']} → {s['then']}" for s in steps)
         try:
+            model_calls += 1
+            notes = "".join(
+                f"  {r['at']} ({r.get('screen') or 'screen'}): {r['line']} [{r['kind']}]\n"
+                for r in live_reactions) or "  (no note taken during the walk)\n"
             verdict = _ask(cfg, JUDGE_PROMPT.format(
-                app=app, flow=fid, goal=goal, outcome=outcome, history=history),
+                app=app, flow=fid, goal=goal, outcome=outcome, history=history,
+                notes=notes),
                 Path(sheet_path))
         except SystemExit as exc:      # a model failure is recorded, never faked
             verdict["error"] = str(exc)[:200]
@@ -766,7 +831,11 @@ def audit_flow(project: Path, flow: dict, serial: str, log=None,
         "crashes": crashes,
         "goal_reached": bool(verdict.get("goal_reached") or outcome == "done"),
         "verdict": str(verdict.get("verdict") or ""),
-        "reactions": verdict.get("reactions") or [],
+        "reactions": (verdict.get("reactions") or []) + [
+            {k: r[k] for k in ("at", "line", "kind")} for r in live_reactions
+            if str(r["line"]).lower() not in
+            " ".join(str(x.get("line", "")).lower() for x in (verdict.get("reactions") or []))
+        ],
         "premium": verdict.get("premium") or [],
         "defects": verdict.get("defects") or [],
         "model_error": verdict.get("error") or "",
@@ -783,6 +852,8 @@ def audit_flow(project: Path, flow: dict, serial: str, log=None,
         "stills": [str(p) for p in stills],
         "sheet": str(sheet_path) if sheet_path else "",
         "rubric": RUBRIC,
+        "video": _stop_video(serial, video_path),
+        "model_calls": model_calls,
         "at": now_iso(),
     }
     (out_dir / "result.json").write_text(json.dumps(result, indent=2) + "\n")
