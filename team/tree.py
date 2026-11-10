@@ -672,19 +672,42 @@ def _body(model: dict) -> str:
     ordered += [None] if None in lanes else []
     for ph in ordered:
         lane = lanes[ph]
+        # Live work first, finished work last: the page is a queue, not an
+        # archive. A feature whose task is queued ranks by that task's position,
+        # so the page order IS the build order; work with nothing queued follows;
+        # done work sinks to the bottom.
+        def _rank(f: dict) -> tuple:
+            done = str(f.get("status") or "") in ("done", "shipped")
+            spots = [order[t["id"]] for t in (f.get("children") or [])
+                     if t.get("kind") == "task" and t.get("id") in order]
+            return (done, min(spots) if spots else 10 ** 5, 0)
+        lane.sort(key=_rank)
         lane_tasks = sum(len([t for t in f.get("children") or []
                               if t.get("kind") == "task"]) for f in lane)
         lane_done = sum(1 for f in lane for t in f.get("children") or []
                         if t.get("kind") == "task" and t.get("status") == "shipped")
         if ph == 2:
+            plural = "feature" if len(lane) == 1 else "features"
+            tasks_word = "task" if lane_tasks == 1 else "tasks"
             out.append('<details class="laterwrap"><summary>Phase 2 — frozen '
                        'until Phase 1 ships '
-                       f'({len(lane)} features · {lane_tasks} tasks)</summary>')
+                       f'({len(lane)} {plural} · {lane_tasks} {tasks_word})'
+                       '</summary>')
         else:
-            label = f"Phase {ph}" if ph else "The plan"
+            # An unphased feature is NOT a third plan: it is work nobody has
+            # placed yet. Naming it "The plan" made a phantom section that read
+            # like a competing lane and could say "4 of 4 built" while six
+            # unbuilt features sat under it.
+            label = f"Phase {ph}" if ph else \
+                "No phase yet — needs a phase before it can be built"
             paused = " · paused, resumes below" if priority else ""
-            out.append(f'<h2>{label} <span class="count">{lane_done} of '
-                       f'{lane_tasks} built{paused}</span></h2>')
+            if ph:
+                count = f"{lane_done} of {lane_tasks} built{paused}"
+            else:
+                plural = "feature" if len(lane) == 1 else "features"
+                count = (f"{len(lane)} {plural} · no phase set — these do NOT "
+                         "ship in Phase 1")
+            out.append(f'<h2>{label} <span class="count">{count}</span></h2>')
         for f in lane:
             out.append(_feature_card(f, order, goal_title))
         if ph == 2:
