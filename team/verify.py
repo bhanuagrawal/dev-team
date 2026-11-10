@@ -432,7 +432,10 @@ def integration_check(worktree: Path, profile: dict, log) -> tuple[bool, str]:
     cfg = dict(profile.get("verify") or {})
     explicit = str(cfg.get("integration_task") or "").strip()
     from . import code_tests
-    classes = code_tests.ui_test_classes(worktree)
+    # An explicit task owns its own selection, so any UI test counts; the legacy
+    # JVM harness can only run classes compiled into the JVM test task.
+    classes = code_tests.ui_test_classes(
+        worktree, code_tests.TEST_DIRS if explicit else code_tests.JVM_TEST_DIRS)
     if not classes:
         log("integration: no asserting UI tests in this project — skipped")
         return True, ""

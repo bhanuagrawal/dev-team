@@ -43,6 +43,12 @@ UNIT_TEST_DIRS = (
 UI_TEST_DIRS = ("src/androidTest", "src/androidInstrumentedTest")
 TEST_DIRS = UNIT_TEST_DIRS + UI_TEST_DIRS
 
+# The test sets a JVM test task can actually execute. A UI test that lives in
+# `src/androidTest` (Espresso) is compiled into an instrumented APK, not into the
+# JVM test task, so `verify` must not hand its class name to `testDebugUnitTest`.
+JVM_TEST_DIRS = ("src/test", "src/androidUnitTest", "src/commonTest",
+                 "src/jvmTest", "src/desktopTest")
+
 SOURCE_EXTS = (".kt", ".java")
 SKIP_DIR_PARTS = {"build", "generated", "__pycache__", ".pipeline", ".gradle",
                   ".git", ".idea", "node_modules"}
@@ -175,7 +181,8 @@ def _read(worktree: Path, rel: str) -> str:
         return ""
 
 
-def ui_test_classes(root: Path) -> dict[str, list[str]]:
+def ui_test_classes(root: Path,
+                    dirs: tuple[str, ...] = TEST_DIRS) -> dict[str, list[str]]:
     """module dir -> fully-qualified names of the UI test classes it declares.
 
     `verify` uses this to run the UI half of a JVM test task without dragging the
@@ -184,6 +191,10 @@ def ui_test_classes(root: Path) -> dict[str, list[str]]:
     in a file this module classifies as an asserting UI test and its name follows
     the JUnit convention (`*Test`) or matches the file stem — a helper declared
     in the same file is not a test and is not selected.
+
+    `dirs` narrows the source sets: pass `JVM_TEST_DIRS` when the classes will be
+    handed to a JVM test task (an instrumented `src/androidTest` class is not
+    compiled into that task), leave the default to consider every test set.
     """
     out: dict[str, list[str]] = {}
     root = Path(root)
@@ -192,7 +203,7 @@ def ui_test_classes(root: Path) -> dict[str, list[str]]:
             rel = p.relative_to(root).as_posix()
         except ValueError:
             continue
-        if not is_test_path(rel):
+        if not (is_test_path(rel) and _in_dirs(rel, dirs)):
             continue
         text = _read(root, rel)
         if not test_file(rel, text).is_ui:
