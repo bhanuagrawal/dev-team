@@ -45,10 +45,13 @@ refuses.
    drawn from — the ref, the last commit that touched the module's sources, the
    versionName, the scene-spec fingerprint, and a sha256 + size per PNG — and the
    gate refuses when any of those moved without a re-render, naming the file and
-   `storefront-scenes <project> --render --frame` as the remedy. It runs
-   unconditionally on purpose: the failure it catches is the diff that changed
-   the code and NOT the pictures. A project with no `listing` block is
-   grandfathered, so the gate never invents work for a listing nobody recorded.
+   `storefront-scenes <project> --render --frame` as the remedy. In `verify` it
+   refuses the diff that draws a picture (a screen, the scene copy, a frame, the
+   listing) without re-recording it; a diff that draws nothing is not charged for
+   a re-render it never needed. `store-publish` and `store-readiness` read it
+   unconditionally, so staleness is never silenced — it just cannot reach Play.
+   A project with no `listing` block is grandfathered, so the gate never invents
+   work for a listing nobody recorded.
    Version/signing/SDK changes and new libraries are the reviewer's diff to
    catch — say so in the handover when a task touches them.
 9. **Ask the owner only what no agent can decide** (freeze-worthy incidents,

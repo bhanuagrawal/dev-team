@@ -283,7 +283,36 @@ def storefront_decision_check(worktree: Path, files: list[str]) -> tuple[bool, s
     return True, "review and direction match the scene spec"
 
 
-def storefront_listing_fresh_check(worktree: Path) -> tuple[bool, str]:
+def _draws_a_screenshot(worktree: Path, f: str, ui_path: str) -> bool:
+    """Does this changed file change what a store screenshot SHOWS?
+
+    The scene spec and its two stamped decisions, the frame registry, and the
+    listing folder are picture inputs by definition. Inside the compose module,
+    only UI code is: a data-layer or repository change leaves the screen the
+    screenshot shows exactly as it was. The classifier is the team's own
+    (`code_tests.is_ui_source`, the one the design gate uses), so this gate does
+    not invent a second definition of "a screen".
+    """
+    from . import code_tests
+
+    p = f.replace("\\", "/").lstrip("./")
+    if p in ("docs/storefront.json", "docs/storefront-review.json",
+             "docs/storefront-direction.json", "docs/storefront-frames.json"):
+        return True
+    if p.startswith("distribution/listing/"):
+        return True
+    if not p.startswith(ui_path.rstrip("/") + "/"):
+        return False
+    try:
+        return code_tests.is_ui_source(p, (worktree / p).read_text(errors="ignore"))
+    except Exception:
+        # A file we cannot read (deleted, binary) is not silently excused: if the
+        # diff cannot be classified as "not a screen", it is treated as one.
+        return True
+
+
+def storefront_listing_fresh_check(worktree: Path,
+                                   files: list[str] | None = None) -> tuple[bool, str]:
     """The listing's pictures must describe the build a user installs.
 
     `docs/storefront-frames.json` records what each shipped PNG was drawn from
@@ -292,14 +321,35 @@ def storefront_listing_fresh_check(worktree: Path) -> tuple[bool, str]:
     separate from `storefront_decision_check` because they fail for different
     reasons and carry different remedies: the decision gate is about words
     nobody decided, this one is about pixels drawn from an older build.
+
+    Refused on a diff that DRAWS a picture (a screen, the scene copy, a frame, the
+    listing) without re-recording it. A diff that draws none of those is not
+    asked to pay for a re-render it never needed — every release's version bump
+    would otherwise make the next unrelated task refuse, and a gate that taxes
+    work it did not touch is a gate that gets switched off. Staleness is never
+    silenced, though: `store-publish` and `store-readiness` read the same
+    function unconditionally, so a stale picture still cannot reach Play.
     """
     from . import storefront_frames as sfr
 
     try:
-        return sfr.listing_freshness(worktree)
+        ok, msg = sfr.listing_freshness(worktree)
     except Exception as exc:  # a check that cannot read the tree says so, never "ok"
         return False, (f"listing freshness could not be read ({exc}) — "
                        f"re-render: devteam storefront-scenes <project> --render --frame")
+    if ok:
+        return ok, msg
+    try:
+        ui_path = sfr.ui_source(worktree)
+    except Exception:
+        ui_path = "composeApp/src"
+    drawing = [f for f in (files or []) if _draws_a_screenshot(worktree, f, ui_path)]
+    if not drawing:
+        return True, ("stale, but this diff draws no screen — "
+                      + msg.replace("LISTING FRAMES DESCRIBE AN OLDER BUILD: ", "")
+                      + " — store-publish still refuses it")
+    return False, msg + (f" (this diff draws it: {drawing[0]}"
+                         + (", …" if len(drawing) > 1 else "") + ")")
 
 
 def flow_gate(project: Path, worktree: Path, spec: dict | None,
@@ -797,11 +847,14 @@ def verify_all(project: Path, worktree: Path, base: str, log, gradle: bool = Tru
         return False, failures
 
     # Storefront LISTING freshness: the PNGs Play uploads are a claim about a
-    # build. Unconditional (not diff-triggered) because the failure it catches is
-    # the diff that touched the code and NOT the pictures — a gate that only ran
-    # when the listing was edited could never see that. Cheap: file reads, PNG
-    # headers and three git reads; projects that never recorded provenance pass.
-    ok, msg = storefront_listing_fresh_check(worktree)
+    # build. Refused when THIS diff draws a picture (a screen, the scene copy, a
+    # frame, the listing) and does not re-record it — the failure is the diff that
+    # changed the code and NOT the pictures, which a gate that only ran when the
+    # listing was edited could never see. Cheap: file reads, PNG headers and three
+    # git reads; projects that never recorded provenance pass. A diff that draws
+    # nothing new does not pay for a re-render, but store-publish reads the same
+    # function unconditionally, so a stale picture still cannot reach Play.
+    ok, msg = storefront_listing_fresh_check(worktree, files)
     log("storefront listing: ok — " + msg if ok else "storefront listing: FAIL — " + msg)
     if not ok:
         failures.append(msg)
