@@ -478,6 +478,22 @@ def meetup_json(transaction_id: str, status: str = "REQUESTED",
                   "distance_meters": 600, "walk_minutes": 8,
                   "opening_hours": "08:00-23:00", "community_handshakes": 42},
         "alternates": [],
+        # The app reads the ACCEPTED state from this snapshot (`meetup.venue` +
+        # `meetup.starts_at`), not from the top-level venue: without it the client
+        # rightly said the server had saved nothing (2026-11-10).
+        "meetup": {
+            "is_accepted": bool(accepted_at),
+            "starts_at": accepted_at,
+            "accepted_at": accepted_at,
+            "accepted_by": OWNER_ID if accepted_at else None,
+            "venue": {"venue_id": "venue-1", "name": "Third Wave Coffee",
+                      "address": "100ft Road, Indiranagar", "venue_type": "CAFE",
+                      "distance_meters": 600, "walk_minutes": 8,
+                      "opening_hours": "08:00-23:00", "community_handshakes": 42}
+            if accepted_at else None,
+            "alternate_venue": None,
+            "alternate_suggested_at": None,
+        },
         "accepted_at": accepted_at,
         "alternate_suggested_at": None,
     }
