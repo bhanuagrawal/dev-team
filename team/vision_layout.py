@@ -124,13 +124,23 @@ def _call(cfg: dict[str, Any], prompt: str, png: Path, timeout: int = 240) -> st
 def _json_block(text: str) -> dict[str, Any]:
     fenced = re.search(r"```(?:json)?\s*(.+?)```", text, re.S)
     raw = fenced.group(1) if fenced else text
-    start, end = raw.find("{"), raw.rfind("}")
-    if start < 0 or end < 0:
+    start = raw.find("{")
+    if start < 0:
         raise SystemExit(f"vision model returned no JSON object: {text[:300]}")
+    # THE FIRST OBJECT, not the last brace. A reply that carries the answer and
+    # then a second object (or a trailing fragment) used to fail as "Extra data"
+    # and killed a whole journey (2026-11-11: first-run-new-user aborted at step 2
+    # and the returning reader's session was never created).
     try:
-        return json.loads(raw[start:end + 1])
+        obj, _end = json.JSONDecoder().raw_decode(raw[start:])
+        if isinstance(obj, dict):
+            return obj
+        raise ValueError(f"top-level JSON is {type(obj).__name__}, not an object")
     except Exception as exc:
-        raise SystemExit(f"vision model returned invalid JSON: {exc}")
+        try:
+            return json.loads(raw[start:raw.rfind("}") + 1])
+        except Exception:
+            raise SystemExit(f"vision model returned invalid JSON: {exc}")
 
 
 # --------------------------------------------------------------------------- #
