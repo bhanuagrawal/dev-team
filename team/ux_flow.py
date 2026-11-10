@@ -354,6 +354,27 @@ def _settle(serial: str, pkg: str, timeout: float = 12.0) -> tuple[bool, float]:
     return False, time.monotonic() - t0
 
 
+_BUSY_WORDS = ("loading", "please wait", "searching", "just a moment",
+               "sending your", "reading your library")
+
+def _wait_past_busy(serial: str, timeout: float = 10.0) -> None:
+    """A spinner is a STATE, not a verdict — wait for it before judging.
+
+    The walk screenshots at the top of every step, so a tap that starts a fetch was
+    photographed 0.5s later: the model saw "Loading book details from catalog…",
+    found nothing to tap, and declared the screen a dead end while the detail
+    actually renders in ~2s (confirmed by hand, 2026-11-10). Waiting for the app
+    to stop saying it is busy is deterministic and costs nothing when it is not.
+    """
+    from .ux_video import _ui_xml
+    t0 = time.monotonic()
+    while time.monotonic() - t0 < timeout:
+        xml = (_ui_xml(serial) or "").lower()
+        if not any(w in xml for w in _BUSY_WORDS):
+            return
+        time.sleep(0.8)
+
+
 def _window_title(serial: str, pkg: str) -> str:
     """The focused activity's short name — never a fragment of it.
 
@@ -486,6 +507,9 @@ def audit_flow(project: Path, flow: dict, serial: str, log=None,
         if time.monotonic() > deadline:
             outcome, reason = "timeout", f"the {int(flow.get('seconds') or DEFAULT_SECONDS)}s cap was reached"
             break
+        if step > 1:
+            # Never photograph a spinner and call it the product.
+            _wait_past_busy(serial)
         still = out_dir / f"step-{step:02d}.png"
         if not _screenshot(serial, still):
             outcome, reason = "error", "could not capture the screen"
