@@ -434,6 +434,15 @@ def audit_flow(project: Path, flow: dict, serial: str, log=None,
                              f"declared fresh) — got {word or 'no answer'}")
     _launch(serial, pkg, base_url=base_url)
     settled, waited = _settle(serial, pkg)
+    if not settled:
+        # ONE retry, with room. A cold start right after `pm clear` on a headless
+        # emulator outlasts the 12s cap often enough that judging it produced a
+        # false "the app never opened" (2026-11-10, the third flow of a run). The
+        # second attempt is the same launch; only the patience changes.
+        if log:
+            log(f"~ ux-flow: '{fid}' did not settle in {waited:.1f}s — relaunching once")
+        _launch(serial, pkg, base_url=base_url)
+        settled, waited = _settle(serial, pkg, timeout=30.0)
     if log:
         log(f"~ ux-flow: '{fid}' launch screen settled after {waited:.1f}s"
             + ("" if settled else " — THE APP NEVER LEFT ITS LAUNCH SCREEN"))
