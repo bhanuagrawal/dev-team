@@ -102,6 +102,25 @@ def _rpc(method: str, params: dict[str, Any] | None = None,
     return data.get("result") or {}
 
 
+def ping(timeout: int = 8) -> tuple[bool, str]:
+    """Is the Stitch MCP answering right now?
+
+    The tools the agent sees come from the host's MCP connection, not from this
+    module: when that connection blips (ECONNRESET, a 5xx, a restart), the
+    session's tool catalog silently loses `stitch.*` and every design task looks
+    impossible. This check answers the only question that matters - can we reach
+    the endpoint with the key we hold - so a dead MCP is REPORTED, not
+    discovered halfway through a task.
+    """
+    url = os.environ.get("STITCH_MCP_URL") or DEFAULT_URL
+    try:
+        res = _rpc("tools/list", {}, timeout=timeout)
+        n = len(res.get("tools") or [])
+        return (n > 0, f"{n} tool(s) at {url}")
+    except Exception as exc:  # noqa: BLE001 - a probe must never raise
+        return (False, f"{url}: {str(exc)[:140]}")
+
+
 def call(tool: str, arguments: dict[str, Any], timeout: int = 300) -> dict[str, Any]:
     """Invoke one Stitch tool and return its structured payload.
 
@@ -146,6 +165,19 @@ def create_project(title: str) -> str:
 def get_project(project_id: str) -> dict[str, Any]:
     pid = _clean_project_id(project_id)
     return call("get_project", {"name": f"projects/{pid}"})
+
+
+def ping(timeout: int = 10) -> int:
+    """How many tools the Stitch MCP answers with, right now.
+
+    The host loads MCP tools once per catalog rebuild; a remote server that is
+    slow or restarting silently loses its tools for that turn (seen 2026-11-10:
+    stitch vanished mid-run after ECONNRESET). This client talks to the same
+    endpoint over plain HTTP and is the path scripted work should use, so a
+    dropped catalog never blocks a design task.
+    """
+    r = _rpc("tools/list", {}, timeout=timeout)
+    return len(r.get("tools") or [])
 
 
 def list_screens(project_id: str) -> list[dict[str, Any]]:
