@@ -32,6 +32,10 @@ refuses.
    and (c) the store/design gates for what a reader is shown. The old diff-scoped
    UI-test requirement is gone with the suites themselves; `team/code_tests.py`
    now only classifies a diff as UI or not, which the design gate needs.
+   **One exception, and it is not a test:** a project may keep a scene RENDERER
+   (the generated `StorefrontScreenshotsTest` that `devteam storefront-preview`
+   writes) because a listing frame needs a composable rendered to a bitmap. It
+   asserts nothing, is never required by a gate and is never run by `verify`.
    `verify` also runs: team-generic, localization, brand, release-note freshness
    (the note may not repeat the last shipped one), the design gate, and compile.
    Version/signing/SDK changes and new libraries are the reviewer's diff to
