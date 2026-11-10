@@ -89,7 +89,12 @@ def node_report(profile: dict, state: dict, research: dict | None,
                               status)
             if not sub["complete"]:
                 kids_complete = False
-                missing.extend(sub["missing"])
+                # Name the child in the parent's missing list. Without this a
+                # container whose own measures are all backed printed three ✓
+                # lines and then "3 missing" with no indication that the gap was
+                # BELOW it — the reader (and the plan refusal that quotes
+                # missing[0]) was told a number, never which branch to open.
+                missing.extend(f"{sub['title']}: {m}" for m in sub["missing"])
     else:
         built = status.get(nid) == "done"
         kids_complete = True
@@ -157,6 +162,12 @@ def format_audit(rows: list[dict[str, Any]]) -> str:
         if r["built"] and r["missing"]:
             lines.append(f"               the tasks are done, the promise is not: "
                          f"{len(r['missing'])} missing")
+            # A container's own evidence lines can all be ✓ while the gap sits in
+            # a branch under it: say WHICH branch, so the report is never a
+            # contradiction the reader has to resolve by running another command.
+            if r["children"]:
+                for m in r["missing"][:3]:
+                    lines.append(f"                 · {m[:96]}")
     open_gaps = [r for r in rows if r["built"] and not r["complete"]]
     lines.append("")
     if open_gaps:
