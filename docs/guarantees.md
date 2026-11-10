@@ -45,7 +45,11 @@ refuses.
    drawn from — the ref, the last commit that touched the module's sources, the
    versionName, the scene-spec fingerprint, and a sha256 + size per PNG — and the
    gate refuses when any of those moved without a re-render, naming the file and
-   `storefront-scenes <project> --render --frame` as the remedy. In `verify` it
+   `storefront-scenes <project> --render --frame` as the remedy. The versionName
+   is recorded too, but a version-only move is reported, not refused: `release`
+   bumps it on every ship and a screenshot shows screens, not a number — the
+   frames describe an older build when the module's sources, the scene copy or
+   the recorded bytes moved. In `verify` it
    refuses the diff that draws a picture (a screen, the scene copy, a frame, the
    listing) without re-recording it; a diff that draws nothing is not charged for
    a re-render it never needed. `store-publish` and `store-readiness` read it

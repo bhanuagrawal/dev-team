@@ -351,15 +351,24 @@ def listing_freshness(project: Path) -> tuple[bool, str]:
                         f"({str(block.get('ui_sha') or 'unrecorded')[:12]} -> {now_ui[:12]}): "
                         "the screenshots show screens an older commit drew")
 
+    # The versionName is recorded, but a version-only move is NOT a stale picture:
+    # `release` bumps it on every ship, and a screenshot shows screens, not a
+    # number. The frames describe an older build when the SCREENS or the COPY
+    # moved (ui_sha / spec_sha above) or when the bytes were edited — refusing on
+    # a bump alone would declare the listing stale seconds after a release that
+    # changed nothing a user sees, and a gate that cries wolf gets ignored.
     now_version = app_version(project)
+    version_note = ""
     if now_version and str(block.get("app_version") or "") != now_version:
-        problems.append(f"the app is {now_version} but the frames were drawn from "
-                        f"{block.get('app_version') or 'an unrecorded version'}")
+        version_note = (f"; drawn at {block.get('app_version') or 'an unrecorded version'}, "
+                        f"the app is now {now_version} with its screens unchanged")
 
     if problems:
-        return False, "LISTING FRAMES DESCRIBE AN OLDER BUILD: " + "; ".join(problems) + " — " + remedy
+        return False, ("LISTING FRAMES DESCRIBE AN OLDER BUILD: " + "; ".join(problems)
+                       + version_note + " — " + remedy)
     return True, (f"{len(recorded)} frame(s) match the build they were drawn from "
-                  f"({str(block.get('ref_sha') or '')[:7] or 'ref?'}, {block.get('app_version') or 'version?'})")
+                  f"({str(block.get('ref_sha') or '')[:7] or 'ref?'}, "
+                  f"{block.get('app_version') or 'version?'})" + version_note)
 
 
 def visible_text(html: str) -> str:
