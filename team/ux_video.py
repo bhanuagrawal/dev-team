@@ -280,9 +280,22 @@ def report(p: dict) -> str:
 # the device: build the delivery ref, install, drive, record
 # --------------------------------------------------------------------------- #
 def _adb(serial: str, args: list[str], timeout: int = 60, binary: bool = False):
+    """One adb call. A DEVICE THAT STOPS ANSWERING IS AN ANSWER, NOT A CRASH.
+
+    `adb logcat -d` against a wedged emulator hung for 45s and raised
+    TimeoutExpired through the whole walk (2026-11-10) — the audit died with a
+    traceback instead of saying "the device stopped answering", which is the one
+    thing the owner could act on. Timeouts now return rc=124 with empty output so
+    every caller reads "no answer" and the walk records it as such.
+    """
     from .emulator import ADB
-    return subprocess.run([ADB, "-s", serial, *args],
-                          capture_output=True, text=not binary, timeout=timeout)
+    try:
+        return subprocess.run([ADB, "-s", serial, *args],
+                              capture_output=True, text=not binary, timeout=timeout)
+    except subprocess.TimeoutExpired as exc:
+        return subprocess.CompletedProcess(
+            args=[ADB, "-s", serial, *args], returncode=124,
+            stdout=b"" if binary else "", stderr=b"" if binary else "")
 
 
 def package_name(project: Path) -> str:

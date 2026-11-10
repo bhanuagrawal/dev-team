@@ -875,6 +875,22 @@ def run(project: Path, only: str | None = None, log=None, avd: str | None = None
             except SystemExit as exc:
                 failed.append({"id": fid, "reason": str(exc)[:300]})
                 continue
+            except Exception as exc:  # a tool/device fault, never a traceback in a walk
+                msg = f"{type(exc).__name__}: {exc}"[:300]
+                ask = human_block(msg)
+                if log:
+                    log(f"~ ux-flow: '{fid}' could not be walked — {msg}"
+                        + (f" (needs the owner: {ask})" if ask else ""))
+                results.append({
+                    "flow": fid, "surface": str(flow.get("surface") or ""),
+                    "goal": str(flow.get("goal") or ""), "outcome": "error",
+                    "reason": msg, "steps": [], "dead_taps": [], "crashes": [],
+                    "goal_reached": False, "verdict": "", "reactions": [],
+                    "premium": [], "defects": [], "model_error": "",
+                    "unblock": ask or "", "blocked_on": "owner" if ask else "",
+                    "stills": [], "sheet": "", "rubric": RUBRIC, "at": now_iso(),
+                })
+                continue
             res["build"] = build
             res["mock"] = base_url or ""
             results.append(res)
