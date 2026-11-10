@@ -23,19 +23,20 @@ DEFAULT_AT = "23:00"
 
 # The owner's run window: 23:00 → 11:00 (12 hours). Every app fires
 # RUNS_PER_DAY times inside it (owner request 2026-11-05) so one skipped run
-# never costs an app its whole night.
+# never costs an app its whole night. Lowered 3 → 2 on 2026-11-11 (owner
+# request): two runs a night, ~6 h apart.
 WINDOW_START_HOUR = 23
 WINDOW_END_HOUR = 11
-RUNS_PER_DAY = 3
+RUNS_PER_DAY = 2
 
 # Best-effort spacing target between any two slots on the machine.
 #
 # `scripts/nightly.sh` holds ONE machine-wide lock (`.nightly.lock`), so an app
 # that fires while another run is alive is SKIPPED, not deferred. The owner
-# accepts an occasional overlap now that every app gets three chances a night;
+# accepts an occasional overlap now that every app gets two chances a night;
 # spacing is therefore a target we optimise, not a hard refusal. Apps are
 # interleaved evenly across the window, which keeps consecutive runs as far
-# apart as the number of apps allows (5 apps × 3 runs = 48 min apart).
+# apart as the number of apps allows (6 apps × 2 runs = 60 min apart).
 MIN_GAP_MIN = 30
 
 
@@ -80,11 +81,11 @@ def plan_gap_minutes(project_count: int) -> float:
 
 
 def plan_schedule(projects: list[str] | set[str]) -> dict[str, list[tuple[int, int]]]:
-    """Deterministic three-runs-a-night plan, evenly interleaved across apps.
+    """Deterministic two-runs-a-night plan, evenly interleaved across apps.
 
     Slots are computed from the sorted project list, so the same set of apps
     always yields the same schedule (idempotent re-runs, no drift). Consecutive
-    slots go to different apps, and one app's runs are ~4 h apart.
+    slots go to different apps, and one app's runs are ~6 h apart.
     """
     names = sorted({p for p in projects if p})
     if not names:
@@ -100,7 +101,7 @@ def plan_schedule(projects: list[str] | set[str]) -> dict[str, list[tuple[int, i
 
 
 def explicit_slots(anchor: str) -> list[tuple[int, int]]:
-    """`--at HH:MM` anchors the first run; the other two follow 4 h later."""
+    """`--at HH:MM` anchors the first run; the other follows 6 h later."""
     try:
         hh, mm = (int(x) for x in anchor.split(":"))
     except Exception:
@@ -210,11 +211,11 @@ def is_project_loaded(project_name: str) -> bool:
 
 def propose_schedule(project_name: str, pref_at: str | None = None,
                      projects: list[str] | None = None) -> list[tuple[int, int]]:
-    """The three slots this project would get.
+    """The two slots this project would get.
 
     With no `--at`, the project joins the machine-wide interleaved plan, so it
     lands as far from every other app's runs as the window allows. An explicit
-    `--at` anchors its first run (the other two follow 4 h later) and leaves the
+    `--at` anchors its first run (the other follows 6 h later) and leaves the
     rest of the plan untouched.
     """
     if pref_at:
@@ -239,7 +240,7 @@ def apply_plan(projects: list[str] | set[str], install_missing: bool = True) -> 
 
 
 def rebalance(projects: list[str] | None = None) -> dict[str, list[tuple[int, int]]]:
-    """Re-space every installed app into the current three-a-night plan."""
+    """Re-space every installed app into the current two-a-night plan."""
     names = projects or [j["project"] for j in list_installed_jobs() if j["project"]]
     return apply_plan(names)
 

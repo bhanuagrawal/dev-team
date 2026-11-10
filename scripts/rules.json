@@ -75,12 +75,12 @@
    "note": "lesson 2026-11-05: doctor tested 'gcloud can mint a token', so a property returning 403 (and a login Google had just blocked) still read as configured; a new project now cannot land there either"
   },
   {
-   "id": "nightly-three-runs-in-window",
-   "rule": "every scheduled app runs RUNS_PER_DAY (3) times a night inside the owner's 23:00\u201311:00 window; apps are interleaved evenly so consecutive machine-wide runs are as far apart as the app count allows, and overlap is tolerated because three runs make a skipped one harmless",
+   "id": "nightly-runs-in-window",
+   "rule": "every scheduled app runs RUNS_PER_DAY (2) times a night inside the owner's 23:00\u201311:00 window; apps are interleaved evenly so consecutive machine-wide runs are as far apart as the app count allows, and overlap is tolerated because two runs make a skipped one harmless",
    "doc": "AGENTS.md",
    "kind": "code",
-   "enforced_by": "devteam setup (scheduler.plan_schedule/apply_plan installs 3 slots per app) + devteam schedules --rebalance (re-spaces every app) + devteam doctor and store-readiness (assert 3 slots inside the window)",
-   "note": "owner directive 2026-11-05: three runs a night, 11pm\u201311am, overlap tolerated but avoided where possible; MIN_GAP_MIN is now a best-effort target, not a refusal"
+   "enforced_by": "devteam setup (scheduler.plan_schedule/apply_plan installs 2 slots per app) + devteam schedules --rebalance (re-spaces every app) + devteam doctor and store-readiness (assert 2 slots inside the window)",
+   "note": "owner directive 2026-11-05: two runs a night, 11pm\u201311am, overlap tolerated but avoided where possible; MIN_GAP_MIN is a best-effort target, not a refusal. 2026-11-11: runs per app lowered 3 \u2192 2"
   },
   {
    "id": "cleanup-is-part-of-the-run",

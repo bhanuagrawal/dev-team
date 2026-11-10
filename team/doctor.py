@@ -131,7 +131,7 @@ def agent_requirements(profile: dict, project: Path) -> dict[str, list[tuple[str
         ]
         # Every app must hold RUNS_PER_DAY slots inside the owner's 23:00–11:00
         # window. Machine-wide spacing is best-effort: the run lock skips an
-        # overlapping app rather than deferring it, but with three runs a night
+        # overlapping app rather than deferring it, but with two runs a night
         # a skip no longer costs the app its night (owner directive 2026-11-05).
         job = next((j for j in scheduler.list_installed_jobs()
                     if j["label"] == scheduler.project_label(project.name)

@@ -2127,7 +2127,7 @@ def cmd_poll(args: argparse.Namespace) -> None:
 
 
 def cmd_schedules(args: argparse.Namespace) -> None:
-    """Owner-visible schedule map: three runs a night for every registered app."""
+    """Owner-visible schedule map: two runs a night for every registered app."""
     if getattr(args, "remove", None):
         project = resolve_project(args.remove)
         scheduler.uninstall_launchd(project.name)
@@ -2908,7 +2908,7 @@ def cmd_setup(args: argparse.Namespace) -> None:
         for s in scheduler.list_installed_schedules():
             print(f"    - {s['label']}: {s['hour']:02d}:{s['minute']:02d}")
         return
-    # opt-in auto: three interleaved runs a night inside the owner's window.
+    # opt-in auto: two interleaved runs a night inside the owner's window.
     # An explicit --at anchors this app's runs and leaves the others alone.
     if args.at:
         slots = scheduler.propose_schedule(project.name, args.at)
