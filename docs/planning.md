@@ -53,6 +53,28 @@ matched nothing (owner directive 2026-11-09). The Stitch screen — exported
   into `docs/stitch/screens/<id>/` before any UI code is written.
 - Backend/data tasks are `not_applicable` from their targets; no designer call.
 
+Stitch (`generate_screen_from_text` / `edit_screens` / `generate_variants`) always
+returns a **new** screen id and Stitch has no delete-screen call, so "generate,
+review, keep" would leave one dead screen per tweak. It does not:
+
+- **The surface id is the only canonical id, and it never moves.** A generated or
+  tweaked result is a *draft*: review it (drift audit + its `screen.png`), then
+  write it onto the surface with `devteam stitch-adopt --draft <id> --onto
+  <surface>` — `update_screen` overwrites the HTML/screenshot in place, so the
+  export, the manifest entry and the Compose snapshot keep the same id.
+- `devteam stitch-tweak` adopts by default; `--fork` is the legacy escape hatch
+  (fork becomes the surface, the old id is retired).
+- `devteam stitch-retire --screen <id> --replaced-by <id> --why "…" --yes` records
+  a screen that is genuinely dead. `RETIRED.md` is RENDERED from
+  `manifest.json → retired_screens`, never hand-edited, and a retired id is never
+  canonical and is not resolvable by `stitch-tweak`/`stitch-adopt`.
+- `devteam verify` refuses a manifest that disagrees with itself (a retired id
+  still canonical, a `replaced_by` that is not canonical, an export directory for
+  a dead id, a canonical surface with no export).
+
+Drafts are disposable: generate them in a scratch Stitch project and
+`delete_project` it when it piles up — the only true delete Stitch offers.
+
 The exported screen set must be current: re-export the Stitch screens before a
 UI task when the project changes. A UI task with no matching exported screen is
 not ready — "derive it from tokens" is not an answer.

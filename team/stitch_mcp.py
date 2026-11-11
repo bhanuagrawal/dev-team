@@ -403,6 +403,36 @@ def generate_variants(project_id: str, screen_ids: list[str], prompt: str, *,
         f"Stitch generate_variants produced no variant within {timeout}s for {pid} ({ids})")
 
 
+def update_screen_content(project_id: str, screen_id: str, *, html: str | None = None,
+                          png: bytes | None = None) -> dict[str, Any]:
+    """Overwrite a screen IN PLACE — the id survives, so nothing has to be retired.
+
+    `edit_screens` and `generate_*` ALWAYS return a new screen id, and Stitch has
+    no delete-screen call, so the screen they replaced would linger in the
+    project forever (BookSwap reached 51 live screens for 34 surfaces this way).
+    Writing the reviewed result back onto the surface's own id keeps one screen
+    per surface: the manifest, the export directory and RETIRED.md stop drifting.
+
+    Proven 2026-11-11 on BookSwap: same id, same title, same geometry, new file.
+    """
+    name = (f"projects/{_clean_project_id(project_id)}"
+            f"/screens/{_clean_screen_id(screen_id)}")
+    out: dict[str, Any] = {}
+    if html is not None:
+        out = call("update_screen", {
+            "name": name,
+            "htmlCodeBase64": base64.b64encode(html.encode()).decode(),
+            "updateMask": ["html_code"],
+        })
+    if png:
+        out = call("update_screen", {
+            "name": name,
+            "screenshotBase64": base64.b64encode(png).decode(),
+            "updateMask": ["screenshot"],
+        })
+    return out
+
+
 def download(screen: dict[str, Any]) -> tuple[bytes, str]:
     """The design itself: (bytes, mime). Handles SVG, HTML and raster alike.
 

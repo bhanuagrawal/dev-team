@@ -4042,48 +4042,139 @@ def _upsert_stitch_manifest_entry(project: Path, root: Path, pid: str, entry: di
     p_copy.write_text(payload)
 
 
-def _retire_stitch_screen(project: Path, root: Path, logical_id: str, old_stitch_id: str,
-                          new_stitch_id: str, title: str) -> None:
-    """Record a superseded Stitch screen as retired, and drop its repo copy.
-
-    Stitch has no delete-screen call, so a tweak leaves the old screen in the
-    project. The repo is the source of truth: one directory per surface, one
-    manifest entry per surface, and RETIRED.md naming the dead ids.
-    """
-    out = root / "docs" / "stitch"
-    mpath = out / "manifest.json"
+def _load_stitch_manifest(root: Path) -> dict:
+    mpath = root / "docs" / "stitch" / "manifest.json"
     try:
-        manifest = json.loads(mpath.read_text()) if mpath.is_file() else {}
+        return json.loads(mpath.read_text()) if mpath.is_file() else {}
     except Exception:
-        manifest = {}
-    retired = list(manifest.get("retired_screens") or [])
-    retired.append({"id": logical_id, "stitch_id": old_stitch_id, "title": title,
-                    "replaced_by": new_stitch_id,
-                    "retired_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())})
-    manifest["retired_screens"] = retired
+        return {}
+
+
+def _write_stitch_manifest(project: Path, root: Path, manifest: dict) -> None:
     payload = json.dumps(manifest, indent=2, ensure_ascii=False) + "\n"
-    mpath.write_text(payload)
+    out = root / "docs" / "stitch"
+    out.mkdir(parents=True, exist_ok=True)
+    (out / "manifest.json").write_text(payload)
     p_copy = pipeline_dir(project) / "stitch_manifest.json"
     if p_copy.parent.is_dir():
         p_copy.write_text(payload)
-    import shutil as _sh
-    stray = out / "screens" / old_stitch_id
-    if stray.is_dir() and stray.name != logical_id:
-        _sh.rmtree(stray, ignore_errors=True)
-    ledger = out / "RETIRED.md"
-    lines = ["# Retired Stitch screens", "",
-             "Stitch has no delete-screen call, so an in-place tweak forks the screen",
-             "and the old one stays in the project. These ids are retired: do not",
-             "design against them, do not export them, do not restore them.", "",
-             "| surface | retired stitch id | replaced by | when |",
-             "|---|---|---|---|"]
-    for r in retired:
-        lines.append(f"| {r['id']} | `{r['stitch_id']}` | `{r['replaced_by']}` | {r['retired_at']} |")
+
+
+def _retired_ids(manifest: dict) -> set[str]:
+    """Every id the ledger says is dead — the surface id and the Stitch id alike."""
+    dead: set[str] = set()
+    for r in manifest.get("retired_screens") or []:
+        for key in ("id", "stitch_id"):
+            v = str(r.get(key) or "").strip()
+            if v:
+                dead.add(v)
+    return dead
+
+
+def _render_retired_ledger(root: Path, manifest: dict) -> None:
+    """Render RETIRED.md FROM the manifest: one copy of the truth, never two.
+
+    The ledger used to be hand-appendable prose beside a manifest nobody
+    reconciled with it, so BookSwap ended up with a dead id listed as canonical
+    and a `replaced_by` pointing at a screen that was itself neither. A file
+    that is rendered cannot disagree with its source.
+    """
+    ledger = root / "docs" / "stitch" / "RETIRED.md"
+    retired = list(manifest.get("retired_screens") or [])
+    if not retired:
+        if ledger.is_file():
+            ledger.unlink()
+        return
+    canonical = {str(s.get("stitch_id") or s.get("id"))
+                 for s in manifest.get("canonical_screens") or []}
+    lines = [
+        "# Retired Stitch screens", "",
+        "Rendered from `manifest.json` → `retired_screens` by `devteam stitch-retire`;",
+        "do not hand-edit. Stitch has no delete-screen call, so a replaced screen stays",
+        "in the project. These ids are dead: do not design against them, do not export",
+        "them, do not restore them. A surface's OWN id is never retired — a new design",
+        "is adopted onto it (see `devteam stitch-adopt`).", "",
+        "| surface | retired stitch id | replaced by | when | reason |",
+        "|---|---|---|---|---|",
+    ]
+    for r in sorted(retired, key=lambda r: str(r.get("retired_at") or "")):
+        by = str(r.get("replaced_by") or "")
+        mark = f"`{by}`" if by else "—"
+        if by and by not in canonical:
+            mark += " ⚠ not canonical"
+        lines.append(f"| {r.get('id') or '—'} | `{r.get('stitch_id')}` | {mark} | "
+                     f"{r.get('retired_at') or ''} | {r.get('reason') or ''} |")
     ledger.write_text("\n".join(lines) + "\n")
 
 
-def _resolve_stitch_screen_entry(project: Path, screen_ref: str, *, stitch_pid: str = "") -> dict | None:
-    """Resolve a screen id or title query from docs/stitch/manifest.json, then live Stitch."""
+def _retire_stitch_screen(project: Path, root: Path, logical_id: str, old_stitch_id: str,
+                          new_stitch_id: str, title: str, reason: str = "") -> dict:
+    """Record a dead Stitch screen, and keep the manifest honest about it.
+
+    Idempotent and chain-aware: retiring the same id twice adds no second row,
+    and when a successor is itself superseded later, every row that pointed at
+    it is re-pointed instead of leaving a dangling `replaced_by`.
+    """
+    import shutil as _sh
+
+    manifest = _load_stitch_manifest(root)
+    old = str(old_stitch_id or "").strip()
+    new = str(new_stitch_id or "").strip()
+    surf = str(logical_id or old)
+    retired = list(manifest.get("retired_screens") or [])
+    dropped: list[str] = []
+
+    # 1. one row per dead id, and earlier links to this id now name its successor
+    row = next((r for r in retired if str(r.get("stitch_id") or "") == old), None)
+    if row is None:
+        row = {"id": surf, "stitch_id": old, "title": title, "replaced_by": new,
+               "retired_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())}
+        if reason:
+            row["reason"] = reason
+        retired.append(row)
+    else:
+        if new:
+            row["replaced_by"] = new
+        if reason:
+            row["reason"] = reason
+        row["title"] = row.get("title") or title
+    if new:
+        for r in retired:
+            if (str(r.get("replaced_by") or "") == old
+                    and str(r.get("stitch_id") or "") != old):
+                r["replaced_by"] = new
+    manifest["retired_screens"] = retired
+
+    # 2. one canonical entry per surface: a retired id is never one of them
+    dead = _retired_ids(manifest) | {old}
+    keep: list[dict] = []
+    for s in manifest.get("canonical_screens") or []:
+        sid = str(s.get("id") or "")
+        stitch = str(s.get("stitch_id") or sid)
+        alive = (sid == surf and stitch not in dead)
+        if alive or (sid not in dead and stitch not in dead):
+            keep.append(s)
+            continue
+        dropped.append(sid)
+        stray = root / "docs" / "stitch" / "screens" / sid
+        if stray.is_dir() and sid != surf:
+            _sh.rmtree(stray, ignore_errors=True)
+    manifest["canonical_screens"] = keep
+    manifest["synced_at"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+    _write_stitch_manifest(project, root, manifest)
+    _render_retired_ledger(root, manifest)
+    return {"retired": old, "surface": surf, "replaced_by": new, "dropped_canonical": dropped}
+
+
+def _resolve_stitch_screen_entry(project: Path, screen_ref: str, *,
+                                 stitch_pid: str = "",
+                                 include_retired: bool = False) -> dict | None:
+    """Resolve a screen id or title from the manifest, then from live Stitch.
+
+    A retired id is never resolvable: the ledger exists so that nobody designs
+    against a dead copy, and a resolver that ignores it hands the dead copy back
+    anyway (BookSwap's `dc488d60` was both retired and canonical for a day).
+    """
     q = (screen_ref or "").strip().lower()
     if not q:
         return None
@@ -4092,23 +4183,34 @@ def _resolve_stitch_screen_entry(project: Path, screen_ref: str, *, stitch_pid: 
         if not mpath.is_file():
             continue
         try:
-            screens = json.loads(mpath.read_text()).get("canonical_screens") or []
+            manifest = json.loads(mpath.read_text())
         except Exception:
-            screens = []
+            continue
+        screens = manifest.get("canonical_screens") or []
+        dead = set() if include_retired else _retired_ids(manifest)
         for s in screens:
             sid = str(s.get("id") or "").lower()
+            stitch = str(s.get("stitch_id") or "").lower()
             title = str(s.get("title") or "").lower()
             surface = str(s.get("surface") or "").lower()
-            if q == sid or q == title or q == surface or q in title:
+            if (sid in dead) or (stitch and stitch in dead):
+                continue
+            if q == sid or q == stitch or q == title or q == surface or q in title:
                 return s
     if stitch_pid:
         try:
             from team import stitch_mcp
+            dead_live = set()
+            if not include_retired:
+                dead_live = _retired_ids(_load_stitch_manifest(project))
             for s in stitch_mcp.list_screens(stitch_pid):
                 sid = str(s.get("name") or "").split("/")[-1]
                 title = str(s.get("title") or "")
+                if not include_retired and sid in dead_live:
+                    continue
                 if q == sid.lower() or q == title.lower() or q in title.lower():
-                    return {"id": sid, "title": title, "surface": s.get("surface") or "", "_raw": s}
+                    return {"id": sid, "stitch_id": sid, "title": title,
+                            "surface": s.get("surface") or "", "_raw": s}
         except Exception:
             pass
     return None
@@ -4166,11 +4268,39 @@ def cmd_stitch_screen(args: argparse.Namespace) -> int:
                 design_system=design_system, log=print,
             )
             screens_dir = root / "docs" / "stitch" / "screens"
-            entry = stitch_mcp.export_one_screen(screen, screens_dir, log=print)
+            if existing and str(existing.get("id") or ""):
+                # --force on a surface that already exists: the new screen is a DRAFT
+                # for that surface. Adopting it onto the surface's own id keeps one
+                # entry per surface; exporting it as-is would mint a second canonical
+                # row and leave the old screen dead with nobody recording it.
+                draft = {"stitch_id": str(screen.get("name") or "").split("/")[-1],
+                         "title": str(screen.get("title") or screen_type)}
+                try:
+                    _adopt_stitch_draft(project, root, clean_pid, draft, existing,
+                                        reason=f"generate --force: {screen_type}")
+                    print(f"  ✓ adopted the new screen onto surface {existing.get('id')} "
+                          f"({existing.get('stitch_id')})")
+                    entry = {"id": existing.get("id"), "stitch_id": existing.get("stitch_id"),
+                             "title": existing.get("title") or screen_type,
+                             "html": f"screens/{existing.get('id')}/index.html"}
+                except Exception as exc:  # noqa: BLE001
+                    print(f"  ! adopt failed ({str(exc)[:140]}); recording the new screen "
+                          f"and retiring the replaced one")
+                    entry = stitch_mcp.export_one_screen(screen, screens_dir, log=print)
+                    if entry:
+                        _upsert_stitch_manifest_entry(project, root, clean_pid, entry)
+                        _retire_stitch_screen(
+                            project, root, str(existing.get("id")), str(existing.get("stitch_id")),
+                            str(entry.get("stitch_id") or ""),
+                            str(existing.get("title") or screen_type),
+                            reason="generate --force (adopt unavailable)")
+            else:
+                entry = stitch_mcp.export_one_screen(screen, screens_dir, log=print)
+                if entry:
+                    _upsert_stitch_manifest_entry(project, root, clean_pid, entry)
             if not entry:
                 print("  ✗ Stitch returned a screen without a valid id.")
                 return 1
-            _upsert_stitch_manifest_entry(project, root, clean_pid, entry)
             html_rel = entry.get("html")
             if html_rel:
                 content = (root / "docs" / "stitch" / html_rel).read_text(errors="ignore")
@@ -4310,23 +4440,46 @@ def cmd_stitch_tweak(args: argparse.Namespace) -> int:
     screens_dir = root / "docs" / "stitch" / "screens"
     best_screen = updated_screens[-1]
     exported = None
+    surface_id = sid          # the id the surface MUST keep serving from
+    adopted = False
     if not getattr(args, "no_export", False):
         for sc in updated_screens:
             ex = stitch_mcp.export_one_screen(sc, screens_dir, log=print, logical_id=repo_id)
             if ex:
                 _upsert_stitch_manifest_entry(project, root, clean_pid, ex)
                 exported = ex
-        if exported and exported.get("html"):
+        forked = str((exported or {}).get("stitch_id") or "")
+        if sid and forked and forked != sid:
+            if getattr(args, "fork", False):
+                # legacy/opt-out: the fork becomes the surface and the old id dies
+                _retire_stitch_screen(project, root, repo_id, sid, forked, screen_title,
+                                      reason="stitch-tweak --fork")
+                surface_id = forked
+                print(f"  · fork kept as the surface ({forked}); {sid} retired")
+            else:
+                try:
+                    _adopt_stitch_draft(
+                        project, root, clean_pid,
+                        {"stitch_id": forked, "title": screen_title},
+                        {"id": repo_id, "stitch_id": sid, "title": screen_title},
+                        reason=f"tweak: {change}"[:160])
+                    adopted = True
+                    print(f"  ✓ adopted {forked} onto surface {repo_id} ({sid}) — the "
+                          f"surface id never moves, so nothing is retired")
+                except Exception as exc:  # noqa: BLE001 - fall back, never lose the tweak
+                    print(f"  ! adopt failed ({str(exc)[:140]}) — retiring the fork's "
+                          f"predecessor instead")
+                    _retire_stitch_screen(project, root, repo_id, sid, forked, screen_title,
+                                          reason="adopt failed")
+                    surface_id = forked
+        if adopted:
+            snap = root / "docs" / "stitch" / "screens" / repo_id / "index.html"
+            new_html = snap.read_text(errors="ignore") if snap.is_file() else ""
+        elif exported and exported.get("html"):
             new_html = (root / "docs" / "stitch" / exported["html"]).read_text(errors="ignore")
         else:
             raw, _ = stitch_mcp.download(best_screen)
             new_html = raw.decode(errors="ignore")
-        # Stitch has no delete-screen call: the forked-away screen still exists in
-        # the project. Retire it so nobody designs against a dead copy.
-        if sid and str((exported or {}).get("stitch_id") or "") not in ("", sid):
-            _retire_stitch_screen(project, root, repo_id, sid,
-                                  str((exported or {}).get("stitch_id") or ""),
-                                  screen_title)
     else:
         raw, _ = stitch_mcp.download(best_screen)
         new_html = raw.decode(errors="ignore")
@@ -4363,8 +4516,23 @@ def cmd_stitch_tweak(args: argparse.Namespace) -> int:
             if ex:
                 _upsert_stitch_manifest_entry(project, root, clean_pid, ex)
                 exported = ex
-        raw, _ = stitch_mcp.download(corrected[-1])
-        new_html = raw.decode(errors="ignore")
+        if adopted:
+            # the correction forked too: fold it back onto the same surface id
+            try:
+                _adopt_stitch_draft(
+                    project, root, clean_pid,
+                    {"stitch_id": str(corrected[-1].get("name") or "").split("/")[-1]},
+                    {"id": repo_id, "stitch_id": surface_id, "title": screen_title},
+                    reason="corrective pass")
+                snap = root / "docs" / "stitch" / "screens" / repo_id / "index.html"
+                new_html = snap.read_text(errors="ignore") if snap.is_file() else ""
+            except Exception as exc:  # noqa: BLE001
+                print(f"  ! corrective adopt failed ({str(exc)[:120]}) — auditing the fork")
+                raw, _ = stitch_mcp.download(corrected[-1])
+                new_html = raw.decode(errors="ignore")
+        else:
+            raw, _ = stitch_mcp.download(corrected[-1])
+            new_html = raw.decode(errors="ignore")
         report = audit_tweak_drift(
             project,
             baseline_html=baseline_html,
@@ -4386,6 +4554,153 @@ def cmd_stitch_tweak(args: argparse.Namespace) -> int:
             print("committed: docs/stitch (push it before a release)")
 
     return 1 if report.get("verdict") == "FAIL" else 0
+
+
+def cmd_stitch_adopt(args: argparse.Namespace) -> int:
+    """Adopt a reviewed draft screen onto a surface's own id — no fork, no retirement."""
+    from team import stitch_mcp
+
+    project = resolve_project(args.project)
+    profile = profile_of(project)
+    clean_pid = str((profile.get("design") or {}).get("stitch_project_id") or "").split("/")[-1]
+    if not clean_pid:
+        print(f"  ✗ No stitch_project_id declared in {project.name}/.pipeline/profile.json under 'design'.")
+        return 1
+    wt = getattr(args, "worktree", None)
+    root = Path(wt).resolve() if wt else project
+
+    surface = _resolve_stitch_screen_entry(project, args.onto)
+    if not surface or not str(surface.get("id") or ""):
+        print(f"  ✗ '{args.onto}' is not a canonical surface in docs/stitch/manifest.json.")
+        print("    Adopt needs the id that must SURVIVE. If the surface is new, run")
+        print(f"    `devteam stitch-screen {project.name} --generate` once and adopt after that.")
+        return 1
+    draft = _resolve_stitch_screen_entry(project, args.draft, stitch_pid=clean_pid)
+    if not draft:
+        print(f"  ✗ No screen matches draft '{args.draft}' (manifest or live Stitch).")
+        return 1
+
+    try:
+        res = _adopt_stitch_draft(project, root, clean_pid, draft, surface,
+                                  reason=str(getattr(args, "why", "") or ""))
+    except stitch_mcp.StitchError as exc:
+        print(f"ADOPT FAILED: {exc}")
+        return 1
+    if res.get("draft") and res["draft"] != res.get("stitch_id"):
+        print(f"  · draft {res['draft']} stays in the project as a draft — delete its "
+              f"scratch project when it piles up; it is not a canonical surface")
+    print(f"✓ adopted onto surface {res['surface']} (Stitch id {res['stitch_id']} kept): "
+          f"{res['html_bytes']} html bytes" + (", screenshot replaced" if res["png"] else ""))
+    _commit_stitch_docs(project, root, f"design(stitch): adopt draft onto {res['surface']}",
+                        getattr(args, "no_commit", False))
+    return 0
+
+
+def cmd_stitch_retire(args: argparse.Namespace) -> int:
+    """Record a dead Stitch screen: ledger row, no canonical row, no export."""
+    project = resolve_project(args.project)
+    profile = profile_of(project)
+    clean_pid = str((profile.get("design") or {}).get("stitch_project_id") or "").split("/")[-1]
+    wt = getattr(args, "worktree", None)
+    root = Path(wt).resolve() if wt else project
+
+    entry = _resolve_stitch_screen_entry(project, args.screen, stitch_pid=clean_pid)
+    if not entry:
+        print(f"  ✗ No screen matches '{args.screen}' (manifest or live Stitch).")
+        return 1
+    stitch_id = str(entry.get("stitch_id") or entry.get("id")).split("/")[-1]
+    surface = str(entry.get("id") or stitch_id)
+    title = str(entry.get("title") or "")
+    replaced = str(getattr(args, "replaced_by", "") or "").split("/")[-1]
+    if replaced:
+        target = _resolve_stitch_screen_entry(project, replaced)
+        if not target:
+            print(f"  ✗ --replaced-by '{replaced}' is not a canonical screen — retire or "
+                  "adopt the successor first.")
+            return 1
+        replaced = str(target.get("stitch_id") or target.get("id")).split("/")[-1]
+    why = str(getattr(args, "why", "") or "")
+
+    print(f"retire {title or surface} ({stitch_id})" + (f" → replaced by {replaced}" if replaced else ""))
+    if not getattr(args, "yes", False):
+        print("  (dry run — nothing written. Re-run with --yes to record it: the ledger row"
+              " is added, the canonical row and export directory for a dead id are dropped.)")
+        return 0
+    res = _retire_stitch_screen(project, root, surface, stitch_id, replaced, title, reason=why)
+    print(f"✓ retired {res['retired']}"
+          + (f", replaced by {res['replaced_by']}" if res["replaced_by"] else " (no successor)"))
+    if res["dropped_canonical"]:
+        print("  dropped from canonical + exports: " + ", ".join(res["dropped_canonical"]))
+    _commit_stitch_docs(project, root, f"design(stitch): retire {res['retired']}",
+                        getattr(args, "no_commit", False))
+    return 0
+
+
+def _commit_stitch_docs(project: Path, root: Path, message: str, no_commit: bool) -> None:
+    if no_commit or root != project:
+        return
+    import subprocess as _sp
+    _sp.run(["git", "add", "docs/stitch"], cwd=project)
+    r = _sp.run(["git", "commit", "-m", message, "--", "docs/stitch"],
+                cwd=project, capture_output=True, text=True)
+    if r.returncode == 0:
+        print("committed: docs/stitch (push it before a release)")
+
+
+def _adopt_stitch_draft(project: Path, root: Path, clean_pid: str, draft: dict,
+                        surface: dict, reason: str = "") -> dict:
+    """Write a reviewed draft's HTML/screenshot onto its surface's own Stitch id.
+
+    `edit_screens` and `generate_*` always return a NEW screen id, and Stitch has
+    no delete-screen call — so "generate, review, keep" would leave one live
+    screen per tweak forever (BookSwap: 51 live screens for 34 surfaces, 17 of
+    them dead). Overwriting the surface id in place keeps ONE id per surface:
+    the draft is the disposable thing, and nothing needs a retirement row.
+    """
+    import base64 as _b64
+
+    from team import stitch_mcp
+
+    draft_sid = str(draft.get("stitch_id") or draft.get("id") or "").split("/")[-1]
+    surf_id = str(surface.get("id") or "").split("/")[-1]
+    surf_sid = str(surface.get("stitch_id") or surf_id).split("/")[-1]
+    if not draft_sid or not surf_sid:
+        raise SystemExit("adopt needs both a draft screen id and a surface id")
+
+    live = stitch_mcp.get_screen(clean_pid, draft_sid)
+    html = ""
+    html_name = str((live.get("htmlCode") or {}).get("name") or "")
+    if html_name:
+        html = str(stitch_mcp.call("download_file", {"name": html_name}).get("html") or "")
+    if not html:
+        raise SystemExit(f"draft {draft_sid} carries no HTML — nothing to adopt")
+    png = None
+    shot_name = str((live.get("screenshot") or {}).get("name") or "")
+    if shot_name:
+        raw = stitch_mcp.call("download_file", {"name": shot_name}).get("image") or ""
+        if raw:
+            png = _b64.b64decode(raw)
+
+    stitch_mcp.update_screen_content(clean_pid, surf_sid, html=html, png=png)
+    refreshed = stitch_mcp.export_one_screen(
+        stitch_mcp.get_screen(clean_pid, surf_sid),
+        root / "docs" / "stitch" / "screens", log=print, logical_id=surf_id)
+    if refreshed:
+        refreshed["title"] = str(surface.get("title") or refreshed.get("title") or "")
+        _upsert_stitch_manifest_entry(project, root, clean_pid, refreshed)
+
+    manifest = _load_stitch_manifest(root)
+    adopted = list(manifest.get("adopted_drafts") or [])
+    adopted.append({"draft_stitch_id": draft_sid, "adopted_into": surf_sid,
+                    "surface": surf_id,
+                    "title": str(live.get("title") or draft.get("title") or ""),
+                    "at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+                    **({"why": reason} if reason else {})})
+    manifest["adopted_drafts"] = adopted[-200:]
+    _write_stitch_manifest(project, root, manifest)
+    return {"surface": surf_id, "stitch_id": surf_sid, "draft": draft_sid,
+            "html_bytes": len(html), "png": bool(png),
+            "html": (refreshed or {}).get("html")}
 
 
 def cmd_stitch_curate(args: argparse.Namespace) -> int:
@@ -5374,6 +5689,9 @@ def main() -> None:
     stw.add_argument("--variants", type=int, default=1, help="variant count 1-5 when --mode refine is used (default: 1)")
     stw.add_argument("--device", default="MOBILE", help="target device: MOBILE, DESKTOP, TABLET, AGNOSTIC")
     stw.add_argument("--model", default="GEMINI_3_8_FLASH", help="model ID (default: GEMINI_3_8_FLASH)")
+    stw.add_argument("--fork", action="store_true",
+                     help="legacy: keep the forked screen as the surface and retire the old id "
+                          "(default is to adopt the result back onto the surface's own id)")
     stw.add_argument("--dry-run", action="store_true", help="print the compiled surgical tweak prompt without calling Stitch")
     stw.add_argument("--no-export", action="store_true", help="skip exporting updated screen to docs/stitch")
     stw.add_argument("--no-commit", action="store_true", help="skip auto-committing docs/stitch")
@@ -5383,6 +5701,25 @@ def main() -> None:
     scur.add_argument("project")
     scur.add_argument("--screens-json", help="path to raw Stitch list_screens JSON dump")
     scur.set_defaults(fn=cmd_stitch_curate)
+    sad = sub.add_parser("stitch-adopt",
+                         help="adopt a reviewed draft screen onto a surface's own Stitch id (no fork, nothing to retire)")
+    sad.add_argument("project")
+    sad.add_argument("--draft", required=True, help="draft screen id or title (the new design)")
+    sad.add_argument("--onto", required=True, help="canonical surface id or title (the id that must survive)")
+    sad.add_argument("--why", help="one line recorded in the manifest")
+    sad.add_argument("--no-commit", action="store_true", help="do not auto-commit docs/stitch")
+    sad.add_argument("--worktree", help="optional worktree path to write docs/stitch into")
+    sad.set_defaults(fn=cmd_stitch_adopt)
+    sre = sub.add_parser("stitch-retire",
+                         help="record a dead Stitch screen: ledger row, no canonical row, no export")
+    sre.add_argument("project")
+    sre.add_argument("--screen", required=True, help="screen id, surface id or title to retire")
+    sre.add_argument("--replaced-by", help="the canonical screen that took over (id or title)")
+    sre.add_argument("--why", help="one line recorded in RETIRED.md")
+    sre.add_argument("--yes", action="store_true", help="actually write it (otherwise a dry run)")
+    sre.add_argument("--no-commit", action="store_true", help="do not auto-commit docs/stitch")
+    sre.add_argument("--worktree", help="optional worktree path to write docs/stitch into")
+    sre.set_defaults(fn=cmd_stitch_retire)
     vd = sub.add_parser("validate-design", help="audit Stitch-generated or tweaked screens for drift, overstepping, and misses")
     vd.add_argument("project")
     vd.add_argument("--screen", default="main", help="screen id, title, or target label to audit")

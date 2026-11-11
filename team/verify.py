@@ -5,6 +5,7 @@ code, not by the agent.
 from __future__ import annotations
 
 import hashlib
+import json
 import os
 import re
 import subprocess
@@ -765,6 +766,80 @@ def store_note_check(project: Path, worktree: Path, spec: dict | None) -> tuple[
     return shipper.whatsnew_gate(project, spec, root=worktree)
 
 
+def stitch_ledger_check(project: Path, worktree: Path) -> tuple[bool, str]:
+    """The Stitch ledger must not contradict itself.
+
+    BookSwap shipped a manifest where `dc488d60` was BOTH canonical and retired,
+    its export directory still on disk, and its `replaced_by` pointing at a
+    screen that was itself neither canonical nor retired. Nothing read
+    `retired_screens`, so the ledger could lie indefinitely. Owner directive
+    2026-11-11: one row per surface, a dead id is never a surface, and the
+    rendered RETIRED.md must match the manifest — enforced, not remembered.
+    """
+    manifest_path = Path(worktree) / "docs" / "stitch" / "manifest.json"
+    if not manifest_path.is_file():
+        return True, "no Stitch manifest"
+    try:
+        manifest = json.loads(manifest_path.read_text())
+    except Exception as exc:  # noqa: BLE001
+        return False, f"STITCH MANIFEST UNREADABLE — {manifest_path}: {exc}"
+    screens = manifest.get("canonical_screens") or []
+    retired = manifest.get("retired_screens") or []
+    dead: set[str] = set()
+    for r in retired:
+        for key in ("id", "stitch_id"):
+            v = str(r.get(key) or "").strip()
+            if v:
+                dead.add(v)
+    problems: list[str] = []
+
+    both = [str(s.get("id")) for s in screens
+            if str(s.get("stitch_id") or "") in dead]
+    if both:
+        problems.append("a retired screen is still canonical: " + ", ".join(both[:6])
+                        + " — one row per surface; adopt the new design onto the surface id "
+                          "(`devteam stitch-adopt`) or drop the row (`devteam stitch-retire --yes`)")
+    canonical_ids = {str(s.get("id")) for s in screens}
+    canonical_stitch = {str(s.get("stitch_id") or s.get("id")) for s in screens}
+    dangling = [str(r.get("stitch_id")) for r in retired if not str(r.get("replaced_by") or "").strip()]
+    if dangling:
+        problems.append("retired with no successor: " + ", ".join(dangling[:6])
+                        + " — pass --replaced-by (or --why) so the ledger says what took over")
+    lost = [f"{r.get('stitch_id')} → {r.get('replaced_by')}" for r in retired
+            if str(r.get("replaced_by") or "") and str(r.get("replaced_by")) not in canonical_stitch]
+    if lost:
+        problems.append("replaced_by is not a canonical screen: " + ", ".join(lost[:4])
+                        + " — re-point it at the surface that actually took over")
+    dirs = Path(worktree) / "docs" / "stitch" / "screens"
+    if dirs.is_dir():
+        stale = sorted(d.name for d in dirs.iterdir()
+                       if d.is_dir() and d.name in dead and d.name not in canonical_ids)
+        if stale:
+            problems.append("export directories for dead ids: " + ", ".join(stale[:6])
+                            + " — `devteam stitch-retire --yes` drops them")
+        orphan = sorted(d.name for d in dirs.iterdir()
+                        if d.is_dir() and d.name not in canonical_ids and d.name not in dead)
+        if orphan:
+            problems.append("export directories with no canonical row: " + ", ".join(orphan[:6])
+                            + " — one directory per surface; retire the screen "
+                              "(`devteam stitch-retire`) or re-export it (`devteam stitch-export`)")
+        missing = sorted(sid for sid in canonical_ids if sid and not (dirs / sid).is_dir())
+        if missing:
+            problems.append("canonical screens with no export: " + ", ".join(missing[:6])
+                            + " — run `devteam stitch-export`")
+    ledger = Path(worktree) / "docs" / "stitch" / "RETIRED.md"
+    if retired and not ledger.is_file():
+        problems.append("retired screens recorded but RETIRED.md is missing — "
+                        "re-render it by re-running `devteam stitch-retire --yes`")
+    if not retired and ledger.is_file():
+        problems.append("RETIRED.md exists with an empty ledger — it is rendered from "
+                        "manifest.json; delete it or record the retirement")
+    if problems:
+        return False, "STITCH LEDGER DISAGREES WITH ITSELF — " + "; ".join(problems)
+    return True, (f"{len(screens)} surface(s), {len(retired)} retired, ledger consistent"
+                  if retired else f"{len(screens)} surface(s), no retirements")
+
+
 def verify_all(project: Path, worktree: Path, base: str, log, gradle: bool = True,
                spec: dict | None = None) -> tuple[bool, list[str]]:
     """Full gate chain. Returns (passed, failure_texts). Set gradle=False to
@@ -882,6 +957,15 @@ def verify_all(project: Path, worktree: Path, base: str, log, gradle: bool = Tru
     # Gradle gates because it costs nothing and its remedy is a one-line edit.
     ok, msg = store_note_check(project, worktree, spec)
     log("store note: ok — " + msg if ok else "store note: FAIL — " + msg)
+    if not ok:
+        failures.append(msg)
+        return False, failures
+
+    # THE STITCH LEDGER: the screen set is the design spec, so a manifest that
+    # disagrees with RETIRED.md (or with its own export directories) is a design
+    # defect, not paperwork. Offline and instant — it reads files only.
+    ok, msg = stitch_ledger_check(project, worktree)
+    log("stitch ledger: ok — " + msg if ok else "stitch ledger: FAIL — " + msg)
     if not ok:
         failures.append(msg)
         return False, failures
