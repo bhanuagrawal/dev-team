@@ -100,6 +100,7 @@ def build(project) -> dict:
         "status": "active" if plan else "unset",
         "decided_by": "owner", "children": [],
     }
+    prd = _prd_of(project)
     if not plan:
         root["note"] = ("This app has no long-term goal yet. Tell the team one "
                         "sentence about what it is for and it becomes the top of "
@@ -122,7 +123,7 @@ def build(project) -> dict:
             root["children"].append(pre)
         _annotate(root)
         return {"root": root, "generated_at": now_iso(), "changes": changes,
-                "asks": asks, "goal_less": True}
+                "asks": asks, "goal_less": True, "prd": prd}
 
     def attach(leaf: dict, mid: str) -> None:
         # anywhere in the tree — a leaf can hang off a sub-goal just as well as
@@ -225,7 +226,7 @@ def build(project) -> dict:
     _annotate(root)
     _annotate_design(project, root)
     return {"root": root, "generated_at": now_iso(), "changes": changes,
-            "asks": asks, "goal_less": False}
+            "asks": asks, "goal_less": False, "prd": prd}
 
 
 def _annotate_design(project, root: dict) -> None:
@@ -445,6 +446,25 @@ _HTML = """<!doctype html>
  .inner li {{ margin:0 0 4px; }}
  .log {{ background:transparent; border-top:1px solid var(--line); margin-top:44px;
          padding-top:14px; }}
+ .prd {{ background:var(--card); border:1px solid var(--line); border-radius:14px;
+         padding:14px 18px; margin-top:14px; }}
+ .prd summary {{ font-size:13px; font-weight:600; color:var(--ink); }}
+ .prd .prd-body {{ margin-top:12px; border-top:1px solid var(--line);
+                   padding-top:10px; font-size:14px; color:#374151; }}
+ .prd-body h1, .prd-body h2, .prd-body h3 {{ margin:18px 0 8px; text-transform:none;
+                                             letter-spacing:0; color:var(--ink); }}
+ .prd-body h1 {{ font-size:18px; }} .prd-body h2 {{ font-size:16px; }}
+ .prd-body h3 {{ font-size:14.5px; }}
+ .prd-body p, .prd-body li {{ margin:0 0 8px; }}
+ .prd-body pre {{ background:#f6f4ef; border:1px solid var(--line); border-radius:8px;
+                  padding:10px 12px; overflow-x:auto; font-size:12px; }}
+ .prd-body code {{ font-size:12.5px; }}
+ .prd-body table {{ border-collapse:collapse; width:100%; margin:10px 0; font-size:13px; }}
+ .prd-body th, .prd-body td {{ border:1px solid var(--line); padding:6px 9px; text-align:left; }}
+ .prd-body blockquote {{ border-left:3px solid var(--line); margin:8px 0;
+                         padding:2px 12px; color:var(--soft); }}
+ .prd-body ul, .prd-body ol {{ padding-left:22px; margin:6px 0; }}
+ .prd-body hr {{ border:none; border-top:1px solid var(--line); margin:16px 0; }}
  .foot {{ color:var(--soft); font-size:12.5px; margin-top:34px;
           border-top:1px solid var(--line); padding-top:14px; }}
  code {{ background:#f3f1ec; padding:1px 5px; border-radius:4px; font-size:12.5px; }}
@@ -494,6 +514,146 @@ def _details(summary: str, items: list[str]) -> str:
     body = "".join(f"<li>{_esc(i)}</li>" for i in items)
     return (f'<details><summary>{_esc(summary)}</summary>'
             f'<div class="inner"><ul>{body}</ul></div></details>')
+
+
+def _prd_of(project) -> dict:
+    """The product's own spec, when one exists (`devteam revamp` synthesizes
+    docs/PRD.md). It belongs on the plan page — the goal says WHY, the PRD says
+    WHAT — but collapsed, so it never competes with the build order: the
+    summary (title, path, size) is visible even when the document is folded."""
+    path = project / "docs" / "PRD.md"
+    try:
+        text = path.read_text()
+    except Exception:
+        return {}
+    nonblank = [l for l in text.splitlines() if l.strip()]
+    title = next((l.lstrip("# ").strip() for l in nonblank
+                  if l.startswith("# ")), "")
+    return {"path": "docs/PRD.md", "text": text,
+            "lines": len(nonblank), "title": title}
+
+
+def _md_html(md: str) -> str:
+    """Tiny deterministic markdown → HTML for the PRD block: headings, lists,
+    tables, fenced code, blockquotes and inline emphasis. No CDN, no JS —
+    anything it does not recognise renders as plain text."""
+    def inline(s: str) -> str:
+        s = _esc(s)
+        s = re.sub(r"`([^`]+)`", r"<code>\1</code>", s)
+        s = re.sub(r"\*\*([^*]+)\*\*", r"<b>\1</b>", s)
+        s = re.sub(r"(?<!\*)\*([^*\n]+)\*(?!\*)", r"<i>\1</i>", s)
+        s = re.sub(r"\[([^\]]+)\]\(([^)\s]+)\)",
+                   r'<a href="\2">\1</a>', s)
+        return s
+
+    out: list[str] = []
+    lines = md.splitlines()
+    i = 0
+    para: list[str] = []
+
+    def flush() -> None:
+        nonlocal para
+        if para:
+            out.append(f"<p>{inline(' '.join(para))}</p>")
+            para = []
+
+    while i < len(lines):
+        s = lines[i].strip()
+        if s.startswith("```"):
+            flush()
+            block = []
+            i += 1
+            while i < len(lines) and not lines[i].strip().startswith("```"):
+                block.append(lines[i])
+                i += 1
+            i += 1
+            out.append("<pre>" + _esc("\n".join(block)) + "</pre>")
+            continue
+        if not s:
+            flush()
+            i += 1
+            continue
+        m = re.match(r"^(#{1,6})\s+(.*)$", s)
+        if m:
+            flush()
+            lvl = len(m.group(1))
+            out.append(f"<h{lvl}>{inline(m.group(2))}</h{lvl}>")
+            i += 1
+            continue
+        if re.match(r"^(-{3,}|\*{3,})$", s):
+            flush()
+            out.append("<hr/>")
+            i += 1
+            continue
+        if s.startswith(">"):
+            flush()
+            quote = []
+            while i < len(lines) and lines[i].strip().startswith(">"):
+                quote.append(lines[i].strip().lstrip(">").strip())
+                i += 1
+            out.append("<blockquote>"
+                       + "".join(f"<p>{inline(q)}</p>" for q in quote if q)
+                       + "</blockquote>")
+            continue
+        if "|" in s and i + 1 < len(lines) and "-" in lines[i + 1] \
+                and re.match(r"^\s*\|?[\s:|-]+\|?\s*$", lines[i + 1]):
+            flush()
+            header = [c.strip() for c in s.strip("|").split("|")]
+            i += 2
+            rows = []
+            while i < len(lines) and "|" in lines[i] and lines[i].strip():
+                rows.append([c.strip() for c in
+                             lines[i].strip().strip("|").split("|")])
+                i += 1
+            out.append("<table><tr>"
+                       + "".join(f"<th>{inline(h)}</th>" for h in header)
+                       + "</tr>"
+                       + "".join("<tr>" + "".join(f"<td>{inline(c)}</td>"
+                                                  for c in r) + "</tr>"
+                                 for r in rows)
+                       + "</table>")
+            continue
+        if re.match(r"^[-*]\s+(.*)$", s):
+            flush()
+            items: list[str] = []
+            while i < len(lines):
+                mm = re.match(r"^\s*[-*]\s+(.*)$", lines[i])
+                if mm:
+                    items.append(mm.group(1))
+                    i += 1
+                elif items and re.match(r"^\s{2,}\S", lines[i]) \
+                        and lines[i].strip():
+                    # an indented continuation of the previous item
+                    items[-1] += " " + lines[i].strip()
+                    i += 1
+                else:
+                    break
+            out.append("<ul>"
+                       + "".join(f"<li>{inline(it)}</li>" for it in items)
+                       + "</ul>")
+            continue
+        if re.match(r"^\d+[.)]\s+(.*)$", s):
+            flush()
+            items = []
+            while i < len(lines):
+                mm = re.match(r"^\s*\d+[.)]\s+(.*)$", lines[i])
+                if mm:
+                    items.append(mm.group(1))
+                    i += 1
+                elif items and re.match(r"^\s{2,}\S", lines[i]) \
+                        and lines[i].strip():
+                    items[-1] += " " + lines[i].strip()
+                    i += 1
+                else:
+                    break
+            out.append("<ol>"
+                       + "".join(f"<li>{inline(it)}</li>" for it in items)
+                       + "</ol>")
+            continue
+        para.append(s)
+        i += 1
+    flush()
+    return "".join(out)
 
 
 def _targets(value) -> str:
@@ -585,6 +745,17 @@ def _body(model: dict) -> str:
                f'<div class="vt">{_esc(root["title"])}</div></div>')
     if root.get("note"):
         out.append(f'<div class="ask">{_esc(root["note"])}</div>')
+
+    # 1b. the product's own spec: visible although collapsed — the summary
+    # names the PRD even when the document itself is folded away
+    prd = model.get("prd") or {}
+    if prd.get("text"):
+        label = prd.get("title") or "Product spec"
+        out.append('<details class="prd"><summary>Product spec (PRD) — '
+                   f'{_esc(label)} · {_esc(prd["path"])} · '
+                   f'{prd["lines"]} lines · collapsed — expand to read'
+                   '</summary><div class="prd-body">'
+                   + _md_html(prd["text"]) + "</div></details>")
 
     # 2. what one run builds next
     if next_task:
