@@ -4157,8 +4157,10 @@ def _retire_stitch_screen(project: Path, root: Path, logical_id: str, old_stitch
     for s in manifest.get("canonical_screens") or []:
         sid = str(s.get("id") or "")
         stitch = str(s.get("stitch_id") or sid)
-        alive = (sid == surf and stitch not in dead)
-        if alive or (sid not in dead and stitch not in dead):
+        # The row is alive iff the screen it serves is alive. The SURFACE id may
+        # legitimately equal a dead stitch id (a surface that was never adopted
+        # keeps its historical id), so never test the surface id here.
+        if stitch not in dead:
             keep.append(s)
             continue
         dropped.append(sid)
