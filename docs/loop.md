@@ -36,7 +36,13 @@ python3 cli.py asks    <project>     # review every open ask/flag: can a machine
 python3 cli.py plan    <project>     # planner maintains the queue (runs every cycle)
 python3 cli.py pick    <project>     # the queue head → task spec + worktree command
 python3 cli.py worktree-start <project> --task-id <id>
-#   → prints WORKTREE_PATH, WORKTREE_BASE, TASK_SPEC and DEVELOP_SKILL.
+#   → prints WORKTREE_PATH, WORKTREE_BASE, TASK_SPEC, DEVELOP_SKILL and DESIGN.
+#     `pick` now writes the spec's `context` block (goal, conventions, build,
+#     design, journeys) from the same sources the gates read, so the developer
+#     sees the design question BEFORE writing UI. `worktree-start` prints
+#     DESIGN=<state>; when it is `pending`/`stale` it also prints
+#     DESIGN_BLOCKED + DESIGN_COMMAND and its NEXT line is the design step, not
+#     the code step. The `verify` design gate is still the hard stop.
 #     Read `skills/dev-team/references/develop.md` and the task spec, then
 #     implement inside WORKTREE_PATH — YOU do the work in this session, not a
 #     subagent. The spec is data (goal, focus paths, conventions, build command,

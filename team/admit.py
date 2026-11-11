@@ -98,13 +98,21 @@ def _targets(profile: dict, kind: str) -> list[str]:
 def entry_for(profile: dict, query: str, kind: str, advances: str,
               why: str) -> dict[str, Any]:
     """The queue entry an admitted request becomes. One shape, always."""
-    return {
+    from . import goals
+
+    # A task spec is a mini-PRD (`problem`, `done_when`), and `pick` copies the
+    # entry's fields onto it. An admitted owner request used to arrive with
+    # neither, so the developer's spec had no statement of the defect and no
+    # acceptance bar. The owner's sentence IS the problem; the milestone's
+    # measures are the best available "done when" until the developer refines it.
+    entry: dict[str, Any] = {
         "type": "bugfix" if kind == "bugfix" else "feature",
         "label": _label(query, kind),
         "target": ", ".join(_targets(profile, kind)),
         "risk": "safe",
         "reason": f'Owner request: "{query}" — {why}' if why else f'Owner request: "{query}"',
         "owner_request": query,
+        "problem": query,
         "pinned": True,
         "priority": "owner",
         "kind": kind,
@@ -113,6 +121,15 @@ def entry_for(profile: dict, query: str, kind: str, advances: str,
         "decided_by": "agent",
         "advances": advances or "none",
     }
+    raw, _ = goals.raw_node(profile, str(advances or ""))
+    measures = [
+        str(m.get("text")).strip()
+        for m in ((raw or {}).get("measures") or [])
+        if isinstance(m, dict) and str(m.get("text") or "").strip()
+    ]
+    if measures:
+        entry["done_when"] = measures[:3]
+    return entry
 
 
 def check(project: Path, query: str, kind: str | None, advances: str,

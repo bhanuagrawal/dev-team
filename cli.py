@@ -937,10 +937,31 @@ def cmd_worktree_start(args: argparse.Namespace) -> None:
     except SystemExit:
         spec = None
     print(f"DEVELOP_SKILL={skill}")
+    design_blocked = False
     if spec:
         print(f"TASK_SPEC={spec}")
-    print(f"NEXT=read {skill.name} and the task spec, then implement inside "
-          f"WORKTREE_PATH — leave the work uncommitted; devteam verify decides")
+        # The design answer is a gate; say so BEFORE the developer starts, not at
+        # verify time. A spec with no context block (an older spec) simply skips.
+        try:
+            data = json.loads(spec.read_text())
+            design = ((data.get("context") or {}).get("design") or {})
+            if design:
+                print("DESIGN=" + str(design.get("state") or "unknown")
+                      + (f" decision={design.get('decision')}" if design.get("decision") else "")
+                      + (f" screen={design.get('screens_dir')}" if design.get("screens_dir") else ""))
+                if design.get("blocked"):
+                    design_blocked = True
+                    print(f"DESIGN_BLOCKED={design.get('instruction')}")
+                    print(f"DESIGN_COMMAND={design.get('command')}")
+        except Exception as exc:
+            print(f"DESIGN=unreadable ({exc})")
+    if design_blocked:
+        print("NEXT=run DESIGN_COMMAND first, record the answer with --record and "
+              f"export the screen — THEN read {skill.name} and implement inside "
+              "WORKTREE_PATH")
+    else:
+        print(f"NEXT=read {skill.name} and the task spec, then implement inside "
+              f"WORKTREE_PATH — leave the work uncommitted; devteam verify decides")
 
 
 def cmd_run_orchestrator(args: argparse.Namespace) -> int:
@@ -1519,6 +1540,12 @@ def cmd_pick(args: argparse.Namespace) -> int:
         if entry.get("label") == label and entry.get("dependencies_added"):
             task["dependencies_added"] = entry["dependencies_added"]
             break
+    # The instruction layer (develop.md) tells the developer to read
+    # context.goal/conventions/build/design/journeys. It must therefore be ON the
+    # spec: the design answer is a gate, and the developer has to see the gate's
+    # question before writing UI, not at verify time after inventing the screen.
+    from team.spec import attach as attach_spec_context
+    task = attach_spec_context(project, task)
     spec_path = pdir / f"{task['id']}.json"
     spec_path.write_text(json.dumps(task, indent=2) + "\n")
     run_info = task.get("run") or {"entries": 1,
