@@ -4037,9 +4037,10 @@ def _upsert_stitch_manifest_entry(project: Path, root: Path, pid: str, entry: di
     manifest["canonical_screens"] = screens
     payload = json.dumps(manifest, indent=2, ensure_ascii=False) + "\n"
     mpath.write_text(payload)
-    p_copy = pipeline_dir(project) / "stitch_manifest.json"
-    p_copy.parent.mkdir(parents=True, exist_ok=True)
-    p_copy.write_text(payload)
+    if Path(root).resolve() == Path(project).resolve():
+        p_copy = pipeline_dir(project) / "stitch_manifest.json"
+        if p_copy.parent.is_dir():
+            p_copy.write_text(payload)
 
 
 def _load_stitch_manifest(root: Path) -> dict:
@@ -4055,6 +4056,11 @@ def _write_stitch_manifest(project: Path, root: Path, manifest: dict) -> None:
     out = root / "docs" / "stitch"
     out.mkdir(parents=True, exist_ok=True)
     (out / "manifest.json").write_text(payload)
+    # The .pipeline mirror only belongs to the checkout that owns it: writing the
+    # MAIN checkout's copy from a worktree run leaves an uncommitted file in a tree
+    # nobody judged, which is the exact "exists only on this disk" defect.
+    if Path(root).resolve() != Path(project).resolve():
+        return
     p_copy = pipeline_dir(project) / "stitch_manifest.json"
     if p_copy.parent.is_dir():
         p_copy.write_text(payload)
@@ -4608,7 +4614,11 @@ def cmd_stitch_retire(args: argparse.Namespace) -> int:
     if not entry:
         print(f"  ✗ No screen matches '{args.screen}' (manifest or live Stitch).")
         return 1
-    stitch_id = str(entry.get("stitch_id") or entry.get("id")).split("/")[-1]
+    # `--stitch-id` names the exact dead id. It exists because a broken ledger can
+    # carry the SAME id as both the surface and its dead screen (BookSwap: surface
+    # dc488d60 lived on as stitch 4accc6eb while dc488d60 was the retired one).
+    forced = str(getattr(args, "stitch_id", "") or "").split("/")[-1]
+    stitch_id = forced or str(entry.get("stitch_id") or entry.get("id")).split("/")[-1]
     surface = str(entry.get("id") or stitch_id)
     title = str(entry.get("title") or "")
     replaced = str(getattr(args, "replaced_by", "") or "").split("/")[-1]
@@ -5715,6 +5725,8 @@ def main() -> None:
     sre.add_argument("project")
     sre.add_argument("--screen", required=True, help="screen id, surface id or title to retire")
     sre.add_argument("--replaced-by", help="the canonical screen that took over (id or title)")
+    sre.add_argument("--stitch-id", help="retire this exact Stitch id (for a broken ledger where the "
+                                        "surface id and the dead id are the same string)")
     sre.add_argument("--why", help="one line recorded in RETIRED.md")
     sre.add_argument("--yes", action="store_true", help="actually write it (otherwise a dry run)")
     sre.add_argument("--no-commit", action="store_true", help="do not auto-commit docs/stitch")

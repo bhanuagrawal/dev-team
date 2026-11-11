@@ -801,10 +801,12 @@ def stitch_ledger_check(project: Path, worktree: Path) -> tuple[bool, str]:
                           "(`devteam stitch-adopt`) or drop the row (`devteam stitch-retire --yes`)")
     canonical_ids = {str(s.get("id")) for s in screens}
     canonical_stitch = {str(s.get("stitch_id") or s.get("id")) for s in screens}
-    dangling = [str(r.get("stitch_id")) for r in retired if not str(r.get("replaced_by") or "").strip()]
+    dangling = [str(r.get("stitch_id")) for r in retired
+                if not str(r.get("replaced_by") or "").strip()
+                and not str(r.get("reason") or "").strip()]
     if dangling:
-        problems.append("retired with no successor: " + ", ".join(dangling[:6])
-                        + " — pass --replaced-by (or --why) so the ledger says what took over")
+        problems.append("retired with no successor and no reason: " + ", ".join(dangling[:6])
+                        + " — pass --replaced-by (what took over) or --why (why it is dead)")
     lost = [f"{r.get('stitch_id')} → {r.get('replaced_by')}" for r in retired
             if str(r.get("replaced_by") or "") and str(r.get("replaced_by")) not in canonical_stitch]
     if lost:
