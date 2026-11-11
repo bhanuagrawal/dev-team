@@ -367,14 +367,30 @@ def run_doctor(project: Path, log) -> dict:
     # reads as "Stitch is broken" (seen 2026-11-10). Probe it here so a dead MCP
     # is reported rather than discovered halfway through a design task.
     try:
-        from . import stitch_mcp
+        from . import designer as designer_mod, stitch_mcp
         n = stitch_mcp.ping()
-        report["design"] = {"status": "ready", "tools": n}
-        log(f"doctor design: ready (Stitch MCP answers, {n} tools)")
+        mismatch = designer_mod.manifest_project_mismatch(project)
+        if mismatch:
+            report["design"] = {
+                "status": "blocked",
+                "tools": n,
+                "blocked": [{"requirement": "Stitch manifest matches profile stitch_project_id",
+                             "fix": mismatch}],
+                "fix": mismatch,
+            }
+            log(f"doctor design: BLOCKED — {mismatch}")
+        else:
+            report["design"] = {"status": "ready", "tools": n}
+            log(f"doctor design: ready (Stitch MCP answers, {n} tools)")
     except Exception as e:  # noqa: BLE001 - a probe must never hide the report
-        report["design"] = {"status": "blocked", "fix": "check network / the MCP url + key; "
-                            "scripted design work can also use team.stitch_mcp directly",
-                            "error": str(e)[:160]}
+        fix_msg = ("check network / the MCP url + key; "
+                   "scripted design work can also use team.stitch_mcp directly")
+        report["design"] = {
+            "status": "blocked",
+            "blocked": [{"requirement": "Stitch MCP reachable", "fix": fix_msg}],
+            "fix": fix_msg,
+            "error": str(e)[:160],
+        }
         log(f"doctor design: BLOCKED — Stitch MCP did not answer ({str(e)[:120]}); "
             "the host's tool catalog will be missing stitch.* this turn — use "
             "`python3 -c \"from team import stitch_mcp; stitch_mcp.ping()\"` to check")

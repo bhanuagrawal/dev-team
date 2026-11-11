@@ -430,19 +430,21 @@ def flow_gate(project: Path, worktree: Path, spec: dict | None,
 
 
 def design_gate(project: Path, worktree: Path, spec: dict | None,
-                files: list[str]) -> tuple[bool, str]:
+                files: list[str], base: str = "origin/main") -> tuple[bool, str]:
     """No UI code without a design: find it, or get it created.
 
     Owner directive 2026-11-10 — an agent may write UI only when a design exists
     for that surface. "Exists" is not a feeling: it is either a screen the
     project already owns (docs/stitch/manifest.json + its exported snapshot, to
     reuse or tweak) or a design the designer produced for THIS task (recorded by
-    `devteam design-consult --record`, with the new screen exported when the
-    answer was `new_screen`). Building a screen out of tokens alone is exactly
-    what this refuses.
+    `devteam design-consult --record`, with the updated/new screen exported into
+    `docs/stitch/screens/<id>/` whenever UI structure changes). Building a
+    screen out of tokens alone — or claiming `existing_screen` while adding new
+    composables/layouts — is what this refuses.
 
     Deterministic and offline: it classifies the diff with the same classifier
-    the UI test gate uses, then reads the recorded answer. It never calls a model.
+    the UI test gate uses, inspects structural UI additions in the diff, and
+    verifies real Stitch snapshot artifacts in the worktree.
     """
     if not spec:
         return True, ""  # no task spec — nothing to bind a design answer to
@@ -466,17 +468,21 @@ def design_gate(project: Path, worktree: Path, spec: dict | None,
     if not ui_files:
         return True, "no UI file changed — no design needed"
 
-    st = designer.status(project, spec)
+    mismatch = designer.manifest_project_mismatch(project, root=worktree)
+    if mismatch:
+        return False, mismatch
+
+    st = designer.status(project, spec, root=worktree)
     label = designer.task_label(spec)
     state = st.get("state")
     remedy = (
         "FIND THE DESIGN OR GET IT CREATED — do not write this screen blind: "
         "if the surface already exists in docs/stitch/manifest.json with a snapshot "
-        "under docs/stitch/screens/<id>/, reuse or tweak it (never redesign it); if it "
-        f"does not, run `devteam design-consult <project> --task {label} --prompt`, "
-        "record the answer with `--record`, and when the answer is `new_screen` generate "
-        "the screen in Stitch and export docs/stitch/screens/<id>/index.html + "
-        "screen.png in THIS same change.")
+        "under docs/stitch/screens/<id>/, reuse it (copy/wiring only) or tweak it "
+        "(`devteam stitch-tweak`); if it does not, run "
+        f"`devteam design-consult {project.name} --task {label} --prompt`, "
+        "record the answer with `--record`, and generate/tweak the screen in Stitch "
+        "so docs/stitch/screens/<id>/index.html + screen.png are exported in THIS change.")
     if state == "not_applicable":
         return True, "the designer says this task has no UI surface"
     if state in ("pending", "stale"):
@@ -486,28 +492,71 @@ def design_gate(project: Path, worktree: Path, spec: dict | None,
     if state != "answered":
         return False, f"design state unreadable ({state}) for {label}. " + remedy
 
-    if str(st.get("decision") or "") == "new_screen":
-        screen = st.get("screen") or {}
-        sid = str(screen.get("id") or "").strip()
-        title = str(screen.get("title") or "").strip()
-        snapshots = project / "docs" / "stitch" / "screens"
-        exported = bool(sid) and (snapshots / sid / "screen.png").is_file()
-        if not exported and title:
-            exported = any(
-                (p / "screen.png").is_file() and
-                title.lower() in (p / "index.html").read_text(errors="ignore").lower()[:4000]
-                for p in snapshots.glob("*") if p.is_dir()) if snapshots.is_dir() else False
-        if not exported:
+    decision = str(st.get("decision") or "")
+    screen = st.get("screen") or {}
+    m = designer.manifest(project, root=worktree)
+    entry = designer.find_manifest_screen(m, screen)
+    png, html, sid = designer.snapshot_paths(worktree, screen, m)
+    title = str((entry or {}).get("title") or screen.get("title") or "").strip()
+    norm_files = {f.replace("\\", "/").lstrip("./") for f in files}
+
+    if decision == "new_screen":
+        if not (png and html and entry):
             return False, (
                 "NEW SCREEN NOT DESIGNED YET — the designer's answer for this task is "
-                f"`new_screen` ({title or sid or 'unnamed'}) but its exported snapshot is "
-                "not in docs/stitch/screens/. Generate it in Stitch and export "
-                "index.html + screen.png there in this same change; a screen built from "
-                "tokens alone is not a design.")
+                f"`new_screen` ({title or sid or 'unnamed'}) but its exported snapshot "
+                "(index.html + screen.png) and manifest.json entry are not in the worktree's "
+                "docs/stitch/. Run `devteam stitch-screen --generate` and export them in this change.")
+        expected_rel = f"docs/stitch/screens/{sid}/"
+        if not any(f.startswith(expected_rel) for f in norm_files):
+            return False, (
+                f"NEW SCREEN SNAPSHOT NOT UPDATED IN DIFF — `{expected_rel}` was not modified/added "
+                "in this worktree diff. Export the newly generated Stitch screen into the worktree.")
         return True, f"new screen designed and exported ({title or sid})"
-    return True, (f"design answered: {st.get('decision')}"
-                  + (f" — {st.get('screen', {}).get('title')}"
-                     if (st.get("screen") or {}).get("title") else ""))
+
+    if decision == "tweak_screen":
+        if not (png and html and entry):
+            return False, (
+                "TWEAKED SCREEN SNAPSHOT MISSING — the designer's answer for this task is "
+                f"`tweak_screen` ({title or sid or 'unnamed'}) but its snapshot or manifest entry "
+                "is missing in the worktree's docs/stitch/. Run `devteam stitch-tweak` first.")
+        expected_rel = f"docs/stitch/screens/{sid}/"
+        cur_sha = designer.snapshot_digest(png, html)
+        base_sha = str(st.get("baseline_snapshot_sha") or "")
+        snapshot_touched = any(f.startswith(expected_rel) for f in norm_files)
+        snapshot_changed = bool(base_sha and cur_sha and cur_sha != base_sha)
+        if not (snapshot_touched or snapshot_changed):
+            return False, (
+                f"TWEAK_SCREEN DID NOT EXPORT A STITCH TWEAK — `{expected_rel}` is unchanged in "
+                "this worktree diff. Run `devteam stitch-tweak` (with `--worktree`) so the updated "
+                "Stitch snapshot is exported before writing UI code.")
+        return True, f"screen tweaked in Stitch and exported ({title or sid})"
+
+    if decision == "existing_screen":
+        if not (png and html and entry):
+            return False, (
+                "EXISTING SCREEN SNAPSHOT MISSING — `existing_screen` named "
+                f"'{title or sid or 'unnamed'}', which is not present in the worktree's "
+                "docs/stitch/manifest.json + docs/stitch/screens/. Sync Stitch or use `tweak_screen`/`new_screen`.")
+        summary = designer.diff_ui_summary(worktree, base, ui_files)
+        if summary["structural_change"]:
+            details: list[str] = []
+            if summary["added_ui_files"]:
+                details.append(f"new UI files: {', '.join(summary['added_ui_files'][:3])}")
+            if summary["added_composables"]:
+                details.append(f"new @Composables: {', '.join(summary['added_composables'][:4])}")
+            if summary["added_layout_lines"] >= 4:
+                details.append(f"{summary['added_layout_lines']} added layout lines")
+            return False, (
+                "EXISTING_SCREEN CANNOT COVER NEW UI STRUCTURE (" + "; ".join(details) + "). "
+                "Do not invent UI structure without a Stitch design: run `devteam design-consult` "
+                "with `tweak_screen` (`devteam stitch-tweak`) or `new_screen` (`devteam stitch-screen --generate`) "
+                "and export the updated snapshot into docs/stitch/screens/ before writing UI code.")
+        return True, (f"design answered: existing_screen"
+                      + (f" — {title}" if title else ""))
+
+    return True, (f"design answered: {decision}"
+                  + (f" — {title}" if title else ""))
 
 
 def localization_check(project_root: Path, files: list[str]) -> tuple[bool, str]:
@@ -814,7 +863,7 @@ def verify_all(project: Path, worktree: Path, base: str, log, gradle: bool = Tru
     # the project already owns, or get one created, before a screen is written.
     # Runs on file reads, before the Gradle gates, so a blind screen is refused
     # cheaply and the remedy (consult → record → export) is named.
-    ok, msg = design_gate(project, worktree, spec, files)
+    ok, msg = design_gate(project, worktree, spec, files, base=base)
     log("design: ok — " + msg if ok else "design: FAIL — " + msg)
     if not ok:
         failures.append(msg)
