@@ -337,6 +337,14 @@
       "kind": "enforcible",
       "enforced_by": "",
       "proposal": "surface the input declaration where the developer sees it: when a task adds a test that reads files outside its source set, the developer brief names the build-input declaration as part of that test's definition of done, or `devteam verify` re-runs the project's test task once with --rerun-tasks so a cached pass cannot be mistaken for a fresh one. Evidence 2026-11-11: a store-identity parity test read the Play listing's title file, and after editing ONLY that file the module's unit-test task reported UP-TO-DATE; declaring the listing directory as a test input made the same edit fail the build as the measure required."
+    },
+    {
+      "id": "generated-design-states-must-not-invent-values",
+      "rule": "a Stitch screen generated for a STATE (failure/empty/loading) may not contain values the app does not hold - task ids, error codes, heap/percentage measurements, trace logs, timers - and the drift audit must not pass one that does",
+      "doc": "docs/store.md",
+      "kind": "enforcible",
+      "proposal": "design_validator: scan the generated screen's text for instrument-shaped tokens (ERR_*, #<id>, '%', 'MB /' heap phrasing, 'trace', 'log', 'Copy', 'Dump', 'Settings') plus any number not present in the task spec, and FAIL the drift report instead of scoring it 100/100",
+      "note": "2026-11-11: a 'job failed notice' generation returned a developer diagnostics console (TASK_ID, 248MB/256MB heap, trace log, Dump Log/Tune Settings). The drift audit scored it 100/100 because it checked prompt fidelity, not truth. It was retired by hand in docs/stitch/RETIRED.md; nothing in code would have stopped it."
     }
   ]
 }
