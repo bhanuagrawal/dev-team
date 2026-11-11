@@ -483,6 +483,31 @@ def record_verdict(state: dict, mid: str, verdict: str, evidence: str,
     })
 
 
+def record_status_verdict(state: dict, node_id: str, status: str, why: str,
+                          by: str = "agent") -> None:
+    """A plan change to a branch's STATUS is itself the latest statement about it.
+
+    `status_of` treats a recorded 'done' verdict as final — correct for a metric
+    that was actually met — but that let a STALE 'done' outrank a LATER plan
+    change that set the same branch back to active. On 2026-11-10 the planner
+    re-activated a retention branch whose number was failing, the profile said
+    active, and `status` still printed done: the only measured failure in the
+    plan stayed hidden, the queue entry aimed at it looked off-goal, and the
+    same change had to be made again by hand the next cycle. Writing the verdict
+    the status change MEANS keeps the two records in step, whichever way the
+    change arrived (`devteam goal … set-status` or a planner `goal_changes`).
+    """
+    st = str(status or "").strip().lower()
+    if st in ("active", "pending"):
+        record_verdict(state, node_id, "active", why, by)
+    elif st in ("done",):
+        record_verdict(state, node_id, "done", why, by)
+    elif st in ("parked", "retired", "dropped"):
+        # Any non-'done' verdict clears a stale retirement; the raw status is what
+        # makes the branch parked.
+        record_verdict(state, node_id, "parked", why, by)
+
+
 def queue_entry_milestone(entry: dict, profile: dict, state: dict) -> str:
     """The milestone a queue entry advances: an explicit 'advances' tag, else —
     for legacy entries that never carried one — the active milestone's id (so

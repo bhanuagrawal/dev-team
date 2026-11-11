@@ -2016,6 +2016,15 @@ def apply_goal_changes(profile: dict, state: dict, result: dict) -> list[dict]:
         e = goals.change(state, what, node_id, why or str(c.get("why") or ""),
                          by="agent")
         e["goals_before"], e["goals_after"] = before, after
+        # A status change is the plan's latest word on the branch: record the
+        # verdict it means, so a stale 'done' cannot keep hiding a branch the
+        # planner just re-activated (2026-11-11: the same change was made twice
+        # and neither took effect while a done verdict outranked it).
+        if str(c.get("action") or "") in ("park", "set-status", "update") \
+                and c.get("status"):
+            goals.record_status_verdict(
+                state, node_id, str(c.get("status")), why or str(c.get("why") or ""),
+                by="agent")
         applied.append({"node": node_id, "what": what, "why": e["why"]})
     return applied
 

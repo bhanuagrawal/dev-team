@@ -1775,6 +1775,10 @@ def cmd_goal(args: argparse.Namespace) -> int:
     e = goals.change(state, human, node_id, args.why or "(no reason given)",
                      before="", after="", by=args.by)
     e["goals_before"], e["goals_after"] = before, after
+    if action in ("park", "set-status", "update") and args.status:
+        goals.record_status_verdict(
+            state, node_id, str(args.status), args.why or "(no reason given)",
+            by=args.by)
     save_json(pfile, profile)
     save_state(project, state)
     from team import tree as tree_mod
