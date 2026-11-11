@@ -321,6 +321,14 @@
    "kind": "enforcible",
    "enforced_by": "",
    "proposal": "devteam ux-flow already detects needs_credentials and prints the unblock; `devteam verify` should report it as rc=4 BLOCKED (with the one ask) rather than FAIL, and `devteam doctor` should flag a declared flow with no credentials when its goal names sign-in. Evidence: 2026-11-10, request-a-book walked on a fresh emulator \u2014 guest browsing died on raw auth text and the walk could not pass without the owner signing in, blocking an otherwise green release."
+  },
+  {
+   "id": "ux-audit-sees-the-run-tree",
+   "rule": "a run's UX audit and ux-plan must be able to read the RUN's tree, not only the project checkout",
+   "doc": "docs/loop.md",
+   "kind": "enforcible",
+   "proposal": "ux-plan and ux-audit take --tree <worktree> (like `storefront-scenes --render --tree`): surfaces, scene bindings and visual/behaviour fingerprints are hashed from that tree, so a run that fixes a screen can re-render, re-react and clear its own gripes before the release that lands it",
+   "note": "seen 2026-11-11: a run fixed DashboardScreen.kt and re-rendered its scenes from the worktree, but `ux-plan`/`ux-audit` hashed the checkout, so the audit reported 'unchanged' and the unbound-scene warning kept quoting the checkout's older docs/storefront.json; the only workaround was `ux-audit --all`, which re-reacts to every scene and costs a vision call per screen"
   }
  ]
 }
