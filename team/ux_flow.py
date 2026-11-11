@@ -81,8 +81,10 @@ Tappable:
 {dead}
 Choose the SINGLE next action that moves a real user closest to the goal:
   type    — index + field ("email" or "password"): put the journey's credential in
-            that field. ONLY when CREDENTIALS are listed below; if they are not,
-            a text field is a wall for you, not a dead control — choose stuck.
+            that field. When PROFILE values are listed below, field may also be
+            "name" or "handle" for a shelf-onboarding form. ONLY when those values
+            are listed below; if they are not, a text field is a wall for you, not
+            a dead control — choose stuck.
   tap     — an index from the list above
   scroll  — "down" or "up": reach content below or above the fold. The screenshot
             shows only the visible part of a screen; a request or continue control
@@ -107,6 +109,7 @@ Reply with JSON only, no prose, no code fences:
   {{"action": "tap", "index": 2, "why": "one short line",
     "reaction": {{"line": "one short line, first person", "kind": "confusing|broken|slow|good"}}}}
   {{"action": "type", "index": 4, "field": "email", "why": "one short line"}}
+  {{"action": "type", "index": 6, "field": "name", "why": "one short line"}}
   {{"action": "scroll", "direction": "down", "why": "one short line"}}
   {{"action": "back", "why": "one short line"}}
   {{"action": "done", "why": "what proves the goal is reached"}}
@@ -309,6 +312,10 @@ def _pick_field(targets: list[dict], role: str) -> int | None:
     if role == "email":
         return fields[0] if fields else None
     if role == "password":
+        return fields[1] if len(fields) > 1 else (fields[0] if fields else None)
+    if role == "name":
+        return fields[0] if fields else None
+    if role == "handle":
         return fields[1] if len(fields) > 1 else (fields[0] if fields else None)
     return fields[0] if fields else None
 
@@ -636,11 +643,18 @@ def audit_flow(project: Path, flow: dict, serial: str, log=None,
             dead_line = ("Already tried on this screen with no visible change (do NOT "
                          "repeat): " + ", ".join(sorted(tried[screen])) + "\n")
         creds = flow.get("credentials") or {}
+        profile = flow.get("profile") or {}
         credentials = ("CREDENTIALS for this journey: email and password are available — "
                        "use action type with field=email/password.\n"
                        if creds.get("email") and creds.get("password") else
                        "CREDENTIALS: none. You cannot sign in or create an account: a "
                        "text field is where a human takes over.\n")
+        if profile.get("name") or profile.get("handle"):
+            credentials += (
+                "PROFILE values for a shelf-onboarding form: "
+                + ", ".join(f"{k}={v}" for k, v in profile.items() if v)
+                + " — use action type with field=name/handle.\n"
+            )
         prompt = DECIDE_PROMPT.format(
             app=app, flow=fid, goal=goal, step=step, max_steps=cap,
             history=history, filled=(", ".join(sorted(filled)) or "(none yet)"),
@@ -709,7 +723,8 @@ def audit_flow(project: Path, flow: dict, serial: str, log=None,
             typed += 1
             field = str(decision.get("field") or "").strip().lower()
             creds = flow.get("credentials") or {}
-            value = creds.get(field) or ""
+            profile = flow.get("profile") or {}
+            value = creds.get(field) or profile.get(field) or ""
             idx = _pick_field(targets, field)
             if not isinstance(idx, int) or not (0 <= idx < len(targets)) or not value:
                 outcome, reason = "error", (
@@ -720,11 +735,11 @@ def audit_flow(project: Path, flow: dict, serial: str, log=None,
             label = (target["label"] or "").strip()
             # The field's own label can be empty in a Compose dump, so trust the
             # model's declared field when it names a credential we actually hold.
-            role = (field if field in creds else
+            role = (field if field in creds or field in profile else
                     "email" if any(k in label.lower() for k in ("email", "mail"))
                     else "password" if any(k in label.lower() for k in ("pass", "secret"))
                     else "field")
-            if role in filled or typed > len(creds):
+            if role in filled or typed > len(creds) + len(profile):
                 # Typing again APPENDS: the field read "…testaudit-pass-123" and the
                 # sign-in then failed for a reason the app never caused.
                 outcome, reason = "error", (

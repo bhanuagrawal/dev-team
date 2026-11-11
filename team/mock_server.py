@@ -252,6 +252,53 @@ class _Handler(BaseHTTPRequestHandler):
                         "role": "LENDER"})
             return
 
+        # The app's offer composer reads the reader's own copies from here.
+        if path.startswith("/api/v1/users/") and path.endswith("/available-copies"):
+            self._json([
+                {
+                    "id": "b0000001-0000-0000-0000-000000000001",
+                    "work_id": "OL893415W",
+                    "book_catalog": {
+                        "isbn": "9780441013593",
+                        "title": "Dune",
+                        "authors": ["Frank Herbert"],
+                        "cover_image_url": BOOKS[0].get("cover_url"),
+                    },
+                },
+                {
+                    "id": "b0000001-0000-0000-0000-000000000002",
+                    "work_id": "OL1168083W",
+                    "book_catalog": {
+                        "isbn": "9780062316097",
+                        "title": "Sapiens",
+                        "authors": ["Yuval Noah Harari"],
+                        "cover_image_url": BOOKS[0].get("cover_url"),
+                    },
+                },
+            ])
+            return
+
+        if path == "/api/v1/catalog/works":
+            self._json([])
+            return
+
+        if path in ("/api/v1/profile", "/api/v1/users/me"):
+            self._json(PROFILE)
+            return
+
+        if path == "/api/v1/offers":
+            self._json({"offers": []})
+            return
+
+        if path.startswith("/api/v1/offers/"):
+            terms = getattr(self.server, "state", {}).get("offer") or {}
+            self._json(offer_json(
+                path.rsplit("/", 1)[-1],
+                mode=str(terms.get("mode") or "PERMANENT"),
+                days=int(terms.get("days") or 21),
+            ))
+            return
+
         if path.startswith("/api/v1/books/"):
             lid = path.rsplit("/", 1)[-1]
             book = next((b for b in BOOKS if b["listing_id"] == lid), None)
@@ -374,6 +421,47 @@ class _Handler(BaseHTTPRequestHandler):
             self._json([row], 201)
             return
 
+        # The onboarding save: the server owns the id, so echo the row back.
+        if path == "/api/v1/profile":
+            row = {**PROFILE, **(body or {})}
+            row["id"] = READER_ID
+            self._json([row], 201)
+            return
+
+        # The app's discovery search: the feed's real query route.
+        if path == "/api/v1/search/local":
+            self._json(BOOKS)
+            return
+
+        if path == "/api/v1/search/vibe":
+            self._json([])
+            return
+
+        if path == "/api/v1/offers":
+            tx = MOCK_TRANSACTION_ID
+            try:
+                self.server.state["offer"] = {
+                    "mode": str(body.get("exchange_mode") or "PERMANENT"),
+                    "days": int(body.get("duration_days") or 21),
+                }
+            except Exception:
+                pass
+            self._json({"transaction_id": tx, "status": "REQUESTED",
+                        "offer_version": 1})
+            return
+
+        if path.startswith("/api/v1/offers/") and (
+                path.endswith("/accept") or path.endswith("/release")
+                or path.endswith("/counter") or path.endswith("/decline")):
+            tx = path.split("/api/v1/offers/")[-1].rsplit("/", 1)[0]
+            terms = getattr(self.server, "state", {}).get("offer") or {}
+            self._json(offer_json(
+                tx,
+                mode=str(terms.get("mode") or "PERMANENT"),
+                days=int(terms.get("days") or 21),
+            ))
+            return
+
         if path.startswith("/rest/v1/rpc/"):
             self._rpc(path.rsplit("/", 1)[-1], body)
             return
@@ -422,6 +510,17 @@ class _Handler(BaseHTTPRequestHandler):
             return
 
         self._json({"message": f"no mock route for {path}"}, 404)
+
+    def do_PATCH(self):
+        path = urlparse(self.path).path
+        body = self._body()
+        self._record("PATCH", path, body)
+        if path in ("/api/v1/profile", "/api/v1/users/me"):
+            row = {**PROFILE, **(body or {})}
+            row["id"] = READER_ID
+            self._json(row)
+            return
+        self._json({"message": "not found"}, 404)
 
     def _rpc(self, name: str, body: dict):
         if name == "rpc_search_local_books":
@@ -505,6 +604,44 @@ def meetup_json(transaction_id: str, status: str = "REQUESTED",
         },
         "accepted_at": accepted_at,
         "alternate_suggested_at": None,
+    }
+
+
+def offer_json(transaction_id: str = "", mode: str = "PERMANENT",
+               days: int = 21) -> dict:
+    """One offer projection in the shape `OffersRepository` decodes.
+
+    The two readers are deterministic: the audit reader is the offerer and the
+    first fixture neighbour keeps the wanted copy. The mock remembers the terms
+    this audit sent so a walk can see the choice it made.
+    """
+    return {
+        "transaction_id": transaction_id or MOCK_TRANSACTION_ID,
+        "status": "REQUESTED",
+        "offer_version": 1,
+        "last_offered_by": READER_ID,
+        "lender_id": OWNER_ID,
+        "borrower_id": READER_ID,
+        "primary_book_id": BOOKS[0]["listing_id"],
+        "my_user_id": READER_ID,
+        "is_mine": True,
+        "note": None,
+        "exchange_mode": mode,
+        "duration_days": int(days),
+        "wanted": {
+            "user_book_id": BOOKS[0]["listing_id"],
+            "title": BOOKS[0]["title"],
+            "author": BOOKS[0]["author"],
+            "cover_url": BOOKS[0].get("cover_url"),
+        },
+        "offered": [{
+            "user_book_id": "b0000001-0000-0000-0000-000000000001",
+            "title": "Dune",
+            "author": "Frank Herbert",
+            "cover_url": BOOKS[0].get("cover_url"),
+        }],
+        "counterpart": {"id": OWNER_ID, "username": "sneha_kora"},
+        "updated_at": "2026-11-12T09:00:00Z",
     }
 
 
