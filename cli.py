@@ -4610,7 +4610,8 @@ def cmd_stitch_retire(args: argparse.Namespace) -> int:
     wt = getattr(args, "worktree", None)
     root = Path(wt).resolve() if wt else project
 
-    entry = _resolve_stitch_screen_entry(project, args.screen, stitch_pid=clean_pid)
+    entry = _resolve_stitch_screen_entry(project, args.screen, stitch_pid=clean_pid,
+                                         include_retired=True)
     if not entry:
         print(f"  ✗ No screen matches '{args.screen}' (manifest or live Stitch).")
         return 1
