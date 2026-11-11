@@ -5790,12 +5790,17 @@ def cmd_stitch_export(args: argparse.Namespace) -> int:
     if not pid:
         raise SystemExit("no design.stitch_project_id in .pipeline/profile.json")
     from team import stitch_mcp
+    from team import designer
     out = project / "docs" / "stitch"
     print(f"exporting Stitch project {pid} → {out}")
-    prev = _load_stitch_manifest(project)
+    prev = designer.ledger(project)
     retired = _retired_ids(prev)
     canon = prev.get("canonical_screens") or []
     live = {str(s.get("name") or "").split("/")[-1]: s for s in stitch_mcp.list_screens(pid)}
+    refusal = designer.empty_export_refusal(prev, len(live))
+    if refusal:
+        print(refusal)
+        return 1
     if canon:
         # REFRESH WHAT IS ALREADY THE SPEC. Exporting every live screen would
         # resurrect the forks this ledger just retired (BookSwap: 51 live screens

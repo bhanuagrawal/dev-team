@@ -63,6 +63,42 @@ def manifest(project: Path, root: Path | None = None) -> dict:
     return load_json(pipeline_dir(project) / "stitch_manifest.json") or {}
 
 
+def ledger(project: Path, root: Path | None = None) -> dict:
+    """The Stitch ledger, falling back to the .pipeline mirror when docs/stitch is absent.
+
+    `docs/stitch/manifest.json` is the tracked source and the mirror is its copy. Reading
+    ONLY the tracked file once made `stitch-export` treat a wiped canvas as a brand-new
+    project and replace a six-surface ledger with an empty one — the design spec was gone
+    and nothing said so. The mirror is what a checkout that never exported still knows.
+    """
+    tracked = manifest(project, root=root)
+    if tracked.get("canonical_screens") or tracked.get("retired_screens"):
+        return tracked
+    mirror = load_json(pipeline_dir(project) / "stitch_manifest.json") or {}
+    if mirror.get("canonical_screens") or mirror.get("retired_screens"):
+        return mirror
+    return tracked
+
+
+def empty_export_refusal(prev: dict, live_count: int) -> str | None:
+    """Why an export that returned no screens must stop instead of writing an empty ledger."""
+    if live_count:
+        return None
+    named = len(prev.get("canonical_screens") or []) + len(prev.get("retired_screens") or [])
+    if named:
+        return (
+            f"REFUSED — Stitch answered with 0 screens, but the ledger names {named} "
+            "surface(s). Writing this would erase the design spec: the screens were deleted "
+            "from the project, or this is the wrong stitch_project_id. Restore them "
+            "(`devteam stitch-screen --generate`, or `stitch-adopt` a reviewed draft) before "
+            "exporting."
+        )
+    return (
+        "REFUSED — Stitch answered with 0 screens for this project; there is nothing to "
+        "export. Generate the first screen with `devteam stitch-screen --generate`."
+    )
+
+
 def manifest_project_mismatch(project: Path, root: Path | None = None) -> str | None:
     """Return a refusal message when docs/stitch/manifest.json belongs to a different Stitch project."""
     pid = _clean_id(design_profile(project).get("stitch_project_id"))
