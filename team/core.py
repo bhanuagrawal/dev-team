@@ -58,9 +58,9 @@ def target_matches(path: str, targets: Any) -> bool:
 
     ONE definition of the allow-list match, so code that reasons about "the
     files this task was allowed to touch" (the release-time untracked-file check)
-    agrees with the developer prompt instead of guessing. An item may be a file,
+    agrees with the task spec instead of guessing. An item may be a file,
     a directory, a `dir/**` subtree or a glob; a bare top-level name never
-    matches, which is why the prompt insists on a path separator."""
+    matches, which is why the spec insists on a path separator."""
     p = str(path or "").strip().lstrip("./")
     if not p:
         return False
@@ -81,14 +81,13 @@ def target_matches(path: str, targets: Any) -> bool:
 
 
 def target_looks_like_paths(target: Any) -> bool:
-    """Is this `target` usable as the developer's file allow-list?
+    """Is this `target` usable as the task's focus paths?
 
     ONE definition, shared by the planner gate (`research._validate`) and the
-    developer prompt (`developer._check_targets_are_paths`): every item must be
-    a single whitespace-free, repo-relative path (or glob). A sentence is prose
-    even when it names files. Lesson 2026-10-18: a feature entry whose target
-    was a whole sentence passed the plan gate and only blew up at
-    developer-prompt time, wasting the run."""
+    task spec a coding agent reads: every item must be a single whitespace-free,
+    repo-relative path (or glob). A sentence is prose even when it names files.
+    Lesson 2026-10-18: a feature entry whose target was a whole sentence passed
+    the plan gate and only blew up when the task was picked, wasting the run."""
     items = target_items(target)
     if not items:
         return False
@@ -300,9 +299,10 @@ def role_env(name: str) -> str:
 # roles: model + the tool-agnostic headless launch contract
 #
 # The team is agentic-tool agnostic BY DESIGN: the orchestrator is whatever
-# agentic tool loads the dev-team skill, and it develops through its own native
-# subagents. The model is the ONLY thing the team pins per role. Nothing here
-# names a vendor, a binary or a CLI.
+# agentic tool loads the dev-team skill, and the few roles that are not code
+# (designer, vision review, storefront review) run through a model. The model
+# is the ONLY thing the team pins per role. Nothing here names a vendor, a
+# binary or a CLI.
 #
 # For tools that cannot spawn subagents (and for A/B bakeoffs) a headless
 # launch is available — but the command is supplied by the ENVIRONMENT, never

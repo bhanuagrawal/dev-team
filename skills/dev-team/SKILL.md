@@ -7,9 +7,9 @@ description: >
   (B) CREATE a brand-new app project from an idea — the full setup workflow
   that ends with a build on Play Console internal testing and a nightly loop.
   The orchestrator (YOU) decides and drives; development is performed
-  either directly by the orchestrator in the isolated worktree (universal
-  default across Claude Code, OpenCode, and Antigravity) or delegated to a
-  subagent you spawn; all quality gates and bookkeeping run via this CLI.
+  directly by the orchestrator in the isolated worktree (universal
+  default across Claude Code, OpenCode, and Antigravity), following
+  `references/develop.md`; all quality gates and bookkeeping run via this CLI.
 
 ## FIRST ACTION — one pass over the toolbox (owner directive 2026-11-09)
 
@@ -38,8 +38,8 @@ devteam admit <project> --query "<the owner's words, verbatim>" \
 ```
 
 - **OK** → the task is pinned at the HEAD of the queue. Then run the normal loop
-  (`plan` → `pick` → `worktree-start` → `developer-prompt` → develop → `verify`
-  → `release` → `record`). It is top priority by construction, not by memory.
+  (`plan` → `pick` → `worktree-start` → develop per `references/develop.md` →
+  `verify` → `release` → `record`). It is top priority by construction, not by memory.
 - **FLAG** → **nothing was queued. Do not execute. Reply and stop.** The block
   names who decides: `OWNER` (a direction call, or work that fights the plan —
   the owner answers) or `AGENT` (a kind/milestone is missing, or the plan needs a
@@ -97,7 +97,7 @@ run `doctor` and a live probe (`research`, or the collector directly):
 |---|---|---|
 | orchestrator | skill (this file) | the agentic tool you are |
 | create-agent | skill (`skills/new-project/SKILL.md`) | delegated on MODE B |
-| developer | skill (prompts/developer.md + this runbook) | direct orchestrator execution in worktree (default) OR spawned subagent |
+| developer | skill (`references/develop.md` + the task spec) | the orchestrator itself, directly in the worktree — no subagent |
 | research (product) | CODE collectors + ONE synthesis (`cli.py plan`, raw: `cli.py research`) | EVERY run, step 2 |
 | alarm | CODE (`cli.py alarm`) | nightly end + on demand |
 | verifier/gates | CODE (`cli.py verify`) | before every release |
@@ -140,6 +140,7 @@ answer).
 | read | when | where |
 |---|---|---|
 | `references/nightly-run.md` | a run starts (Mode A) | this skill dir |
+| `references/develop.md` | `worktree-start` has printed `DEVELOP_SKILL` — the only instruction the coding agent gets | this skill dir |
 | `references/goal-mode.md` | a release needs its direction | this skill dir |
 | `references/handover.md` | end of a run / a SPEC arrives | this skill dir |
 | `references/ops.md` | one agent only, asks, upkeep | this skill dir |
@@ -153,13 +154,13 @@ memorise sections; follow the pointer.
 ## Hard rules (never violate)
 - **Worktree Isolation for All Code Edits:** You NEVER edit project code on
   `main` directly. All development must occur strictly inside the isolated
-  task worktree (`dt/<task-id>`). In single-agent tools (e.g. Claude Code,
-  OpenCode, Cursor) or by orchestrator preference, the orchestrator performs
-  the development directly inside `WORKTREE_PATH`. In multi-agent environments,
-  the orchestrator may optionally delegate the worktree to a subagent. In all
-  cases, the exact same gates (`devteam verify`), allow-lists (`surface.targets`),
-  and release steps apply. Bookkeeping and `.pipeline/tasks/*.json` live in the
-  main checkout.
+  task worktree (`dt/<task-id>`), and YOU do it — the same session that ran
+  `status`, `plan` and `pick`. Do not delegate the work to a subagent: a fresh
+  subagent loses the goal, the design answer and the previous `verify` failure,
+  and the run pays for that twice (once to serialize the brief, once to review a
+  diff it did not write). `worktree-start` prints `DEVELOP_SKILL`; read it, then
+  implement. The exact same gates (`devteam verify`) and release steps apply.
+  Bookkeeping and `.pipeline/tasks/*.json` live in the main checkout.
 - **Self-improvement is a standing duty, not a leftover:** when a run surprises
   you, CLOSE IT IN CODE — apply the durable fix to the team's own code/skills in
   the same run; this is the one sanctioned way the orchestrator edits
@@ -197,17 +198,17 @@ memorise sections; follow the pointer.
 - Never push with red gates. `devteam verify` must PASS before `devteam release`.
 - **Automatic scope/knob/dependency guards are RETIRED (owner directive
   2026-10-31).** There is no `frozen_paths` check, no release-knob diff and no
-  dependency-declaration gate. What remains is the task allow-list in the
-  developer prompt plus compile/UI-test/device gates; a bad change is reverted, and
+  dependency-declaration gate. What remains is `surface.targets` as the task's
+  focus plus compile/UI-test/device gates; a bad change is reverted, and
   CI only reaches internal testing. Reintroduce a NARROW rule only when a real
   incident names what it prevents.
 - **Emulators are torn down, never abandoned.** A run that needs an AVD records
   a start-of-run baseline (`cli.py emulators <project> --record --reset`;
-  `run-headless`/`run-orchestrator` do this automatically) and checks it at run
+  `run-orchestrator` does this automatically) and checks it at run
   end (`cli.py verify` and `nightly.sh` call `cli.py emulators <project>`).
   The check stops ONLY emulators that appeared during this run and never one
-  the owner had open deliberately. Tell the developer subagent to start an AVD
-  through `with-emulator <avd> -- <cmd>` (teardown guaranteed by an EXIT trap).
+  the owner had open deliberately. Start an AVD through
+  `with-emulator <avd> -- <cmd>` (teardown guaranteed by an EXIT trap).
   A leak is warn-only: it never reds a gate, but the run report must mention it.
   **When the device gate fails on the emulator itself, diagnose before retrying.**
   A failed `:app:connectedDebugAndroidTest` is not always the code. Three

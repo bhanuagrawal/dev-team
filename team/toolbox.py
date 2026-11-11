@@ -104,11 +104,9 @@ _RAW: list[tuple[str, str, str, str, str, bool]] = [
     # ---- build ------------------------------------------------------------- #
     ("pick", "build", "the queue head → task spec + worktree command",
      ".pipeline/tasks/<id>.json", "empty queue; queue not planned since admission", True),
-    ("worktree-start", "build", "cut dt/<task-id> from origin/main and lock it",
+    ("worktree-start", "build", "cut dt/<task-id> from origin/main, lock it, and "
+                                "print the tree + task spec + the develop skill",
      ".pipeline/worktrees/<id>", "dirty or unknown task id", True),
-    ("developer-prompt", "build", "print the task POINTER (path + spec) for the "
-                                  "coding tool to implement",
-     "nothing", "no task spec", True),
     ("verify", "build", "the gate: team-generic, localization, brand, test gate, "
                         "coverage, compile, tests, device",
      ".pipeline/runs/ log, verify id", "any gate red", True),
@@ -200,8 +198,6 @@ _RAW: list[tuple[str, str, str, str, str, bool]] = [
     ("keystore-backup", "ops", "back up the release keystore off-repo and verify it",
      "Google Drive + ~/.config/devteam/keystores", "no backup destination", True),
     # ---- internal ---------------------------------------------------------- #
-    ("run-headless", "internal", "a host runs one task end-to-end",
-     "everything the run touches", "—", False),
     ("run-orchestrator", "internal", "spawn a host agent with a prompt",
      "—", "—", False),
     ("setup", "internal", "install the team's own prerequisites",

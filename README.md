@@ -26,7 +26,7 @@ passed.
 
 ### The order, end to end (one screen)
 
-The orchestrator has two tools: **run a shell command**, and **edit files in the task worktree** (or spawn a subagent). The skill is the checklist that names the commands; the run is a fixed
+The orchestrator has two tools: **run a shell command**, and **edit files in the task worktree**. The skill is the checklist that names the commands; the run is a fixed
 sequence of them. Nothing below is invented at runtime — code decides *what is
 allowed*, the agent decides *what to do*.
 
@@ -39,19 +39,19 @@ allowed*, the agent decides *what to do*.
 | 1 | `cli.py adapt` | code |
 | 2 | `cli.py plan` | code + **one LLM call** |
 | 3 | `cli.py pick` — then write `.pipeline/tasks/<id>.json` | code, then agent |
-| 4 | `cli.py worktree-start` | code |
-| 5 | `cli.py developer-prompt` | code |
-| 6 | develop the task inside worktree | direct orchestrator execution (default) or subagent |
-| 7 | `cli.py verify` | code (**gate**) |
-| 8 | `cli.py release` | code (**gate**, only on green) |
-| 9 | `cli.py record` | code |
-| 10 | `cli.py alarm` — then post the outcome banner | code + agent |
+| 4 | `cli.py worktree-start` — prints the tree, the task spec and the develop skill | code |
+| 5 | develop the task inside the worktree, following `references/develop.md` | agent |
+| 6 | `cli.py verify` | code (**gate**) |
+| 7 | `cli.py release` | code (**gate**, only on green) |
+| 8 | `cli.py record` | code |
+| 9 | `cli.py alarm` — then post the outcome banner | code + agent |
 | — | *tail* emulator teardown, then `alarm` again | shell |
 
-The agent's judgement is steps 3 (compose the spec) and 6 (develop the task in worktree) and
-its choice of words in 10; **`plan`, `verify`, `release` and `record` are gates
-whose output it relays, never overrides.** It never edits project code — it runs
-commands, writes task specs, and spawns the developer. Each step is expanded below.
+The agent's judgement is steps 3 (compose the spec) and 5 (develop the task in
+the worktree) and its choice of words in 9; **`plan`, `verify`, `release` and
+`record` are gates whose output it relays, never overrides.** It never edits
+project code outside the task worktree — it runs commands, writes task specs, and
+does the development itself. Each step is expanded below.
 
 ### Step 0 — does the project exist, and does it match the team? (code)
 
@@ -162,40 +162,46 @@ If the plan was not reviewed today it says so on stderr — run step 2 first.
 ### Step 4 — a sandbox, never your working tree (code)
 
 `cli.py worktree-start <project> --task-id <id>` creates a fresh git worktree at
-`origin/main` (`dt/<task>`), and records the base. All reading, scanning and
-development happen in worktrees at `origin/main`; the local checkout — including
-uncommitted WIP — is never touched.
+`origin/main` (`dt/<task>`), records the base, copies the gitignored build inputs
+(`local.properties`, the keystore named by `keystore.properties`) and prints the
+facts the run needs:
 
-### Step 5 — the exact developer prompt (code)
+```
+WORKTREE_PATH=<project>/.pipeline/worktrees/<task>
+WORKTREE_BRANCH=dt/<task>
+WORKTREE_BASE=<origin/main sha>
+DEVELOP_SKILL=<team>/skills/dev-team/references/develop.md
+TASK_SPEC=<project>/.pipeline/tasks/<task>.json
+```
 
-`cli.py developer-prompt <project> <spec>` renders the prompt verbatim: project
-facts, targets, the risk addendum for gesture/drag-adjacent surfaces, the
-analytics context, the reason the item was queued, and — for goal-linked work —
+All reading, scanning and development happen in worktrees at `origin/main`; the
+local checkout — including uncommitted WIP — is never touched.
 
-> `GOAL THIS SERVES: <the goal> — done here means: <its outcome>`
-> `LONG-TERM (owner): <the vision>`
-> *Do not widen scope to "help" this goal: a smaller change that serves it is
-> better than a bigger one that does not.*
+### Step 5 — the instruction is a skill, not a prompt (code → agent)
 
-Convention files that no longer exist are annotated `SKIP` rather than sent as a
-broken path.
+There is no instruction template and no prompt-rendering command. The coding agent
+gets the task spec (data: `problem`, `done_when`, `surface.targets`,
+`context.goal`, `context.conventions`, `context.build`, `context.design`,
+`context.journeys`) and one page of procedure,
+`skills/dev-team/references/develop.md`. Everything else it needs to know is
+enforced by `verify`, which refuses rather than advises.
 
 ### Step 6 — develop (agent)
 
-The orchestrator develops the task inside `WORKTREE_PATH` directly (universal default
-across Claude Code, OpenCode, Antigravity, Cursor) adhering to the developer prompt,
-conventions, and target allow-list. Developers write no tests: the suite is retired
-(owner policy 2026-11-10), so a change carries the app code and nothing else. In multi-agent
-environments the orchestrator may optionally spawn a native subagent or run headless
-(`cli.py run-headless`).
+The orchestrator develops the task inside `WORKTREE_PATH` itself — no subagent, no
+handoff, no second copy of the brief. It works in the same session that ran
+`status`, `plan` and `pick`, so the goal, the design answer and any previous
+`verify` failure are already in context. Developers write no tests: the suite is
+retired (owner policy 2026-11-10), so a change carries the app code and nothing
+else.
 
 ### Step 7 — trust nothing: gates (code)
 
 `cli.py verify <project> --worktree <path>` checks the *actual diff*, not the
 agent's report:
 
-- **scope** — an empty diff is a failure; the task's allow-list is the scope
-  the developer prompt renders;
+- **scope** — an empty diff is a failure; `surface.targets` is where the work was
+  expected, not a fence;
 - **localization** — every newly referenced string resource exists in every
   locale the project ships;
 - **brand** — an icon change carries its recorded provenance;
@@ -208,7 +214,7 @@ agent's report:
 - **compile**;
 - **emulator hygiene** (warn-only) — see *Safety rails*.
 
-FAIL → The orchestrator fixes the failure in the worktree (or re-prompts the subagent with the failure output, max 2 attempts total), then the run records `failed` and alarms.
+FAIL → The orchestrator fixes the failure in the worktree, up to 2 attempts total, then the run records `failed` and alarms.
 
 ### Step 8 — release & store readiness (code)
 
@@ -498,7 +504,6 @@ python3 cli.py research <project> [--no-llm] [--apply-result <file>]
                                                 # same engine, raw JSON result
 python3 cli.py queue <project> [add|review]     # admission + impact review
 python3 cli.py worktree-start <project> --task-id ID
-python3 cli.py developer-prompt <project> .pipeline/tasks/ID.json
 python3 cli.py tree <project> [--html] [--open] # the plan, locally
 python3 cli.py publish <project>                # put the plan on the repo now
 python3 cli.py goal <project> add|park|set-status|retire|reparent|revert|review|log
@@ -523,8 +528,8 @@ alarms. Zero LLM, zero project names.
 
 | Layer | Who | What |
 |---|---|---|
-| Orchestrator | any agentic tool with the `dev-team` skill | decide + drive: adapt, **plan**, pick, sandbox, develop in worktree (or spawn developer), gate, release, record, report |
-| Developer | direct orchestrator execution in worktree (default) or **native subagent** | edit code inside the task worktree, per `prompts/developer.md` |
+| Orchestrator | any agentic tool with the `dev-team` skill | decide + drive: adapt, **plan**, pick, sandbox, develop in worktree, gate, release, record, report |
+| Developer | the orchestrator itself, in the task worktree | edit code inside `WORKTREE_PATH`, per `skills/dev-team/references/develop.md` |
 | Research / **planner** | code collectors + **one** synthesis call (`cli.py plan`) | review the plan against fresh data: maintain the tree and the queue, then hand over the task (the queue head) — judged and applied by code |
 | Python (`cli.py`, `team/`) | deterministic only | gates, worktree plumbing, version bump, bookkeeping, plan rendering/publishing, alarms |
 | Scheduler | macOS `launchd` (`com.devteam.nightly`) | boot the orchestrator each night at the configured slot |
@@ -558,14 +563,13 @@ alarms. Zero LLM, zero project names.
 ```
 cli.py                  deterministic CLI (above)
 team/                   core, adapt, scan, goals, tree, publish, research (the
-                        planner engine), queue, verify, developer, shipper,
+                        planner engine), queue, verify, worktrees, shipper,
                         scribe, doctor, alarm, emulator, scheduler, align
-prompts/developer.md    the developer contract (motion + generic templates)
 scripts/nightly.sh      launchd entry point
 config/runtimes.json    role → model (the only thing pinned)
 skills/dev-team/        THE contract any orchestrator agent must follow
 skills/new-project/     mode-B create-a-new-app playbook + reference assets
-skills/android-code/    coding-style law for developer subagents
+skills/android-code/    coding-style law for the coding agent
 skills/checks/          executable expertise (localization completeness, …)
 ```
 

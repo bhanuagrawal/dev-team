@@ -1470,9 +1470,9 @@ def _validate(result: dict, research: dict | None = None) -> str | None:
         if q.get("type") in ("feature", "bugfix") and not target_looks_like_paths(q.get("target")):
             return (
                 f"{q.get('type')} queue entry '{q.get('label')}' names no "
-                "repo-relative path in 'target' — that field becomes the "
-                "developer's 'Edit ONLY files under:' allow-list, so a sentence "
-                "there hard-fails the build step (see developer-prompt). Put the "
+                "repo-relative path in 'target' — that field becomes the task's "
+                "focus paths, so a sentence there tells the coding agent nothing "
+                "about where to look. Put the "
                 "description in 'reason' and list real paths in 'target', e.g. "
                 "'app/src/main/java/**/ui/Foo.kt, app/src/main/res/values*/strings.xml'. "
                 "A TOP-LEVEL file with no '/' (e.g. settings.gradle.kts) must be "

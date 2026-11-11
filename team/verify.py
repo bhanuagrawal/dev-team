@@ -199,8 +199,8 @@ def scope_check(profile: dict, files: list[str]) -> tuple[bool, str]:
     NO FILE-SCOPE OR KNOB GUARDS (owner directive 2026-10-31). Frozen paths,
     release-knob diffing and dependency declaration were all removed: the owner
     does not yet see a case they protect against and will reintroduce one only if
-    a real incident justifies it. What remains is the task's allow-list in the
-    developer prompt plus the compile/test/device gates — a bad change is reverted,
+    a real incident justifies it. What remains is `surface.targets` plus the
+    compile/test/device gates — a bad change is reverted,
     and CI only ever reaches internal testing.
     """
     if not files:

@@ -136,11 +136,10 @@ commands, in order, with the reasoning and the failure branches.
    review and proceed — you do not re-derive selection logic. If `pick` prints
    `NOTE: plan review … NOT reviewed today` on stderr, step 2 was skipped — run
    it before building. Type handling:
-   - motion → targets from surfaces; use the MOTION developer prompt template.
-   - bugfix/feature → targets from the queue entry; use the GENERIC developer
-     prompt template (`devteam developer-prompt <project> <spec> --template generic`).
-   - investigation → code-free task: fresh analysis subagent, read-only +
-     docs, write findings to docs/progress/investigation-<slug>.md, then
+   - motion / bugfix / feature → targets from the queue entry; the task spec says
+     what to build. There is no per-type template: one skill, one spec.
+   - investigation → code-free task: read-only + docs, write findings to
+     docs/progress/investigation-<slug>.md, then
      `record --result shipped --note "investigation: <finding>"`.
    - `risk: supervised` tasks require a human present — otherwise skip them.
 4. Compose the task spec JSON (a mini-PRD, not a label):
@@ -155,39 +154,35 @@ commands, in order, with the reasoning and the failure branches.
    the task is worked at its intended depth rather than gold-plated or rushed.
 5. Prepare the sandbox (deterministic git plumbing is code, not you):
    `python3 <team>/cli.py worktree-start <project> --task-id <id>`
-   → WORKTREE_PATH / WORKTREE_BRANCH / WORKTREE_BASE.
+   → WORKTREE_PATH / WORKTREE_BRANCH / WORKTREE_BASE / DEVELOP_SKILL / TASK_SPEC.
+   Read that output as the run's coordinates; nothing else tells you where to work.
    Then `python3 <team>/cli.py emulators <project> --record --reset` — record the
-   start-of-run emulator baseline. `run-headless`/`run-orchestrator` do this
-   automatically, but a STEP-BY-STEP run (this numbered procedure) does not, and
-   the run-end leak check trusts whatever baseline file is on disk: with none (or
-   a stale one that predates the owner opening an emulator) `verify` classifies a
-   device the owner started themselves as "leaked" and stops it, breaking the
-   "never stop an emulator you did not start" rule. Recording the baseline here,
-   before any device work, is what makes that check safe.
-6. GET THE HANDOFF (a pointer, not a prompt):
-   `python3 <team>/cli.py developer-prompt <project> .pipeline/tasks/<id>.json --worktree <WORKTREE_PATH>`
-   It prints `WORKTREE_PATH` + `TASK_SPEC` and nothing else. The spec file carries
-   the goal, focus paths, conventions, build/test commands, locale set and the test
-   contract `verify` enforces (`team.developer.write_brief`). Hand that pointer over
-   as-is; the coding tool reads the project and works in its own context. `--full`
-   still renders the legacy prose template if a headless CLI cannot read the spec.
-7. DEVELOP THE TASK — Two execution paths:
-   (A) DIRECT ORCHESTRATOR DEVELOPMENT (Universal Default — works in Claude Code, OpenCode, Antigravity, Cursor):
-       - You (the orchestrator) perform the implementation directly inside `WORKTREE_PATH`.
-       - Read the TASK_SPEC first, then the project's conventions (`profile.conventions`, `docs/stitch/screens/<id>/`) and the nearest existing feature, and match its architecture (MVI/MVVM, DI, navigation, design tokens). Load the platform skills you have (android-code, android-build, android-test).
-       - Design: `context.design` in the spec says whether this task needs a design consultation (`devteam design-consult`), which Stitch screen already exists (`docs/stitch/manifest.json`, `docs/stitch/screens/<id>/`), and when UI changes are needed: prefer `devteam stitch-tweak` (`edit_screens` / `REFINE` variants) to update an existing screen in place rather than `stitch-screen --generate` (complete redesign). A design-required task is built from that exported snapshot; never invent a visual language in code.
-       - There is no file allow-list: you own the whole project for this task. Change any file the task needs, and retire a surface the task replaces (old screen, its route, its references) in the same change. NEVER edit on `main` directly — work only in `WORKTREE_PATH`.
-       - UI/UX Excellence & Hierarchy Assertions: design for the real-world physical context of use (glanceability from 15ft, outdoor glare, one-handed reachability). Never ship raw wireframe/canvas prototypes or flat unstyled low-contrast text. Use cohesive design tokens (high-contrast palette, tabular display typography, modern squircles 16-24dp, tactile press feedback) and complete lifecycle states (empty guidance, active interaction, frictionless undo recovery, repeat/rematch loops). Whenever adding or modifying UI screens, components, or interactive flows, write automated UI tests (in the project's test set, e.g. `commonTest` or `androidTest`) verifying layout math, interaction states, and user flows. Run automated UI hierarchy assertions to ensure no sibling view bounds overlap and all text container dimensions fully enclose their measured text bounds.
-       - Do not change release knobs (versionName, versionCode, signing, targetSdk) unless the task says so — nothing checks this automatically now.
-       - Test incrementally inside the worktree using the project's verify commands (e.g. `gradle compileDebugKotlinAndroid` plus the UI test task named in the spec's `build.test`). Unit tests are retired: do not write or gate on one; only a UI change owes a UI test. Failure to run an on-device runner (no AVD/emulator) is non-blocking (warn-only), but any failure of the test assertions themselves is a hard blocker.
-       - If you encounter a build or test error, diagnose and resolve it directly in the worktree.
-   (B) SUBAGENT DELEGATION (Optional fallback when supported and conserving orchestrator context):
-       - Budget the session at the task's `effort_min` (~210 is the norm for a healthy entry, band 120-300).
-       - Spawn subagent with `cwd = WORKTREE_PATH` using your tool's native mechanism (e.g. `invoke_subagent`).
-       - Pass the pointer from step 6.
-       - Model: read `roles.developer.model` from `<team>/config/runtimes.json` if your tool supports per-subagent models.
-       - If your tool cannot spawn subagents and you choose not to develop directly, run headless:
-         `python3 <team>/cli.py run-headless <project> --task-spec .pipeline/tasks/<id>.json`
+   start-of-run emulator baseline. `run-orchestrator` does this automatically, but
+   a STEP-BY-STEP run (this numbered procedure) does not, and the run-end leak
+   check trusts whatever baseline file is on disk: with none (or a stale one that
+   predates the owner opening an emulator) `verify` classifies a device the owner
+   started themselves as "leaked" and stops it, breaking the "never stop an
+   emulator you did not start" rule. Recording the baseline here, before any
+   device work, is what makes that check safe.
+6. READ THE SKILL — THE ONLY INSTRUCTION (there is no prompt and no template):
+   `DEVELOP_SKILL` from step 5 is `skills/dev-team/references/develop.md`. Read it
+   in full, then read `TASK_SPEC`. The spec is data (`problem`, `done_when`,
+   `user_sees`, `not_in_scope`, `surface.targets`, `context.goal`,
+   `context.conventions`, `context.build`, `context.design`, `context.journeys`);
+   the skill is procedure. Nothing else is written for the coding agent, because
+   prose that restates a gate is what drifts.
+7. DEVELOP THE TASK — YOU, IN THIS SESSION, IN `WORKTREE_PATH`:
+    - Do not spawn a developer subagent. You are the one who ran `status`, `plan`
+      and `pick`: the goal, the design answer and any previous `verify` failure
+      are already in your context. A fresh subagent starts without them and the
+      run pays twice for the handoff.
+    - Work in the tree for everything — edits, `git`, greps, builds, relative
+      paths. The owner's checkout is not yours.
+    - Follow `references/develop.md` for the hard rules (no commit/push/version
+      bump; no pin changes to work around a local environment; retire what you
+      replace; a mockup's copy is not data) and for what "done" means.
+    - If the task cannot be done, write `PIPELINE_BLOCKER.md` in the tree root and
+      stop — a blocker is a valid outcome, an invented workaround is not.
 
 8. VERIFY THE WORKTREE — TRUST NOTHING:
    `python3 <team>/cli.py verify <project> --worktree <WORKTREE_PATH> --task-spec .pipeline/tasks/<id>.json`
@@ -200,9 +195,8 @@ commands, in order, with the reasoning and the failure branches.
      together with why, because a dependency is a third party, a supply chain, an
      account, a licence and permanent maintenance, and the plan once adopted one
      from a spec's stack line without anybody asking.
-   - FAIL → Diagnose the failure:
-     - If developing directly: fix the issue inside `WORKTREE_PATH` and re-run verify (up to 2 iterations).
-     - If using a subagent: append the failure output to the subagent's context (spawn a FRESH subagent with same prompt + "previous attempt failed as follows: ..." — max 2 attempts total, then `devteam record --result failed` and alarm).
+   - FAIL → Diagnose the failure, fix it inside `WORKTREE_PATH` and re-run verify
+     (up to 2 iterations, then `devteam record --result failed` and alarm).
    - PASS → `python3 <team>/cli.py release <project> --worktree <WORKTREE_PATH>
      --task-spec .pipeline/tasks/<id>.json`
      This bumps the version, writes release notes (within

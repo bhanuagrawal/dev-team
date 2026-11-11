@@ -64,8 +64,8 @@ def _restore_machine_local_inputs(project: Path, wt: Path, log) -> None:
     Shared with the developer worktrees verbatim: one rule, one implementation,
     so a scan tree that a command builds in has the same inputs a task tree has.
     """
-    from .developer import _copy_machine_local_inputs
-    _copy_machine_local_inputs(project, wt, log or (lambda _msg: None))
+    from .worktrees import copy_machine_local_inputs
+    copy_machine_local_inputs(project, wt, log or (lambda _msg: None))
 
 
 
@@ -279,11 +279,11 @@ def _queue_task(q: dict, seq: int) -> dict:
                     # (lesson 2026-10-30).
                     "targets": target_items(q["target"])},
         "risk": q.get("risk", "safe"),
-        # The expected size of THIS session travels with the task: the developer
-        # prompt shows it (the whole spec is dumped for the agent), so a task is
-        # worked at its intended depth instead of being gold-plated or rushed.
+        # The expected size of THIS session travels with the task: the coding
+        # agent reads it in the spec, so a task is worked at its intended depth
+        # instead of being gold-plated or rushed.
         "effort_min": q.get("effort_min"),
-        # The leaf carries its branch with it: the developer prompt shows which
+        # The leaf carries its branch with it: the task spec shows which
         # goal this run serves, and `record` attributes the shipped leaf from the
         # spec instead of re-matching the label (which the next refill rewrites).
         "advances": str(q.get("advances") or ""),

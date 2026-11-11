@@ -36,11 +36,12 @@ python3 cli.py asks    <project>     # review every open ask/flag: can a machine
 python3 cli.py plan    <project>     # planner maintains the queue (runs every cycle)
 python3 cli.py pick    <project>     # the queue head → task spec + worktree command
 python3 cli.py worktree-start <project> --task-id <id>
-python3 cli.py developer-prompt <project> .pipeline/tasks/<id>.json --worktree <wt>
-#   → prints a POINTER (WORKTREE_PATH + TASK_SPEC). Hand it to the coding tool
-#     as-is: the spec file carries the goal, conventions, build/test commands and
-#     the test contract. The tool reads the project and implements in its own
-#     context. There is no file allow-list — the agent owns the whole project.
+#   → prints WORKTREE_PATH, WORKTREE_BASE, TASK_SPEC and DEVELOP_SKILL.
+#     Read `skills/dev-team/references/develop.md` and the task spec, then
+#     implement inside WORKTREE_PATH — YOU do the work in this session, not a
+#     subagent. The spec is data (goal, focus paths, conventions, build command,
+#     design answer, journeys); the skill is procedure. There is no prompt and no
+#     template: anything a gate already enforces is not restated in prose.
 python3 cli.py verify  <project> --worktree <wt> --task-spec .pipeline/tasks/<id>.json
 python3 cli.py release <project> --worktree <wt> --task-spec .pipeline/tasks/<id>.json
 python3 cli.py record  <project> --result shipped --task-spec <spec> --version <v> --commit <sha> --note "<one line>"

@@ -34,6 +34,13 @@ They replace `git branch -D` on unmerged work, and `parked()` makes them visible
 to `status` so they cannot rot silently.
 
 Zero project names — generic across all projects.
+
+The tree is also where a task's BUILD INPUTS are made whole. A git checkout
+only materializes tracked files, so a fresh tree has no `local.properties`
+(gradle then dies with "SDK location not found") and no signing material
+(`bundleRelease` dies with "Keystore file ... not found"). Those are copied from
+the owner's checkout — but ONLY when the repo gitignores them, so the copy can
+never be staged into a commit by the release step.
 """
 from __future__ import annotations
 
@@ -52,6 +59,9 @@ PARK_NAMESPACE = "dt/parked/"
 MAIN_REF = "origin/main"
 DEFAULT_SETTLE_MIN = 30   # a tree touched this recently may have a live run
 TREE_CAP = 3              # more dev trees than this per project is a smell
+# Machine-local build inputs a fresh tree does not inherit (gitignored by the
+# project, so copying them can never produce a committable file).
+MACHINE_LOCAL_INPUTS = ("local.properties", "keystore.properties")
 
 
 def _settle_seconds() -> int:
@@ -201,9 +211,9 @@ def live_run_reason(project: Path, tree: Path) -> str | None:
     `worktree-start` unlocked and `remove --force`d the first one's tree and
     re-cut it from origin/main, so a verified, uncommitted change existed
     nowhere and a different fix shipped in its place. `prune` already treats a
-    locked tree touched inside the settle window as live; `prepare_worktree`
-    did not, and it is the one caller that can destroy work. Refusing is the
-    only answer that cannot.
+    locked tree touched inside the settle window as live; `prepare` did not, and
+    it is the one caller that can destroy work. Refusing is the only answer that
+    cannot.
     """
     locks = _locks(project)
     if not any(_same_path(Path(p), tree.resolve()) for p in locks):
@@ -583,3 +593,118 @@ def start_attempt(project: Path, tree: Path, task_id: str, log=None) -> dict[str
         return {"branch": branch, "pushed": False, "why": why}
     say(f"worktree: {branch} exists at origin (the tree is now disposable)")
     return {"branch": branch, "pushed": True, "why": ""}
+
+
+# --------------------------------------------------------------------------- #
+# PREPARING A TREE — cut it, make its build inputs whole, push its branch
+# --------------------------------------------------------------------------- #
+def copy_machine_local_inputs(project: Path, tree: Path, log=None) -> None:
+    """Give a fresh tree the gitignored inputs a build needs.
+
+    Shared with the scan tree verbatim: one rule, one implementation, so a tree
+    that a command builds in has the same inputs a task tree has.
+    """
+    say = log or (lambda *_: None)
+    for name in MACHINE_LOCAL_INPUTS:
+        src, dst = project / name, tree / name
+        if not src.exists() or dst.exists():
+            continue
+        ignored = git(["check-ignore", "-q", name], cwd=project)
+        if ignored.returncode != 0:
+            say(f"worktree: not copying {name} — not gitignored, it would be committable")
+            continue
+        shutil.copy2(src, dst)
+        say(f"worktree: copied gitignored build input {name} from the checkout")
+        _copy_referenced_inputs(project, tree, name, say)
+
+
+def _copy_referenced_inputs(project: Path, tree: Path, name: str, say) -> None:
+    """Copy the machine-local file a properties file NAMES, not just the file.
+
+    `keystore.properties` says `storeFile=upload-keystore.jks`; copying the
+    properties without the key leaves `bundleRelease` dying in the tree with
+    "Keystore file '…/upload-keystore.jks' not found for signing config
+    'release'" — which reads like a code defect and is really a half-copied
+    environment (seen 2026-10-31). Every `*File` value is copied too, under the
+    same gitignore guard, so a copy can never become committable.
+    """
+    try:
+        text = (project / name).read_text(errors="replace")
+    except OSError:
+        return
+    for raw in text.splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        if not key.strip().endswith("File"):
+            continue
+        ref = value.strip()
+        if not ref:
+            continue
+        path = Path(ref)
+        if not path.is_absolute():
+            path = project / ref
+        if not path.is_file():
+            continue
+        try:
+            rel = path.resolve().relative_to(project.resolve())
+        except ValueError:
+            continue  # outside the project: not ours to copy
+        dst = tree / rel
+        if dst.exists():
+            continue
+        ignored = git(["check-ignore", "-q", str(rel)], cwd=project)
+        if ignored.returncode != 0:
+            say(f"worktree: not copying {rel} — not gitignored, it would be committable")
+            continue
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(path, dst)
+        say(f"worktree: copied gitignored build input {rel} (named by {name})")
+
+
+def prepare(project: Path, task_id: str, log=None) -> tuple[Path, str] | None:
+    """Cut `dt/<task-id>` from origin/main into its own tree. Returns (tree, base).
+
+    The owner's checkout and its uncommitted work are never touched: every read
+    and write of the task happens here. Refuses to replace a tree that a live
+    run still owns (see `live_run_reason`) — wiping one is how a verified,
+    uncommitted change once existed nowhere.
+    """
+    say = log or (lambda *_: None)
+    git(["fetch", "origin"], cwd=project, timeout=120)
+    r = git(["rev-parse", "origin/main"], cwd=project)
+    if r.returncode != 0:
+        say("FATAL: cannot resolve origin/main")
+        return None
+    base = r.stdout.strip()
+    tree = project / RUN_BASE / task_id
+    if tree.exists():
+        live = live_run_reason(project, tree)
+        if live:
+            say(f"worktree: REFUSED to replace {tree.name} — {live}")
+            say("worktree: another session is working in that tree. Its work is "
+                "safe at origin/dt/<task-id> once it pushes; wait for it (or for "
+                "the settle window) instead of wiping an uncommitted change.")
+            return None
+        git(["worktree", "unlock", str(tree)], cwd=project, timeout=60)
+        git(["worktree", "remove", "--force", str(tree)], cwd=project)
+    for ref in (f"dt/{task_id}", "dt-base"):
+        git(["branch", "-D", ref], cwd=project, timeout=60)
+    r = git(["worktree", "add", "-b", f"dt/{task_id}", str(tree), base], cwd=project)
+    if r.returncode != 0:
+        say("FATAL: worktree add failed: " + (r.stdout + r.stderr)[-800:])
+        return None
+    git(["branch", "-f", "dt-base", base], cwd=project, timeout=60)
+    copy_machine_local_inputs(project, tree, say)
+    # A previous attempt on this task id may still be the only copy of its work
+    # (a blocked session that never reached release). Preserve it as
+    # dt/parked/<task>-<sha> before this run owns the branch name again.
+    rescue = resolve_attempt(project, task_id, base, say)
+    if rescue:
+        say(f"worktree: ! {rescue} — NOT pushing this attempt yet")
+        return tree, base
+    # Durability at creation: after this, the tree is a cache, not the record.
+    start_attempt(project, tree, task_id, say)
+    return tree, base
+

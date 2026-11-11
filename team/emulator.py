@@ -276,8 +276,8 @@ def baseline_path(project: Path) -> Path:
 def record_baseline(project: Path, log=None, reset: bool = False) -> list[dict]:
     """Call at RUN START. First snapshot wins: a later call inside the same run
     must not adopt the run's own emulator as 'pre-existing'. Pass reset=True at
-    a genuine run entry point (nightly, run-headless, run-orchestrator) so a
-    stale baseline from an earlier run cannot shield an orphan forever."""
+    a genuine run entry point (nightly, run-orchestrator) so a stale baseline
+    from an earlier run cannot shield an orphan forever."""
     p = baseline_path(project)
     if p.exists() and not reset:
         try:

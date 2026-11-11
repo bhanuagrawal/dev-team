@@ -2,7 +2,8 @@
 """dev-team CLI — deterministic bookkeeping and gates ONLY.
 
 The orchestrator is ANY agentic tool running with the dev-team skill: it decides
-and drives; native subagents develop. This CLI exposes the deterministic actions
+and drives; it develops the task itself, from the spec and one skill page.
+This CLI exposes the deterministic actions
 that agent needs, and nothing project-shaped is hardcoded here — every project
 fact comes from <project>/.pipeline/profile.json. No vendor or binary is baked
 in either: headless launches come from roles.<role>.command or DEVTEAM_AGENT_CMD.
@@ -35,8 +36,9 @@ def task_spec_path(project: Path, spec: str) -> Path:
     The runbook/README name specs project-relative (`.pipeline/tasks/<id>.json`),
     but a shell resolves that against the CWD — which for an orchestrator is the
     TEAM dir, not the project. A correct command then dies with a bare
-    FileNotFoundError (observed live on `developer-prompt`). Accept the
-    documented shape: CWD first, then the project, then the team dir.
+    FileNotFoundError (observed live: a command was killed by its own documented
+    path shape). Accept the documented shape: CWD first, then the project, then
+    the team dir.
     """
     p = Path(spec)
     candidates = [p, project / spec, TEAM_ROOT / spec]
@@ -56,7 +58,7 @@ def task_spec_path(project: Path, spec: str) -> Path:
 
 
 def language_conventions(project: Path) -> list[str]:
-    """Convention sources for the developer subagent: the team's universal
+    """Convention sources for the coding agent: the team's universal
     android-code skill, plus any in-repo architecture/conventions doc.
     KMP (composeApp) projects additionally get the kmp-compose-multiplatform
     skill (Google-architecture-grounded) — KMP is not Android-idiom territory."""
@@ -583,10 +585,10 @@ def cmd_rc(args: argparse.Namespace) -> None:
     scoring, no validation of the answer. This command is only the pen: the agent
     (or the owner, with --owner) states yes/no and one line of why.
 
-    Asked of the orchestrator's developer session — the agent that wrote the code
+    Asked of the orchestrator's coding session — the agent that wrote the code
     — because it is the one that knows whether the work it did is a complete
     thing a user could receive; if that session is closed, the orchestrating LLM
-    answers, having seen the diff and the developer's report."""
+    answers, having seen the diff and the run's report."""
     project = resolve_project(args.project)
     if bool(args.yes) == bool(args.no):
         raise SystemExit("pass exactly one of --yes / --no")
@@ -883,9 +885,9 @@ def cmd_worktree_start(args: argparse.Namespace) -> None:
     project = resolve_project(args.project)
     if not args.task_id:
         raise SystemExit("--task-id required")
-    from team.developer import prepare_worktree
+    from team.worktrees import prepare
     log = RunLog(project, "worktree-" + args.task_id)
-    prepared = prepare_worktree(project, args.task_id, log)
+    prepared = prepare(project, args.task_id, log)
     if not prepared:
         raise SystemExit("worktree prep failed (see log)")
     wt, base = prepared
@@ -926,31 +928,18 @@ def cmd_worktree_start(args: argparse.Namespace) -> None:
     print(f"WORKTREE_PATH={wt}")
     print(f"WORKTREE_BRANCH=dt/{args.task_id}")
     print(f"WORKTREE_BASE={base}")
-
-
-def cmd_run_headless(args: argparse.Namespace) -> int:
-    """Skill-documented fallback for tools without subagents + bakeoff harness.
-    Deterministic spawn from runtimes.json with identical gates."""
-    from team import developer
-    project = resolve_project(args.project)
-    log = RunLog(project, "headless-" + today())
-    # Emulator bookkeeping (run start): remember what was ALREADY running so the
-    # run end can stop only what this run started, never the owner's emulator.
-    emulator.record_baseline(project, log, reset=True)
-    task = load_json(task_spec_path(project, args.task_spec))
-    if not task:
-        raise SystemExit(f"bad task spec: {args.task_spec}")
-    if not args.supervised and task.get("risk") == "supervised":
-        raise SystemExit("task is risk:supervised — it may only run with --supervised "
-                         "(a human present)")
-    res = developer.execute(project, task, log)
-    payload = {k: v for k, v in res.items() if k != "worktree"} | \
-              {"worktree": res.get("worktree")}
-    task_out = Path(args.task_spec)
-    print(json.dumps(payload, indent=2))
-    if res.get("status") == "failed":
-        return 1
-    return 0 if res.get("status") in ("done", "blocked") else 1
+    # The instruction layer: one skill file and the task spec. No prompt, no
+    # template, no second copy of rules a gate already enforces.
+    skill = TEAM_ROOT / "skills" / "dev-team" / "references" / "develop.md"
+    try:
+        spec = task_spec_path(project, args.task_id)
+    except SystemExit:
+        spec = None
+    print(f"DEVELOP_SKILL={skill}")
+    if spec:
+        print(f"TASK_SPEC={spec}")
+    print(f"NEXT=read {skill.name} and the task spec, then implement inside "
+          f"WORKTREE_PATH — leave the work uncommitted; devteam verify decides")
 
 
 def cmd_run_orchestrator(args: argparse.Namespace) -> int:
@@ -960,17 +949,18 @@ def cmd_run_orchestrator(args: argparse.Namespace) -> int:
     project = resolve_project(args.project)
     cfg = role_cfg("orchestrator")
     log = RunLog(project, "orchestrator-" + today())
-    # Emulator bookkeeping (run start) — see run_headless for why it is a baseline.
+    # Emulator bookkeeping (run start): a baseline of what was ALREADY running,
+    # so the run end stops only what this run started.
     emulator.record_baseline(project, log, reset=True)
     prompt = args.prompt or (
         "You are the dev-team orchestrator. Load and follow the dev-team skill in "
         "full. Run tonight's pipeline: status → asks → PLAN (the planner re-reads "
         "every signal and decides priority and which entries one run clubs into "
-        "one release) → pick the run it handed over → worktree-start → "
-        "developer-prompt (it prints a POINTER: worktree + task spec; the spec "
-        "carries the goal, conventions and test contract) → hand that pointer to "
-        "the coding tool as a native subagent (model from runtimes.json) → verify "
-        "the worktree → release on green → record → alarm. "
+        "one release) → pick the run it handed over → worktree-start (it prints "
+        "the tree, the task spec and the develop skill) → implement the task "
+        "YOURSELF in that tree, following skills/dev-team/references/develop.md, "
+        "then verify the worktree → release on green → record → alarm. "
+        "Do not spawn a developer subagent: the work is yours. "
         "Project: "
         f"{project.name} (absolute path: {project}). Report a compact summary of "
         "what shipped.")
@@ -986,30 +976,6 @@ def cmd_run_orchestrator(args: argparse.Namespace) -> int:
     # (launchd log) instead of being buffered until exit.
     r = sys_run(argv, None, timeout=args.timeout, capture=False)
     return r.returncode
-
-
-def cmd_developer_prompt(args: argparse.Namespace) -> None:
-    """Print the handoff. The task is decided by code; this only points at it.
-
-    No instruction template on the default path: the spec file carries the goal,
-    the conventions, the build/test commands and the test contract (see
-    team.developer.write_brief). `--full` still renders the legacy prose template
-    for a headless CLI tool that cannot read the spec itself.
-    """
-    project = resolve_project(args.project)
-    profile = profile_of(project)
-    spec_path = task_spec_path(project, args.task_spec)
-    task = load_json(spec_path) or json.loads(spec_path.read_text())
-    paths = task["surface"].get("targets") or []
-    from team.developer import build_prompt, handoff, write_brief
-
-    if getattr(args, "full", False):
-        print(build_prompt(project, profile, task, paths,
-                           tpl_override=getattr(args, "template", None)))
-        return
-
-    spec = write_brief(project, spec_path, profile, task, paths)
-    print(handoff(spec, getattr(args, "worktree", None)))
 
 
 def cmd_queue(args: argparse.Namespace) -> None:
@@ -1577,10 +1543,10 @@ def cmd_pick(args: argparse.Namespace) -> int:
     print(json.dumps({"pick": task, "spec": str(spec_path),
                       "run": {**run_info, "closes": closes, "thin": thin},
                       "worktree_cmd": f"python3 cli.py worktree-start {project.name} --task-id {task['id']}",
-                      # .pipeline/tasks/ is relative to the PROJECT dir, which
-                      # developer-prompt already searches — a bare filename
-                      # resolves nowhere (CWD/team dir hold no tasks/).
-                      "prompt_cmd": f"python3 cli.py developer-prompt {project.name} .pipeline/tasks/{spec_path.name}"},
+                      # The instruction layer is one file: the skill the coding
+                      # agent reads before touching the tree. No prompt.
+                      "develop_skill": str(TEAM_ROOT / "skills" / "dev-team"
+                                           / "references" / "develop.md")},
                      indent=2))
     # The pick executes what the planner decided. Priority and batching are the
     # planner's calls (it sees every signal); this only says whether THIS run was
@@ -4796,7 +4762,6 @@ def main() -> None:
     sc = sub.add_parser("scan");       sc.add_argument("project"); sc.add_argument("--skip-gradle", action="store_true"); sc.set_defaults(fn=cmd_scan)
     pk = sub.add_parser("pick"); pk.add_argument("project"); pk.add_argument("--supervised", action="store_true"); pk.add_argument("--auto-refill", action="store_true", help="synthesize next horizon and refill queue if empty"); pk.set_defaults(fn=cmd_pick)
     w = sub.add_parser("worktree-start"); w.add_argument("project"); w.add_argument("--task-id", required=True); w.set_defaults(fn=cmd_worktree_start)
-    dp = sub.add_parser("developer-prompt"); dp.add_argument("project"); dp.add_argument("task_spec"); dp.add_argument("--template", choices=["motion", "generic", "auto"], default="auto"); dp.add_argument("--worktree", default=None, help="worktree path printed by worktree-start (included in the handoff)"); dp.add_argument("--full", action="store_true", help="render the legacy prose template (headless tools that cannot read the spec)"); dp.set_defaults(fn=cmd_developer_prompt)
     q = sub.add_parser("queue"); q.add_argument("project"); q.add_argument("--done")
     q.add_argument("action", nargs="?", choices=["add", "review"])
     q.add_argument("--spec"); q.add_argument("--type")
@@ -4812,7 +4777,6 @@ def main() -> None:
                         f"{_queue.EFFORT_BAND[0]}-{_queue.EFFORT_BAND[1]})")
     q.add_argument("--supersedes", action="append", default=[])
     q.set_defaults(fn=cmd_queue)
-    rh = sub.add_parser("run-headless"); rh.add_argument("project"); rh.add_argument("--task-spec", required=True); rh.add_argument("--supervised", action="store_true"); rh.set_defaults(fn=cmd_run_headless)
     ro = sub.add_parser("run-orchestrator"); ro.add_argument("project"); ro.add_argument("--prompt"); ro.add_argument("--timeout", type=int, default=5400); ro.set_defaults(fn=cmd_run_orchestrator)
     v = sub.add_parser("verify");      v.add_argument("project"); v.add_argument("--worktree"); v.add_argument("--task-spec"); v.add_argument("--skip-gradle", action="store_true"); v.set_defaults(fn=cmd_verify)
     ci_p = sub.add_parser("ci", help="print or write the canonical release workflow (tag → AAB → Play internal)")
