@@ -5765,12 +5765,43 @@ def cmd_stitch_export(args: argparse.Namespace) -> int:
     from team import stitch_mcp
     out = project / "docs" / "stitch"
     print(f"exporting Stitch project {pid} → {out}")
-    manifest = stitch_mcp.export_screens(pid, out / "screens", log=print)
-    (out / "manifest.json").write_text(json.dumps(manifest, indent=2, ensure_ascii=False) + "\n")
-    # Keep the pipeline's legacy copy in step; docs/stitch is the tracked source.
-    (pipeline_dir(project) / "stitch_manifest.json").write_text(
-        json.dumps(manifest, indent=2, ensure_ascii=False) + "\n")
-    print(f"manifest: {out / 'manifest.json'} ({len(manifest['canonical_screens'])} screen(s))")
+    prev = _load_stitch_manifest(project)
+    retired = _retired_ids(prev)
+    canon = prev.get("canonical_screens") or []
+    live = {str(s.get("name") or "").split("/")[-1]: s for s in stitch_mcp.list_screens(pid)}
+    if canon:
+        # REFRESH WHAT IS ALREADY THE SPEC. Exporting every live screen would
+        # resurrect the forks this ledger just retired (BookSwap: 51 live screens
+        # for 34 surfaces, and a plain re-export made all 51 canonical again).
+        keep: list[dict] = []
+        for entry in canon:
+            sid = str(entry.get("stitch_id") or entry.get("id")).split("/")[-1]
+            screen = live.get(sid)
+            if not screen:
+                print(f"  ! surface {entry.get('id')} → {sid} is gone from Stitch; row kept as-is")
+                keep.append(entry)
+                continue
+            ex = stitch_mcp.export_one_screen(screen, out / "screens", log=print,
+                                              logical_id=str(entry.get("id")))
+            keep.append({**entry, **(ex or {})})
+        known = {str(e.get("stitch_id") or e.get("id")) for e in canon}
+        unsurfaced = [sid for sid in live if sid not in known and sid not in retired]
+        if unsurfaced:
+            print(f"  · {len(unsurfaced)} live screen(s) are neither canonical nor retired — "
+                  "left OUT of the spec:")
+            for sid in unsurfaced[:8]:
+                print(f"    {sid}  {live[sid].get('title') or ''}")
+            print("    adopt one onto a surface (`devteam stitch-adopt --draft <id> --onto <surface>`) "
+                  "or record it dead (`devteam stitch-retire`)")
+        manifest = {**prev, "project": project.name, "project_id": pid,
+                    "synced_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+                    "canonical_screens": keep}
+    else:
+        manifest = stitch_mcp.export_screens(pid, out / "screens", log=print)
+        manifest["retired_screens"] = prev.get("retired_screens") or []
+    _write_stitch_manifest(project, project, manifest)
+    _render_retired_ledger(project, manifest)
+    print(f"manifest: {out / 'manifest.json'} ({len(manifest['canonical_screens'])} surface(s))")
     if not args.no_commit:
         import subprocess as _sp
         _sp.run(["git", "add", "docs/stitch"], cwd=project)
