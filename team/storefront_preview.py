@@ -620,11 +620,35 @@ def roborazzi_source(spec: dict[str, Any]) -> str:
         "    @get:Rule",
         "    val compose = createComposeRule()",
         "",
+    ]
+    # A spec that serves its own fake platform provider (a document provider, a
+    # content resolver) must install it in EVERY test, not once per JVM: Robolectric
+    # gives each test its own environment, so a provider registered in the fixtures'
+    # initializer is gone by the third scene and the screen silently falls back to
+    # placeholder data. The spec opts in by defining registerProviders().
+    if re.search(r"\bfun\s+registerProviders\s*\(", fixtures):
+        out += [
+            "    @org.junit.Before",
+            "    fun installFixtureProviders() {",
+            "        StorefrontFixtures.registerProviders()",
+            "    }",
+            "",
+        ]
+    out += [
         "    private fun scene(name: String, content: @Composable () -> Unit) {",
         # A scene must sit on the app's own surface: several screens inherit their
         # background from the host, and a transparent scene renders light text on the
         # renderer's white canvas (unreadable screenshots, not a design bug).
         f"        compose.setContent {{ {_scene_wrap(spec, 'content()')} }}",
+        # A still must show the screen a user ends up on, not the frame it was in
+        # while its file metadata was still loading: a result card reads the output
+        # file's name and size through the platform resolver OFF the main thread
+        # (ResultFileMeta), so capturing immediately drew a card with a fallback
+        # name and no size - a picture of a state no user sees, and the listing's
+        # "here is your file" moment with the file missing. Wait (bounded) for
+        # that state to land, then capture.
+        "        compose.waitForIdle()",
+        "        repeat(50) { compose.waitForIdle(); Thread.sleep(10) }",
         '        val dir = System.getProperty("storefront.output") ?: "build/storefront"',
         '        java.io.File(dir).mkdirs()',
         '        compose.onRoot().captureRoboImage("$dir/$name.png")',

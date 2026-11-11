@@ -788,6 +788,21 @@ def run_store_readiness_audit(project: Path, tree: Path | None = None) -> list[R
             # answer, judge the edit by the tokens it actually moved.
             fresh_because_visual_unchanged = False
             comp_ts = None
+            # PROVENANCE BEATS MTIME (2026-11-12). A refreshed worktree stamps a new
+            # mtime on the files a merge touched and keeps the old one on the files it
+            # did not, so "design newer than the oldest screenshot" turned a listing
+            # that recorded the exact commit it was drawn from into a blocker. When the
+            # registry can prove the frames match the tree (ui_sha, spec_sha and every
+            # PNG's sha256 agree), that proof outranks filesystem clocks.
+            if is_stale:
+                try:
+                    from . import storefront_frames as _sfr
+
+                    proven, _why = _sfr.listing_freshness(src)
+                    if proven:
+                        is_stale = False
+                except Exception:
+                    pass
             if is_stale:
                 frames_meta = src / "docs" / "storefront-frames.json"
                 if frames_meta.is_file():
