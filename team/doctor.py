@@ -370,6 +370,10 @@ def run_doctor(project: Path, log) -> dict:
         from . import designer as designer_mod, stitch_mcp
         n = stitch_mcp.ping()
         mismatch = designer_mod.manifest_project_mismatch(project)
+        design_cfg = profile_of(project).get("design") or {}
+        pid = str(design_cfg.get("stitch_project_id") or "").strip()
+        has_ui = bool(profile_of(project).get("targets"))
+        manifest_exists = (project / "docs" / "stitch" / "manifest.json").is_file()
         if mismatch:
             report["design"] = {
                 "status": "blocked",
@@ -379,6 +383,37 @@ def run_doctor(project: Path, log) -> dict:
                 "fix": mismatch,
             }
             log(f"doctor design: BLOCKED — {mismatch}")
+        elif has_ui and not pid:
+            # The UI design gate refuses a screen the project cannot point at a
+            # Stitch design. An MCP that answers while no project is registered
+            # used to read as "ready" (2026-11-12: a UI task reached its design
+            # step and found the project existed but had never been declared or
+            # exported), so say what is missing BEFORE the run reaches the gate.
+            fix = ("declare profile.design.stitch_project_id (find the live project "
+                   "with the Stitch MCP list_projects tool) and run "
+                   f"`devteam stitch-export {project.name}` — the design gate refuses "
+                   "a UI diff with no exported screen")
+            report["design"] = {
+                "status": "blocked",
+                "tools": n,
+                "blocked": [{"requirement": "a Stitch project registered for a UI app",
+                             "fix": fix}],
+                "fix": fix,
+            }
+            log(f"doctor design: BLOCKED — no design.stitch_project_id on a project "
+                f"with UI targets; the design gate will refuse UI work")
+        elif pid and not manifest_exists:
+            fix = (f"run `devteam stitch-export {project.name}` — the design gate needs "
+                   "docs/stitch/manifest.json + screens/<id>/ exported before UI code")
+            report["design"] = {
+                "status": "blocked",
+                "tools": n,
+                "blocked": [{"requirement": "the Stitch screens exported as the design spec",
+                             "fix": fix}],
+                "fix": fix,
+            }
+            log(f"doctor design: BLOCKED — stitch_project_id is set but "
+                "docs/stitch/manifest.json is missing")
         else:
             report["design"] = {"status": "ready", "tools": n}
             log(f"doctor design: ready (Stitch MCP answers, {n} tools)")
