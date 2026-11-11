@@ -4623,7 +4623,9 @@ def cmd_stitch_retire(args: argparse.Namespace) -> int:
     surface = str(entry.get("id") or stitch_id)
     title = str(entry.get("title") or "")
     replaced = str(getattr(args, "replaced_by", "") or "").split("/")[-1]
-    if replaced:
+    if replaced and re.fullmatch(r"[0-9a-f]{32}", replaced):
+        pass  # an explicit Stitch id — allowed, the ledger names ids, not titles
+    elif replaced:
         target = _resolve_stitch_screen_entry(project, replaced)
         if not target:
             print(f"  ✗ --replaced-by '{replaced}' is not a canonical screen — retire or "
