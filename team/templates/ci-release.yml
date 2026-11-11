@@ -210,3 +210,66 @@ jobs:
           here is not proof the store has the change.
           EOF
           echo "::warning::The edit was committed WITHOUT an automatic review submission — send it from Play Console → Publishing overview, then record it with devteam store-status."
+
+#@@FIREBASE_JOB@@
+  # THE QA CHANNEL (optional, per project).
+  #
+  # The tag that ships the release AAB to Play internal testing also ships an
+  # installable DEBUG APK to Firebase App Distribution. Debug is where the
+  # test-only affordances live (email/password sign-in, seeded readers, a mock
+  # backend), so testers need a build they can install without a laptop — and it
+  # must never be the same artifact as the store build.
+  #
+  # Rendered only when the profile declares ci.firebase {app_id, groups}; with no
+  # credential the APK is still built and kept as an artifact, so a project that
+  # has not set this up ships nothing and stays green.
+  debug-to-firebase:
+    runs-on: ubuntu-latest
+    env:
+      FIREBASE_JSON: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_JSON }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Gradle (with cache)
+        uses: gradle/actions/setup-gradle@v4
+
+      # Debug builds are signed by the debug keystore Gradle generates on the
+      # runner: no release keystore, no secrets, and nothing that can be published.
+      - name: Build debug APK
+        run: |
+          sed -i 's/networkTimeout=.*/networkTimeout=120000/' gradle/wrapper/gradle-wrapper.properties 2>/dev/null || true
+          ./gradlew :__MODULE__:assembleDebug -Dorg.gradle.internal.http.socketTimeout=120000 -Dorg.gradle.internal.http.connectionTimeout=120000
+
+      - name: Upload debug APK as workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: debug-${{ github.ref_name }}
+          path: __DEBUG_APK__
+
+      - name: Share with testers (Firebase App Distribution)
+        id: firebase
+        if: env.FIREBASE_JSON != ''
+        continue-on-error: true
+        uses: wzieba/Firebase-Distribution-Github-Action@v1
+        with:
+          appId: __FIREBASE_APP_ID__
+          serviceCredentialsFileContent: ${{ env.FIREBASE_JSON }}
+          groups: __FIREBASE_GROUPS__
+          file: __DEBUG_APK__
+          releaseNotes: |
+            Debug build ${{ github.ref_name }} — test-only affordances enabled
+            (email/password sign-in, seeded readers, mock backend).
+            Commit ${{ github.sha }}.
+
+      - name: Say what a missing credential means
+        if: env.FIREBASE_JSON == ''
+        run: echo "::warning::FIREBASE_SERVICE_ACCOUNT_JSON is unset — the debug APK was built and kept as a workflow artifact, but no tester was notified."
+#@@/FIREBASE_JOB@@

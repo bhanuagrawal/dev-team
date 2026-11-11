@@ -73,6 +73,7 @@ The trigger for `main` is **the gates passed**, not "a human is about to look".
 | finished, `verify` PASS | `main` (project) / a commit on `main` (this repo) | no |
 | stopped mid-flight (verify FAIL, blocker) | committed + pushed to `dt/<task-id>`, tree pruned, attempt listed as `⏸ parked` | no |
 | stopped for an owner ask | same as above, **plus** `record --result blocked --note "<the question>"` | yes — the ask itself |
+| a DEBUG build for testers | Firebase App Distribution, same tag as the release (only when `profile.ci.firebase` is declared) | no |
 
 Nothing about a finished change needs a human in the loop; the human only enters
 for a launch they choose to trigger (`devteam promote`, never raised by an agent),
