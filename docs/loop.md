@@ -127,6 +127,25 @@ next `ci --write` silently rewrites it.
    directory survived. `record --result blocked` before any owner ask: the ask
    names the branch.
 
+## Two-reader flows — one UI, one API peer
+
+A swap needs two readers, and a second emulator/browser is the expensive way to
+get one. `devteam flow-peer <project> --with-reader <app-reader-id> --peer-email …`
+seats the other reader through the real public API: it accepts, shares a number
+for that offer, confirms the handover and confirms the return. Walk the app for
+the reader on screen; the peer does the other side. Run it twice, swapping which
+side is the app, to cover both UI positions:
+
+```bash
+python3 cli.py flow-peer BookSwapKMP --with-reader <app-user-id>         --peer-email peer@example.test --peer-password '…' --expect-completed
+python3 cli.py flow-peer BookSwapKMP --with-reader <app-user-id>         --peer-email peer@example.test --peer-password '…' --create-offer         --exchange-mode TEMPORARY --duration-days 7 --expect-completed
+```
+
+It acts only on offers whose counterpart is `--with-reader`, refuses without a
+credential or a filter, and logs every action under `.pipeline/runs/`. This is
+the half that lets the accepted-offer loop be audited end to end; `ux-flow`
+still walks the app's own three journeys.
+
 ## Done means
 
 `verify` PASS (which includes the mandatory **ux-flow audit**: every declared

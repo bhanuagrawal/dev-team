@@ -2288,6 +2288,13 @@ def cmd_ux_video(args: argparse.Namespace) -> int:
     return 1 if res["failed"] else 0
 
 
+def cmd_flow_peer(args: argparse.Namespace) -> int:
+    """The other reader, through the real API: accept, share, handover, return."""
+    project = resolve_project(args.project)
+    from team import flow_peer
+    return flow_peer.main(project, args)
+
+
 def cmd_mock_server(args: argparse.Namespace) -> int:
     """Foreground mock backend: deterministic Supabase shapes, no real project."""
     project = resolve_project(args.project)
@@ -5368,6 +5375,32 @@ def main() -> None:
                     help="the vision model that navigates (the API; browser Gemini is "
                          "the asset maker, not a navigator)")
     uf.set_defaults(fn=cmd_ux_flow)
+    fp = sub.add_parser("flow-peer", help="drive the OTHER reader through the real API so "
+                                          "one app can be walked through accept → number → "
+                                          "handover → return (run twice, swapping which side is the app)")
+    fp.add_argument("project")
+    fp.add_argument("--with-reader", help="only act on offers whose counterpart is this user id "
+                                          "(the reader seated in the app)")
+    fp.add_argument("--peer-email", help="peer account email (or BOOKSWAP_PEER_EMAIL)")
+    fp.add_argument("--peer-password", help="peer account password (or BOOKSWAP_PEER_PASSWORD)")
+    fp.add_argument("--peer-token", help="peer access token instead of email/password")
+    fp.add_argument("--phone", default="+91 90000 00002",
+                    help="the number this peer shares for the offer")
+    fp.add_argument("--create-offer", action="store_true",
+                    help="first create an offer on --with-reader's shelf (app as receiver)")
+    fp.add_argument("--exchange-mode", choices=["TEMPORARY", "PERMANENT"], default="TEMPORARY")
+    fp.add_argument("--duration-days", type=int, default=21)
+    fp.add_argument("--interval", type=float, default=3.0, help="seconds between polls")
+    fp.add_argument("--timeout", type=int, default=300, help="give up after this many seconds")
+    fp.add_argument("--max-actions", type=int, default=10)
+    fp.add_argument("--expect-completed", action="store_true",
+                    help="exit 0 only when a swap reaches COMPLETED")
+    fp.add_argument("--once", action="store_true", help="one pass, then report")
+    fp.add_argument("--api-url", help="override the API base read from the app")
+    fp.add_argument("--supabase-url", help="override the Supabase base read from the app")
+    fp.add_argument("--anon-key", help="override the public anon key read from the app")
+    fp.add_argument("--json", action="store_true")
+    fp.set_defaults(fn=cmd_flow_peer)
     ms = sub.add_parser("mock-server", help="serve a local Supabase-shaped mock backend "
                                             "(deterministic fixtures) for a manual or audited "
                                             "walk of a debug build")

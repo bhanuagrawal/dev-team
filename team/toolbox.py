@@ -132,6 +132,10 @@ _RAW: list[tuple[str, str, str, str, str, bool]] = [
                          "vision model; every walk must reach its goal",
      ".pipeline/ux_flows/*", "a journey not walked on this diff; a walk that did not "
                              "reach its goal; no emulator", True),
+    ("flow-peer", "build", "drive the OTHER reader through the real API so one app "
+                           "can be walked through accept → number → handover → return",
+     ".pipeline/runs/flow-peer-*.log", "no peer credential; no --with-reader; no "
+                                       "available app listing for --create-offer", True),
     # ---- deliver ----------------------------------------------------------- #
     ("release", "deliver", "version bump → signed AAB → CI → internal testing",
      "version file, tag, CI run, state", "verify not run for this worktree", True),
