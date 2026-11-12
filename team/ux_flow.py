@@ -1063,8 +1063,15 @@ def run(project: Path, only: str | None = None, log=None, avd: str | None = None
             if mock and not (flow.get("credentials") or {}).get("password"):
                 # The mock accepts these; a real backend would not, so they are
                 # injected only for an audited mock run and never live in the spec.
-                flow = {**flow, "credentials": {"email": "audit@bookswap.test",
-                                                "password": "audit-pass-123"}}
+                # A signup form also asks for a NAME before it will create the
+                # account, and a walk that stops there never reaches its goal — so
+                # the same audited-run-only treatment covers the profile values.
+                flow = {**flow,
+                        "credentials": {"email": "audit@bookswap.test",
+                                        "password": "audit-pass-123"},
+                        "profile": {"name": "Audit Reader",
+                                    "handle": "auditreader",
+                                    **(flow.get("profile") or {})}}
             fid = str(flow["id"])
             try:
                 res = audit_flow(
