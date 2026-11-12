@@ -181,9 +181,9 @@ def ping(timeout: int = 10) -> int:
     return len(r.get("tools") or [])
 
 
-def list_screens(project_id: str) -> list[dict[str, Any]]:
+def list_screens(project_id: str, timeout: int = 300) -> list[dict[str, Any]]:
     pid = _clean_project_id(project_id)
-    out = call("list_screens", {"projectId": pid})
+    out = call("list_screens", {"projectId": pid}, timeout=timeout)
     return list(out.get("screens") or [])
 
 
@@ -248,20 +248,37 @@ def _pick_screen(res: dict[str, Any], prefer_square: bool = False) -> dict[str, 
 
 def _poll_changed_screens(project_id: str, before: dict[str, str],
                           timeout: int = 900, interval: int = 20) -> list[dict[str, Any]]:
-    """Poll list_screens for newly created or updated screens after a slow/dropped call."""
+    """Poll list_screens for newly created or updated screens after a slow/dropped call.
+
+    The BUDGET is the whole poll, not one iteration: each `list_screens` is itself
+    an MCP round trip, and an unbounded one let a tweak that the editor never
+    produced sit in the poll for 20+ minutes past its own deadline (2026-11-13: a
+    `stitch-tweak` hung until it was killed, and the run had no design export).
+    Every read now gets what is left of the budget, so a dead editor surfaces as a
+    refusal the caller can act on instead of a wedged run.
+    """
     pid = _clean_project_id(project_id)
     deadline = time.time() + timeout
-    while time.time() < deadline:
-        time.sleep(interval)
+    while True:
+        remaining = deadline - time.time()
+        if remaining <= 0:
+            return []
+        time.sleep(min(interval, remaining))
+        budget = max(5, int(deadline - time.time()))
+        try:
+            screens = list_screens(pid, timeout=min(budget, 60))
+        except StitchError:
+            if time.time() >= deadline:
+                return []
+            continue
         changed = []
-        for s in list_screens(pid):
+        for s in screens:
             name = str(s.get("name") or "")
             html_name = str((s.get("htmlCode") or {}).get("name") or "")
             if html_name and before.get(name) != html_name:
                 changed.append(s)
         if changed:
             return changed
-    return []
 
 
 def generate_icon(project_id: str, prompt: str, *, device: str = "AGNOSTIC",
