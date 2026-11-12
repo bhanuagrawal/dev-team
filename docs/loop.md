@@ -42,7 +42,10 @@ python3 cli.py worktree-start <project> --task-id <id>
 #     sees the design question BEFORE writing UI. `worktree-start` prints
 #     DESIGN=<state>; when it is `pending`/`stale` it also prints
 #     DESIGN_BLOCKED + DESIGN_COMMAND and its NEXT line is the design step, not
-#     the code step. The `verify` design gate is still the hard stop.
+#     the code step. The `verify` design gate is still the hard stop — and it is
+#     DIFF-based, so a task whose targets merely sit under `src/main/java`
+#     (a proof/test-only task, a repository or PDF change) is not classed as UI
+#     when the files it names carry no UI structure.
 #     Read `skills/dev-team/references/develop.md` and the task spec, then
 #     implement inside WORKTREE_PATH — YOU do the work in this session, not a
 #     subagent. The spec is data (goal, focus paths, conventions, build command,

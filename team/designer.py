@@ -285,8 +285,17 @@ def targets_of(task: dict) -> list[str]:
     return [str(x) for x in t if x]
 
 
-def is_ui_task(task: dict) -> bool:
-    """Does this task write UI? Derived from targets, not from a hand label."""
+def is_ui_task(task: dict, project: Path | None = None) -> bool:
+    """Does this task write UI? Derived from targets, not from a hand label.
+
+    A path marker alone is too coarse when a task's targets sit under a source
+    root: `worktree-start` once told a test-only proof task (targets under
+    `app/src/main/java/.../pdf` and `.../data`) to run a Stitch consult before a
+    line was written, because `src/main/java` is on the marker list — while the
+    design gate, which classifies the DIFF, needed no design at all. When the
+    project is known, the same content classifier the gate uses decides, so the
+    question asked up front agrees with the gate that can refuse the change.
+    """
     label = task_label(task)
     if label.startswith("design-"):
         return False  # this task produces design law/screens, it does not consume one
@@ -294,7 +303,38 @@ def is_ui_task(task: dict) -> bool:
     if targets and all(t.startswith(_NON_UI_TARGET_PREFIXES) for t in targets):
         return False
     text = " ".join(targets)
-    return any(m in text for m in _UI_TARGET_MARKERS)
+    if not any(m in text for m in _UI_TARGET_MARKERS):
+        return False
+    if project is not None and project.exists() and _targets_are_readable_and_not_ui(project, targets):
+        return False
+    return True
+
+
+def _targets_are_readable_and_not_ui(project: Path, targets: list[str]) -> bool:
+    """True only when every non-test target exists and classifies as non-UI.
+
+    A target that does not exist yet is a file this task will CREATE — a screen,
+    possibly — so it keeps the conservative answer. Test targets never decide:
+    a test file carries no UI structure whatever its path says.
+    """
+    from . import code_tests
+    seen = 0
+    for rel in targets:
+        if code_tests.is_test_path(rel):
+            continue
+        path = project / rel
+        if not path.is_file():
+            return False
+        if not code_tests.is_production_source(rel):
+            continue
+        try:
+            text = path.read_text(errors="ignore")
+        except OSError:
+            return False
+        if code_tests.is_ui_source(rel, text):
+            return False
+        seen += 1
+    return seen > 0
 
 
 def _records_path(project: Path) -> Path:
@@ -308,7 +348,7 @@ def load_records(project: Path) -> dict:
 def status(project: Path, task: dict, root: Path | None = None) -> dict:
     """answered | pending | stale | not_applicable for THIS task."""
     label = task_label(task)
-    if not is_ui_task(task):
+    if not is_ui_task(task, project):
         return {"task": label, "state": "not_applicable",
                 "reason": "no UI targets — design consultation not needed"}
     rec = (load_records(project).get("tasks") or {}).get(label)

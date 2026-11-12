@@ -90,7 +90,7 @@ def design_context(project: Path, task: dict) -> dict:
     """What the design gate will require for THIS task, said before any UI code."""
     label = designer.task_label(task)
     try:
-        ui_task = designer.is_ui_task(task)
+        ui_task = designer.is_ui_task(task, project)
         st = designer.status(project, task)
     except Exception as exc:  # never lose a spec to a reading error
         return {

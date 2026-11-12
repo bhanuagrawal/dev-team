@@ -248,7 +248,7 @@ def _annotate_design(project, root: dict) -> None:
                 for c in n.get("children") or []:
                     walk(c)
                 return
-            ui = [t for t in tasks if designer.is_ui_task(t)]
+            ui = [t for t in tasks if designer.is_ui_task(t, project)]
             if not ui:
                 n["design_consult"] = {"state": "not_applicable"}
             else:
