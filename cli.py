@@ -3103,6 +3103,7 @@ def cmd_storefront_scenes(args: argparse.Namespace) -> int:
         print(sr.format_review(review))
         print(f"  saved -> {path.relative_to(project)}")
 
+    render_tree: Path | None = None
     if do_all or getattr(args, "render", False):
         print("~ rendering composables off-device (AGP layoutlib)")
         tree = None
@@ -3125,6 +3126,7 @@ def cmd_storefront_scenes(args: argparse.Namespace) -> int:
             tree = project
             print("  DELIVERY: --from-checkout — screenshots will describe the local "
                   "checkout, NOT the app CI ships")
+        render_tree = tree
         res = sp.render_previews(project, log=print, tree=tree)
         if res.get("status") != "OK":
             print(f"  ✗ {res.get('status')}: {res.get('error')}")
@@ -3280,7 +3282,8 @@ def cmd_storefront_scenes(args: argparse.Namespace) -> int:
 
     if do_all or getattr(args, "frame", False):
         print("~ compositing marketing frames (1620x3200, 1080-wide opening)")
-        res = sp.compose_frames(project, log=print, force=getattr(args, "force", False))
+        res = sp.compose_frames(project, log=print, force=getattr(args, "force", False),
+                                tree=render_tree)
         if res.get("status") != "OK":
             print(f"  ✗ {res.get('error')}")
             return 1

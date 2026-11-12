@@ -223,13 +223,22 @@ def png_dims(path: Path) -> tuple[int, int] | None:
     return None
 
 
-def listing_record(project: Path) -> dict[str, Any]:
+def listing_record(project: Path, tree: Path | None = None) -> dict[str, Any]:
     """What the shipped frames were drawn from, as data a re-run reproduces.
 
-    Every field is read from the tree that ships: the delivery ref and the last
+    Every field is read from the tree that SHIPS: the delivery ref and the last
     commit that touched the module's sources (from git), the versionName the
     build installs (from the module's build file), the scene spec fingerprint the
     copy came from, and one sha256 + size per PNG actually on disk.
+
+    `tree` is the tree the pixels actually came from when that is not the
+    delivery tree (a run's `--tree` worktree). Two failures this prevents, both
+    seen on 2026-11-13: a checkout that was two commits behind recorded the
+    PREVIOUS app/src commit, so a truthful re-render was stamped stale; and a
+    worktree render recorded `origin/main`, so the registry claimed frames
+    described a commit they had never seen. A worktree render is therefore
+    recorded as such, and `listing_freshness` says so in its verdict so the run
+    knows those pixels are not yet installable.
     """
     from .storefront_review import spec_fingerprint
 
@@ -251,22 +260,34 @@ def listing_record(project: Path) -> dict[str, Any]:
         except Exception:
             spec_sha = ""
     source = ui_source(project)
+    rendered = Path(tree).resolve() if tree else None
+    from_worktree = bool(rendered and rendered != project.resolve())
+    if from_worktree:
+        # The pixels describe THIS tree's HEAD, whatever it is. Never origin/main.
+        ref_sha = _git_out(rendered, ["rev-parse", "HEAD"])
+        ui_sha = _git_out(rendered, ["log", "-1", "--format=%H", "--", source])
+    else:
+        # The delivery render draws origin/main, so the ref it describes is
+        # origin/main even when the checkout itself lags (law: read the ref).
+        ref_sha = _git_out(project, ["rev-parse", "origin/main"])
+        ui_sha = _git_out(project, ["log", "-1", "--format=%H", "origin/main", "--", source])
     return {
         "rendered_at": now_iso(),
-        "ref": "origin/main",
-        "ref_sha": _git_out(project, ["rev-parse", "origin/main"]),
+        "ref": "worktree" if from_worktree else "origin/main",
+        "ref_sha": ref_sha,
         "ui_path": source,
-        "ui_sha": _git_out(project, ["log", "-1", "--format=%H", "--", source]),
-        "app_version": app_version(project),
+        "ui_sha": ui_sha,
+        "app_version": app_version(rendered or project),
         "spec_sha": spec_sha,
+        "rendered_from_worktree": from_worktree,
         "files": files,
     }
 
 
-def record_listing(project: Path) -> dict[str, Any]:
+def record_listing(project: Path, tree: Path | None = None) -> dict[str, Any]:
     """Stamp the registry with the provenance of the frames just composed."""
     registry = load_registry(project)
-    block = listing_record(project)
+    block = listing_record(project, tree=tree)
     registry["listing"] = block
     save_registry(project, registry)
     return block
@@ -307,6 +328,11 @@ def listing_freshness(project: Path) -> tuple[bool, str]:
 
     remedy = f"re-render: devteam storefront-scenes {_project_label(project)} --render --frame"
     problems: list[str] = []
+    worktree_note = ""
+    if block.get("rendered_from_worktree"):
+        worktree_note = ("; drawn from a work-run tree "
+                         f"({str(block.get('ref_sha') or '')[:7] or 'unrecorded'}) — "
+                         "re-render from origin/main once it is merged")
     recorded = {str(f.get("name")): f for f in block.get("files") or []}
 
     for p in on_disk:
@@ -345,7 +371,10 @@ def listing_freshness(project: Path) -> tuple[bool, str]:
                             "screenshot's copy and the spec now describe different words")
 
     source = str(block.get("ui_path") or ui_source(project))
-    now_ui = _git_out(project, ["log", "-1", "--format=%H", "--", source])
+    # The ref CI ships is origin/main (law 2): a checkout that lags must not make
+    # a truthful render look stale, which is exactly what happened on 2026-11-13.
+    now_ui = (_git_out(project, ["log", "-1", "--format=%H", "origin/main", "--", source])
+              or _git_out(project, ["log", "-1", "--format=%H", "--", source]))
     if now_ui and str(block.get("ui_sha") or "") != now_ui:
         problems.append(f"{source} moved since the frames were drawn "
                         f"({str(block.get('ui_sha') or 'unrecorded')[:12]} -> {now_ui[:12]}): "
@@ -368,7 +397,8 @@ def listing_freshness(project: Path) -> tuple[bool, str]:
                        + version_note + " — " + remedy)
     return True, (f"{len(recorded)} frame(s) match the build they were drawn from "
                   f"({str(block.get('ref_sha') or '')[:7] or 'ref?'}, "
-                  f"{block.get('app_version') or 'version?'})" + version_note)
+                  f"{block.get('app_version') or 'version?'})" + version_note
+                  + worktree_note)
 
 
 def visible_text(html: str) -> str:

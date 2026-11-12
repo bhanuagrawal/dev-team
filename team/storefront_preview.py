@@ -1098,8 +1098,14 @@ def _frame_html(scene: dict[str, Any], img_uri: str, colors: dict[str, str]) -> 
 </body></html>"""
 
 
-def compose_frames(project: Path, log: Any = None, force: bool = False) -> dict[str, Any]:
-    """Wrap each rendered scene in the marketing frame and write Play-ready PNGs."""
+def compose_frames(project: Path, log: Any = None, force: bool = False,
+                   tree: Path | None = None) -> dict[str, Any]:
+    """Wrap each rendered scene in the marketing frame and write Play-ready PNGs.
+
+    `tree` is the tree the scenes were rendered FROM (a run's `--tree` worktree),
+    so the listing's provenance names the pixels a user would install rather
+    than whatever ref the command happened to be standing on.
+    """
     spec = load_spec(project, create=False)
     scenes_dir = project / ".pipeline/storefront_scenes"
     if not scenes_dir.is_dir():
@@ -1221,7 +1227,8 @@ def compose_frames(project: Path, log: Any = None, force: bool = False) -> dict[
     # as if it had.
     from . import storefront_frames as sfr
     ok_frames = [w for w in written if w.get("status") == "OK"]
-    recorded = sfr.record_listing(project) if plan and len(ok_frames) == len(plan) else {}
+    recorded = (sfr.record_listing(project, tree=tree)
+                if plan and len(ok_frames) == len(plan) else {})
     if recorded and log:
         log(f"  = listing provenance recorded ({len(recorded.get('files') or [])} frame(s), "
             f"{recorded.get('app_version') or 'version?'} @ {str(recorded.get('ref_sha') or '')[:7]})")
