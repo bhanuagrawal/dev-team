@@ -5797,6 +5797,25 @@ def cmd_stitch_export(args: argparse.Namespace) -> int:
     retired = _retired_ids(prev)
     canon = prev.get("canonical_screens") or []
     live = {str(s.get("name") or "").split("/")[-1]: s for s in stitch_mcp.list_screens(pid)}
+    if not live and canon:
+        # A project can hold screens that its listing does not enumerate (a screen generated
+        # into the project without an instance, seen 2026-11-12: list_screens answered {} while
+        # get_screen answered for both canonical ids). The ledger already names the spec, so ask
+        # for each recorded id directly instead of treating a live canvas as wiped. An id that
+        # really is gone still fails here, and the empty-export refusal below still fires when
+        # none of them resolve.
+        for entry in canon:
+            sid = str(entry.get("stitch_id") or entry.get("id")).split("/")[-1]
+            try:
+                screen = stitch_mcp.get_screen(pid, sid)
+            except stitch_mcp.StitchError as exc:
+                print(f"  ! surface {entry.get('id')} → {sid} did not answer: {exc}")
+                continue
+            if screen:
+                live[sid] = screen
+        if live:
+            print(f"  ~ Stitch's screen listing was empty; resolved {len(live)} recorded "
+                  "screen(s) by id from the ledger")
     refusal = designer.empty_export_refusal(prev, len(live))
     if refusal:
         print(refusal)
