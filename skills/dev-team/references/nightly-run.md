@@ -70,17 +70,13 @@ commands, in order, with the reasoning and the failure branches.
       ships analysis a user cannot see. Enforced in code (the plan is rejected); an
       investigation may head the queue only when nothing executable exists, and then its
       `reason` says so.
-    - **TEST COVERAGE IS A SIGNAL AND A GATE** (owner 2026-11-05). `signals.coverage`
-      carries two numbers over the shipped tree: **unit** (share of non-UI main-source
-      files a JVM test names; real JaCoCo LINE coverage replaces the proxy when a report
-      exists) and **ui** (share of UI files a test mounts, counting Robolectric
-      `src/test` and `src/androidTest` alike). Floors live in `config/coverage.json` and a
-      project may override its own in `profile['coverage']`; `devteam coverage <project>`
-      prints them and `status` shows the last measurement. The planner prompt states them,
-      and **code enforces the priority**: while either leg is below its floor the queue
-      HEAD must be the executable entry that raises it (its `target` names the test
-      sources it will write) — a red CI or a store rejection is the only exemption. A
-      goal milestone does not outrank an uncovered codebase.
+    - **TEST COVERAGE IS RETIRED — INFORMATION ONLY** (owner policy 2026-11-10:
+      "get rid of them completely", after the earlier 2026-11-05 coverage gate).
+      `signals.coverage` may still be measured over the shipped tree and `status`
+      may print it, but both floors are 0/0 in `config/coverage.json`, no run is
+      ever sized or ordered to raise coverage, and `verify` has no test gate. An
+      entry whose only deliverable is a test or a proof suite is NOT executable
+      work: it ships nothing a user can see, so it is never the queue head.
     - **POLISH IS MEASURED, NOT CLAIMED** (owner 2026-11-05: *"don't dumbly keep adding
       features — polish a lot"*, and *"look and feel usually doesn't change in one run"*).
       So the unit is the SCREEN and the trigger is a fingerprint, never a per-release
@@ -147,7 +143,7 @@ commands, in order, with the reasoning and the failure branches.
     "surface": {"label": "<label>", "targets": ["<repo-relative path(s)>"]},
     "risk": "safe", "effort_min": 210, "created": "<iso>",
     "problem": "<one line, the user's words: what is broken or missing>",
-    "done_when": ["<acceptance line a test can assert>", "..."],
+    "done_when": ["<acceptance line observable in the shipped app>", "..."],
     "user_sees": "<optional>", "not_in_scope": "<optional>"}
    Write it to `.pipeline/tasks/<id>.json`. `effort_min` (from the picked queue
    entry) is the expected size of ONE developer session — the brief shows it, so

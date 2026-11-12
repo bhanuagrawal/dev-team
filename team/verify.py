@@ -995,7 +995,7 @@ def verify_all(project: Path, worktree: Path, base: str, log, gradle: bool = Tru
         return False, failures
 
     # REVAMP CODEBASE REBUILD GATE: a task claiming to be a revamp or rebuild from scratch
-    # must genuinely replace the legacy codebase and supply fresh tests.
+    # must genuinely replace the legacy codebase (no test is owed — see revamp_gate).
     ok, msg = revamp_gate(project, worktree, spec, files)
     log("revamp: ok — " + msg if ok else "revamp: FAIL — " + msg)
     if not ok:

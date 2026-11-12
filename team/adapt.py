@@ -126,16 +126,29 @@ def needed(project: Path) -> list[str]:
 def _relocated(path: str) -> str | None:
     """A path the TEAM moved, repaired structurally — never by guessing.
 
-    Two cases, in order, and nothing else:
-      1. The path was inside the team repo (`.../dev-team/...`) and the team repo
+    Three cases, in order, and nothing else:
+      1. The path was inside a TEAM WORKTREE (`.../worktrees/dev-team/<branch>/...`):
+         a worktree is a throwaway copy of the team repo, so the SAME file at the
+         same relative place under the live team root is the answer — the branch
+         directory is the only segment that is not part of the path.
+      2. The path was inside the team repo (`.../dev-team/...`) and the team repo
          has moved: the SAME file at the same relative place is the answer.
-      2. The path was a skills path: `skills/<name>/...` found under a known
+      3. The path was a skills path: `skills/<name>/...` found under a known
          skills root. Exactly one hit, or we refuse — a name collision (two
          different skills called android-code) is an ambiguity only the owner may
          resolve, and re-pointing to the wrong one silently swaps the style law
          the developer is told to read."""
     p = Path(path)
-    # 1. team repo relocation (structural: same tail, new root)
+    # 1. team WORKTREE relocation (structural: drop the worktree + branch segments)
+    if "/worktrees/dev-team/" in path:
+        rest = path.split("/worktrees/dev-team/", 1)[1]
+        if "/" in rest:
+            tail = rest.split("/", 1)[1]
+            from .core import TEAM_ROOT
+            cand = TEAM_ROOT / tail
+            if cand.exists():
+                return str(cand)
+    # 2. team repo relocation (structural: same tail, new root)
     for marker in ("/dev-team/", "/Documents/AI/dev-team/"):
         if marker in path:
             tail = path.split(marker, 1)[1]
@@ -143,7 +156,7 @@ def _relocated(path: str) -> str | None:
             cand = TEAM_ROOT / tail
             if cand.exists():
                 return str(cand)
-    # 2. skills root search (unique hit only)
+    # 3. skills root search (unique hit only)
     if "/skills/" in path:
         tail = path.split("/skills/", 1)[1]
         from .core import TEAM_ROOT

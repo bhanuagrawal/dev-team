@@ -945,7 +945,7 @@ Decide what to BUILD NEXT. Output STRICT JSON only (no prose, no code fence):
       "effort_min": {target_effort},
       "priority": 1, "reason": "one line grounded in research",
       "problem": "<one line, in the user's words: what is broken or missing>",
-      "done_when": ["<acceptance line a test can assert>", "..."],
+      "done_when": ["<acceptance line observable in the shipped app>", "..."],
       "whatsnew": "<1-2 lines of USER-FACING Play store copy for this release, no engineering words ('render', 'test', 'composable', 'scene') — the release ships exactly this>",
       "user_sees": "<optional: what the user notices after>",
       "not_in_scope": "<optional: what this task must not change>",
@@ -1131,9 +1131,12 @@ Rules:
   never a bare filename — the validator rejects a separator-less item and the whole plan is refused.
 - EVERY feature/bugfix ENTRY IS A MINI-PRD, not a label (owner directive 2026-11-09):
   * `problem` — ONE line, in the user's words: what is broken or missing.
-  * `done_when` — 1-3 acceptance lines. Each must be something a TEST can assert;
-    the tests ARE the proof (`verify` refuses a diff whose changed production files
-    carry no test). "works better" / "polished" are not acceptance lines.
+  * `done_when` — 1-3 acceptance lines. Each must be observable in the SHIPPED app:
+    a behaviour a person (or the ux-flow audit walking the journey) can see, or a
+    number a signal carries. TESTS ARE RETIRED (owner policy 2026-11-10): no test is
+    owed, none is run, and `verify` has no test gate — a test-only acceptance line
+    is not proof, it is work the owner has already refused. "works better" /
+    "polished" are still not acceptance lines.
   * `user_sees` (optional) — what the user notices after the change.
   * `not_in_scope` (optional) — what this task must NOT change.
   Code rejects a feature/bugfix entry without a non-empty `problem` and `done_when`.
@@ -1291,7 +1294,8 @@ def _validate(result: dict, research: dict | None = None) -> str | None:
                 dw = q.get("done_when")
                 if not isinstance(dw, list) or not [x for x in dw if str(x).strip()]:
                     return (f"queue entry '{q.get('label')}' has no 'done_when' — list "
-                            "1-3 acceptance lines, each one a test can assert. A task "
+                            "1-3 acceptance lines, each one observable in the shipped "
+                            "app (a visible behaviour or a number a signal carries). A task "
                             "without an acceptance line is a wish: the gate cannot check "
                             "it, so the run ships an opinion")
         if research is not None:
