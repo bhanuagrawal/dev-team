@@ -22,6 +22,7 @@ import base64
 import json
 import os
 import re
+import subprocess
 import time
 import urllib.error
 import urllib.request
@@ -453,6 +454,65 @@ def download(screen: dict[str, Any]) -> tuple[bytes, str]:
     raise StitchError("Stitch returned neither html nor image bytes")
 
 
+def _fetch_file_by_url(download_url: str, timeout: int = 120) -> bytes:
+    """Download a Stitch file straight from its serving URL.
+
+    `download_file` answers for HTML but 404s ("Requested entity was not found")
+    for the screenshot blobs of the same screen, which silently left every
+    exported screen without its `screen.png` — the design gate then refused every
+    reuse of an existing screen. The serving URL the screen payload carries is
+    authoritative, so it is the fallback.
+    """
+    url = str(download_url or "").strip()
+    if not url:
+        raise StitchError("no downloadUrl on the file")
+    _, key = _credentials()
+    req = urllib.request.Request(url, headers={"X-Goog-Api-Key": key})
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            return r.read()
+    except urllib.error.HTTPError as exc:
+        detail = exc.read().decode("utf-8", "replace")[:200]
+        raise StitchError(f"file download failed: HTTP {exc.code} — {detail}")
+    except Exception as exc:
+        raise StitchError(f"file download failed: {exc}")
+
+
+def _render_html_png(html_path: Path, out_png: Path, width: int, height: int,
+                     log=None) -> bool:
+    """Render an exported screen's own HTML to `screen.png`.
+
+    Stitch stopped serving the screenshot blob for every screen created before
+    ~2026-11-01 (the file entity answers 404 while `get_screen` still names it),
+    so an export that trusted the blob shipped a design spec with no picture and
+    the design gate refused every reuse. The HTML Stitch DOES serve is the same
+    screen, so its own render is the snapshot: width/height come from the screen
+    payload, never guessed.
+    """
+    log = log or (lambda *_: None)
+    try:
+        from .marketing_asset_generator import _find_chrome_executable
+    except Exception:
+        return False
+    chrome = _find_chrome_executable()
+    if not chrome:
+        log(f"  ! {html_path.name}: no Chrome to render the screen snapshot")
+        return False
+    w = max(320, int(width or 780))
+    h = max(320, int(height or 1768))
+    out_png.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        subprocess.run([chrome, "--headless", "--disable-gpu", "--hide-scrollbars",
+                        "--force-device-scale-factor=1",
+                        f"--window-size={w},{h}",
+                        f"--screenshot={out_png.resolve()}", html_path.resolve().as_uri()],
+                       capture_output=True, text=True, timeout=120)
+    except Exception as exc:  # noqa: BLE001 - a render must never kill the export
+        log(f"  ! {html_path.name}: screen render failed — {exc}")
+        return False
+    return out_png.is_file() and out_png.stat().st_size > 0
+
+
 def export_one_screen(screen: dict[str, Any], out_dir: Path, log=None,
                       *, logical_id: str | None = None) -> dict[str, Any] | None:
     """Download one screen into <out_dir>/<logical_id>/.
@@ -490,15 +550,34 @@ def export_one_screen(screen: dict[str, Any], out_dir: Path, log=None,
         except StitchError as exc:
             log(f"  ! {title}: html export failed — {exc}")
     shot_name = str((screen.get("screenshot") or {}).get("name") or "")
-    if shot_name:
+    shot_url = str((screen.get("screenshot") or {}).get("downloadUrl") or "")
+    if shot_name or shot_url:
+        png: bytes = b""
         try:
-            shot = call("download_file", {"name": shot_name})
+            shot = call("download_file", {"name": shot_name}) if shot_name else {}
             b64 = shot.get("image") or ""
             if b64:
-                (screen_dir / "screen.png").write_bytes(base64.b64decode(b64))
-                entry["screenshot"] = f"screens/{dir_id}/screen.png"
+                png = base64.b64decode(b64)
         except StitchError as exc:
-            log(f"  ! {title}: screenshot export failed — {exc}")
+            log(f"  · {title}: screenshot via the MCP file API failed ({exc}) — trying its serving URL")
+        if not png and shot_url:
+            try:
+                png = _fetch_file_by_url(shot_url)
+            except StitchError as exc:
+                log(f"  ! {title}: screenshot export failed — {exc}")
+        if png:
+            (screen_dir / "screen.png").write_bytes(png)
+            entry["screenshot"] = f"screens/{dir_id}/screen.png"
+        else:
+            html_file = screen_dir / "index.html"
+            if html_file.is_file() and _render_html_png(
+                    html_file, screen_dir / "screen.png",
+                    int(screen.get("width") or 0), int(screen.get("height") or 0),
+                    log=log):
+                entry["screenshot"] = f"screens/{dir_id}/screen.png"
+                entry["snapshot_source"] = "rendered-from-exported-html"
+                log(f"  ~ {title}: Stitch serves no screenshot blob; rendered the "
+                    "exported design HTML at its own size")
     log(f"  ✓ {title} → {screen_dir}")
     return entry
 

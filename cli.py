@@ -5219,6 +5219,9 @@ def main() -> None:
                         help="download every Stitch screen (HTML + screenshot) into docs/stitch — the design spec")
     se.add_argument("project")
     se.add_argument("--no-commit", action="store_true")
+    se.add_argument("--worktree",
+                    help="export into this task worktree instead of the checkout (a run "
+                         "must land the design spec in the tree it commits from)")
     se.set_defaults(fn=cmd_stitch_export)
     dc = sub.add_parser("design-consult",
                         help="ask the designer for one task; the answer is cached against the current Stitch state")
@@ -5791,20 +5794,30 @@ def cmd_stitch_export(args: argparse.Namespace) -> int:
         raise SystemExit("no design.stitch_project_id in .pipeline/profile.json")
     from team import stitch_mcp
     from team import designer
-    out = project / "docs" / "stitch"
+    # WHICH TREE OWNS THE EXPORT. The design spec is committed project content, so
+    # a run must be able to write it into its own worktree: exporting into the
+    # checkout instead puts the artefact in a tree nobody commits from and leaves
+    # main without a ledger (the defect that made the design agent BLOCKED). The
+    # .pipeline mirror is skipped for a worktree by _write_stitch_manifest.
+    wt = getattr(args, "worktree", None)
+    root = Path(wt).resolve() if wt else project
+    out = root / "docs" / "stitch"
     print(f"exporting Stitch project {pid} → {out}")
-    prev = designer.ledger(project)
+    prev = designer.ledger(project, root=root)
     retired = _retired_ids(prev)
     canon = prev.get("canonical_screens") or []
     live = {str(s.get("name") or "").split("/")[-1]: s for s in stitch_mcp.list_screens(pid)}
-    if not live and canon:
-        # A project can hold screens that its listing does not enumerate (a screen generated
-        # into the project without an instance, seen 2026-11-12: list_screens answered {} while
-        # get_screen answered for both canonical ids). The ledger already names the spec, so ask
-        # for each recorded id directly instead of treating a live canvas as wiped. An id that
-        # really is gone still fails here, and the empty-export refusal below still fires when
-        # none of them resolve.
-        for entry in canon:
+    if canon:
+        # A project can hold screens its LISTING does not enumerate (they exist, but
+        # no canvas instance names them — seen on 2026-11-12: list_screens answered
+        # 5 while Setup and History still answered get_screen by id). Asking for
+        # each recorded id directly is what keeps those surfaces in the spec: without
+        # it the export called them "gone from Stitch" and quietly shipped a ledger
+        # with no Setup or History design.
+        missing = [e for e in canon
+                   if str(e.get("stitch_id") or e.get("id")).split("/")[-1] not in live]
+        resolved = 0
+        for entry in missing:
             sid = str(entry.get("stitch_id") or entry.get("id")).split("/")[-1]
             try:
                 screen = stitch_mcp.get_screen(pid, sid)
@@ -5813,9 +5826,10 @@ def cmd_stitch_export(args: argparse.Namespace) -> int:
                 continue
             if screen:
                 live[sid] = screen
-        if live:
-            print(f"  ~ Stitch's screen listing was empty; resolved {len(live)} recorded "
-                  "screen(s) by id from the ledger")
+                resolved += 1
+        if resolved:
+            print(f"  ~ Stitch's listing omitted {len(missing)} recorded screen(s); "
+                  f"resolved {resolved} by id from the ledger")
     refusal = designer.empty_export_refusal(prev, len(live))
     if refusal:
         print(refusal)
@@ -5846,22 +5860,28 @@ def cmd_stitch_export(args: argparse.Namespace) -> int:
                   "or record it dead (`devteam stitch-retire`)")
         manifest = {**prev, "project": project.name, "project_id": pid,
                     "synced_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-                    "canonical_screens": keep}
+                    "canonical_screens": keep,
+                    # The count is DERIVED, never carried over: a ledger that says
+                    # "6 surfaces" over 4 rows is the same class of lie as a stale
+                    # canonical row, and a reader trusts the number.
+                    "screen_count": len(keep)}
     else:
         manifest = stitch_mcp.export_screens(pid, out / "screens", log=print)
         manifest["retired_screens"] = prev.get("retired_screens") or []
-    _write_stitch_manifest(project, project, manifest)
-    _render_retired_ledger(project, manifest)
+    _write_stitch_manifest(project, root, manifest)
+    _render_retired_ledger(root, manifest)
     print(f"manifest: {out / 'manifest.json'} ({len(manifest['canonical_screens'])} surface(s))")
     if not args.no_commit:
         import subprocess as _sp
-        _sp.run(["git", "add", "docs/stitch"], cwd=project)
+        # The commit lands in the tree that OWNS the export: a worktree run commits
+        # on dt/<task-id> (release puts it on main); the checkout commits on main.
+        _sp.run(["git", "add", "docs/stitch"], cwd=root)
         r = _sp.run(["git", "commit", "-m",
                      "design(stitch): export the screen set as the design spec",
                      "--", "docs/stitch"],
-                    cwd=project, capture_output=True, text=True)
+                    cwd=root, capture_output=True, text=True)
         if r.returncode == 0:
-            print("committed: docs/stitch + manifest (push it before a release)")
+            print(f"committed in {root}: docs/stitch + manifest (push it before a release)")
         else:
             print("nothing to commit (or commit refused): " + (r.stderr or "").strip()[:160])
     return 0
