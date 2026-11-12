@@ -178,9 +178,21 @@ def _commit_edit(package: str, edit: str, token: str, project: Path) -> dict:
     """
     committed = _post(f"{API}/applications/{package}/edits/{edit}:commit", project, token)
     err = str((committed or {}).get("_error") or "").lower()
-    if committed.get("_error") and "must be set" in err and "must not be set" not in err:
+    # Two different Play answers mean the same thing — this edit may only be
+    # committed if it is NOT sent for review automatically:
+    #   * "changesNotSentForReview must be set"  (console: review is manual)
+    #   * "Changes cannot be sent for review automatically. Please set the query
+    #     parameter changesNotSentForReview to true"  (an app policy issue is open)
+    # The second used to fall through untried, so the icon upload died with the
+    # edit already staged (2026-11-12) even though CI had handled the same hold
+    # since 2026-11-08. Retry with the flag and mark the result, so callers can
+    # say "committed, NOT sent for review" instead of reading it as a launch.
+    hold = "must be set" in err or "cannot be sent for review" in err
+    if committed.get("_error") and hold and "must not be set" not in err:
         committed = _post(f"{API}/applications/{package}/edits/{edit}:commit"
                           "?changesNotSentForReview=true", project, token)
+        if isinstance(committed, dict) and not committed.get("_error"):
+            committed["_review_pending"] = True
     return committed
 
 
@@ -265,8 +277,12 @@ def publish_icon(project: Path, dry_run: bool = True, log: Any = None) -> dict[s
             _discard(package, fresh_id, token, project)
         if not got or got[0].get("sha256") != want:
             raise RuntimeError("commit did not take effect: the app still serves a different icon")
-        plan.update(status="OK", committed=True, live_sha256=got[0].get("sha256"))
+        plan.update(status="OK", committed=True, live_sha256=got[0].get("sha256"),
+                    review_pending=bool(committed.get("_review_pending")))
         say(f"  ✓ committed listing edit {edit_id} for {package} (icon verified in a fresh edit)")
+        if plan["review_pending"]:
+            say("    ! committed WITHOUT sending for review — Play has an open policy "
+                "issue; click Send for review in Play Console → Publishing overview")
         say("    note: if Managed publishing is ON, the change waits for the owner's "
             "Publish click in Play Console → Publishing overview")
         return plan

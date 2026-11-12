@@ -77,12 +77,31 @@ def _put_track(pkg: str, edit: str, project: Path, token: str,
 
 
 def _commit(pkg: str, edit: str, project: Path, token: str) -> dict:
-    """Commit WITHOUT `changesNotSentForReview`: the release must reach Google."""
+    """Commit the production edit and let Play decide whether it may go to review.
+
+    Play refuses an automatic review submission while the app has an open policy
+    issue — "Changes cannot be sent for review automatically. Please set the
+    query parameter changesNotSentForReview to true" — which is exactly the state
+    the Nov 8 Misleading-Claims rejection leaves behind. Retrying with the flag
+    commits the release as a draft that waits on Play Console → Send for review.
+    That is a real launch step, so the result carries `_review_pending` and
+    `promote` records it instead of reporting a review that never happened.
+    """
+    url = f"{API}/applications/{pkg}/edits/{edit}:commit"
     r = run(["curl", "-s", "-X", "POST",
-             "-H", f"Authorization: Bearer {token}",
-             f"{API}/applications/{pkg}/edits/{edit}:commit"],
+             "-H", f"Authorization: Bearer {token}", url],
             project, timeout=120)
-    return play_listing._payload(r.stdout)
+    out = play_listing._payload(r.stdout)
+    err = str((out or {}).get("_error") or "").lower()
+    if out.get("_error") and "cannot be sent for review" in err and "must not be set" not in err:
+        r = run(["curl", "-s", "-X", "POST",
+                 "-H", f"Authorization: Bearer {token}",
+                 f"{url}?changesNotSentForReview=true"],
+                project, timeout=120)
+        out = play_listing._payload(r.stdout)
+        if isinstance(out, dict) and not out.get("_error"):
+            out["_review_pending"] = True
+    return out
 
 
 def _discard(pkg: str, edit: str, project: Path, token: str) -> None:
@@ -238,7 +257,13 @@ def promote(project: Path, version: str, *, requested_by: str,
         _discard(pkg, edit, project, token)
         return {"status": "ERROR", "error": f"commit refused: {committed['_error']}"}
 
-    say(f"promote: v{version} ({','.join(codes)}) committed as edit {edit} — sent for review")
+    review_pending = bool(committed.get("_review_pending"))
+    if review_pending:
+        say(f"promote: v{version} ({','.join(codes)}) committed as edit {edit} — "
+            "NOT sent for review (Play policy hold); send it from Play Console → "
+            "Publishing overview")
+    else:
+        say(f"promote: v{version} ({','.join(codes)}) committed as edit {edit} — sent for review")
 
     # Read back through a FRESH edit: the commit's own payload says nothing about
     # what Play kept. `draft` here is the managed-publishing signature — the
@@ -261,6 +286,7 @@ def promote(project: Path, version: str, *, requested_by: str,
         "note": note,
         "read_back": (kept or {}).get("status") or "not-listed-yet",
         "managed_publishing": bool(kept and kept.get("status") == "draft"),
+        "review_pending": review_pending,
     }
     state.setdefault("promotions", []).append(record)
     save_state(project, state)
