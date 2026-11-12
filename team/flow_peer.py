@@ -196,16 +196,33 @@ class Peer:
                                token=self.token)
         if status != 200 or not isinstance(mine, list) or not mine:
             raise SystemExit("flow-peer: the peer has no available copy to offer")
+        # Available copies are the authoritative list (the shelf projection has
+        # no availability flag); the shelf only supplies the copy's own mode so
+        # a temporary run picks a copy that is actually lent.
+        status, available = request(
+            "GET", f"{self.api}/api/v1/users/{app_reader}/available-copies",
+            token=self.token,
+        )
+        if status != 200 or not isinstance(available, list) or not available:
+            raise SystemExit("flow-peer: the app reader has no available listing to receive an offer")
         status, shelf = request("GET", f"{self.api}/api/v1/users/{app_reader}/shelf",
                                 token=self.token)
-        if status != 200 or not isinstance(shelf, dict):
-            raise SystemExit(f"flow-peer: cannot read the app reader's shelf ({status})")
-        listings = [b for b in (shelf.get("bookshelf") or [])
-                    if b.get("listingId") and b.get("isAvailable", True)]
-        if not listings:
-            raise SystemExit("flow-peer: the app reader has no available listing to receive an offer")
+        modes = {}
+        if status == 200 and isinstance(shelf, dict):
+            modes = {str(b.get("listingId")): str(b.get("exchangeMode") or "").upper()
+                     for b in (shelf.get("bookshelf") or []) if b.get("listingId")}
+        wanted_mode = str(mode or "TEMPORARY").upper()
+        candidates = [
+            c for c in available
+            if str(c.get("id") or "")
+        ]
+        if not candidates:
+            raise SystemExit("flow-peer: the app reader has no available copy id")
+        candidates.sort(key=lambda c: 0 if modes.get(str(c.get("id"))) in
+                        ((wanted_mode, "BOTH") if wanted_mode == "TEMPORARY" else
+                         ("PERMANENT", "BOTH")) else 1)
         payload = {
-            "primary_book_id": listings[0]["listingId"],
+            "primary_book_id": str(candidates[0]["id"]),
             "book_ids": [str(mine[0].get("id") or "")],
             "exchange_mode": mode,
             "duration_days": int(days),

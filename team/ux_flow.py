@@ -82,9 +82,9 @@ Tappable:
 Choose the SINGLE next action that moves a real user closest to the goal:
   type    — index + field ("email" or "password"): put the journey's credential in
             that field. When PROFILE values are listed below, field may also be
-            "name" or "handle" for a shelf-onboarding form. ONLY when those values
-            are listed below; if they are not, a text field is a wall for you, not
-            a dead control — choose stuck.
+            "name", "handle" or "phone" for a shelf-onboarding or swap form. ONLY
+            when those values are listed below; if they are not, a text field is a
+            wall for you, not a dead control — choose stuck.
   tap     — an index from the list above
   scroll  — "down" or "up": reach content below or above the fold. The screenshot
             shows only the visible part of a screen; a request or continue control
@@ -317,6 +317,8 @@ def _pick_field(targets: list[dict], role: str) -> int | None:
         return fields[0] if fields else None
     if role == "handle":
         return fields[1] if len(fields) > 1 else (fields[0] if fields else None)
+    if role == "phone":
+        return fields[0] if fields else None
     return fields[0] if fields else None
 
 
