@@ -1,6 +1,9 @@
 {
   "_comment": "Role -> model. Model ab chhota token hai: 'llm' (worker) ya 'thinker' (orchestrator). Asli id ~/agentconfig/agentconfig.env se aata hai (llmctl switch se badalta hai). Is file mein provider/ID kabhi mat likho. Optional per-role 'command' (argv template with {model}/{prompt}) un tools ke liye hai jo subagent spawn nahi kar sakte; DEVTEAM_AGENT_CMD wahi template env se deta hai.",
   "roles": {
+    "developer": {
+      "model": "llm"
+    },
     "reviewer": {
       "model": "llm"
     },
