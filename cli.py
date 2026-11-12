@@ -4333,7 +4333,8 @@ def cmd_stitch_screen(args: argparse.Namespace) -> int:
                 except Exception as exc:  # noqa: BLE001
                     print(f"  ! adopt failed ({str(exc)[:140]}); recording the new screen "
                           f"and retiring the replaced one")
-                    entry = stitch_mcp.export_one_screen(screen, screens_dir, log=print)
+                    entry = stitch_mcp.export_one_screen(
+                        screen, screens_dir, log=print, title_hint=screen_type)
                     if entry:
                         _upsert_stitch_manifest_entry(project, root, clean_pid, entry)
                         _retire_stitch_screen(
@@ -4342,7 +4343,8 @@ def cmd_stitch_screen(args: argparse.Namespace) -> int:
                             str(existing.get("title") or screen_type),
                             reason="generate --force (adopt unavailable)")
             else:
-                entry = stitch_mcp.export_one_screen(screen, screens_dir, log=print)
+                entry = stitch_mcp.export_one_screen(
+                    screen, screens_dir, log=print, title_hint=screen_type)
                 if entry:
                     _upsert_stitch_manifest_entry(project, root, clean_pid, entry)
             if not entry:

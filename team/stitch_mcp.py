@@ -514,17 +514,27 @@ def _render_html_png(html_path: Path, out_png: Path, width: int, height: int,
 
 
 def export_one_screen(screen: dict[str, Any], out_dir: Path, log=None,
-                      *, logical_id: str | None = None) -> dict[str, Any] | None:
+                      *, logical_id: str | None = None,
+                      title_hint: str | None = None) -> dict[str, Any] | None:
     """Download one screen into <out_dir>/<logical_id>/.
 
     `edit_screens` FORKS: a tweak returns a new screen id and the old one stays in
     the project. If the export took the new id as its directory, every tweak would
     add a second copy of the same surface to the repo. `logical_id` keeps the
     stable name (the manifest entry) and the live Stitch id is recorded beside it.
+
+    A generated screen sometimes comes back with NO title, and the entry then
+    recorded the raw Stitch id as its title. Everything downstream that resolves a
+    screen BY TITLE (`design-consult --record` → `verify`'s design gate) then reports
+    "the exported snapshot is missing" for a screen that is right there, and the run
+    only recovers by re-recording the answer against the id. `title_hint` is the name
+    the caller asked for, used whenever Stitch returns nothing usable.
     """
     log = log or (lambda *_: None)
     sid = str(screen.get("name") or "").split("/")[-1]
-    title = str(screen.get("title") or sid)
+    title = str(screen.get("title") or "").strip()
+    if not title or title == sid:
+        title = str(title_hint or "").strip() or sid
     if not sid:
         return None
     dir_id = str(logical_id or sid)
