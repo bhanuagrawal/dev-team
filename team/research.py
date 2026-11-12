@@ -1330,33 +1330,11 @@ def _validate(result: dict, research: dict | None = None) -> str | None:
                         "head, so put the executable entry first; the "
                         "investigation may stay queued behind it. The head may be "
                         "an investigation only when nothing executable is queued")
-            # UI TEST COVERAGE IS A HARD GATE (owner directive 2026-11-05; unit
-            # tests retired 2026-11-10). 100% UI test coverage is enforced by code.
-            # When the UI leg is below its floor, the planner MUST make raising
-            # coverage the TOPMOST PRIORITY: the queue HEAD (queue[0]) must be the
-            # executable entry that raises coverage. A run builds exactly one entry,
-            # so when the codebase is below 100% UI coverage that build slot goes to
-            # raising it. The only exemption is a delivery fire (red CI / a store
-            # rejection), which outranks everything.
-            cov = (research.get("signals", {}).get("coverage") or {})
-            cov_below = [k for k in ("unit", "ui") if k in (cov.get("below_floor") or [])]
-            if q is result["queue"][0] and cov_below and not (
-                    ci_last == "failure" or store_blocked):
-                if q.get("type") not in EXECUTABLE_TYPES or not coverage_mod.targets_tests(
-                        q.get("target")):
-                    floors = cov.get("floor") or {}
-                    detail = ", ".join(
-                        f"{k} {(cov.get(k) or {}).get('percent')}% < {floors.get(k, 100)}%"
-                        for k in cov_below)
-                    return (f"signals.coverage is below the floor ({detail}): raising UI "
-                            "coverage is the TOPMOST PRIORITY — the queue HEAD (queue[0]) "
-                            "must be the executable entry that raises coverage — a "
-                            "bugfix/feature whose 'target' names the UI test sources it will "
-                            "write (e.g. 'app/src/androidTest/java/**', "
-                            "'app/src/test/java/**', '.../commonTest/**') plus any "
-                            "production path the tests need. Code rejects a head that "
-                            "does not, because a run builds only the head. The only "
-                            "exemption is a delivery fire (red CI or a store rejection)")
+            # NO COVERAGE GATE. Owner policy 2026-11-10 retired tests completely
+            # ("get rid of them completely"): no test is owed, written, required or
+            # run, and `verify` has no test gate. `signals.coverage` may still be
+            # measured and printed, but it never orders the queue and a project
+            # floor cannot re-introduce the gate the owner removed.
 
             # P0 UI BLUNDERS ARE FIRES (owner directive 2026-11-07):
             # A broken screen where primary controls are clipped, blank, or text overlaps is a defect
@@ -1837,34 +1815,22 @@ def coverage_prompt_block(sig: dict) -> str:
         return f"{v}% ({leg.get('measured_by') or 'structural'})"
 
     lines = [
-        "- TEST COVERAGE IS A SIGNAL AND A HARD GATE (`signals.coverage`): "
-        f"ui {pct(ui)} against a {floor.get('ui')}% floor. Unit tests are RETIRED: "
-        f"the unit leg ({pct(unit)}, floor {floor.get('unit')}%) is measured for "
-        "information only and never blocks. The team enforces 100% UI test coverage "
-        "in code.",
+        "- TEST COVERAGE IS INFORMATION ONLY — THERE IS NO COVERAGE GATE "
+        "(`signals.coverage`): "
+        f"ui {pct(ui)} and unit {pct(unit)} are measured over the shipped tree and "
+        "may be quoted in `insights`, but TESTS ARE RETIRED (owner policy "
+        "2026-11-10: \"get rid of them completely\"). No test is owed, written, "
+        "required or run; `verify` has no test gate and runs no suite. A project "
+        "floor cannot re-introduce the gate the owner removed.",
+        "  * Never size, order or head the queue to raise coverage, and never write "
+        "an entry whose only deliverable is a test or a proof suite — it ships "
+        "nothing a user can see and nothing runs it. A change is proven by the "
+        "compile gate, the ux-flow audit for a screen, and the store/design gates.",
     ]
     if below:
-        missing = []
-        for leg in below:
-            ex = ((sig.get(leg) or {}).get("missing_examples") or [])[:3]
-            if ex:
-                missing.append(f"{leg} e.g. " + ", ".join(ex))
         lines.append(
-            f"  * BELOW THE UI FLOOR ({', '.join(below)}): RAISING UI COVERAGE IS THE TOPMOST PRIORITY. "
-            "queue[0] (the queue HEAD) MUST be the executable entry that raises it — a bugfix/feature "
-            "whose `target` names the UI test sources it will write (`.../src/androidTest/**`, "
-            "`.../src/test/**`, `.../src/commonTest/**`) plus any production path the tests need. "
-            "Code strictly rejects any plan whose queue head does not target UI tests. Aim at the biggest uncovered "
-            "area" + (f" ({'; '.join(missing)})." if missing else "."))
-        lines.append(
-            "  * The ONE exemption: a delivery fire (signals.ci red, or a store "
-            "rejection) outranks coverage — name it in the head's `reason` when you "
-            "take it. A goal milestone does NOT outrank an uncovered codebase: tests "
-            "are how the next change stays shippable.")
-    else:
-        lines.append(
-            "  * At 100% UI coverage: say so in `insights` and spend the run on "
-            "product work. Defend 100% UI coverage on every UI diff.")
+            "  * The numbers are below a configured floor, which is information for "
+            "the owner only: do NOT make raising them the queue head.")
     return "\n".join(lines)
 
 
