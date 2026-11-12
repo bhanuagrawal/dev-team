@@ -2308,6 +2308,11 @@ def cmd_ux_flow(args: argparse.Namespace) -> int:
     project = resolve_project(args.project)
     log = RunLog(project, "ux-flow-" + today())
     from team import ux_audit, ux_flow
+    poster = (getattr(args, "camera_poster", None) or "").strip()
+    if poster:
+        os.environ["DEVTEAM_CAMERA_POSTER"] = str(Path(poster).expanduser())
+        log(f"~ ux-flow: camera poster {Path(poster).expanduser()} (the emulator's "
+            f"virtual-scene wall)")
     res = ux_flow.run(project, only=getattr(args, "flow", None), log=log,
                       avd=getattr(args, "avd", None),
                       keep_emulator=getattr(args, "keep_emulator", False),
@@ -5374,6 +5379,10 @@ def main() -> None:
     uf.add_argument("--via", choices=["api"], default="api",
                     help="the vision model that navigates (the API; browser Gemini is "
                          "the asset maker, not a navigator)")
+    uf.add_argument("--camera-poster", metavar="IMAGE",
+                    help="put this image on the emulator's virtual-scene wall so a "
+                         "camera-only journey (e.g. a shelf photo) has a real frame to "
+                         "capture — an emulator has no shelf in front of it")
     uf.set_defaults(fn=cmd_ux_flow)
     fp = sub.add_parser("flow-peer", help="drive the OTHER reader through the real API so "
                                           "one app can be walked through accept → number → "

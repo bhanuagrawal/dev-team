@@ -500,9 +500,83 @@ class _Handler(BaseHTTPRequestHandler):
             return
 
         if path == "/functions/v1/vision-shelf-scanner":
-            self._json({"titles": ["Dune — Frank Herbert",
-                                   "The Psychology of Money — Morgan Housel",
-                                   "1984 — George Orwell"]})
+            # The app's real contract: `{success, detectedSpinesCount, books[]}`.
+            # These six spines are the first six rows of a LIVE answer recorded
+            # on 2026-11-12 and kept as a test fixture in the project
+            # (src/androidUnitTest/resources/shelfvision/) — real titles, real
+            # confidences, trimmed to six so the review sheet fits a walk. The
+            # live route is not deterministic (it answered 18 / 503 / 16 / 503 on
+            # four calls); a walk needs an answer, and the truth of the numbers is
+            # proven by that project test, not by this fixture.
+            books = [
+                {"title": "ADVENTURES OF THE SIX COUSINS", "author": "Enid Blyton",
+                 "isbn": None, "confidence": 0.95, "vibeTags": ["classic", "adventure"]},
+                {"title": "THE SMUGGLERS' CAVES", "author": "Enid Blyton",
+                 "isbn": None, "confidence": 0.95, "vibeTags": ["mystery", "adventure"]},
+                {"title": "The Secret of CLIFF CASTLE", "author": "Enid Blyton",
+                 "isbn": None, "confidence": 0.9, "vibeTags": ["mystery", "youth"]},
+                {"title": "The Secret of Skytop Hill and other stories",
+                 "author": "Enid Blyton", "isbn": None, "confidence": 0.9,
+                 "vibeTags": ["anthology", "classic"]},
+                {"title": "The Secret of the LOST NECKLACE", "author": "Enid Blyton",
+                 "isbn": None, "confidence": 0.95, "vibeTags": ["mystery", "detective"]},
+                {"title": "The Wishing-Chair Collection", "author": "Enid Blyton",
+                 "isbn": None, "confidence": 0.95, "vibeTags": ["fantasy", "magical"]},
+            ]
+            self._json({"success": True,
+                        "detectedSpinesCount": len(books),
+                        "skippedDuplicatesCount": 0,
+                        "books": books,
+                        "message": ""})
+            return
+
+        if path == "/api/v1/shelf/publish":
+            # `POST /api/v1/shelf/publish`: one `user_books` row per book, and a
+            # work already on the shelf is skipped unless the reader declared a
+            # second copy. The state lives on the server so a second capture of
+            # the same shelf in one walk really is a duplicate.
+            wanted = body.get("books") or []
+            allow_dup = bool(body.get("allow_duplicate_copy"))
+            shelf = getattr(self.server, "state", {}).setdefault("shelf", [])
+
+            def work_id(title: str) -> str:
+                slug = "".join(ch for ch in title.lower() if ch.isalnum())[:24]
+                return f"work-{slug or 'untitled'}"
+
+            listings, published, skipped = [], 0, 0
+            for index, book in enumerate(wanted):
+                title = str(book.get("title") or "").strip()
+                already = any(str(row.get("title", "")).strip().lower()
+                              == title.lower() for row in shelf)
+                if already and not allow_dup:
+                    skipped += 1
+                    listings.append({
+                        "listingId": f"listing-dup-{index}",
+                        "title": title,
+                        "author": str(book.get("author") or ""),
+                        "isbn": str(book.get("isbn") or ""),
+                        "listingType": str(book.get("listingType") or "TEMPORARY"),
+                        "workId": work_id(title),
+                        "exchangeMode": str(book.get("exchangeMode") or ""),
+                        "alreadyListed": True,
+                    })
+                    continue
+                row = {
+                    "listingId": f"listing-{len(shelf) + published + 1}",
+                    "title": title,
+                    "author": str(book.get("author") or ""),
+                    "isbn": str(book.get("isbn") or ""),
+                    "listingType": str(book.get("listingType") or "TEMPORARY"),
+                    "workId": work_id(title),
+                    "exchangeMode": str(book.get("exchangeMode") or ""),
+                    "alreadyListed": False,
+                }
+                shelf.append(row)
+                published += 1
+                listings.append(row)
+            self._json({"success": True, "publishedCount": published,
+                        "skippedCount": skipped, "listings": listings,
+                        "message": ""})
             return
 
         if path == "/functions/v1/dispute-arbiter":

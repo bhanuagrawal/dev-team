@@ -129,7 +129,9 @@ _RAW: list[tuple[str, str, str, str, str, bool]] = [
     ("ux-video", "build", "record declared journeys on a device",
      ".pipeline/ux_video/*", "no declared flows; no emulator", True),
     ("ux-flow", "build", "THE release audit: drive goal-declared journeys with a "
-                         "vision model; every walk must reach its goal",
+                         "vision model; every walk must reach its goal (a camera-only "
+                         "journey gets a real frame from --camera-poster on the emulator's "
+                         "virtual-scene wall)",
      ".pipeline/ux_flows/*", "a journey not walked on this diff; a walk that did not "
                              "reach its goal; no emulator", True),
     ("flow-peer", "build", "drive the OTHER reader through the real API so one app "

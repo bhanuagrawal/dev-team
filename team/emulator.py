@@ -16,6 +16,7 @@ named in the run log, the run still succeeds. Teardown is hygiene, not a gate.
 from __future__ import annotations
 
 import json
+import os
 import re
 import shutil
 import subprocess
@@ -163,6 +164,32 @@ def trust_state(serial: str) -> str:
     return ""
 
 
+def camera_poster() -> str:
+    """The image this pass puts on the emulator's virtual-scene wall, if any.
+
+    `DEVTEAM_CAMERA_POSTER` (or `ux-flow --camera-poster <file>`) answers the
+    question an emulator cannot: a phone-only camera feature is untestable on a
+    device that has no shelf in front of it. The emulator's own virtual scene
+    renders a real photograph onto its poster wall, so CameraX captures a frame
+    of actual book spines — the app's camera path is exercised for real, and no
+    debug seam or gallery picker is added to the product to make a test pass.
+    """
+    raw = (os.environ.get("DEVTEAM_CAMERA_POSTER") or "").strip()
+    if not raw:
+        return ""
+    path = Path(raw).expanduser().resolve()
+    return str(path) if path.is_file() else ""
+
+
+def _camera_args(log=None) -> list[str]:
+    poster = camera_poster()
+    if not poster:
+        return []
+    if log:
+        log(f"~ emulator: virtual-scene camera, wall poster = {poster}")
+    return ["-camera-back", "virtualscene", "-virtualscene-poster", f"wall={poster}"]
+
+
 def _boot(name: str, log=None, wipe: bool = False, timeout: int = 240) -> str:
     """Start `name` headless and return its serial once boot completes."""
     if not adb_available():
@@ -174,6 +201,7 @@ def _boot(name: str, log=None, wipe: bool = False, timeout: int = 240) -> str:
     args = [emulator_bin(), "-avd", name, "-no-window", "-no-audio",
             "-no-boot-anim", "-no-snapshot-save", "-gpu", "swiftshader_indirect",
             "-netdelay", "none", "-netspeed", "full"]
+    args += _camera_args(log)
     if wipe:
         args += ["-no-snapshot-load", "-wipe-data"]
     subprocess.Popen(args, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,

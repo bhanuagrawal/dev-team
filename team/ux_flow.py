@@ -63,6 +63,11 @@ RUBRIC = "ux-flow-v1"
 # back button has not learned anything about the app.
 IGNORE_LABELS = {"back", "navigate up", "close", "cancel", "ok", "done", "skip"}
 
+# How many tappable controls the vision model is shown at once. High enough for a
+# full phone screen of named controls (a feed measured 66); blank containers only
+# take the room that is left.
+_TAP_CAP = 80
+
 DECIDE_PROMPT = """You are using a mobile app like a real person, to check ONE journey works.
 
 App: {app}
@@ -288,7 +293,18 @@ def tappables(xml: str, pkg: str = "") -> list[dict]:
     # Request Borrow on a book card). A list that hides a tappable control is a
     # false audit, so the cap is high enough to include a full mobile screen.
     uniq.sort(key=lambda t: (t["y"], t["x"]))
-    return uniq[:40]
+    # A blank clickable container must never push a NAMED control out of the list.
+    # A feed screen exposed 66 named controls plus 8 blank ones; the cap of 40
+    # cut the list at the book cards and the bottom dock (My Shelf, Passport)
+    # never reached the model, which then guessed at unlabelled coordinates and
+    # "closed" a sheet it had never opened (2026-11-12, shelf-photo-to-library).
+    # Named controls come first; blanks only fill what is left.
+    named = [t for t in uniq if t["label"].strip()]
+    blank = [t for t in uniq if not t["label"].strip()]
+    kept = named[:_TAP_CAP]
+    kept += blank[:max(0, _TAP_CAP - len(kept))]
+    kept.sort(key=lambda t: (t["y"], t["x"]))
+    return kept
 
 
 def _pick_field(targets: list[dict], role: str) -> int | None:

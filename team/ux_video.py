@@ -370,7 +370,34 @@ def build_and_install(project: Path, serial: str, log=None,
     if res.returncode != 0:
         out = (res.stdout or "") + (res.stderr or "")
         raise SystemExit("adb install failed: " + out.strip()[-500:])
+    _grant_audit_permissions(serial, package_name(project), log)
     return {"apk": str(apk), "tree": str(tree), "task": task}
+
+
+# Runtime permissions a walked journey must not stop on.
+AUDIT_PERMISSIONS = ("android.permission.CAMERA",)
+
+
+def _grant_audit_permissions(serial: str, pkg: str, log=None) -> None:
+    """Pre-grant the runtime permissions a journey needs, before it starts.
+
+    A system permission dialog is drawn by the platform and its uiautomator dump
+    carries no labelled control a vision model can choose, so the walk dies on
+    "tap index 0 is not a listed target" the moment a camera surface opens
+    (2026-11-12, the shelf-photo journey). The permission is already declared in
+    the manifest — granting it moves the journey's start to where the product
+    starts. A refusal is never fatal: the app's own sentence becomes the finding.
+    """
+    for permission in AUDIT_PERMISSIONS:
+        try:
+            r = _adb(serial, ["shell", "pm", "grant", pkg, permission], timeout=30)
+            output = (r.stdout or "") + (r.stderr or "")
+            granted = r.returncode == 0 and "Exception" not in output
+        except Exception:
+            granted = False
+        if log:
+            log(f"~ ux-video: {'granted' if granted else 'could not grant'} "
+                f"{permission.rsplit('.', 1)[-1].lower()} ({pkg})")
 
 
 def _ui_xml(serial: str) -> str:
