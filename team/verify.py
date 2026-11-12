@@ -714,7 +714,13 @@ def revamp_gate(project: Path, worktree: Path, spec: dict | None, files: list[st
     """Ensure that a revamp / rebuild task genuinely replaced the legacy codebase.
 
     Refuses releases that claim to be a 'revamp' or 'rebuild' but only touched
-    minor cosmetic lines or failed to replace the core application code and tests.
+    minor cosmetic lines instead of replacing the core application code.
+
+    It does NOT demand tests. "TESTS ARE RETIRED — ALL OF THEM" (owner policy
+    2026-11-10, docs/guarantees.md): the gate used to refuse a revamp whose diff
+    carried no `*Test.kt`, which put a test requirement back on exactly the
+    tasks the policy had cleared — and a UI change that removes a door and moves
+    a section is not a ground-up rebuild just because its label says revamp.
     """
     if not spec:
         return True, "no task spec — revamp gate skipped"
@@ -731,23 +737,16 @@ def revamp_gate(project: Path, worktree: Path, spec: dict | None, files: list[st
     if not is_revamp:
         return True, "not a revamp task"
 
-    # Check that new code was actually created/modified in the worktree
+    # Check that the application code really moved: a one-line cosmetic touch is
+    # not a rebuild.
     code_changes = [f for f in files if f.endswith(".kt") or f.endswith(".java")]
     if len(code_changes) < 3:
         return False, (
             f"task is marked as revamp/rebuild, but diff has only {len(code_changes)} code file changes. "
-            "A ground-up rebuild must rewrite the application codebase and its tests, not just tweak single lines."
+            "A ground-up rebuild must rewrite the application codebase, not just tweak single lines."
         )
 
-    # Check that tests were also written for the new code
-    test_changes = [f for f in files if "Test.kt" in f or "Test.java" in f]
-    if not test_changes:
-        return False, (
-            "task is marked as revamp/rebuild, but diff contains zero new/updated tests. "
-            "Rebuilding from scratch requires fresh test coverage."
-        )
-
-    return True, f"{len(code_changes)} code files rebuilt, {len(test_changes)} tests verified"
+    return True, f"{len(code_changes)} code files rebuilt"
 
 
 def store_note_check(project: Path, worktree: Path, spec: dict | None) -> tuple[bool, str]:
