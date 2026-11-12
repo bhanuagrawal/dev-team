@@ -259,6 +259,35 @@ def _ga4_pull(project: Path, profile: dict) -> dict:
         out["app_remove_events_30d"] = (
             sum(int(r["metricValues"][0]["value"]) for r in un["rows"])
             if isinstance(un, dict) and "rows" in un else None)
+        # The FUNNEL, not just the endpoints (2026-11-12). Weekly totals answered
+        # "how many uninstalled" and nothing about where a person leaves, so a
+        # plan could only guess at a feature. One grouped read names every event
+        # the app sends with the people behind it; `funnel` then carries the four
+        # steps a first run can be judged on, and `events_30d` keeps the raw map
+        # so a project can read its own custom event without a team change.
+        ev = query(["eventName"], ["eventCount", "totalUsers"], 30)
+        events_30d: dict[str, dict] = {}
+        if isinstance(ev, dict) and "error" not in ev:
+            for row in ev.get("rows") or []:
+                name = (row.get("dimensionValues") or [{}])[0].get("value") or ""
+                vals = [m.get("value") for m in row.get("metricValues") or []]
+                if not name:
+                    continue
+                events_30d[name] = {
+                    "events": int(vals[0] or 0) if vals else 0,
+                    "users": int(vals[1] or 0) if len(vals) > 1 else 0,
+                }
+            out["events_30d"] = events_30d
+            steps = ("first_open", "session_start", "job_started",
+                     "job_completed", "job_failed", "app_remove")
+            out["funnel_30d"] = {s: events_30d.get(s, {}).get("users") for s in steps}
+            installs = events_30d.get("first_open", {}).get("users") or 0
+            started = events_30d.get("job_started", {}).get("users") or 0
+            out["job_start_rate_30d"] = (
+                round(started / installs, 4) if installs else None)
+        else:
+            out["events_30d"] = {}
+            out["ga4_event_error"] = (ev or {}).get("error")
         cf = query(["eventName"], ["eventCount"], 30, "churn_feedback_reason_selected")
         out["churn_feedback_responses_30d"] = (
             sum(int(r["metricValues"][0]["value"]) for r in cf["rows"])
