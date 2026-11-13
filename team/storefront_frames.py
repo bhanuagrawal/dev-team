@@ -172,13 +172,25 @@ _VERSION_RE = re.compile(
     r'versionName\s*=\s*(?:System\.getenv\("VERSION_NAME"\)\s*\?:\s*)?"([^"]+)"')
 
 
-def app_version(project: Path) -> str:
+def app_version(project: Path, ref: str | None = None) -> str:
+    """The version a frame shows.
+
+    `ref` names the git ref the pixels actually came from (`origin/main` for a
+    delivery render). Without it the CHECKOUT is read — and the checkout lags
+    the delivery ref by design, so a fresh release would be stamped with the
+    previous version even though the picture is of the new one.
+    """
     module = _module_of(project)
     for name in ("build.gradle.kts", "build.gradle"):
-        f = project / module / name
-        if not f.is_file():
+        rel = f"{module}/{name}"
+        if ref:
+            text = _git_out(project, ["show", f"{ref}:{rel}"])
+        else:
+            f = project / rel
+            text = f.read_text(errors="ignore") if f.is_file() else ""
+        if not text:
             continue
-        m = _VERSION_RE.search(f.read_text(errors="ignore"))
+        m = _VERSION_RE.search(text)
         if m:
             return m.group(1).strip()
     return ""
@@ -277,7 +289,8 @@ def listing_record(project: Path, tree: Path | None = None) -> dict[str, Any]:
         "ref_sha": ref_sha,
         "ui_path": source,
         "ui_sha": ui_sha,
-        "app_version": app_version(rendered or project),
+        "app_version": app_version(rendered or project,
+                                   ref=None if from_worktree else "origin/main"),
         "spec_sha": spec_sha,
         "rendered_from_worktree": from_worktree,
         "files": files,
@@ -386,7 +399,7 @@ def listing_freshness(project: Path) -> tuple[bool, str]:
     # moved (ui_sha / spec_sha above) or when the bytes were edited — refusing on
     # a bump alone would declare the listing stale seconds after a release that
     # changed nothing a user sees, and a gate that cries wolf gets ignored.
-    now_version = app_version(project)
+    now_version = app_version(project, ref="origin/main")
     version_note = ""
     if now_version and str(block.get("app_version") or "") != now_version:
         version_note = (f"; drawn at {block.get('app_version') or 'an unrecorded version'}, "
