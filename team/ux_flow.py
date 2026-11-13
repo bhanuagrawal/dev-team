@@ -565,6 +565,10 @@ def audit_flow(project: Path, flow: dict, serial: str, log=None,
         if not word.lower().startswith("success"):
             raise SystemExit(f"ux-flow: could not clear app data for '{pkg}' (flow is "
                              f"declared fresh) — got {word or 'no answer'}")
+    # A fresh flow clears app data; a runtime grant must be re-asserted before
+    # the app asks for it, or the audit meets a system dialog it cannot tap.
+    for permission in ("android.permission.CAMERA",):
+        _adb(serial, ["shell", "pm", "grant", pkg, permission], timeout=30)
     _launch(serial, pkg, base_url=base_url)
     settled, waited = _settle(serial, pkg)
     if not settled:
