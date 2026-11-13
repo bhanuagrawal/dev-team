@@ -393,8 +393,8 @@ def edit_screens(project_id: str, screen_ids: list[str], prompt: str, *,
             # OLD screen and `verify`'s design gate would refuse the diff. Polling
             # by htmlCode file name cannot see an in-place edit either, so the old
             # code spun for the full 900s budget and then failed with a message
-            # that named no next step (seen 2026-11-13 on FieldCert: edit_screens
-            # and generate_variants both answered this way, ~25 min lost). Fail
+            # that named no next step (seen 2026-11-13: edit_screens and
+            # generate_variants both answered this way, ~25 min lost). Fail
             # fast and name the write-back path instead.
             say(f"  stitch: edit_screens applied {len(ops)} DOM operation(s) but "
                 "persisted no screen artifact — the change is not exportable yet")
