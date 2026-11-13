@@ -398,6 +398,65 @@ def git_ref_state(project: Path, ref: str = DELIVERY_REF) -> dict[str, Any]:
     return state
 
 
+# The plan page mirror is the team writing ABOUT the plan; its commit is never
+# work a queue must reconcile, and on an active project it is most of history
+# (BookSwap 2026-11-13: 4 of the last 5 commits were `chore(plan): …`). A drift
+# list that is all bookkeeping is a drift list nobody can act on.
+PLAN_MIRROR_PREFIX = "chore(plan):"
+
+
+def is_plan_mirror(commit: dict[str, Any]) -> bool:
+    return str(commit.get("subject") or "").startswith(PLAN_MIRROR_PREFIX)
+
+
+def recent_commits(project: Path, ref: str = DELIVERY_REF,
+                   since: str | None = None, limit: int = 6) -> list[dict[str, Any]]:
+    """The last few commits on a ref, newest first — WHAT landed, not just that it did.
+
+    A sha mismatch ("plan base abc ≠ delivery def") is the fact that main moved and
+    nothing else: the run still cannot tell whether the queue is out of date or the
+    tree is unchanged since the last plan. So every reader of delivery drift quotes
+    the commits themselves (`sha`, `date`, `subject`), and `since` narrows the list
+    to the commits AFTER a point — the plan's base — which are exactly the commits
+    the current plan has not seen.
+
+    The plan's own page mirror is skipped (`is_plan_mirror`): it is the only commit
+    kind the team writes about itself, and it would otherwise crowd out the work.
+    `limit` counts REAL commits, so the git read over-fetches to leave room.
+
+    Never raises: an unreadable ref is an empty list, and a caller must treat that
+    as "could not tell", never as "nothing moved".
+    """
+    want = max(1, int(limit))
+    rng = f"{since}..{ref}" if since else ref
+    r = git(["log", rng, f"-n{want * 3}",
+             "--pretty=format:%h%x09%ad%x09%s", "--date=short"], cwd=project, timeout=30)
+    if r.returncode != 0:
+        return []
+    out: list[dict[str, Any]] = []
+    for line in (r.stdout or "").splitlines():
+        parts = line.split("\t", 2)
+        if len(parts) == 3 and parts[0].strip():
+            row = {"sha": parts[0].strip(), "date": parts[1].strip(),
+                   "subject": parts[2].strip()}
+            if not is_plan_mirror(row):
+                out.append(row)
+        if len(out) >= want:
+            break
+    return out
+
+
+def commit_summary(commits: list[dict[str, Any]], limit: int = 3) -> str:
+    """`a1b2c3d subject; e4f5g6h subject (+2 more)` — one line, same everywhere.
+
+    `status`, `replan` and `verify` name the same commits the same way, so an
+    owner reading two blocks does not have to match two spellings of one fact.
+    """
+    shown = [f"{c['sha']} {c['subject']}" for c in (commits or [])[:limit]]
+    extra = len(commits or []) - len(shown)
+    return "; ".join(shown) + (f" (+{extra} more)" if extra > 0 else "")
+
+
 def _git_lines(args: list[str], cwd: Path, timeout: int = 60) -> list[str]:
     r = git(args, cwd=cwd, timeout=timeout)
     if r.returncode != 0:

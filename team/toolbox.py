@@ -69,7 +69,8 @@ _RAW: list[tuple[str, str, str, str, str, bool]] = [
      "state.queue, goal log, .pipeline/research.json", "no vision; flat tree", True),
     ("replan", "plan", "an OUT-OF-BAND change (the owner edited or pushed by hand) or a "
                        "team change to the plan FORMAT: detect → adopt (never revert) → "
-                       "adapt → re-plan; `--all` sweeps every app",
+                       "adapt → re-plan; the drift quotes the last few COMMITS since the "
+                       "plan base, not just a sha; `--all` sweeps every app",
      "state.adoptions, state.plan_base_sha, queue, profile shape",
      "a broken app is reported and the sweep continues; a planner refusal is reported", True),
     ("research", "plan", "the planner's engine, raw: collectors + one synthesis",
@@ -107,8 +108,9 @@ _RAW: list[tuple[str, str, str, str, str, bool]] = [
     ("worktree-start", "build", "cut dt/<task-id> from origin/main, lock it, and "
                                 "print the tree + task spec + the develop skill",
      ".pipeline/worktrees/<id>", "dirty or unknown task id", True),
-    ("verify", "build", "the gate: team-generic, localization, brand, test gate, "
-                        "coverage, compile, tests, device",
+    ("verify", "build", "the gate: team-generic, localization, brand, design, "
+                        "store/stitch/storefront, the ux-flow audit, compile — plus "
+                        "WARN when main's commits moved past the worktree's base",
      ".pipeline/runs/ log, verify id", "any gate red", True),
     ("worktree-prune", "build", "remove trees whose work is safe elsewhere",
      "worktree registry", "uncommitted work (parks it instead)", True),

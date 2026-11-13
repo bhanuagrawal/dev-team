@@ -86,7 +86,9 @@ order with `✓` done / `>` active / `·` later marks, the one being worked on, 
 any plan changes the team made since you last looked), the queue grouped by the
 goal each entry serves, the surfaces (shipped / animated / un-animated, with
 risk labels), the last run, and — if the project lags the team — `ADAPT NEEDED`
-(step 0 is the fix; nobody migrates by hand). It ends with the URLs below.
+(step 0 is the fix; nobody migrates by hand). When main has moved past the plan
+base it names the **commits** that moved it (`since base: …`), not just the sha.
+It ends with the URLs below.
 
 ### Step 2 — the planner reviews the plan, and hands over the task (code + one LLM call)
 
@@ -95,8 +97,10 @@ the one place direction is decided, and the one writer of the plan and the queue
 
 Deterministic collectors (no LLM) gather: analytics (GA4 via a service account,
 if the project declares one), a codebase scan **at `origin/main`**, repo/tag/
-ledger facts, and the state of the project's own CI workflow — including the
-failure log tail when delivery is red.
+ledger facts, the last commits — including `since_plan_base`, the ones main gained
+after the queue was derived, each of which the synthesis must reconcile — and the
+state of the project's own CI workflow, including the failure log tail when
+delivery is red.
 
 Then **exactly one** synthesis call returns strict JSON, and *code validates and
 applies it*. The synthesis proposes:

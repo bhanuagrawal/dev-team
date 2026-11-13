@@ -9,8 +9,14 @@ detects what moved, **adopts it (never reverts the owner's work)**, re-shapes th
 project and re-derives the queue, then stamps the delivery sha the new plan is
 built from. `devteam status` prints `plan base:`; when main has moved past it,
 that line names `replan` — a plan is never followed against a main it was not
-built from. Nothing is deleted: every adoption is logged in `state.adoptions` and
-every queue verdict in `state.queue_events`.
+built from — and the line under it quotes the **commits** that moved it
+(`since base: <sha> <subject>; …`). A sha says the plan is old; the commits say
+what it is old *about*, and they are the same list `replan` adopts and the
+planner receives as `signals.repo.commits.since_plan_base` — the commits that
+landed after the queue was derived, each of which must be reconciled (already
+landed → drop/supersede the entry; a committed spec → the follow-up task; a fix
+→ do not file the bug it removed). Nothing is deleted: every adoption is logged
+in `state.adoptions` and every queue verdict in `state.queue_events`.
 
 **A team change to the plan format is the same problem** (2026-11-09: a task is a
 mini-PRD — `problem`, `done_when`, `user_sees`, `not_in_scope`). Each app picks it
@@ -63,6 +69,13 @@ python3 cli.py alarm   <project>
 is no route table to look for. `devteam admit` is the only way a request becomes
 work: **OK** → pinned at the head of the queue (top priority, execute now);
 **FLAG** → nothing queued; reply to whoever the block names and stop.
+
+**Verify reads the same commits.** `verify` judges the diff against the worktree's
+base, so when main has moved since that base it prints `base: WARN` and names the
+commits it did **not** judge. That is not a gate failure — `release` rebases a
+rejected push — but the PASS describes an older tree: rebase in the worktree and
+re-run the diff-scoped checks, or, when the commits changed the *queue* rather
+than the code under test, `replan` instead of shipping the stale head.
 
 Report the outcome banner with the `RELEASE HANDOVER` block (store note + owner
 checklist + release-candidate call) and the two page URLs `record` prints.

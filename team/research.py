@@ -21,8 +21,8 @@ from typing import Any
 
 from . import scan
 from . import coverage as coverage_mod
-from .core import (RunLog, git, now_iso, pipeline_dir, profile_of, run, save_json,
-                   save_state, state_of, target_looks_like_paths)
+from .core import (RunLog, git, is_plan_mirror, now_iso, pipeline_dir, profile_of,
+                   run, save_json, save_state, state_of, target_looks_like_paths)
 from . import goals
 from . import queue as queue_mod
 
@@ -601,9 +601,19 @@ def _store_readiness_pull(project: Path, tree: Path | None = None) -> dict:
         return {"status": "error", "reason": str(e)[:200]}
 
 
-def _recent_commits_pull(project: Path, latest_tag: str | None = None, limit: int = 8) -> dict:
+def _recent_commits_pull(project: Path, latest_tag: str | None = None, limit: int = 8,
+                         since_plan_base: str | None = None) -> dict:
     """Collect recent git commit history, unreleased commits, and detected intent so the
-    researcher understands recent developer/owner context and landed initiatives."""
+    researcher understands recent developer/owner context and landed initiatives.
+
+    `since_plan_base` adds the narrower, authoritative list: the commits that landed
+    on the delivery ref AFTER the current plan was built. The general `recent_commits`
+    window (last N) says what the codebase looks like; this one says what the PLAN has
+    not accounted for, which is the difference between a review that re-derives the
+    same queue and a replan based on what main actually gained (the owner's own
+    commits included — 2026-11-13: main gained several ux-flow fixes the queue could
+    not see, and the run kept proposing work those commits had already settled).
+    """
     def _git(cmd: list[str]) -> str:
         r = git(cmd, cwd=project, timeout=30)
         return r.stdout.strip() if r.returncode == 0 else ""
@@ -613,59 +623,35 @@ def _recent_commits_pull(project: Path, latest_tag: str | None = None, limit: in
     if not has_origin:
         ref = "main" if _git(["rev-parse", "--verify", "main"]) else "HEAD"
 
-    log_raw = _git(["log", ref, f"-n{limit}", "--pretty=format:%H%x09%h%x09%an%x09%ad%x09%s", "--date=short"])
-    commits: list[dict] = []
-    for line in log_raw.split("\n"):
-        if not line.strip():
-            continue
-        parts = line.split("\t")
-        if len(parts) >= 5:
-            full_hash, short_hash, author, date, subject = parts[0], parts[1], parts[2], parts[3], parts[4]
+    def _collect(revs: list[str], with_author: bool) -> list[dict]:
+        pretty = ("--pretty=format:%H%x09%h%x09%an%x09%ad%x09%s" if with_author
+                  else "--pretty=format:%H%x09%h%x09%ad%x09%s")
+        rows: list[dict] = []
+        for line in _git(["log", *revs, pretty, "--date=short"]).split("\n"):
+            if not line.strip():
+                continue
+            parts = line.split("\t")
+            if len(parts) < (5 if with_author else 4):
+                continue
+            full_hash, short_hash = parts[0], parts[1]
+            date, subject = (parts[3], parts[4]) if with_author else (parts[2], parts[3])
             files_raw = _git(["diff-tree", "--no-commit-id", "--name-only", "-r", full_hash])
             files = [f.strip() for f in files_raw.split("\n") if f.strip()][:10]
-            commits.append({
-                "hash": short_hash,
-                "date": date,
-                "author": author,
-                "subject": subject,
-                "files": files,
-            })
+            row = {"hash": short_hash, "date": date, "subject": subject, "files": files}
+            if with_author:
+                row["author"] = parts[2]
+            rows.append(row)
+        return rows
 
-    unreleased: list[dict] = []
-    if latest_tag:
-        unreleased_raw = _git(["log", f"{latest_tag}..{ref}", "--pretty=format:%H%x09%h%x09%an%x09%ad%x09%s", "--date=short"])
-        for line in unreleased_raw.split("\n"):
-            if not line.strip():
-                continue
-            parts = line.split("\t")
-            if len(parts) >= 5:
-                full_hash, short_hash, author, date, subject = parts[0], parts[1], parts[2], parts[3], parts[4]
-                files_raw = _git(["diff-tree", "--no-commit-id", "--name-only", "-r", full_hash])
-                files = [f.strip() for f in files_raw.split("\n") if f.strip()][:10]
-                unreleased.append({
-                    "hash": short_hash,
-                    "date": date,
-                    "subject": subject,
-                    "files": files,
-                })
-
-    local_unpushed: list[dict] = []
-    if has_origin:
-        head_raw = _git(["log", "origin/main..HEAD", "--pretty=format:%H%x09%h%x09%an%x09%ad%x09%s", "--date=short"])
-        for line in head_raw.split("\n"):
-            if not line.strip():
-                continue
-            parts = line.split("\t")
-            if len(parts) >= 5:
-                full_hash, short_hash, author, date, subject = parts[0], parts[1], parts[2], parts[3], parts[4]
-                files_raw = _git(["diff-tree", "--no-commit-id", "--name-only", "-r", full_hash])
-                files = [f.strip() for f in files_raw.split("\n") if f.strip()][:10]
-                local_unpushed.append({
-                    "hash": short_hash,
-                    "date": date,
-                    "subject": subject,
-                    "files": files,
-                })
+    # The plan's own page mirror (`chore(plan): …`) is the team writing about the
+    # plan, not work: filtered here too, and the window over-fetches so `limit`
+    # still counts real commits.
+    commits = [c for c in _collect([ref, f"-n{limit * 3}"], with_author=True)
+               if not is_plan_mirror(c)][:limit]
+    unreleased = _collect([f"{latest_tag}..{ref}"], with_author=False) if latest_tag else []
+    local_unpushed = _collect(["origin/main..HEAD"], with_author=False) if has_origin else []
+    since_base = [c for c in _collect([f"{since_plan_base}..{ref}"], with_author=False)
+                  if not is_plan_mirror(c)] if since_plan_base else []
 
     all_inspected = local_unpushed + commits
     detected_intent: list[str] = []
@@ -681,6 +667,10 @@ def _recent_commits_pull(project: Path, latest_tag: str | None = None, limit: in
         "recent_commits": commits,
         "unreleased_commits": unreleased,
         "local_unpushed_commits": local_unpushed,
+        # Commits AFTER the plan base: the queue was derived without them, so each
+        # one is either work already landed (drop/obsolete) or a spec to follow up.
+        "since_plan_base": since_base,
+        "since_plan_base_ref": ref if since_plan_base else None,
         "detected_intent": detected_intent[:5],
     }
 
@@ -889,7 +879,9 @@ def research_collect(project: Path, log: RunLog) -> dict:
                     **(state.get("insights") or {}),
                 },
                 "open_asks": _open_asks_pull(profile),
-                "commits": _recent_commits_pull(project, latest_tag=latest),
+                "commits": _recent_commits_pull(
+                    project, latest_tag=latest,
+                    since_plan_base=str(state.get("plan_base_sha") or "") or None),
             },
             "stages": {
                 "ci_workflow": profile.get("ci_workflow"),
@@ -1029,6 +1021,16 @@ Rules:
   evidence.
 - RECENT COMMITS & CODEBASE CONTEXT (`signals.repo.commits`):
   Inspect `signals.repo.commits.recent_commits`, `unreleased_commits`, `local_unpushed_commits`, and `detected_intent`.
+- COMMITS SINCE THE PLAN BASE (`signals.repo.commits.since_plan_base`) — RECONCILE
+  EACH ONE, DO NOT SKIP THEM. This is the narrower, authoritative list: the
+  commits that landed on the delivery ref AFTER the queue you were given was
+  derived, so the plan has not accounted for them yet. Before adding any entry,
+  answer for every commit: is this work ALREADY LANDED (then the queue entry that
+  describes it is obsolete — drop or supersede it, never rebuild it), a SPEC or
+  design it committed (then the follow-up implementation task is yours to queue),
+  or a FIX that removes a bug you were about to file (then do not file it)? An
+  empty list means the plan is current; a list relayed into `insights` but not
+  reflected in the queue is a plan that ships work main already has.
   Recent commits indicate owner intent, landed architecture, updated design specifications
   (e.g., `docs/design.md`, design system tokens, Stitch screens), or storefront visual updates
   that arrived recently.
@@ -1884,10 +1886,14 @@ def sources_line(research: dict) -> str:
                  f"{cb.get('animated_count', 0)} animated · "
                  f"{len(cb.get('remaining') or [])} unanimated surface(s)")
     repo = sig.get("repo") or {}
+    commits_sig = repo.get("commits") or {}
+    since_base = len(commits_sig.get("since_plan_base") or [])
     lines.append(f"- Ledger: queue {len(repo.get('current_queue') or [])} · "
                  f"runs {repo.get('runs_recorded', 0)} · open asks "
                  f"{len(repo.get('open_asks') or [])} · recent commits "
-                 f"{len((repo.get('commits') or {}).get('recent_commits') or [])}")
+                 f"{len(commits_sig.get('recent_commits') or [])}"
+                 + (f" · {since_base} since the plan base (reconcile)"
+                    if since_base else " · plan base current"))
     return "\n".join(lines)
 
 

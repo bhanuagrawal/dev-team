@@ -18,7 +18,8 @@ meant — you do.** Two commands, in this order, before any other tool or edit:
 
 ```bash
 devteam tools                 # ONE PASS: every verb, what it writes, what it refuses
-devteam status <project>      # where this project actually stands (delivery ref, plan, queue)
+devteam status <project>      # where the project stands: delivery ref, plan base + the
+                              # commits that moved main past it, queue
 ```
 
 Then decide the sequence yourself from that list — do not look for a route table;

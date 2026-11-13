@@ -25,6 +25,10 @@ commands, in order, with the reasoning and the failure branches.
    `status` is read-only and prints `ADAPT NEEDED` when the project lags the
    team (step 0 is the fix — never migrate by hand). It ends with the
    `goal page: file://…` URL: keep it, the run banner ends with it (10b).
+   When it prints `plan base: … — main has moved`, READ the `since base:` commits
+   under that line: they landed after the plan and step 2 must reconcile each one
+   before the queue is trusted (the same list the planner gets as
+   `signals.repo.commits.since_plan_base`).
 2. **RUN THE PLANNER — every run, not just when the queue is empty.**
    `python3 <team>/cli.py plan <project>`
    ONE agent reviews where the work is heading against fresh data: it refreshes
@@ -98,6 +102,16 @@ commands, in order, with the reasoning and the failure branches.
       compile/tests). A surface with no rendered scene reports `no render` — bind it in
       `docs/storefront.json` (`"surface": "<label>"`); it is never judged from a
       different screen's picture.
+   - **MAIN'S LAST COMMITS ARE EVIDENCE, NOT BACKGROUND** (owner directive
+     2026-11-13: *"verify / replan based on the last few commits in main"*). The
+     prompt carries `signals.repo.commits.since_plan_base`: the commits that
+     landed on the delivery ref AFTER the plan base, i.e. the ones the queue was
+     derived without. Every entry there is reconciled in the same synthesis —
+     work already landed drops or supersedes the entry that described it, a
+     committed spec/design gets the follow-up implementation task, a fix removes
+     the bug that would have been filed. `status` prints the same commits on its
+     `since base:` line and `verify` warns when its worktree predates them; a run
+     whose plan ignored that list ships work main already has.
    - Every cycle runs an IMPACT REVIEW: the synthesis must judge each
      already-queued task; the CLI prints a `QUEUE IMPACT` block (added / kept /
      replaced / obsolete / dropped). A queued task can never vanish silently.
@@ -191,6 +205,12 @@ commands, in order, with the reasoning and the failure branches.
      together with why, because a dependency is a third party, a supply chain, an
      account, a licence and permanent maintenance, and the plan once adopted one
      from a spec's stack line without anybody asking.
+   - `base: WARN` (not a failure) → main gained commits after this worktree's
+     base, so the gates judged an older tree; the line names the commits it did
+     NOT judge. Rebase the worktree, re-run verify (the diff-scoped checks are
+     cheap), then release — or `replan` if those commits changed the queue
+     rather than the code under test (see step 2). Never release a stale head
+     just because every gate passed on it.
    - FAIL → Diagnose the failure, fix it inside `WORKTREE_PATH` and re-run verify
      (up to 2 iterations, then `devteam record --result failed` and alarm).
    - PASS → `python3 <team>/cli.py release <project> --worktree <WORKTREE_PATH>

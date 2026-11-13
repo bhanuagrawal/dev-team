@@ -194,6 +194,29 @@ def changed_files(worktree: Path, base: str) -> list[str]:
     return sorted(out)
 
 
+def base_drift(project: Path, base: str) -> list[dict] | None:
+    """Commits on the delivery ref that this worktree was NOT cut from.
+
+    The gates judge a diff against a base; if main has gained commits since that
+    base, the verdict describes a tree users no longer receive. Naming the commits
+    (not just "stale") is what lets the run decide between two honest moves: rebase
+    the worktree and re-run the diff-scoped checks, or replan if the queue itself is
+    what those commits changed. Warn-only by design — `release` rebases a rejected
+    push and would otherwise fail a run that is merely behind.
+
+    `None` means "could not tell" (no readable delivery ref) — never "nothing moved".
+    """
+    from .core import git_ref_state, recent_commits
+    if not base:
+        return []
+    # git_ref_state fetches first: a worktree's own origin/main is frozen at the
+    # moment it was cut, so reading the worktree would always report "no drift".
+    ref = git_ref_state(project)
+    if not ref.get("ref_sha"):
+        return None
+    return recent_commits(project, ref=ref["ref"], since=base, limit=5)
+
+
 def scope_check(profile: dict, files: list[str]) -> tuple[bool, str]:
     """(ok, message). Scope is the task's own allow-list, not a file freeze.
 
@@ -850,6 +873,23 @@ def verify_all(project: Path, worktree: Path, base: str, log, gradle: bool = Tru
     profile = profile_of(project)
     files = changed_files(worktree, base)
     failures: list[str] = []
+
+    # WHICH COMMITS THESE GATES SPEAK FOR. A diff is verified against `base`; if the
+    # delivery ref has gained commits since, the PASS describes a tree users no
+    # longer receive (and the queue may be describing work main already has). This
+    # is a WARNING, not a gate: the remedy is a rebase + diff-scoped re-run, or a
+    # replan, and both are decisions the agent makes with the commits in hand.
+    drift = base_drift(project, base)
+    if drift is None:
+        log("base: unknown — the delivery ref could not be read; these gates speak only "
+            "for the worktree's own base")
+    elif drift:
+        from .core import commit_summary
+        log("base: WARN — main moved past this worktree's base; gates judged an older "
+            "tree. Not verified against: " + commit_summary(drift, limit=4)
+            + " — rebase the worktree and re-run verify, or replan if the queue is what moved")
+    else:
+        log("base: ok — the worktree stands on what the delivery ref serves")
 
     ok, msg = flow_gate(project, worktree, spec, files)
     if not ok:

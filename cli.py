@@ -1947,6 +1947,15 @@ def cmd_status(args: argparse.Namespace) -> None:
     if base and ref.get("ref_sha") and not str(ref["ref_sha"]).startswith(base[:12]):
         print(f"plan base:  {base} — main has moved to {str(ref['ref_sha'])[:12]}; "
               f"run `devteam replan {profile['name']}` (it adopts, never reverts)")
+        # The sha says the plan is old; the COMMITS say what it is old about. A run
+        # that reads only the hash cannot tell a landed queue entry from a design
+        # commit that needs follow-up work, so the drift line quotes the commits
+        # the plan never saw (the same list `replan` adopts and the planner gets as
+        # signals.repo.commits.since_plan_base).
+        from team.core import commit_summary, recent_commits
+        moved = recent_commits(project, ref=ref["ref"], since=base, limit=4)
+        if moved:
+            print(f"            since base: {commit_summary(moved, limit=4)}")
     elif base:
         print(f"plan base:  {base} (the delivery ref the plan was built from)")
     # The plan is reviewed by one agent on every run (step 2). Show when that
