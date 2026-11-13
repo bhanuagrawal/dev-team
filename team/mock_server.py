@@ -231,6 +231,32 @@ class _Handler(BaseHTTPRequestHandler):
         # /api/v1/books/{listing_id}; without it a card that is on screen cannot
         # be opened ("Failed to load book details: not found"), and the borrow
         # journey dead-ends on a listing the reader can see (2026-11-10).
+        # The A2A 1.0 card. The app resolves it before any turn, so a mock that
+        # only speaks the legacy `/functions/v1/ui-composer` route leaves the
+        # feed empty even though sign-in worked.
+        if path == "/.well-known/agent-card.json":
+            host = self.headers.get("Host") or "10.0.2.2:54399"
+            self._json({
+                "name": "bookswap-audit-agent",
+                "description": "Deterministic fixtures for the flow audit",
+                "version": "2.5.0",
+                "supportedInterfaces": [{
+                    "url": f"http://{host}/a2a/v1",
+                    "protocolBinding": "JSONRPC",
+                    "protocolVersion": "1.0",
+                }],
+                "capabilities": {"streaming": False, "pushNotifications": False},
+                "defaultInputModes": ["text/plain"],
+                "defaultOutputModes": ["application/json"],
+                "skills": [{
+                    "id": "neighborhood-discovery",
+                    "name": "Neighborhood Discovery",
+                    "description": "Audit fixtures for the Home and Search surfaces",
+                    "tags": ["home", "search"],
+                }],
+            })
+            return
+
         if path == "/api/v1/trades/live":
             # The transaction a cold start should reopen; empty until this audit
             # has actually asked for a book.
@@ -464,6 +490,53 @@ class _Handler(BaseHTTPRequestHandler):
 
         if path.startswith("/rest/v1/rpc/"):
             self._rpc(path.rsplit("/", 1)[-1], body)
+            return
+
+        # A2A 1.0 JSON-RPC. Same deterministic blocks as the legacy route, plus
+        # the generic `content` strip the current Home states its area with.
+        if path == "/a2a/v1":
+            blocks = [
+                {
+                    "type": "content",
+                    "variant": "strip",
+                    "preset": "area",
+                    "title": "Bangalore · 3 km around you",
+                    "body": "8 copies within 3 km.",
+                    "slot": "TOP_STRIP",
+                    "artifactId": "mock-area",
+                },
+                *_blocks(),
+            ]
+            self._json({
+                "jsonrpc": "2.0",
+                "id": body.get("id", 1),
+                "result": {
+                    "task": {
+                        "id": "mock-task-" + str(int(getattr(self.server, 'turn', 0))),
+                        "contextId": "mock-context",
+                        "status": {
+                            "state": "TASK_STATE_COMPLETED",
+                            "message": {
+                                "messageId": "mock-done",
+                                "role": "ROLE_AGENT",
+                                "parts": [{"text": "Neighborhood Bookstore"}],
+                            },
+                        },
+                        "artifacts": [
+                            {
+                                "artifactId": f"mock-block-{i}",
+                                "name": block["type"],
+                                "parts": [{
+                                    "data": block,
+                                    "mediaType": "application/json",
+                                }],
+                            }
+                            for i, block in enumerate(blocks)
+                        ],
+                    }
+                },
+            })
+            self.server.turn = int(getattr(self.server, "turn", 0)) + 1
             return
 
         if path == "/functions/v1/ui-composer":
