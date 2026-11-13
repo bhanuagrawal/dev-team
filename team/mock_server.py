@@ -246,6 +246,16 @@ class _Handler(BaseHTTPRequestHandler):
                     "protocolVersion": "1.0",
                 }],
                 "capabilities": {"streaming": False, "pushNotifications": False},
+                "securitySchemes": {
+                    "bearer": {
+                        "httpAuthSecurityScheme": {
+                            "description": "A mock bearer token",
+                            "scheme": "Bearer",
+                            "bearerFormat": "JWT",
+                        }
+                    }
+                },
+                "securityRequirements": [{"schemes": {"bearer": {}}}],
                 "defaultInputModes": ["text/plain"],
                 "defaultOutputModes": ["application/json"],
                 "skills": [{
@@ -522,6 +532,11 @@ class _Handler(BaseHTTPRequestHandler):
                                 "parts": [{"text": "Neighborhood Bookstore"}],
                             },
                         },
+                        "history": [{
+                            "messageId": "mock-user",
+                            "role": "ROLE_USER",
+                            "parts": [{"text": "browse"}],
+                        }],
                         "artifacts": [
                             {
                                 "artifactId": f"mock-block-{i}",
