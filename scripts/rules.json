@@ -1,358 +1,366 @@
 {
-  "_comment": "Every rule the team enforces, and WHERE it is enforced. This is the conversion backlog, kept as data so it cannot drift the way prose does: `code` = a command already refuses/does it; `enforcible` = a command could, and the proposal is written down; `judgment` = no mechanism can decide it, a person or model must; `reference` = facts/diagnostics that belong in docs, not in the contract. Print the gap with `devteam docs-audit --rules`. When a rule moves to code, change its kind here and delete the prose that restated it.",
-  "rules": [
-    {
-      "id": "worktree-isolation",
-      "rule": "never edit project code on main; every task runs on dt/<task-id> cut from origin/main",
-      "doc": "AGENTS.md#1",
-      "kind": "code",
-      "enforced_by": "devteam worktree-start / release"
-    },
-    {
-      "id": "delivery-ref",
-      "rule": "read project code from origin/main, not the checkout",
-      "doc": "AGENTS.md#2",
-      "kind": "code",
-      "enforced_by": "devteam status (DELIVERY line) / storefront-scenes renders from the scan tree"
-    },
-    {
-      "id": "state-is-written-not-edited",
-      "rule": "never hand-edit .pipeline/state.json; write via devteam record",
-      "doc": "AGENTS.md#3",
-      "kind": "enforcible",
-      "proposal": "doctor: keep a state checksum written by the CLI and BLOCK when the file changed outside it",
-      "note": "today only prose + convention"
-    },
-    {
-      "id": "one-canonical-ci",
-      "rule": ".github/workflows/release.yml is generated from team/templates/ci-release.yml",
-      "doc": "AGENTS.md#4",
-      "kind": "code",
-      "enforced_by": "devteam doctor (renders the template and compares the project workflow)"
-    },
-    {
-      "id": "store-assets-are-deliverables",
-      "rule": "screenshots render from the app's composables; the poster is composed (plate from an image model only), never hand-drawn HTML",
-      "doc": "docs/store.md",
-      "kind": "code",
-      "enforced_by": "devteam storefront-build (refuses without a plate/layout; --builtin must be deliberate) + asset_critic provenance"
-    },
-    {
-      "id": "storefront-direction",
-      "rule": "what the listing says is decided and committed before anything is drawn",
-      "doc": "docs/store.md",
-      "kind": "code",
-      "enforced_by": "devteam storefront-build (refuses without a locked direction) / storefront-direction --apply"
-    },
-    {
-      "id": "listing-publish-ends-in-browser",
-      "rule": "the API uploads and commits a listing edit; permissions and Managed publishing are console-only, so the publish is finished in Play Console",
-      "doc": "docs/store.md",
-      "kind": "reference",
-      "note": "no mechanism can grant console permissions; the skill states the sequence"
-    },
-    {
-      "id": "nightly-schedule-enforced",
-      "rule": "every app must have an active launchd nightly schedule (or explicit manual mode in profile.json) verified by doctor and store-readiness",
-      "doc": "AGENTS.md",
-      "kind": "code",
-      "enforced_by": "devteam doctor (orchestrator check) + devteam store-readiness (Automation & Operations category)"
-    },
-    {
-      "id": "ux-audit-on-change",
-      "rule": "a screen whose look/feel fingerprint changed must get one neutral first-use reaction before a run can claim it polished anything; unchanged screens are never re-audited",
-      "doc": "SKILL.md",
-      "kind": "code",
-      "enforced_by": "devteam ux-plan / ux-audit (fingerprint decides) + team/verify.py warn naming the unaudited screens",
-      "note": "warning, not a gate: the released gates stay compile/tests. Per-screen fingerprints mean the audit is paid on change, never per release"
-    },
-    {
-      "id": "ga4-read-is-verified",
-      "rule": "a GA4 connection is ready only when the declared property can actually be read; the credential is a reader service account (connections.ga4.key_file or machine-wide $DEVTEAM_GA4_KEY), never the owner's ADC login — Google blocks analytics.readonly for gcloud's default client",
-      "doc": "AGENTS.md",
-      "kind": "code",
-      "enforced_by": "team/ga4.py (one credential resolver + a real runReport probe) used by team/research.py and devteam doctor",
-      "note": "lesson 2026-11-05: doctor tested 'gcloud can mint a token', so a property returning 403 (and a login Google had just blocked) still read as configured; a new project now cannot land there either"
-    },
-    {
-      "id": "nightly-runs-in-window",
-      "rule": "every scheduled app runs RUNS_PER_DAY (2) times a night inside the owner's 23:00–11:00 window; apps are interleaved evenly so consecutive machine-wide runs are as far apart as the app count allows, and overlap is tolerated because two runs make a skipped one harmless",
-      "doc": "AGENTS.md",
-      "kind": "code",
-      "enforced_by": "devteam setup (scheduler.plan_schedule/apply_plan installs 2 slots per app) + devteam schedules --rebalance (re-spaces every app) + devteam doctor and store-readiness (assert 2 slots inside the window)",
-      "note": "owner directive 2026-11-05: two runs a night, 11pm–11am, overlap tolerated but avoided where possible; MIN_GAP_MIN is a best-effort target, not a refusal. 2026-11-11: runs per app lowered 3 → 2"
-    },
-    {
-      "id": "cleanup-is-part-of-the-run",
-      "rule": "pick and record prune; a tree goes only when its work is safe somewhere else",
-      "doc": "docs/loop.md",
-      "kind": "code",
-      "enforced_by": "devteam worktree-prune (dry run by default) / pick / record"
-    },
-    {
-      "id": "worktree-is-not-a-record",
-      "rule": "work is closed when main contains it or origin holds its branch; unfinished work is parked",
-      "doc": "docs/loop.md",
-      "kind": "code",
-      "enforced_by": "worktrees.park + devteam takeover (parked list)"
-    },
-    {
-      "id": "no-auto-guards",
-      "rule": "no frozen paths, release-knob diff or dependency gates; compile/tests are the gates — and a production change must carry its own test in the same diff",
-      "doc": "docs/guarantees.md",
-      "kind": "code",
-      "enforced_by": "devteam verify (diff-scoped test gate) / devteam release (same gate before the bump)"
-    },
-    {
-      "id": "tests-are-part-of-the-change",
-      "rule": "every changed production file is named by a test file in the same diff; a changed UI file is named by a Compose/Espresso test with an assertion, never a screenshot render",
-      "doc": "docs/guarantees.md",
-      "kind": "code",
-      "enforced_by": "devteam verify (test gate) / devteam release (refuses before the version bump) / devteam doctor (test-posture warn)"
-    },
-    {
-      "id": "full-test-coverage-enforced",
-      "rule": "100% unit and UI test coverage is enforced by code; when below 100%, the planner must make raising coverage the topmost priority (queue HEAD)",
-      "doc": "docs/guarantees.md",
-      "kind": "code",
-      "enforced_by": "config/coverage.json / team/coverage.py (100% floors) / team/research.py (_validate rejects non-test queue HEAD) / devteam doctor (coverage WARN)"
-    },
-    {
-      "id": "ask-only-what-no-agent-can-decide",
-      "rule": "ask the owner only for what no agent can decide (incidents, WIP, direction); never about promotion",
-      "doc": "docs/guarantees.md",
-      "kind": "judgment",
-      "note": "requires intent; the run banner is where it shows"
-    },
-    {
-      "id": "nothing-uncommitted",
-      "rule": "every change ends in a commit on a pushed ref; a dirty checkout is reported",
-      "doc": "docs/guarantees.md",
-      "kind": "code",
-      "note": "warn-only by design: the run commits its own work, it does not commit the owner's",
-      "enforced_by": "devteam doctor / status (checkout_dirty — reports, never commits the owner's WIP)"
-    },
-    {
-      "id": "verify-before-release",
-      "rule": "never push with red gates",
-      "doc": "SKILL.md#hard-rules",
-      "kind": "code",
-      "enforced_by": "devteam release (refuses on FAIL) / verify"
-    },
-    {
-      "id": "release-notes-curated",
-      "rule": "a whatsnew_curated project never gets the pipeline's boilerplate note, but an explicit per-release `whatsnew` in the task spec IS written; no release may repeat the previous release's note verbatim",
-      "doc": "SKILL.md#hard-rules",
-      "kind": "code",
-      "enforced_by": "shipper.whatsnew_gate (verify + release refuse a repeated/empty note) / store-readiness"
-    },
-    {
-      "id": "emulators-torn-down",
-      "rule": "a run stops only the emulators it started",
-      "doc": "SKILL.md#hard-rules",
-      "kind": "code",
-      "enforced_by": "devteam emulators --record / verify (baseline diff)"
-    },
-    {
-      "id": "emulator-failure-modes",
-      "rule": "three emulator-only failure modes (corrupt snapshot, AVD lock, crash-consent dialog) and how to repair them",
-      "doc": "SKILL.md#hard-rules",
-      "kind": "reference",
-      "note": "diagnostics, not a rule: 20 lines of troubleshooting sitting in the contract"
-    },
-    {
-      "id": "self-improvement-duty",
-      "rule": "a surprise is closed by a change to team code in the same run; nothing is appended to a log",
-      "doc": "SKILL.md#hard-rules",
-      "kind": "judgment",
-      "note": "no mechanism can decide what surprised an agent, but the FIX must be a commit; a fix too large for the run becomes an `enforcible` entry here"
-    },
-    {
-      "id": "generic-team-code",
-      "rule": "team code carries no project names",
-      "doc": "SKILL.md#hard-rules",
-      "kind": "code",
-      "enforced_by": "devteam doctor (greps every registered project name)"
-    },
-    {
-      "id": "docs-newest-wins",
-      "rule": "the newest text is the source of truth; overlapping copies are removed, not kept",
-      "doc": "scripts/hooks/pre-commit",
-      "kind": "code",
-      "enforced_by": "devteam docs-audit --check --new-only (pre-commit hook)"
-    },
-    {
-      "id": "resume-from-state",
-      "rule": "a run's starting position (delivery ref, dirty files, trees, queue head, open asks, next command) is read, not inferred from prose",
-      "doc": "team/takeover.py",
-      "kind": "code",
-      "enforced_by": "devteam takeover"
-    },
-    {
-      "id": "emulator-boot-zombie-repair",
-      "rule": "a device gate that cannot boot because a dead emulator still holds the AVD must repair the AVD and rerun, never silently degrade to warn-only",
-      "doc": "docs/guarantees.md / SKILL.md#hard-rules",
-      "kind": "enforcible",
-      "proposal": "devteam verify's instrumented stage: before booting an AVD, if a qemu process holds that AVD's lock while `adb devices` shows no online device AND this run started no emulator, terminate the holder, clear the locks, boot again, and only then fall back to warn-only; record the repair in the run log",
-      "note": "2026-11-05/06: the two touched device classes passed (13 tests), then a zombie qemu from a failed boot kept the AVD lock, every later boot died in ~1s, and verify degraded to 'device test runner could not execute (warn-only)' — the degrade is right for a machine with no emulator, wrong for a repairable lock holder"
-    },
-    {
-      "id": "plan-middle-tier",
-      "rule": "the plan has a middle tier: vision → goals (the ENDS, one number each) → milestones (the MEANS) → tasks; a new milestone must sit under a goal, and a later goal's milestones are not planned while an earlier goal's number fails",
-      "doc": "docs/planning.md",
-      "kind": "code",
-      "enforced_by": "team/goals.py (ensure_goal_tier, tree_gaps, validate_advances) — devteam adapt re-shapes the tree, devteam doctor gates it, the planner's goal gate refuses the queue"
-    },
-    {
-      "id": "store-screenshots-track-the-shipped-ui",
-      "rule": "a listing frame must be painted from a render that contains the screen it depicts; a poster older than the newest change to its scene's composables is stale, not current",
-      "doc": "docs/store.md",
-      "kind": "enforcible",
-      "proposal": "store-readiness/store-publish compare the source commit recorded for the painted frames (.pipeline/storefront_run.json + docs/storefront-frames.json composition) with the newest commit that touched each scene's bound composables in docs/storefront.json: a frame whose scene changed after the paint is reported as STALE and store-publish refuses it until `devteam storefront-build <project> --poster` repaints it.",
-      "note": "run-derived 2026-11-06 (Paddle v1.0.40): verify warned 'History changed (render), no audit since' while the listing's 03_summary/04_history posters still depicted the previous build, and every readiness check passed 25/25 because nothing compares the frames' source commit with the shipped screens."
-    },
-    {
-      "id": "launcher-icon-parity-for-vector-icons",
-      "rule": "the installed launcher must be provably the same design as the Play listing icon; a warning that no check can ever clear is a defect in the check, not a finding about the app",
-      "doc": "docs/store.md",
-      "kind": "enforcible",
-      "proposal": "store-readiness 'Installed Icon Matches Store Listing': when the app ships an adaptive VECTOR launcher (mipmap-anydpi-v26/ic_launcher.xml) and no PNG mipmap, render the vector's foreground+background pair at 512x512 (or compare the listing icon against the adaptive icon's declared colors) and report parity from that render instead of the current 'no launcher bitmap to compare' WARNING, which no adaptive-icon project can ever clear",
-      "note": "run-derived 2026-11-07 (BookSwapKMP v1.0.2): every store-readiness run carried this WARNING while the listing icon (Stitch) and the adaptive launcher are the only icon assets the project ships; the same run also found the keystore check passing the scan tree instead of the project, so a real backup read as missing"
-    },
-    {
-      "id": "competitor-research-honesty",
-      "rule": "competitor research may not present a figure it did not read: no default rating (the parser fills 4.5 when the listing gave none), no 'not stated' rendered as a value, and no search-answer fragment presented as a listing feature",
-      "doc": "docs/new-app.md (Mode B step 1 / spec review)",
-      "kind": "enforcible",
-      "why": "2026-11-08: `devteam competition` produced a gate-passing document that listed the project itself as its own rival, a cybersecurity MDR portal as a field-inspection benchmark, and 4.5★ for every app (a parser default, not a reading). The store blocker would have been 'cleared' by data the owner could not trust; the document was not committed.",
-      "proposal": "`_parse_recon_search_output` carries rating=None (never 4.5) when the listing gave none; `devteam store-readiness` refuses docs/COMPETITION_RESEARCH.md that renders a 'not stated' rating/install as a value, or a feature bullet containing 'the sources do not provide' / 'no specific mention'",
-      "note": "2026-11-08: `devteam competition` produced a gate-passing document that listed the project itself as its own rival, a cybersecurity MDR portal as a field-inspection benchmark, and 4.5 stars for every app (a parser default, not a reading). The document was not committed; self-exclusion and the search-term fallback are already fixed in code."
-    },
-    {
-      "id": "live-path-verdict-needs-probe",
-      "rule": "a milestone measure that names a server-side effect ('RPC succeeds', 'scan is sent', 'handshake completes') is only marked met with a recorded live probe; reading the call site and passing fake-transport tests is not evidence that the call lands",
-      "doc": "docs/planning.md",
-      "kind": "enforcible",
-      "proposal": "a measure may carry {\"probe\": \"<command>\"}; devteam plan --apply-result runs it (or refuses the verdict when the measure text names a backend path and no probe exists), exactly as metric measures are already evaluated by code. Today the orchestrator's 'cheap check' is prose.",
-      "note": "run-derived 2026-11-08 (BookSwapKMP v1.0.3): m1 'Local Supabase RPC book requests succeed' was retired as met because BookSwapRepository forwarded requestBook/verifyHandoff to the RPCs and tests passed on a fake transport — the app actually boots to Discovery with no sign-in (App.kt default destination, in-memory SessionStore), so the RPCs post with the anon key and auth.uid() is NULL. The owner found it by hand; the gates could not, because the defect is 'the default entry never authenticates', which no diff-scoped test names."
-    },
-    {
-      "id": "device-evidence-for-ux-offdevice-for-integration",
-      "rule": "ux-audit, ux-video and ux-flow judge a DEVICE (emulator or connected phone) — never an off-device render; integration tests run OFF a device (JVM/Robolectric) and verify never boots one for them",
-      "doc": "docs/guarantees.md",
-      "kind": "code",
-      "enforced_by": "team/emulator.require_device() is the only way the three UX passes get a serial (it raises when none is available); team/verify.device_gate runs verify.integration_task on the JVM or skips, and no longer boots an AVD",
-      "note": "owner policy 2026-11-08. run-derived: ux-audit used to judge a Robolectric render, which cannot show a keyboard covering the submit button, an inset collision, a session that failed to persist, or an unreachable network — all found within an hour of moving the audit onto the device."
-    },
-    {
-      "id": "ux-evidence-must-be-the-screen",
-      "rule": "a UX verdict may only be stored against a frame that is provably the app AND that screen: the capture path launches the app and confirms the foreground package, and one live frame is never reused as evidence for several surfaces — each surface needs its own journey frame",
-      "doc": "docs/loop.md / devteam ux-audit",
-      "kind": "code",
-      "enforced_by": "team/ux_audit.launch_app() force-stops and launches the app, then reads mCurrentFocus until the app's own package is in front (no frame is stored otherwise); run_audit assigns a live frame only to a single-surface pass and otherwise requires a per-surface journey frame",
-      "note": "run-derived 2026-11-08: ux-audit installed the APK, photographed the launcher and stored three P1 'wrong screen captured' gripes on each of four screens; before that it re-judged one frame as four different screens. Both halves are refused in code now, and a project with several stale screens must declare journeys (docs/ux-flows.json + `devteam ux-flow`) to be judged."
-    },
-    {
-      "id": "verdicts-are-revisable",
-      "rule": "a milestone verdict can be withdrawn when new evidence lands; the plan must reflect the APP, not the last diff",
-      "doc": "docs/planning.md",
-      "kind": "code",
-      "enforced_by": "devteam goal <project> verdict --id <milestone> --met yes|no --evidence '…' (appends to goal_log, re-derives the pointer, rewrites the page)",
-      "note": "owner question 2026-11-08 ('flow awareness'): m1 sat at ✓ for a week while the feed crashed and no request could be sent, because only the planner could write a verdict and only for the ACTIVE milestone — a wrong 'met' was unwithdrawable once the pointer moved on."
-    },
-    {
-      "id": "coverage-tests-must-be-runnable",
-      "rule": "a test file the coverage signal counts must be reachable by a verify gate: tests under an included build (e.g. build-logic) are only real coverage when a project task runs them and profile.verify.test names that task",
-      "doc": "docs/guarantees.md",
-      "kind": "enforcible",
-      "enforced_by": "",
-      "proposal": "devteam verify: when the diff adds or changes src/test files under an included build, run `./gradlew <profile.verify.test> --dry-run` and WARN (or fail once the rule is proven) unless the dry-run task graph contains that build's `:test` task; coverage.py already counts build-logic src/test as unit coverage, so today a project can reach 100% with tests nothing ever executes",
-      "note": "run-derived 2026-11-08 (ZenListKMP): unit coverage counted build-logic/convention/src/main as uncovered, the queue head was the entry to test it, and verify's test command was ':app:test..., :shared:test...' — the new build-logic tests would have been decoration in every gate while the coverage signal turned green. Closed for that project by a root `testBuildLogic` task wired into profile.verify.test; the generic mechanism is proposed here."
-    },
-    {
-      "id": "brand-publish-reconciles-with-the-store",
-      "rule": "a brand change's 'next: publish' must be decided from the STORE, not from the last step the brand command happened to run: an icon already inside a Play review submission (or whose live listing bytes match the committed icon) is published, and the chain must not tell the owner to upload it again",
-      "doc": "docs/store.md",
-      "kind": "enforcible",
-      "proposal": "team/brand_change.status(): when the last step is 'released' and Play answers with a live listing icon whose sha256 matches the committed distribution/listing/<locale>/images/icon.png, record the 'published' step (or report 'already live') instead of printing 'next: devteam brand <project> --publish'; team/play_listing.publish_icon() short-circuits when the live bytes already match, so a re-run never opens a fresh Play edit on an in-review listing",
-      "note": "run-derived 2026-11-09: status printed 'brand: open at released — icon-refresh-2026-11-07; next: devteam brand <project> --publish' while signals.store_status showed that exact icon already cleared by the API and inside the current review submission (the storefront pass published it, not the brand command). The owner's obvious next action would have opened a second Play edit and re-triggered review for bytes Play already had; the store is the record of whether an asset is published, never a command's step log."
-    },
-    {
-      "id": "agent-decides-intent-code-decides-consequences",
-      "rule": "a request becomes work only through `devteam admit`: the agent states the kind, the milestone, the reason and its own alignment verdict; code validates every consequence and flags (queueing nothing) when any check fails",
-      "doc": "docs/loop.md",
-      "kind": "code",
-      "enforced_by": "team/admit.py (devteam admit) — unknown kind, unknown/done/parked milestone, unmet earlier goal, empty --why, no vision, missing --verdict are all refused; the old keyword classifier (devteam route) is retired because code cannot read intent"
-    },
-    {
-      "id": "tool-inventory-is-complete",
-      "rule": "every verb the CLI registers is described in one inventory (what it writes, what it refuses), because that list is the only thing an agent reads before choosing a sequence",
-      "doc": "docs/loop.md",
-      "kind": "code",
-      "enforced_by": "team/toolbox.py + devteam doctor (compares `sub.add_parser(...)` in cli.py with the inventory in both directions and BLOCKS on drift); printed by `devteam tools`"
-    },
-    {
-      "id": "flow-frame-is-not-surface-evidence",
-      "rule": "a journey that dead-ends before reaching a surface must not supply that surface's UX evidence: ux-audit judged 'Discovery' from the newest still of the first-run journey — which is the sign-in recovery card — and filed sign-in gripes against the discovery feed",
-      "doc": "docs/guarantees.md",
-      "kind": "enforcible",
-      "proposal": "team/ux_audit.py _flow_still_for: use a still only from a flow whose goal was REACHED (or a frame whose step screen matches the surface); a stuck journey's last frame is where it died, not what the surface looks like",
-      "note": "run-derived 2026-11-09 (BookSwapKMP): the first-run journey dead-ends at provider sign-in (no credentials on a headless emulator), so its last still is the sign-in recovery card; the next ux-audit reviewed that card as 'Discovery' and produced 'wait, this is a sign-in screen, not a discovery feed' + 'an error banner already?' as feed gripes. Stale-frame remedies also named the wrong command — fixed in the same run (a flow still is refreshed by `devteam ux-flow`, never by `storefront-scenes`)."
-    },
-    {
-      "id": "done-is-earned-not-exhausted",
-      "rule": "a branch is not done when its task list empties: it is COMPLETE only when every measure it declared has evidence (a machine-checkable number, or a recorded verdict with evidence); a built branch without evidence is a GAP and that gap is the next task",
-      "doc": "docs/planning.md",
-      "kind": "code",
-      "enforced_by": "team/closure.py (devteam closure --require) + goals.validate_advances (work may be queued AT a gap, a plan may not step OVER one) + status/record print the closure block"
-    },
-    {
-      "id": "ux-audit-knows-what-the-harness-supplied",
-      "rule": "a UX audit judges the app, not the render harness: when a scene's content is supplied by the storefront fixture (a page thumbnail the JVM renderer cannot decode), the audit must say so in the prompt instead of reporting the fixture's stand-in as a P0 about the app",
-      "doc": "docs/store.md",
-      "kind": "enforcible",
-      "proposal": "storefront.json scene gains `fixture_supplied: [\"page thumbnail\"]`; ux_audit PROMPT names those regions and forbids a P0 on their CONTENT (the tile, its labels and its affordances stay in scope). Seen 2026-11-10: the audit and the Play screenshot both judged the same fixture bars, so the split screen carried a P0 the app had already fixed in v1.5.47.",
-      "note": "the run fixed the fixture art and moved the label out of the picture, but the mechanism that let a fixture defect look like an app defect is still open"
-    },
-    {
-      "id": "ux-flow-gate-needs-a-session-an-agent-can-get",
-      "rule": "a release gate may not demand a state no agent can reach: a journey whose goal requires sign-in must declare how the session is established (flows[].credentials from a test account, or a documented one-time device session that survives the walk's install), and a gate blocked on a missing credential is reported once as the OWNER ASK instead of reddening every run",
-      "doc": "docs/guarantees.md",
-      "kind": "enforcible",
-      "enforced_by": "",
-      "proposal": "devteam ux-flow already detects needs_credentials and prints the unblock; `devteam verify` should report it as rc=4 BLOCKED (with the one ask) rather than FAIL, and `devteam doctor` should flag a declared flow with no credentials when its goal names sign-in. Evidence: 2026-11-10, request-a-book walked on a fresh emulator — guest browsing died on raw auth text and the walk could not pass without the owner signing in, blocking an otherwise green release."
-    },
-    {
-      "id": "ux-audit-sees-the-run-tree",
-      "rule": "a run's UX audit and ux-plan must be able to read the RUN's tree, not only the project checkout",
-      "doc": "docs/loop.md",
-      "kind": "enforcible",
-      "proposal": "ux-plan and ux-audit take --tree <worktree> (like `storefront-scenes --render --tree`): surfaces, scene bindings and visual/behaviour fingerprints are hashed from that tree, so a run that fixes a screen can re-render, re-react and clear its own gripes before the release that lands it",
-      "note": "seen 2026-11-11: a run fixed DashboardScreen.kt and re-rendered its scenes from the worktree, but `ux-plan`/`ux-audit` hashed the checkout, so the audit reported 'unchanged' and the unbound-scene warning kept quoting the checkout's older docs/storefront.json; the only workaround was `ux-audit --all`, which re-reacts to every scene and costs a vision call per screen"
-    },
-    {
-      "id": "a-file-reading-gate-declares-its-input",
-      "rule": "a test or gate that reads a repo file outside its own source set must declare that file as a build input, or the build's up-to-date check reuses the PASS it computed before the file changed and the guard silently never runs",
-      "doc": "docs/guarantees.md",
-      "kind": "enforcible",
-      "enforced_by": "",
-      "proposal": "surface the input declaration where the developer sees it: when a task adds a test that reads files outside its source set, the developer brief names the build-input declaration as part of that test's definition of done, or `devteam verify` re-runs the project's test task once with --rerun-tasks so a cached pass cannot be mistaken for a fresh one. Evidence 2026-11-11: a store-identity parity test read the Play listing's title file, and after editing ONLY that file the module's unit-test task reported UP-TO-DATE; declaring the listing directory as a test input made the same edit fail the build as the measure required."
-    },
-    {
-      "id": "generated-design-states-must-not-invent-values",
-      "rule": "a Stitch screen generated for a STATE (failure/empty/loading) may not contain values the app does not hold - task ids, error codes, heap/percentage measurements, trace logs, timers - and the drift audit must not pass one that does",
-      "doc": "docs/store.md",
-      "kind": "enforcible",
-      "proposal": "design_validator: scan the generated screen's text for instrument-shaped tokens (ERR_*, #<id>, '%', 'MB /' heap phrasing, 'trace', 'log', 'Copy', 'Dump', 'Settings') plus any number not present in the task spec, and FAIL the drift report instead of scoring it 100/100",
-      "note": "2026-11-11: a 'job failed notice' generation returned a developer diagnostics console (TASK_ID, 248MB/256MB heap, trace log, Dump Log/Tune Settings). The drift audit scored it 100/100 because it checked prompt fidelity, not truth. It was retired by hand in docs/stitch/RETIRED.md; nothing in code would have stopped it."
-    },
-    {
-      "id": "design-for-a-shipped-surface-starts-from-the-surface",
-      "rule": "a design for an EXISTING shipped screen must describe that screen; a generated screen that invents sections is not a design answer for a UI bugfix",
-      "doc": "skills/dev-team/references/develop.md",
-      "kind": "enforcible",
-      "proposal": "devteam stitch-screen --generate: when the screen label matches a surface the app already renders (docs/storefront.json scene or a target with paths), seed compile_stitch_screen_prompt from THAT scene's real content (fixture labels, section order, the controls the composable draws) and mark the exported entry surface-bound; design-consult must then refuse `new_screen` whose exported screen carries sections the scene does not. Also print a heartbeat and cap stitch-tweak at the run's remaining budget - it produced no output for 15 minutes on 2026-11-12 and the run had to abandon it",
-      "note": "Seen 2026-11-12: a goal-page bugfix needed a design (removing an affordance, moving delete behind a menu). Stitch held no screen for that surface, so design-consult said new_screen; the generated page invented a session CTA, a weekly cadence grid and habit-intention copy the app does not have, and the developer was told to match it. All the design actually needed to say was 'the top bar has one overflow'. Seen again 2026-11-13: a rows-level control on an ALREADY SHIPPED list surface got `new_screen` because Stitch held no screen for it, and the generation invented a shield-overview card, category chips, per-row cap badges, an 'Apply' bulk-action button and a different brand name ('MindfulGates') - while the drift audit still scored it 100/100 and PASSED. The run implemented only the two things the task and the consult actually specified (the control's two states and the count line) and recorded the rest as out of scope, but nothing in code made that decision: verify's design gate only checks that a snapshot exists. `stitch-tweak` also produced no output for 15 minutes again and was abandoned, exactly as the 2026-11-12 note predicted."
-    }
-  ]
+ "_comment": "Every rule the team enforces, and WHERE it is enforced. This is the conversion backlog, kept as data so it cannot drift the way prose does: `code` = a command already refuses/does it; `enforcible` = a command could, and the proposal is written down; `judgment` = no mechanism can decide it, a person or model must; `reference` = facts/diagnostics that belong in docs, not in the contract. Print the gap with `devteam docs-audit --rules`. When a rule moves to code, change its kind here and delete the prose that restated it.",
+ "rules": [
+  {
+   "id": "worktree-isolation",
+   "rule": "never edit project code on main; every task runs on dt/<task-id> cut from origin/main",
+   "doc": "AGENTS.md#1",
+   "kind": "code",
+   "enforced_by": "devteam worktree-start / release"
+  },
+  {
+   "id": "delivery-ref",
+   "rule": "read project code from origin/main, not the checkout",
+   "doc": "AGENTS.md#2",
+   "kind": "code",
+   "enforced_by": "devteam status (DELIVERY line) / storefront-scenes renders from the scan tree"
+  },
+  {
+   "id": "state-is-written-not-edited",
+   "rule": "never hand-edit .pipeline/state.json; write via devteam record",
+   "doc": "AGENTS.md#3",
+   "kind": "enforcible",
+   "proposal": "doctor: keep a state checksum written by the CLI and BLOCK when the file changed outside it",
+   "note": "today only prose + convention"
+  },
+  {
+   "id": "one-canonical-ci",
+   "rule": ".github/workflows/release.yml is generated from team/templates/ci-release.yml",
+   "doc": "AGENTS.md#4",
+   "kind": "code",
+   "enforced_by": "devteam doctor (renders the template and compares the project workflow)"
+  },
+  {
+   "id": "store-assets-are-deliverables",
+   "rule": "screenshots render from the app's composables; the poster is composed (plate from an image model only), never hand-drawn HTML",
+   "doc": "docs/store.md",
+   "kind": "code",
+   "enforced_by": "devteam storefront-build (refuses without a plate/layout; --builtin must be deliberate) + asset_critic provenance"
+  },
+  {
+   "id": "storefront-direction",
+   "rule": "what the listing says is decided and committed before anything is drawn",
+   "doc": "docs/store.md",
+   "kind": "code",
+   "enforced_by": "devteam storefront-build (refuses without a locked direction) / storefront-direction --apply"
+  },
+  {
+   "id": "listing-publish-ends-in-browser",
+   "rule": "the API uploads and commits a listing edit; permissions and Managed publishing are console-only, so the publish is finished in Play Console",
+   "doc": "docs/store.md",
+   "kind": "reference",
+   "note": "no mechanism can grant console permissions; the skill states the sequence"
+  },
+  {
+   "id": "nightly-schedule-enforced",
+   "rule": "every app must have an active launchd nightly schedule (or explicit manual mode in profile.json) verified by doctor and store-readiness",
+   "doc": "AGENTS.md",
+   "kind": "code",
+   "enforced_by": "devteam doctor (orchestrator check) + devteam store-readiness (Automation & Operations category)"
+  },
+  {
+   "id": "ux-audit-on-change",
+   "rule": "a screen whose look/feel fingerprint changed must get one neutral first-use reaction before a run can claim it polished anything; unchanged screens are never re-audited",
+   "doc": "SKILL.md",
+   "kind": "code",
+   "enforced_by": "devteam ux-plan / ux-audit (fingerprint decides) + team/verify.py warn naming the unaudited screens",
+   "note": "warning, not a gate: the released gates stay compile/tests. Per-screen fingerprints mean the audit is paid on change, never per release"
+  },
+  {
+   "id": "ga4-read-is-verified",
+   "rule": "a GA4 connection is ready only when the declared property can actually be read; the credential is a reader service account (connections.ga4.key_file or machine-wide $DEVTEAM_GA4_KEY), never the owner's ADC login \u2014 Google blocks analytics.readonly for gcloud's default client",
+   "doc": "AGENTS.md",
+   "kind": "code",
+   "enforced_by": "team/ga4.py (one credential resolver + a real runReport probe) used by team/research.py and devteam doctor",
+   "note": "lesson 2026-11-05: doctor tested 'gcloud can mint a token', so a property returning 403 (and a login Google had just blocked) still read as configured; a new project now cannot land there either"
+  },
+  {
+   "id": "nightly-runs-in-window",
+   "rule": "every scheduled app runs RUNS_PER_DAY (2) times a night inside the owner's 23:00\u201311:00 window; apps are interleaved evenly so consecutive machine-wide runs are as far apart as the app count allows, and overlap is tolerated because two runs make a skipped one harmless",
+   "doc": "AGENTS.md",
+   "kind": "code",
+   "enforced_by": "devteam setup (scheduler.plan_schedule/apply_plan installs 2 slots per app) + devteam schedules --rebalance (re-spaces every app) + devteam doctor and store-readiness (assert 2 slots inside the window)",
+   "note": "owner directive 2026-11-05: two runs a night, 11pm\u201311am, overlap tolerated but avoided where possible; MIN_GAP_MIN is a best-effort target, not a refusal. 2026-11-11: runs per app lowered 3 \u2192 2"
+  },
+  {
+   "id": "cleanup-is-part-of-the-run",
+   "rule": "pick and record prune; a tree goes only when its work is safe somewhere else",
+   "doc": "docs/loop.md",
+   "kind": "code",
+   "enforced_by": "devteam worktree-prune (dry run by default) / pick / record"
+  },
+  {
+   "id": "worktree-is-not-a-record",
+   "rule": "work is closed when main contains it or origin holds its branch; unfinished work is parked",
+   "doc": "docs/loop.md",
+   "kind": "code",
+   "enforced_by": "worktrees.park + devteam takeover (parked list)"
+  },
+  {
+   "id": "no-auto-guards",
+   "rule": "no frozen paths, release-knob diff or dependency gates; compile/tests are the gates \u2014 and a production change must carry its own test in the same diff",
+   "doc": "docs/guarantees.md",
+   "kind": "code",
+   "enforced_by": "devteam verify (diff-scoped test gate) / devteam release (same gate before the bump)"
+  },
+  {
+   "id": "tests-are-part-of-the-change",
+   "rule": "every changed production file is named by a test file in the same diff; a changed UI file is named by a Compose/Espresso test with an assertion, never a screenshot render",
+   "doc": "docs/guarantees.md",
+   "kind": "code",
+   "enforced_by": "devteam verify (test gate) / devteam release (refuses before the version bump) / devteam doctor (test-posture warn)"
+  },
+  {
+   "id": "full-test-coverage-enforced",
+   "rule": "100% unit and UI test coverage is enforced by code; when below 100%, the planner must make raising coverage the topmost priority (queue HEAD)",
+   "doc": "docs/guarantees.md",
+   "kind": "code",
+   "enforced_by": "config/coverage.json / team/coverage.py (100% floors) / team/research.py (_validate rejects non-test queue HEAD) / devteam doctor (coverage WARN)"
+  },
+  {
+   "id": "ask-only-what-no-agent-can-decide",
+   "rule": "ask the owner only for what no agent can decide (incidents, WIP, direction); never about promotion",
+   "doc": "docs/guarantees.md",
+   "kind": "judgment",
+   "note": "requires intent; the run banner is where it shows"
+  },
+  {
+   "id": "nothing-uncommitted",
+   "rule": "every change ends in a commit on a pushed ref; a dirty checkout is reported",
+   "doc": "docs/guarantees.md",
+   "kind": "code",
+   "note": "warn-only by design: the run commits its own work, it does not commit the owner's",
+   "enforced_by": "devteam doctor / status (checkout_dirty \u2014 reports, never commits the owner's WIP)"
+  },
+  {
+   "id": "verify-before-release",
+   "rule": "never push with red gates",
+   "doc": "SKILL.md#hard-rules",
+   "kind": "code",
+   "enforced_by": "devteam release (refuses on FAIL) / verify"
+  },
+  {
+   "id": "release-notes-curated",
+   "rule": "a whatsnew_curated project never gets the pipeline's boilerplate note, but an explicit per-release `whatsnew` in the task spec IS written; no release may repeat the previous release's note verbatim",
+   "doc": "SKILL.md#hard-rules",
+   "kind": "code",
+   "enforced_by": "shipper.whatsnew_gate (verify + release refuse a repeated/empty note) / store-readiness"
+  },
+  {
+   "id": "emulators-torn-down",
+   "rule": "a run stops only the emulators it started",
+   "doc": "SKILL.md#hard-rules",
+   "kind": "code",
+   "enforced_by": "devteam emulators --record / verify (baseline diff)"
+  },
+  {
+   "id": "emulator-failure-modes",
+   "rule": "three emulator-only failure modes (corrupt snapshot, AVD lock, crash-consent dialog) and how to repair them",
+   "doc": "SKILL.md#hard-rules",
+   "kind": "reference",
+   "note": "diagnostics, not a rule: 20 lines of troubleshooting sitting in the contract"
+  },
+  {
+   "id": "self-improvement-duty",
+   "rule": "a surprise is closed by a change to team code in the same run; nothing is appended to a log",
+   "doc": "SKILL.md#hard-rules",
+   "kind": "judgment",
+   "note": "no mechanism can decide what surprised an agent, but the FIX must be a commit; a fix too large for the run becomes an `enforcible` entry here"
+  },
+  {
+   "id": "generic-team-code",
+   "rule": "team code carries no project names",
+   "doc": "SKILL.md#hard-rules",
+   "kind": "code",
+   "enforced_by": "devteam doctor (greps every registered project name)"
+  },
+  {
+   "id": "docs-newest-wins",
+   "rule": "the newest text is the source of truth; overlapping copies are removed, not kept",
+   "doc": "scripts/hooks/pre-commit",
+   "kind": "code",
+   "enforced_by": "devteam docs-audit --check --new-only (pre-commit hook)"
+  },
+  {
+   "id": "resume-from-state",
+   "rule": "a run's starting position (delivery ref, dirty files, trees, queue head, open asks, next command) is read, not inferred from prose",
+   "doc": "team/takeover.py",
+   "kind": "code",
+   "enforced_by": "devteam takeover"
+  },
+  {
+   "id": "emulator-boot-zombie-repair",
+   "rule": "a device gate that cannot boot because a dead emulator still holds the AVD must repair the AVD and rerun, never silently degrade to warn-only",
+   "doc": "docs/guarantees.md / SKILL.md#hard-rules",
+   "kind": "enforcible",
+   "proposal": "devteam verify's instrumented stage: before booting an AVD, if a qemu process holds that AVD's lock while `adb devices` shows no online device AND this run started no emulator, terminate the holder, clear the locks, boot again, and only then fall back to warn-only; record the repair in the run log",
+   "note": "2026-11-05/06: the two touched device classes passed (13 tests), then a zombie qemu from a failed boot kept the AVD lock, every later boot died in ~1s, and verify degraded to 'device test runner could not execute (warn-only)' \u2014 the degrade is right for a machine with no emulator, wrong for a repairable lock holder"
+  },
+  {
+   "id": "plan-middle-tier",
+   "rule": "the plan has a middle tier: vision \u2192 goals (the ENDS, one number each) \u2192 milestones (the MEANS) \u2192 tasks; a new milestone must sit under a goal, and a later goal's milestones are not planned while an earlier goal's number fails",
+   "doc": "docs/planning.md",
+   "kind": "code",
+   "enforced_by": "team/goals.py (ensure_goal_tier, tree_gaps, validate_advances) \u2014 devteam adapt re-shapes the tree, devteam doctor gates it, the planner's goal gate refuses the queue"
+  },
+  {
+   "id": "store-screenshots-track-the-shipped-ui",
+   "rule": "a listing frame must be painted from a render that contains the screen it depicts; a poster older than the newest change to its scene's composables is stale, not current",
+   "doc": "docs/store.md",
+   "kind": "enforcible",
+   "proposal": "store-readiness/store-publish compare the source commit recorded for the painted frames (.pipeline/storefront_run.json + docs/storefront-frames.json composition) with the newest commit that touched each scene's bound composables in docs/storefront.json: a frame whose scene changed after the paint is reported as STALE and store-publish refuses it until `devteam storefront-build <project> --poster` repaints it.",
+   "note": "run-derived 2026-11-06 (Paddle v1.0.40): verify warned 'History changed (render), no audit since' while the listing's 03_summary/04_history posters still depicted the previous build, and every readiness check passed 25/25 because nothing compares the frames' source commit with the shipped screens."
+  },
+  {
+   "id": "launcher-icon-parity-for-vector-icons",
+   "rule": "the installed launcher must be provably the same design as the Play listing icon; a warning that no check can ever clear is a defect in the check, not a finding about the app",
+   "doc": "docs/store.md",
+   "kind": "enforcible",
+   "proposal": "store-readiness 'Installed Icon Matches Store Listing': when the app ships an adaptive VECTOR launcher (mipmap-anydpi-v26/ic_launcher.xml) and no PNG mipmap, render the vector's foreground+background pair at 512x512 (or compare the listing icon against the adaptive icon's declared colors) and report parity from that render instead of the current 'no launcher bitmap to compare' WARNING, which no adaptive-icon project can ever clear",
+   "note": "run-derived 2026-11-07 (BookSwapKMP v1.0.2): every store-readiness run carried this WARNING while the listing icon (Stitch) and the adaptive launcher are the only icon assets the project ships; the same run also found the keystore check passing the scan tree instead of the project, so a real backup read as missing"
+  },
+  {
+   "id": "competitor-research-honesty",
+   "rule": "competitor research may not present a figure it did not read: no default rating (the parser fills 4.5 when the listing gave none), no 'not stated' rendered as a value, and no search-answer fragment presented as a listing feature",
+   "doc": "docs/new-app.md (Mode B step 1 / spec review)",
+   "kind": "enforcible",
+   "why": "2026-11-08: `devteam competition` produced a gate-passing document that listed the project itself as its own rival, a cybersecurity MDR portal as a field-inspection benchmark, and 4.5\u2605 for every app (a parser default, not a reading). The store blocker would have been 'cleared' by data the owner could not trust; the document was not committed.",
+   "proposal": "`_parse_recon_search_output` carries rating=None (never 4.5) when the listing gave none; `devteam store-readiness` refuses docs/COMPETITION_RESEARCH.md that renders a 'not stated' rating/install as a value, or a feature bullet containing 'the sources do not provide' / 'no specific mention'",
+   "note": "2026-11-08: `devteam competition` produced a gate-passing document that listed the project itself as its own rival, a cybersecurity MDR portal as a field-inspection benchmark, and 4.5 stars for every app (a parser default, not a reading). The document was not committed; self-exclusion and the search-term fallback are already fixed in code."
+  },
+  {
+   "id": "live-path-verdict-needs-probe",
+   "rule": "a milestone measure that names a server-side effect ('RPC succeeds', 'scan is sent', 'handshake completes') is only marked met with a recorded live probe; reading the call site and passing fake-transport tests is not evidence that the call lands",
+   "doc": "docs/planning.md",
+   "kind": "enforcible",
+   "proposal": "a measure may carry {\"probe\": \"<command>\"}; devteam plan --apply-result runs it (or refuses the verdict when the measure text names a backend path and no probe exists), exactly as metric measures are already evaluated by code. Today the orchestrator's 'cheap check' is prose.",
+   "note": "run-derived 2026-11-08 (BookSwapKMP v1.0.3): m1 'Local Supabase RPC book requests succeed' was retired as met because BookSwapRepository forwarded requestBook/verifyHandoff to the RPCs and tests passed on a fake transport \u2014 the app actually boots to Discovery with no sign-in (App.kt default destination, in-memory SessionStore), so the RPCs post with the anon key and auth.uid() is NULL. The owner found it by hand; the gates could not, because the defect is 'the default entry never authenticates', which no diff-scoped test names."
+  },
+  {
+   "id": "device-evidence-for-ux-offdevice-for-integration",
+   "rule": "ux-audit, ux-video and ux-flow judge a DEVICE (emulator or connected phone) \u2014 never an off-device render; integration tests run OFF a device (JVM/Robolectric) and verify never boots one for them",
+   "doc": "docs/guarantees.md",
+   "kind": "code",
+   "enforced_by": "team/emulator.require_device() is the only way the three UX passes get a serial (it raises when none is available); team/verify.device_gate runs verify.integration_task on the JVM or skips, and no longer boots an AVD",
+   "note": "owner policy 2026-11-08. run-derived: ux-audit used to judge a Robolectric render, which cannot show a keyboard covering the submit button, an inset collision, a session that failed to persist, or an unreachable network \u2014 all found within an hour of moving the audit onto the device."
+  },
+  {
+   "id": "ux-evidence-must-be-the-screen",
+   "rule": "a UX verdict may only be stored against a frame that is provably the app AND that screen: the capture path launches the app and confirms the foreground package, and one live frame is never reused as evidence for several surfaces \u2014 each surface needs its own journey frame",
+   "doc": "docs/loop.md / devteam ux-audit",
+   "kind": "code",
+   "enforced_by": "team/ux_audit.launch_app() force-stops and launches the app, then reads mCurrentFocus until the app's own package is in front (no frame is stored otherwise); run_audit assigns a live frame only to a single-surface pass and otherwise requires a per-surface journey frame",
+   "note": "run-derived 2026-11-08: ux-audit installed the APK, photographed the launcher and stored three P1 'wrong screen captured' gripes on each of four screens; before that it re-judged one frame as four different screens. Both halves are refused in code now, and a project with several stale screens must declare journeys (docs/ux-flows.json + `devteam ux-flow`) to be judged."
+  },
+  {
+   "id": "verdicts-are-revisable",
+   "rule": "a milestone verdict can be withdrawn when new evidence lands; the plan must reflect the APP, not the last diff",
+   "doc": "docs/planning.md",
+   "kind": "code",
+   "enforced_by": "devteam goal <project> verdict --id <milestone> --met yes|no --evidence '\u2026' (appends to goal_log, re-derives the pointer, rewrites the page)",
+   "note": "owner question 2026-11-08 ('flow awareness'): m1 sat at \u2713 for a week while the feed crashed and no request could be sent, because only the planner could write a verdict and only for the ACTIVE milestone \u2014 a wrong 'met' was unwithdrawable once the pointer moved on."
+  },
+  {
+   "id": "coverage-tests-must-be-runnable",
+   "rule": "a test file the coverage signal counts must be reachable by a verify gate: tests under an included build (e.g. build-logic) are only real coverage when a project task runs them and profile.verify.test names that task",
+   "doc": "docs/guarantees.md",
+   "kind": "enforcible",
+   "enforced_by": "",
+   "proposal": "devteam verify: when the diff adds or changes src/test files under an included build, run `./gradlew <profile.verify.test> --dry-run` and WARN (or fail once the rule is proven) unless the dry-run task graph contains that build's `:test` task; coverage.py already counts build-logic src/test as unit coverage, so today a project can reach 100% with tests nothing ever executes",
+   "note": "run-derived 2026-11-08 (ZenListKMP): unit coverage counted build-logic/convention/src/main as uncovered, the queue head was the entry to test it, and verify's test command was ':app:test..., :shared:test...' \u2014 the new build-logic tests would have been decoration in every gate while the coverage signal turned green. Closed for that project by a root `testBuildLogic` task wired into profile.verify.test; the generic mechanism is proposed here."
+  },
+  {
+   "id": "brand-publish-reconciles-with-the-store",
+   "rule": "a brand change's 'next: publish' must be decided from the STORE, not from the last step the brand command happened to run: an icon already inside a Play review submission (or whose live listing bytes match the committed icon) is published, and the chain must not tell the owner to upload it again",
+   "doc": "docs/store.md",
+   "kind": "enforcible",
+   "proposal": "team/brand_change.status(): when the last step is 'released' and Play answers with a live listing icon whose sha256 matches the committed distribution/listing/<locale>/images/icon.png, record the 'published' step (or report 'already live') instead of printing 'next: devteam brand <project> --publish'; team/play_listing.publish_icon() short-circuits when the live bytes already match, so a re-run never opens a fresh Play edit on an in-review listing",
+   "note": "run-derived 2026-11-09: status printed 'brand: open at released \u2014 icon-refresh-2026-11-07; next: devteam brand <project> --publish' while signals.store_status showed that exact icon already cleared by the API and inside the current review submission (the storefront pass published it, not the brand command). The owner's obvious next action would have opened a second Play edit and re-triggered review for bytes Play already had; the store is the record of whether an asset is published, never a command's step log."
+  },
+  {
+   "id": "agent-decides-intent-code-decides-consequences",
+   "rule": "a request becomes work only through `devteam admit`: the agent states the kind, the milestone, the reason and its own alignment verdict; code validates every consequence and flags (queueing nothing) when any check fails",
+   "doc": "docs/loop.md",
+   "kind": "code",
+   "enforced_by": "team/admit.py (devteam admit) \u2014 unknown kind, unknown/done/parked milestone, unmet earlier goal, empty --why, no vision, missing --verdict are all refused; the old keyword classifier (devteam route) is retired because code cannot read intent"
+  },
+  {
+   "id": "tool-inventory-is-complete",
+   "rule": "every verb the CLI registers is described in one inventory (what it writes, what it refuses), because that list is the only thing an agent reads before choosing a sequence",
+   "doc": "docs/loop.md",
+   "kind": "code",
+   "enforced_by": "team/toolbox.py + devteam doctor (compares `sub.add_parser(...)` in cli.py with the inventory in both directions and BLOCKS on drift); printed by `devteam tools`"
+  },
+  {
+   "id": "flow-frame-is-not-surface-evidence",
+   "rule": "a journey that dead-ends before reaching a surface must not supply that surface's UX evidence: ux-audit judged 'Discovery' from the newest still of the first-run journey \u2014 which is the sign-in recovery card \u2014 and filed sign-in gripes against the discovery feed",
+   "doc": "docs/guarantees.md",
+   "kind": "enforcible",
+   "proposal": "team/ux_audit.py _flow_still_for: use a still only from a flow whose goal was REACHED (or a frame whose step screen matches the surface); a stuck journey's last frame is where it died, not what the surface looks like",
+   "note": "run-derived 2026-11-09 (BookSwapKMP): the first-run journey dead-ends at provider sign-in (no credentials on a headless emulator), so its last still is the sign-in recovery card; the next ux-audit reviewed that card as 'Discovery' and produced 'wait, this is a sign-in screen, not a discovery feed' + 'an error banner already?' as feed gripes. Stale-frame remedies also named the wrong command \u2014 fixed in the same run (a flow still is refreshed by `devteam ux-flow`, never by `storefront-scenes`)."
+  },
+  {
+   "id": "done-is-earned-not-exhausted",
+   "rule": "a branch is not done when its task list empties: it is COMPLETE only when every measure it declared has evidence (a machine-checkable number, or a recorded verdict with evidence); a built branch without evidence is a GAP and that gap is the next task",
+   "doc": "docs/planning.md",
+   "kind": "code",
+   "enforced_by": "team/closure.py (devteam closure --require) + goals.validate_advances (work may be queued AT a gap, a plan may not step OVER one) + status/record print the closure block"
+  },
+  {
+   "id": "ux-audit-knows-what-the-harness-supplied",
+   "rule": "a UX audit judges the app, not the render harness: when a scene's content is supplied by the storefront fixture (a page thumbnail the JVM renderer cannot decode), the audit must say so in the prompt instead of reporting the fixture's stand-in as a P0 about the app",
+   "doc": "docs/store.md",
+   "kind": "enforcible",
+   "proposal": "storefront.json scene gains `fixture_supplied: [\"page thumbnail\"]`; ux_audit PROMPT names those regions and forbids a P0 on their CONTENT (the tile, its labels and its affordances stay in scope). Seen 2026-11-10: the audit and the Play screenshot both judged the same fixture bars, so the split screen carried a P0 the app had already fixed in v1.5.47.",
+   "note": "the run fixed the fixture art and moved the label out of the picture, but the mechanism that let a fixture defect look like an app defect is still open"
+  },
+  {
+   "id": "ux-flow-gate-needs-a-session-an-agent-can-get",
+   "rule": "a release gate may not demand a state no agent can reach: a journey whose goal requires sign-in must declare how the session is established (flows[].credentials from a test account, or a documented one-time device session that survives the walk's install), and a gate blocked on a missing credential is reported once as the OWNER ASK instead of reddening every run",
+   "doc": "docs/guarantees.md",
+   "kind": "enforcible",
+   "enforced_by": "",
+   "proposal": "devteam ux-flow already detects needs_credentials and prints the unblock; `devteam verify` should report it as rc=4 BLOCKED (with the one ask) rather than FAIL, and `devteam doctor` should flag a declared flow with no credentials when its goal names sign-in. Evidence: 2026-11-10, request-a-book walked on a fresh emulator \u2014 guest browsing died on raw auth text and the walk could not pass without the owner signing in, blocking an otherwise green release."
+  },
+  {
+   "id": "ux-audit-sees-the-run-tree",
+   "rule": "a run's UX audit and ux-plan must be able to read the RUN's tree, not only the project checkout",
+   "doc": "docs/loop.md",
+   "kind": "enforcible",
+   "proposal": "ux-plan and ux-audit take --tree <worktree> (like `storefront-scenes --render --tree`): surfaces, scene bindings and visual/behaviour fingerprints are hashed from that tree, so a run that fixes a screen can re-render, re-react and clear its own gripes before the release that lands it",
+   "note": "seen 2026-11-11: a run fixed DashboardScreen.kt and re-rendered its scenes from the worktree, but `ux-plan`/`ux-audit` hashed the checkout, so the audit reported 'unchanged' and the unbound-scene warning kept quoting the checkout's older docs/storefront.json; the only workaround was `ux-audit --all`, which re-reacts to every scene and costs a vision call per screen"
+  },
+  {
+   "id": "a-file-reading-gate-declares-its-input",
+   "rule": "a test or gate that reads a repo file outside its own source set must declare that file as a build input, or the build's up-to-date check reuses the PASS it computed before the file changed and the guard silently never runs",
+   "doc": "docs/guarantees.md",
+   "kind": "enforcible",
+   "enforced_by": "",
+   "proposal": "surface the input declaration where the developer sees it: when a task adds a test that reads files outside its source set, the developer brief names the build-input declaration as part of that test's definition of done, or `devteam verify` re-runs the project's test task once with --rerun-tasks so a cached pass cannot be mistaken for a fresh one. Evidence 2026-11-11: a store-identity parity test read the Play listing's title file, and after editing ONLY that file the module's unit-test task reported UP-TO-DATE; declaring the listing directory as a test input made the same edit fail the build as the measure required."
+  },
+  {
+   "id": "generated-design-states-must-not-invent-values",
+   "rule": "a Stitch screen generated for a STATE (failure/empty/loading) may not contain values the app does not hold - task ids, error codes, heap/percentage measurements, trace logs, timers - and the drift audit must not pass one that does",
+   "doc": "docs/store.md",
+   "kind": "enforcible",
+   "proposal": "design_validator: scan the generated screen's text for instrument-shaped tokens (ERR_*, #<id>, '%', 'MB /' heap phrasing, 'trace', 'log', 'Copy', 'Dump', 'Settings') plus any number not present in the task spec, and FAIL the drift report instead of scoring it 100/100",
+   "note": "2026-11-11: a 'job failed notice' generation returned a developer diagnostics console (TASK_ID, 248MB/256MB heap, trace log, Dump Log/Tune Settings). The drift audit scored it 100/100 because it checked prompt fidelity, not truth. It was retired by hand in docs/stitch/RETIRED.md; nothing in code would have stopped it."
+  },
+  {
+   "id": "design-for-a-shipped-surface-starts-from-the-surface",
+   "rule": "a design for an EXISTING shipped screen must describe that screen; a generated screen that invents sections is not a design answer for a UI bugfix",
+   "doc": "skills/dev-team/references/develop.md",
+   "kind": "enforcible",
+   "proposal": "devteam stitch-screen --generate: when the screen label matches a surface the app already renders (docs/storefront.json scene or a target with paths), seed compile_stitch_screen_prompt from THAT scene's real content (fixture labels, section order, the controls the composable draws) and mark the exported entry surface-bound; design-consult must then refuse `new_screen` whose exported screen carries sections the scene does not. Also print a heartbeat and cap stitch-tweak at the run's remaining budget - it produced no output for 15 minutes on 2026-11-12 and the run had to abandon it",
+   "note": "Seen 2026-11-12: a goal-page bugfix needed a design (removing an affordance, moving delete behind a menu). Stitch held no screen for that surface, so design-consult said new_screen; the generated page invented a session CTA, a weekly cadence grid and habit-intention copy the app does not have, and the developer was told to match it. All the design actually needed to say was 'the top bar has one overflow'. Seen again 2026-11-13: a rows-level control on an ALREADY SHIPPED list surface got `new_screen` because Stitch held no screen for it, and the generation invented a shield-overview card, category chips, per-row cap badges, an 'Apply' bulk-action button and a different brand name ('MindfulGates') - while the drift audit still scored it 100/100 and PASSED. The run implemented only the two things the task and the consult actually specified (the control's two states and the count line) and recorded the rest as out of scope, but nothing in code made that decision: verify's design gate only checks that a snapshot exists. `stitch-tweak` also produced no output for 15 minutes again and was abandoned, exactly as the 2026-11-12 note predicted."
+  },
+  {
+   "id": "queue-entry-type-is-pickable",
+   "rule": "a queue entry's type must be one the picker can actually serve (bugfix/feature/motion/visual) \u2014 a plan must not hand over a head no run will ever build",
+   "doc": "docs/planning.md",
+   "kind": "enforcible",
+   "proposal": "research._validate: reject a queue entry whose type is outside the executable set (or mark the non-executable ones explicitly as orchestrator work in the PLAN REVIEW block), so a plan cannot carry a slot the picker silently skips",
+   "note": "seen 2026-11-13: a queue entry typed 'store' sat at the head for a cycle, pick could never serve it (scan._eligible accepts bugfix/feature/motion/visual), and nothing said so. Resolved this run by keeping it typed as orchestrator store work behind a real code head; the planner prompt's schema already lists only motion|bugfix|feature|investigation, so code should enforce what the schema says."
+  }
+ ]
 }
