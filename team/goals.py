@@ -396,10 +396,21 @@ def status_of(profile: dict, state: dict) -> dict[str, str]:
             continue
         sts = [out[i] for i in _leaves_under(nid, kids, kind) if i in out]
         rs = str(raw[nid].get("status") or "").lower()
-        if rs in ("done", "dropped") or latest.get(nid) in ("done", "dropped"):
+        last = latest.get(nid)
+        if rs in ("done", "dropped") or last in ("done", "dropped"):
             out[nid] = "done"
         elif rs in ("parked", "retired"):
             out[nid] = "parked"
+        elif last in ("active", "pending"):
+            # An explicit statement about the GOAL outranks a derivation from its
+            # leaves. The owner (or the planner, through `set-status`) said this
+            # goal is open; "every leaf under it happens to be done" is not a
+            # refutation — that is exactly the picture a GAP leaves behind (a
+            # milestone whose tasks all shipped and whose number is still unmet is
+            # a container holding only done leaves). Ignoring the verdict printed
+            # the goal as finished one line above the unproven milestone, so the
+            # plan change meant to correct that read as though it had not applied.
+            out[nid] = str(last)
         elif sts and all(s == "done" for s in sts):
             out[nid] = "done"
         elif "active" in sts:
