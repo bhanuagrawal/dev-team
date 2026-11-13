@@ -366,7 +366,7 @@ def build_and_install(project: Path, serial: str, log=None,
     apk = apks[-1]
     if log:
         log(f"~ ux-video: installing {apk.name}")
-    res = _adb(serial, ["install", "-r", "-d", str(apk)], timeout=300)
+    res = _adb(serial, ["install", "-r", "-d", "-g", str(apk)], timeout=300)
     if res.returncode != 0:
         out = (res.stdout or "") + (res.stderr or "")
         raise SystemExit("adb install failed: " + out.strip()[-500:])
