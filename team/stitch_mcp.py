@@ -227,6 +227,23 @@ def apply_design_system(project_id: str, asset_id: str,
     })
 
 
+def _dom_operations(res: dict[str, Any]) -> list[dict[str, Any]]:
+    """The DOM operations Stitch reports when an edit is applied in place.
+
+    `edit_screens` has two shapes: a new screen artifact (`design.screens`) or a
+    `DomOperationEvent` describing what it changed on the live screen. Only the
+    first is exportable, so code has to tell them apart instead of waiting for a
+    file that will never appear.
+    """
+    ops: list[dict[str, Any]] = []
+    for comp in res.get("outputComponents") or []:
+        payload = ((comp or {}).get("sessionEvent") or {}).get("eventPayload") or {}
+        for op in payload.get("dom_operations") or []:
+            if isinstance(op, dict):
+                ops.append(op)
+    return ops
+
+
 def _extract_screens(res: dict[str, Any]) -> list[dict[str, Any]]:
     designs = []
     for comp in res.get("outputComponents") or []:
@@ -368,6 +385,29 @@ def edit_screens(project_id: str, screen_ids: list[str], prompt: str, *,
         screens = _extract_screens(res)
         if screens:
             return screens
+        ops = _dom_operations(res)
+        if ops:
+            # Stitch APPLIED the change but answered with DOM operations instead of
+            # a screen artifact. That is not the same thing as a design: nothing
+            # new is downloadable, so the snapshot an export would produce is the
+            # OLD screen and `verify`'s design gate would refuse the diff. Polling
+            # by htmlCode file name cannot see an in-place edit either, so the old
+            # code spun for the full 900s budget and then failed with a message
+            # that named no next step (seen 2026-11-13 on FieldCert: edit_screens
+            # and generate_variants both answered this way, ~25 min lost). Fail
+            # fast and name the write-back path instead.
+            say(f"  stitch: edit_screens applied {len(ops)} DOM operation(s) but "
+                "persisted no screen artifact — the change is not exportable yet")
+            changed = _poll_changed_screens(pid, before, timeout=min(timeout, 120))
+            if changed:
+                return changed
+            raise StitchError(
+                "Stitch accepted the edit as DOM operations on the live screen but "
+                "exported no new htmlCode artifact, so there is nothing to export and "
+                "the design snapshot would still be the pre-tweak screen. Apply the same "
+                "change to the screen's own HTML and write it back in place with "
+                "stitch_mcp.update_screen_content(project, screen_id, html=...), then "
+                "`devteam stitch-export <project>` — the screen id survives, nothing to retire.")
         say("  stitch: edit_screens returned no screen reference — polling for updated screen")
     except StitchError as exc:
         say(f"  stitch: edit_screens did not return ({str(exc)[:160]}) — polling (no retry)")
@@ -411,6 +451,19 @@ def generate_variants(project_id: str, screen_ids: list[str], prompt: str, *,
         screens = _extract_screens(res)
         if screens:
             return screens
+        ops = _dom_operations(res)
+        if ops:
+            # Same shape as edit_screens: applied in place, nothing exportable.
+            say(f"  stitch: generate_variants applied {len(ops)} DOM operation(s) but "
+                "persisted no screen artifact — polling briefly")
+            changed = _poll_changed_screens(pid, before, timeout=min(timeout, 120))
+            if changed:
+                return changed
+            raise StitchError(
+                "Stitch applied the variant as DOM operations on the live screen but "
+                "exported no new htmlCode artifact, so there is nothing to export. Write "
+                "the change into the screen's own HTML via stitch_mcp.update_screen_content "
+                "and re-run `devteam stitch-export <project>`.")
         say("  stitch: generate_variants returned no screen reference — polling")
     except StitchError as exc:
         say(f"  stitch: generate_variants did not return ({str(exc)[:160]}) — polling (no retry)")
