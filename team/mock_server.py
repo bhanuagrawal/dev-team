@@ -323,7 +323,7 @@ class _Handler(BaseHTTPRequestHandler):
             return
 
         if path == "/api/v1/offers":
-            self._json({"offers": []})
+            self._json({"offers": list(self.server.state.get("offers") or [])})
             return
 
         if path.startswith("/api/v1/offers/"):
@@ -475,11 +475,25 @@ class _Handler(BaseHTTPRequestHandler):
 
         if path == "/api/v1/offers":
             tx = MOCK_TRANSACTION_ID
+            terms = {}
             try:
-                self.server.state["offer"] = {
+                terms = {
                     "mode": str(body.get("exchange_mode") or "PERMANENT"),
                     "days": int(body.get("duration_days") or 21),
                 }
+                self.server.state["offer"] = terms
+                # The audit just SENT this offer, so the list it opens next must
+                # contain it: a mock that forgets what it accepted made every
+                # swap journey read "did my offer vanish?" (2026-11-14).
+                created = list(self.server.state.get("offers") or [])
+                created = [row for row in created
+                           if row.get("transaction_id") != tx]
+                created.append(offer_json(
+                    tx,
+                    mode=terms["mode"],
+                    days=terms["days"],
+                ))
+                self.server.state["offers"] = created
             except Exception:
                 pass
             self._json({"transaction_id": tx, "status": "REQUESTED",
