@@ -114,13 +114,20 @@ def _book_block_items() -> list[dict]:
             "title": b["title"],
             "author": b["author"],
             "coverUrl": b["cover_url"],
+            "distanceLabel": b["distance_label"],
+            "conditionLabel": b["condition"].replace("_", " ").title(),
             "aiMatchBadge": b["distance_label"],
             "ownerUsername": b["owner_username"],
             "ownerTrustScore": b["owner_trust_score"],
             "action": {
-                "label": "Request this book",
-                "actionType": "REQUEST_BOOK",
-                "payload": {"listing_id": b["listing_id"]},
+                "label": "View Book",
+                "tool": "navigate",
+                "args": {"to": "book", "listingId": b["listing_id"]},
+            },
+            "primaryAction": {
+                "label": "Make Offer",
+                "tool": "navigate",
+                "args": {"to": "make_offer", "listingId": b["listing_id"]},
             },
         }
         for b in BOOKS
@@ -128,25 +135,46 @@ def _book_block_items() -> list[dict]:
 
 
 def _blocks() -> list[dict]:
+    # The app's contract is TWO block types and ONE navigate tool. The mock
+    # speaks exactly that, so a journey walked against it exercises the same
+    # decoder and executor the real backend feeds.
     return [
         {
-            "type": "smart_insight_banner",
-            "headline": "3 readers near you want books on your shelf",
-            "subtext": "Circulate 2 books this weekend to earn Priority Swap Credits.",
-            "accentColorHex": "#E06D44",
-            "primaryAction": {"label": "View Matches", "actionType": "view_matches"},
+            "type": "card",
+            "layout": "card",
+            "slot": "HERO",
+            "preset": "offer_waiting",
+            "tone": "OPPORTUNITY",
+            "eyebrow": "THREE READERS NEAR YOU",
+            "title": "3 readers near you want books on your shelf",
+            "body": "Circulate 2 books this weekend to earn Priority Swap Credits.",
+            "actions": [{
+                "label": "View Matches",
+                "tool": "navigate",
+                "args": {"to": "offers"},
+            }],
         },
         {
-            "type": "book_carousel",
-            "sectionTitle": "Available Within 15 Min Walk",
-            "sectionSubtitle": "Verified owners with trust scores above 90 percent",
+            "type": "section",
+            "slot": "FEED",
+            "title": "Available Within 15 Min Walk",
+            "subtitle": "Verified owners with trust scores above 90 percent",
             "items": _book_block_items(),
         },
         {
-            "type": "vision_scanner_cta",
+            "type": "card",
+            "layout": "card",
+            "slot": "DISCOVERY",
+            "preset": "scanner",
+            "tone": "INFO",
+            "eyebrow": "EMPTY SHELF",
             "title": "Scan your shelf",
-            "subtitle": "Snap a photo of your bookshelf to list books in seconds",
-            "action": {"label": "Scan", "actionType": "LAUNCH_SHELF_CAMERA"},
+            "body": "Snap a photo of your bookshelf to list books in seconds.",
+            "actions": [{
+                "label": "Scan Shelf",
+                "tool": "navigate",
+                "args": {"to": "scan_shelf"},
+            }],
         },
     ]
 
