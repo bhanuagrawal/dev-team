@@ -577,6 +577,44 @@ def print_release_handover(project: Path, task: dict, version: str,
         pass
 
 
+def print_asset_handover(project: Path, task: dict, version: str,
+                         commit: str = "") -> None:
+    """The handover for a run that shipped an ARTEFACT, not a build.
+
+    A store-listing refresh, a design export or a brand asset lands on main and
+    needs no version bump: there is no new APK, so there is no new store note and
+    no release-candidate call to make. `record` used to print the previous
+    release's note and RC verdict in that case (they are read from the ledger),
+    which claims a build the owner never received — the one thing a handover
+    exists to prevent. Say what actually shipped, and point at the release that
+    will carry it.
+    """
+    label = (task.get("surface") or {}).get("label") or task.get("id") or "?"
+    targets = [str(t) for t in (task.get("surface") or {}).get("targets") or [] if t]
+    lines = [
+        "--- ARTEFACT SHIP (no new app build) ---",
+        f"  SHIPPED:  {label}",
+        f"  ref:      main @ {commit[:8] or 'unrecorded'}"
+        + (f"  (described build: v{version})" if version else ""),
+    ]
+    if targets:
+        lines.append("  files:    " + ", ".join(targets[:6]))
+    lines += [
+        "  NO STORE NOTE and NO RELEASE-CANDIDATE CALL: nothing in the app changed, so "
+        "there is no new build to judge or to describe on Play.",
+        f"  the build on internal testing stays v{version or '?'} — this artefact "
+        "describes or decorates that build, it does not replace it.",
+    ]
+    text = "\n".join(lines)
+    print(text)
+    try:
+        out = project / ".pipeline/runs" / f"{today()}-artefact-v{version or '?'}.md"
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_text(text + "\n")
+    except Exception:
+        pass
+
+
 def cmd_rc(args: argparse.Namespace) -> None:
     """Record the release-candidate call for a shipped version.
 
@@ -1291,6 +1329,9 @@ def _refresh_coverage_signal(project: Path) -> None:
 def cmd_record(args: argparse.Namespace) -> None:
     project = resolve_project(args.project)
     state = state_of(project)
+    # Read BEFORE this record appends its rows: the version the project had already
+    # delivered is what tells a new BUILD from an ASSET-ONLY ship (see below).
+    prev_version = latest_shipped_version(state)
     task = json.loads(task_spec_path(project, args.task_spec).read_text()) \
         if args.task_spec else {}
     entry = {"date": today(), "task_id": args.task or task.get("id", "?"),
@@ -1401,17 +1442,24 @@ def cmd_record(args: argparse.Namespace) -> None:
     # LLM that made the change — see SKILL 10d). Same rule as the blocks above:
     # code prints it, the banner quotes it.
     if args.result == "shipped":
-        print_release_handover(project, task,
-                              str(args.version or latest_shipped_version(state)),
-                              str(args.commit or ""))
+        asset_only = bool(args.version) and str(args.version) == prev_version
+        if asset_only:
+            print_asset_handover(project, task, str(args.version), str(args.commit or ""))
+        else:
+            print_release_handover(project, task,
+                                  str(args.version or latest_shipped_version(state)),
+                                  str(args.commit or ""))
         # The icon chain is a state machine with a `released` step; only a shipped
         # record knows a release happened, so this is where the step advances.
-        try:
-            from team import brand_change
+        # An artefact-only ship released nothing: the icon or the frames it wrote
+        # go out with a build that has not been cut yet.
+        if not asset_only:
+            try:
+                from team import brand_change
 
-            brand_change.mark_released(project, str(args.version or ""), str(args.commit or ""))
-        except Exception:
-            pass
+                brand_change.mark_released(project, str(args.version or ""), str(args.commit or ""))
+            except Exception:
+                pass
     block = goals.review_block(state_of(project))
     if block:
         print("\n" + block)
