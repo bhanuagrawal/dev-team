@@ -37,6 +37,20 @@ class StitchError(RuntimeError):
     pass
 
 
+class NoExportableArtifact(StitchError):
+    """Stitch answered with DOM operations only — applied live, nothing to download.
+
+    It subclasses StitchError because every caller already handles "Stitch did
+    not give us a screen" that way. It exists so the call that raises it can tell
+    it apart from a transport failure: `edit_screens`/`generate_variants` raise it
+    from INSIDE their own try-block, and a plain `except StitchError` swallowed
+    that message and went back to polling a change that can never arrive
+    (2026-11-14: a tweak polled 120s, then 900s more, then failed with the wrong
+    reason — ~17 minutes lost per attempt).
+    """
+    pass
+
+
 def _credentials() -> tuple[str, str]:
     url = (os.environ.get("STITCH_MCP_URL") or DEFAULT_URL).strip()
     key = (os.environ.get("STITCH_API_KEY") or "").strip()
@@ -401,7 +415,7 @@ def edit_screens(project_id: str, screen_ids: list[str], prompt: str, *,
             changed = _poll_changed_screens(pid, before, timeout=min(timeout, 120))
             if changed:
                 return changed
-            raise StitchError(
+            raise NoExportableArtifact(
                 "Stitch accepted the edit as DOM operations on the live screen but "
                 "exported no new htmlCode artifact, so there is nothing to export and "
                 "the design snapshot would still be the pre-tweak screen. Apply the same "
@@ -409,6 +423,8 @@ def edit_screens(project_id: str, screen_ids: list[str], prompt: str, *,
                 "stitch_mcp.update_screen_content(project, screen_id, html=...), then "
                 "`devteam stitch-export <project>` — the screen id survives, nothing to retire.")
         say("  stitch: edit_screens returned no screen reference — polling for updated screen")
+    except NoExportableArtifact:
+        raise
     except StitchError as exc:
         say(f"  stitch: edit_screens did not return ({str(exc)[:160]}) — polling (no retry)")
     changed = _poll_changed_screens(pid, before, timeout=timeout)
@@ -459,12 +475,14 @@ def generate_variants(project_id: str, screen_ids: list[str], prompt: str, *,
             changed = _poll_changed_screens(pid, before, timeout=min(timeout, 120))
             if changed:
                 return changed
-            raise StitchError(
+            raise NoExportableArtifact(
                 "Stitch applied the variant as DOM operations on the live screen but "
                 "exported no new htmlCode artifact, so there is nothing to export. Write "
                 "the change into the screen's own HTML via stitch_mcp.update_screen_content "
                 "and re-run `devteam stitch-export <project>`.")
         say("  stitch: generate_variants returned no screen reference — polling")
+    except NoExportableArtifact:
+        raise
     except StitchError as exc:
         say(f"  stitch: generate_variants did not return ({str(exc)[:160]}) — polling (no retry)")
     changed = _poll_changed_screens(pid, before, timeout=timeout)
