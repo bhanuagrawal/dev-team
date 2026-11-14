@@ -115,6 +115,19 @@ commands, in order, with the reasoning and the failure branches.
    - Every cycle runs an IMPACT REVIEW: the synthesis must judge each
      already-queued task; the CLI prints a `QUEUE IMPACT` block (added / kept /
      replaced / obsolete / dropped). A queued task can never vanish silently.
+   - **A BRANCH THAT NEEDS EVIDENCE IS NOT A RUN OF ITS OWN.** `closure` prints a
+     branch whose measures have no recorded number as a GAP, and the next step
+     reads like an investigation ("run the jobs on a real document and write the
+     numbers down"). `research._validate` REFUSES an investigation at the head
+     while any executable entry is queued behind it, and a run that ships only
+     analysis spends the release on nothing a user sees — so do NOT queue the
+     evidence as an investigation and do not make the plan head-on-nothing. Fold
+     the measurement into the executable pass that the gap points at: one
+     feature/bugfix entry whose `done_when` carries the recorded numbers next to
+     the behaviour change the same session makes, `supersedes` the pure-evidence
+     entry, and the gap closes from the task's own `record --note`. This is the
+     one shape that satisfies the code-first head, the closure gap and the
+     release at once.
    - If it leaves nothing executable → `devteam alarm` + OWNER ASK, then stop
      (see the run-outcome contract). No invented work to fill silence.
    - `devteam research <project>` is the same engine with a machine-readable
