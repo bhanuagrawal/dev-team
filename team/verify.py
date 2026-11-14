@@ -182,16 +182,83 @@ def ensure_wrapper_distribution(worktree: Path, log=None) -> str:
 
 
 def changed_files(worktree: Path, base: str) -> list[str]:
+    """Every file this worktree changed against [base] — committed, staged, unstaged or new.
+
+    THE INDEX IS ITS OWN PLACE. `git diff base HEAD` sees what is committed and
+    `git diff` sees what is unstaged; a developer who runs `git add -A` before
+    `verify` (the normal habit, and what `release` itself does) has every change
+    STAGED — in neither of those two, and invisible to every gate that reads this
+    list. On 2026-11-15 that reported `scope ok (2 files)` on a 27-file change and
+    passed the ux-flow gate for a screen it had never seen, so the run recorded
+    "verify PASS" on a tree nobody had judged. The staged diff is asked for
+    explicitly, against [base] as well, so nothing can sit in the index unseen.
+    """
     r = subprocess.run(
         ["git", "diff", "--name-only", base, "HEAD"] + ["--", "."],
+        cwd=worktree, capture_output=True, text=True)
+    staged = subprocess.run(
+        ["git", "diff", "--name-only", "--cached", base] + ["--", "."],
         cwd=worktree, capture_output=True, text=True)
     r2 = subprocess.run(
         ["git", "diff", "--name-only"], cwd=worktree, capture_output=True, text=True)
     untracked = subprocess.run(
         ["git", "ls-files", "--others", "--exclude-standard"],
         cwd=worktree, capture_output=True, text=True)
-    out = set(x for x in (r.stdout + r2.stdout + untracked.stdout).splitlines() if x.strip())
+    out = set(x for x in (r.stdout + staged.stdout + r2.stdout + untracked.stdout)
+              .splitlines() if x.strip())
     return sorted(out)
+
+
+def tree_fingerprint(worktree: Path) -> str:
+    """Identify the exact bytes the gates judged: HEAD plus every uncommitted change.
+
+    `verify` and `release` are two commands and a run can be interrupted between
+    them; a verdict is only worth what it was measured on. This is what
+    `release` compares, so "verify PASS" can never be carried onto a tree that
+    changed afterwards (2026-11-15: a PASS recorded on 2 of 27 files was about
+    to be read as a green light for the whole change).
+    """
+    parts: list[str] = []
+    for argv in (["git", "rev-parse", "HEAD"],
+                 ["git", "status", "--porcelain"],
+                 ["git", "diff", "--cached"],
+                 ["git", "diff"]):
+        r = subprocess.run(argv, cwd=worktree, capture_output=True, text=True)
+        parts.append(r.stdout)
+    untracked = subprocess.run(
+        ["git", "ls-files", "--others", "--exclude-standard"],
+        cwd=worktree, capture_output=True, text=True).stdout
+    paths = [p for p in untracked.splitlines() if p.strip()]
+    if paths:
+        hashed = subprocess.run(
+            ["git", "hash-object", "--stdin-paths"], cwd=worktree,
+            input="\n".join(paths) + "\n", capture_output=True, text=True)
+        parts.append(hashed.stdout)
+    return hashlib.sha256("\x00".join(parts).encode()).hexdigest()[:16]
+
+
+def release_blocker(state: dict, worktree: Path) -> str:
+    """Why this worktree may NOT be released, or "" when a PASS covers it.
+
+    `devteam tools` has always promised that `release` refuses a build whose
+    worktree was never verified; the code only ran the flow and store-note
+    gates, so an agent that skipped `verify` released anyway. The remedy is one
+    command, so there is no override: run `devteam verify` on this worktree and
+    the release proceeds.
+    """
+    rec = state.get("last_verify") or {}
+    if not rec:
+        return ("no verify recorded for this project — run `devteam verify "
+                f"{worktree.name}` before releasing")
+    if Path(str(rec.get("worktree") or "")).resolve() != worktree.resolve():
+        return ("the last verify judged a different tree (" +
+                str(rec.get("worktree")) + ") — verify THIS worktree before releasing")
+    if not rec.get("ok"):
+        return "the last verify on this tree FAILED — fix the gates, then release"
+    if str(rec.get("fingerprint") or "") != tree_fingerprint(worktree):
+        return ("this worktree changed after its last verify — the PASS described "
+                "other bytes; re-run `devteam verify` before releasing")
+    return ""
 
 
 def base_drift(project: Path, base: str) -> list[dict] | None:

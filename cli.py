@@ -1152,6 +1152,18 @@ def cmd_verify(args: argparse.Namespace) -> int:
             spec = _json.loads(sp.read_text())
     ok, failures = gates.verify_all(project, tree, base, log,
                                     gradle=not args.skip_gradle, spec=spec)
+    # The verdict is worth what it was measured on: record the tree it judged so
+    # `release` can never read it against a tree that changed afterwards.
+    try:
+        _st = state_of(project)
+        _st["last_verify"] = {"worktree": str(tree), "ok": bool(ok),
+                              "fingerprint": gates.tree_fingerprint(tree),
+                              "base": base, "at": now_iso(),
+                              "gate": "verify-" + today(),
+                              "failures": [str(f)[:300] for f in (failures or [])][:6]}
+        save_state(project, _st)
+    except Exception as e:  # never fail a gate run over its own bookkeeping
+        log(f"verify: could not record the verdict ({e})")
     # Run-end emulator teardown: warn-only by owner decision (never flips the
     # gate). A skill asks an agent to stop its emulator; this is what holds when
     # it forgets — orphans are stopped and named in the run log. leak_check
@@ -1234,6 +1246,17 @@ def cmd_release(args: argparse.Namespace) -> int:
     else:
         log("release candidate: NOT CALLED YET — nothing recorded; the agent that made "
             f"this change calls `devteam rc {project.name} --version {name} --yes|--no`")
+
+    # THE VERIFY PRECONDITION. `devteam tools` promises this gate and the code
+    # did not have it: an agent that skipped `verify` (or verified a different
+    # tree) could release. One command clears it, so nothing here is negotiable.
+    from team import verify as _verify_mod
+    blockers = _verify_mod.release_blocker(state, worktree)
+    if blockers:
+        log("release: BLOCKED — " + blockers)
+        print(json.dumps({"delivered": False, "version": name,
+                          "error": "verify gate: " + blockers, "ci": {}}, indent=2))
+        return 1
 
     # NO TEST GATE AT RELEASE EITHER. Tests are retired (owner policy
     # 2026-11-10): there is no suite to require in the diff, so this is not a
