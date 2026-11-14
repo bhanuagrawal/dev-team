@@ -4118,13 +4118,21 @@ def _write_stitch_manifest(project: Path, root: Path, manifest: dict) -> None:
 
 
 def _retired_ids(manifest: dict) -> set[str]:
-    """Every id the ledger says is dead — the surface id and the Stitch id alike."""
+    """Every SCREEN id the ledger says is dead.
+
+    A row spans a surface: `id` is the surface that survives, `stitch_id` is the
+    dead screen. Reading `id` as dead too made a surface that had ever retired a
+    duplicate (BookSwap's `library`) unresolvable — `stitch-adopt --onto library`
+    skipped the canonical row and adopted onto the duplicate instead, and the
+    ledger gate then saw the same id as both retired and canonical. Only a row
+    with no `stitch_id` (an older single-id row) falls back to `id`.
+    """
     dead: set[str] = set()
     for r in manifest.get("retired_screens") or []:
-        for key in ("id", "stitch_id"):
-            v = str(r.get(key) or "").strip()
-            if v:
-                dead.add(v)
+        stitch = str(r.get("stitch_id") or "").strip()
+        v = stitch or str(r.get("id") or "").strip()
+        if v:
+            dead.add(v)
     return dead
 
 
