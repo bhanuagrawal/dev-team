@@ -678,16 +678,30 @@ def audit_surface(project: Path, row: dict, prev: dict | None = None, log=None) 
             f"(nothing recorded: an old picture is not evidence)")
 
     current_dhash = None
+    render_sha = None
     try:
         current_dhash = pngcmp._dhash(png)
+        render_sha = hashlib.sha256(png.read_bytes()).hexdigest()
     except Exception:
         pass
 
     # Zero-cost shortcut: if previous audit has recorded dhash matching current render,
     # the visual layout and pixels have not structurally moved despite code touches.
     # We update fingerprints without spending a vision model call ($0.00).
+    #
+    # The dhash alone is NOT enough to call two renders the same picture: it is a
+    # 9x8 gradient fingerprint, so a renamed primary button or a swapped icon on an
+    # otherwise identical layout hashes identically. Seen 2026-11-14: the home
+    # screen's "Choose a PDF" button was relabelled and the Merge/Split icons were
+    # separated, the render changed on disk, and the audit still skipped the model
+    # and carried the OLD gripes forward while stamping them with the NEW source
+    # fingerprints — a fresh reaction on old pixels. So the skip also requires the
+    # render's own bytes to be unchanged; a record made before this check existed
+    # carries no hash and gets one real call.
     if (prev and current_dhash is not None and prev.get("dhash") is not None
             and prev.get("dhash") == current_dhash
+            and render_sha is not None
+            and prev.get("render_sha") == render_sha
             and prev.get("rubric") in (RUBRIC, "ux-reactions-v1")):
         if log:
             log(f"~ ux: '{row['label']}' render structurally identical to last audit (dhash={current_dhash}) — skipping model call ($0.00)")
@@ -696,6 +710,7 @@ def audit_surface(project: Path, row: dict, prev: dict | None = None, log=None) 
             "scene": row.get("scene"),
             "render": str(png),
             "dhash": current_dhash,
+            "render_sha": render_sha,
             "visual": row["visual"],
             "behaviour": row["behaviour"],
             "rubric": RUBRIC,
@@ -823,6 +838,7 @@ def audit_surface(project: Path, row: dict, prev: dict | None = None, log=None) 
         "scene": row.get("scene"),
         "render": str(png),
         "dhash": current_dhash,
+        "render_sha": render_sha,
         "visual": row["visual"],
         "behaviour": row["behaviour"],
         "rubric": RUBRIC,
