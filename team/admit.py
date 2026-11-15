@@ -122,7 +122,9 @@ def entry_for(profile: dict, query: str, kind: str, advances: str,
         "advances": advances or "none",
         # the product clause this serves or amends (`PRODUCT.md`); empty for a
         # project that has not declared a law.
-        "law": (law or "").strip().upper(),
+        "law": ",".join(
+            part.strip().upper() for part in (law or "").split(",") if part.strip()
+        ),
     }
     raw, _ = goals.raw_node(profile, str(advances or ""))
     measures = [
@@ -230,23 +232,27 @@ def check(project: Path, query: str, kind: str | None, advances: str,
     from . import law as law_mod
 
     ledger = law_mod.audit(project, state=state)
-    law_id = (law or "").strip().upper()
+    # A task may implement more than one clause (it usually does). The gate
+    # records them all and refuses any one it cannot find.
+    law_ids = [part.strip().upper() for part in (law or "").split(",") if part.strip()]
     if ledger["present"] and kind != "release":
         known = {c["id"] for c in ledger["clauses"]}
-        if not law_id:
+        if not law_ids:
             findings.append("no --law")
             return flag("agent",
                         "which product clause does this serve, or amend? "
                         f"({'/'.join(sorted(known)) or 'PRODUCT.md has no clauses'})",
-                        "re-run admit with --law <Pn>")
-        if law_id not in known:
-            findings.append(f"unknown law clause {law_id}")
+                        "re-run admit with --law <Pn>[,<Pn>]")
+        missing = [cid for cid in law_ids if cid not in known]
+        if missing:
+            findings.append(f"unknown law clause(s) {', '.join(missing)}")
             return flag("agent",
-                        f"{law_id} is not in PRODUCT.md "
+                        f"{', '.join(missing)} is not in PRODUCT.md "
                         f"(known: {', '.join(sorted(known)) or 'none'})",
-                        "re-run admit with a declared clause id")
-        text = next(c["text"] for c in ledger["clauses"] if c["id"] == law_id)
-        findings.append(f"law {law_id}: {text[:90]}")
+                        "re-run admit with declared clause ids")
+        for cid in law_ids:
+            text = next(c["text"] for c in ledger["clauses"] if c["id"] == cid)
+            findings.append(f"law {cid}: {text[:90]}")
 
     return {"ok": True, "verdict": "ok", "who": "agent", "findings": findings,
             "question": "", "next": f"devteam plan {project.name}",
@@ -263,7 +269,9 @@ def admit(project: Path, query: str, kind: str | None, advances: str, why: str,
     res = check(project, query, kind, advances, why, verdict, law=law)
     res["query"] = query
     res["kind"] = kind or ""
-    res["law"] = (law or "").strip().upper()
+    res["law"] = ",".join(
+        part.strip().upper() for part in (law or "").split(",") if part.strip()
+    )
 
     if res["verdict"] == "precheck":
         return res

@@ -5657,8 +5657,8 @@ def main() -> None:
                     help="the agent's alignment call; omit for the pre-check")
     rt.add_argument(
         "--law", default="",
-        help="the product clause this serves or amends (PRODUCT.md id, e.g. P1); "
-             "required once a project declares a law")
+        help="the product clause(s) this serves or amends (PRODUCT.md ids, e.g. "
+             "P1,P4); required once a project declares a law")
     rt.add_argument("--dry-run", action="store_true",
                     help="run every check, queue nothing")
     rt.add_argument("--clear", action="store_true",
