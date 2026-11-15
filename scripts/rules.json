@@ -385,6 +385,14 @@
       "kind": "enforcible",
       "proposal": "storefront-scenes --render (and storefront-build): compile the harness it is about to run and, on failure, name the drift (the spec's fixtures/imports vs the app's types) instead of returning the bare ':composeApp:testDebugUnitTest failed' seen on 2026-11-15; also refuse a spec whose `renderer` disagrees with what the module can run",
       "note": "found 2026-11-15: the tracked harness had been hand-fixed twice while docs/storefront.json kept a 2026-11-09 copy, so every regeneration put the broken one back \u2014 the render failed, and the error named a gradle task, not the cause"
+    },
+    {
+      "id": "watermark-heal-must-not-eat-the-device",
+      "rule": "the poster cleaner heals a fixed bottom-right box; its 'was there a mark?' guard reads any high-contrast content in that box as a mark, so a device whose bezel reaches the corner gets blended into a grey smear across the dock",
+      "doc": "docs/store.md",
+      "kind": "enforcible",
+      "proposal": "plate_clean: before healing, judge the box's content shape \u2014 a vendor stamp is a compact blob on otherwise flat background, a device/dock is structure crossing the box edges; when it is structure, do not heal (report corner_mark='content') and make storefront-build re-paint that frame with the reserved-corner instruction rather than blending it",
+      "note": "found 2026-11-15: all four painted frames carried a visible grey smear over the app's dock; the raw renders were clean, so the damage was the heal, and the run still recorded every heal 'verified'. The prompt now reserves the last 14% of width and height as plain background, which keeps the heal box off the device."
     }
   ]
 }

@@ -117,10 +117,16 @@ def poster_prompt(project: Path, scene: dict[str, Any], direction: dict[str, Any
         "not a prop. Draw it 68-74% of the canvas height, anchored to the right edge, with "
         "its ENTIRE DISPLAY VISIBLE — the device body may bleed 0-2% past the edge but never "
         "the screen's own content (a cropped screen made the model invent what it could not "
-        "see). Its top edge sits at 10-13% and its bottom edge at 82-85%. Put the copy in "
+        "see). Its top edge sits at 10-13% and its bottom edge at 78-82%. Put the copy in "
         "the upper-left, no wider than 44% of the canvas, so it never overlaps the device. "
         "Fill the space under the phone with its soft contact shadow — no wide blank band, "
-        "no small floating device, no broad empty top margin.")
+        "no small floating device, no broad empty top margin. "
+        # The reserved corner is a MEASUREMENT, not a request: the cleaner heals a fixed
+        # box at the bottom-right, and a device that reaches into it was blended into a
+        # grey smear across the dock (observed 2026-11-15 on all four painted frames).
+        "The last 14% of the canvas width and the last 14% of its height must be plain "
+        "background with nothing in them — the device's body ends above and left of that "
+        "corner, and no shadow, no copy and no artwork enters it.")
     parts += [
         "Every number and status on that screen (counts, percentages, dates, PASS/FAIL, "
         "severity) is part of the screenshot: copy each one exactly as it appears. Never "
@@ -158,8 +164,8 @@ def poster_prompt(project: Path, scene: dict[str, Any], direction: dict[str, Any
         # the bottom-right corner of every image, and the cleaner heals that corner. If
         # the copy or the phone is there, healing would smear the owner's own text — the
         # run refused exactly that. So the corner is asked to stay plain background.
-        "Keep the bottom-right corner free of text and of the phone: leave it plain "
-        "background.",
+        "Keep the bottom-right corner (the last 14% of width and height) free of text, "
+        "device, shadow or artwork: leave it plain background.",
     ]
     angle = (direction.get("copy_angle") or {}).get(str(scene.get("id")), "")
     if angle:
