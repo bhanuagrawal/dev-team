@@ -57,6 +57,8 @@ _RAW: list[tuple[str, str, str, str, str, bool]] = [
      "profile/state shape, .pipeline/*", "a project it cannot read", True),
     ("coverage", "orient", "unit + UI coverage against the 100% floor",
      "nothing", "nothing", True),
+    ("law", "orient", "the product's own clauses (PRODUCT.md) and who cites them",
+     "nothing", "never — it reports; `doctor` is the gate", True),
     ("asks", "orient", "review every open ask/flag and say who can do it (rule table)",
      "nothing; --strict exits 1 while an ask is agent work",
      "nothing — it reports", True),

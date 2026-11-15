@@ -116,3 +116,25 @@ NEXT: `devteam tree <project>` to see where today's work sits, then `devteam
 admit` — refused while an earlier sub-goal's number fails; `devteam closure
 <project>` says which "done" is only a list that ran out.
 
+
+### The product law is a file, and every task cites it
+
+Priority is one axis; truth is the other. A task can advance the right milestone
+and still contradict the product (2026-11-15: three docs, a prompt and a tool
+catalogue each described a "match" the backend had already deleted).
+
+So a project may declare its law in **`PRODUCT.md`** — one clause per line with a
+stable id (`P1`…`P12`), one sentence each. Everything else cites it: a migration
+header (`-- Law: P1`), a test name, a source file's header comment. Then:
+
+- `devteam law <project>` prints every clause and the first file that cites it;
+- `devteam admit … --law P1` records **which clause** the request serves or
+  amends — required once `PRODUCT.md` exists (not required for `release`, which
+  delivers work that already named its clause);
+- `devteam doctor` refuses three things: a clause nothing cites (*dead law*), a
+  citation of a clause that does not exist (*fiction*), and a queued task with no
+  clause (*work with no reason in the product*).
+
+A project with no `PRODUCT.md` is not blocked — declaring the law is a choice,
+and once declared the team holds you to it. An amendment must touch the clause,
+the code that cites it, and a test in one commit.

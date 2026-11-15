@@ -3839,7 +3839,8 @@ def cmd_admit(args: argparse.Namespace) -> int:
         print("admit: --query is required (the owner's words, verbatim)", file=sys.stderr)
         return 2
     res = admit_mod.admit(project, args.query, args.kind, args.advances,
-                          args.why, args.verdict, dry_run=args.dry_run)
+                          args.why, args.verdict, dry_run=args.dry_run,
+                          law=getattr(args, "law", "") or "")
     if args.json:
         print(json.dumps(res, indent=2))
     else:
@@ -3920,6 +3921,24 @@ def cmd_tools(args: argparse.Namespace) -> int:
                          {r["verb"]: r for r in toolbox.for_agents()}, indent=2))
     else:
         print(toolbox.format_inventory(agent_only=not args.all))
+    return 0
+
+
+def cmd_law(args: argparse.Namespace) -> int:
+    """LAW — the product's clauses and the files that cite them.
+
+    The law is one file per project (`PRODUCT.md`), with stable ids. Everything
+    else cites it: migration headers, tests, and `admit --law`. This command
+    prints the audit; `doctor` is the gate that refuses a dead clause.
+    """
+    project = resolve_project(args.project)
+    from team import law as law_mod
+
+    result = law_mod.audit(project)
+    print(law_mod.format_audit(result))
+    if result.get("present") and (result["orphans"] or result["unknown"]
+                                  or result["tasks_without_law"]):
+        return 1
     return 0
 
 
@@ -5617,6 +5636,12 @@ def main() -> None:
     br.add_argument("--reset", action="store_true",
                     help="clear an abandoned brand run deliberately (kept as a .bak file)")
     br.set_defaults(fn=cmd_brand)
+
+    lw = sub.add_parser("law",
+                        help="the product's own clauses (PRODUCT.md) and who cites "
+                             "them; `doctor` refuses a clause nothing cites")
+    lw.add_argument("project")
+    lw.set_defaults(fn=cmd_law)
     from team.admit import KINDS as _ADMIT_KINDS
     rt = sub.add_parser("admit",
                         help="THE GATE: judge one owner request against the plan, "
@@ -5630,6 +5655,10 @@ def main() -> None:
     rt.add_argument("--why", default="", help="one line: which outcome this serves")
     rt.add_argument("--verdict", choices=("aligned", "neutral", "against", "gap"),
                     help="the agent's alignment call; omit for the pre-check")
+    rt.add_argument(
+        "--law", default="",
+        help="the product clause this serves or amends (PRODUCT.md id, e.g. P1); "
+             "required once a project declares a law")
     rt.add_argument("--dry-run", action="store_true",
                     help="run every check, queue nothing")
     rt.add_argument("--clear", action="store_true",

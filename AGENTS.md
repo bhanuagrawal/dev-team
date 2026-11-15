@@ -62,7 +62,7 @@ missing kind/milestone) answers before anything executes.
 | page | read it when | loader |
 |---|---|---|
 | `docs/loop.md` | running work: the commands, what lands where, cleanup, "done" | `devteam tools` / `status` |
-| `docs/planning.md` | choosing work: the plan's shape and its gate | `devteam tree` / `doctor` |
+| `docs/planning.md` | choosing work: the plan's shape, its gate, and the product law | `devteam tree` / `doctor` / `law` |
 | `docs/store.md` | anything the Play listing shows | `storefront-build` / `store-publish` refusal |
 | `docs/guarantees.md` | a gate refused, or you are fixing the team itself | `devteam verify` refusal / `doctor` |
 | `docs/new-app.md` | starting an app from an idea | `devteam onboard` / `skills/new-project` |

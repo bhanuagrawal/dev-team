@@ -96,7 +96,7 @@ def _targets(profile: dict, kind: str) -> list[str]:
 
 
 def entry_for(profile: dict, query: str, kind: str, advances: str,
-              why: str) -> dict[str, Any]:
+              why: str, law: str = "") -> dict[str, Any]:
     """The queue entry an admitted request becomes. One shape, always."""
     from . import goals
 
@@ -120,6 +120,9 @@ def entry_for(profile: dict, query: str, kind: str, advances: str,
         "why": why,
         "decided_by": "agent",
         "advances": advances or "none",
+        # the product clause this serves or amends (`PRODUCT.md`); empty for a
+        # project that has not declared a law.
+        "law": (law or "").strip().upper(),
     }
     raw, _ = goals.raw_node(profile, str(advances or ""))
     measures = [
@@ -133,7 +136,7 @@ def entry_for(profile: dict, query: str, kind: str, advances: str,
 
 
 def check(project: Path, query: str, kind: str | None, advances: str,
-          why: str, verdict: str | None) -> dict[str, Any]:
+          why: str, verdict: str | None, law: str = "") -> dict[str, Any]:
     """Deterministic findings + the agent's verdict → one decision.
 
     Returns {ok, verdict, who, findings, question, next, milestone, title}.
@@ -219,20 +222,48 @@ def check(project: Path, query: str, kind: str | None, advances: str,
                              "park it, or drop it?", "REPLY ONLY — nothing was queued")
 
     findings.append("verdict: aligned")
+
+    # 7. the product law: a task names the clause it implements or amends. Only
+    #    enforced once a project DECLARES a law (`PRODUCT.md`); a project that has
+    #    not written one is not blocked, it is simply not held to one. `release`
+    #    delivers work that already named its clause at admission.
+    from . import law as law_mod
+
+    ledger = law_mod.audit(project, state=state)
+    law_id = (law or "").strip().upper()
+    if ledger["present"] and kind != "release":
+        known = {c["id"] for c in ledger["clauses"]}
+        if not law_id:
+            findings.append("no --law")
+            return flag("agent",
+                        "which product clause does this serve, or amend? "
+                        f"({'/'.join(sorted(known)) or 'PRODUCT.md has no clauses'})",
+                        "re-run admit with --law <Pn>")
+        if law_id not in known:
+            findings.append(f"unknown law clause {law_id}")
+            return flag("agent",
+                        f"{law_id} is not in PRODUCT.md "
+                        f"(known: {', '.join(sorted(known)) or 'none'})",
+                        "re-run admit with a declared clause id")
+        text = next(c["text"] for c in ledger["clauses"] if c["id"] == law_id)
+        findings.append(f"law {law_id}: {text[:90]}")
+
     return {"ok": True, "verdict": "ok", "who": "agent", "findings": findings,
             "question": "", "next": f"devteam plan {project.name}",
             "milestone": advances or "", "title": title}
 
 
 def admit(project: Path, query: str, kind: str | None, advances: str, why: str,
-          verdict: str | None, dry_run: bool = False) -> dict[str, Any]:
+          verdict: str | None, dry_run: bool = False,
+          law: str = "") -> dict[str, Any]:
     """Run the gate; on OK pin the task at the head of the queue (once)."""
     from . import queue as qmod
 
     profile, state = profile_of(project), state_of(project)
-    res = check(project, query, kind, advances, why, verdict)
+    res = check(project, query, kind, advances, why, verdict, law=law)
     res["query"] = query
     res["kind"] = kind or ""
+    res["law"] = (law or "").strip().upper()
 
     if res["verdict"] == "precheck":
         return res
@@ -249,7 +280,7 @@ def admit(project: Path, query: str, kind: str | None, advances: str, why: str,
             save_state(project, state)
         return res
 
-    entry = entry_for(profile, query, kind or "", advances, why)
+    entry = entry_for(profile, query, kind or "", advances, why, law=law)
     if dry_run:
         res["entry"] = entry
         res["dry_run"] = True
@@ -282,6 +313,8 @@ def format_admit(res: dict[str, Any]) -> str:
     if res.get("milestone"):
         lines.append(f"  advances:   {res['milestone']}" +
                      (f"  ({res['title']})" if res.get("title") else ""))
+    if res.get("law"):
+        lines.append(f"  law:        {res['law']}")
     lines.append("  findings:")
     for f in res.get("findings") or ["  (none)"]:
         lines.append(f"    - {f}")

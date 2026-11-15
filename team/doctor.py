@@ -648,6 +648,47 @@ def run_doctor(project: Path, log) -> dict:
     except Exception as e:  # a check must never hide the report
         log(f"doctor report-page: could not check ({e})")
 
+    # THE LAW — is the declared product law alive, cited, and obeyed? A project
+    # with no PRODUCT.md is not blocked; declaring the law is a choice, and once
+    # declared the team holds you to it. Three failures: a clause nothing cites
+    # (dead law), a citation of a clause that does not exist (fiction), a queued
+    # task with no clause (work with no reason in the product).
+    try:
+        from . import law as law_mod
+        ledger = law_mod.audit(project)
+        if not ledger["present"]:
+            report["law"] = {"status": "ready", "blocked": [], "checks_passed": 0,
+                             "note": "no PRODUCT.md — the product law is not declared "
+                                     "for this project"}
+            log("doctor law: ready (no PRODUCT.md — the law is not declared)")
+        else:
+            problems = []
+            if ledger["orphans"]:
+                problems.append(f"{len(ledger['orphans'])} clause(s) nothing cites: "
+                                + ", ".join(ledger["orphans"]))
+            if ledger["unknown"]:
+                problems.append(f"citation(s) of unknown clause(s): "
+                                + ", ".join(ledger["unknown"]))
+            if ledger["tasks_without_law"]:
+                problems.append(f"{len(ledger['tasks_without_law'])} queued task(s) "
+                                "name no clause: "
+                                + ", ".join(ledger["tasks_without_law"][:3]))
+            if problems:
+                report["law"] = {
+                    "status": "warn", "blocked": [],
+                    "checks_passed": len(ledger["clauses"]) - len(ledger["orphans"]),
+                    "note": ("; ".join(problems) + " — cite the clause where it is "
+                             "implemented, or re-admit the task with --law <Pn>; "
+                             "`devteam law <project>` lists the clauses"),
+                }
+                log(f"doctor law: WARN — " + "; ".join(problems))
+            else:
+                report["law"] = {"status": "ready", "blocked": [],
+                                 "checks_passed": len(ledger["clauses"])}
+                log(f"doctor law: ready — {len(ledger['clauses'])} clause(s), each cited")
+    except Exception as e:  # a check must never hide the report
+        log(f"doctor law: could not check ({e})")
+
     try:
         state = state_of(project)
         state["doctor"] = {"generated_at": now_iso(), "report": report}
