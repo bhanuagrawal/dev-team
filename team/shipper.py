@@ -789,8 +789,38 @@ def push_and_deliver(project: Path, worktree: Path, task: dict, new_version: str
         else:
             log(f"CI failed after {max_retries} attempts — giving up")
 
-    return {"delivered": False, "error": f"CI failed after {max_retries} attempts",
-            "ci": ci, "commit": sha, "version": new_version}
+    result = {"delivered": False, "error": f"CI failed after {max_retries} attempts",
+              "ci": ci, "commit": sha, "version": new_version}
+    # A RED RUN IS NOT ALWAYS A CODE FAILURE (owner directive 2026-11-16). When
+    # GitHub refuses to start the jobs because the account cannot pay for
+    # minutes, retrying three times re-proves the same thing and the run ends
+    # with testers holding nothing — "generate a debug build on the local
+    # machine and publish it to Firebase App Testing if it is set up" is the
+    # fallback, and it is narrow on purpose: a DEBUG apk for testers, never a
+    # claim that Play was updated.
+    try:
+        from . import local_delivery
+        blocked, why = local_delivery.billing_blocked(
+            project, (ci or {}).get("run_id"), log)
+        if blocked:
+            if local_delivery.firebase_config(profile_of(project)) is not None:
+                log("CI billed-out: building a debug apk locally and sending it to "
+                    "Firebase App Distribution instead of leaving testers empty-handed")
+                local = local_delivery.deliver(
+                    project, log, version=new_version, reason=why,
+                    notes_extra=f"Commit {sha[:12]}.")
+                result["local_delivery"] = local
+                log(local_delivery.summary_line(local))
+            else:
+                log("CI billed-out and no ci.firebase app is declared — no local "
+                    "channel to deliver through; the release is still not delivered")
+            result["ci_blocked_by_billing"] = True
+            result["error"] = ("CI could not start: GitHub Actions billing "
+                               f"({why}) — Play internal testing was NOT updated")
+    except SystemExit as e:  # a failed fallback must not mask the CI verdict
+        log(f"local delivery failed: {e}")
+        result["local_delivery_error"] = str(e)
+    return result
 
 
 def _pushed_sha(worktree: Path) -> str:

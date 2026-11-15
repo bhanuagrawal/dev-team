@@ -1320,6 +1320,13 @@ def cmd_release(args: argparse.Namespace) -> int:
 
     res = shipper.push_and_deliver(project, worktree, task, name, log, code=code)
     print(json.dumps(res, indent=2))
+    if res.get("local_delivery"):
+        from team import local_delivery
+        print(local_delivery.summary_line(res["local_delivery"]))
+    if res.get("ci_blocked_by_billing"):
+        print("CI BLOCKED BY BILLING — GitHub Actions refused to start the jobs, so "
+              "Play internal testing was NOT updated. Fix Billing & plans (spending "
+              "limit / payment) and re-run the release; testers have the debug build.")
     return 0 if res.get("delivered") else 1
 
 
@@ -2202,6 +2209,33 @@ def cmd_poll(args: argparse.Namespace) -> None:
         return
     lines = logs[-1].read_text().splitlines()
     print("\n".join(lines[-args.tail:]))
+
+
+def cmd_local_delivery(args: argparse.Namespace) -> int:
+    """Deliver a DEBUG build by hand when CI cannot start.
+
+    The automatic path is inside `release` (`shipper.push_and_deliver` calls the
+    same module when the red run names GitHub Actions billing). This verb is the
+    on-demand form — same code, same narrow claim: testers get an apk, Play does
+    not change.
+    """
+    from team import local_delivery
+
+    project = resolve_project(args.project)
+    log = RunLog(project, "local-delivery-" + today())
+    version = str(args.version or "").strip()
+    if not version:
+        from team import shipper
+        latest = shipper.remote_latest_release(project)
+        version = "dev" if not latest else str(latest.get("version") or "dev")
+    result = local_delivery.deliver(
+        project, log, version=version, reason=str(args.reason or ""),
+        notes_extra=str(args.notes or ""),
+        distribute=not args.no_distribute, dry_run=args.dry_run,
+    )
+    print(json.dumps(result, indent=2))
+    print(local_delivery.summary_line(result))
+    return 0 if (result.get("dry_run") or result.get("apk")) else 1
 
 
 def cmd_schedules(args: argparse.Namespace) -> None:
@@ -5317,6 +5351,17 @@ def main() -> None:
                      help="mark this as the owner's own call rather than the agent's")
     rcp.set_defaults(fn=cmd_rc)
     po = sub.add_parser("poll");       po.add_argument("project"); po.add_argument("--tail", type=int, default=60); po.set_defaults(fn=cmd_poll)
+    ld = sub.add_parser("local-delivery",
+                        help="CI cannot start (e.g. GitHub Actions billing): build a "
+                             "DEBUG apk here and send it to Firebase App Distribution")
+    ld.add_argument("project")
+    ld.add_argument("--version", help="the version being delivered (defaults to the last tag)")
+    ld.add_argument("--reason", help="why CI could not deliver (printed in the tester note)")
+    ld.add_argument("--notes", help="extra release-note text for testers")
+    ld.add_argument("--no-distribute", action="store_true",
+                    help="build the debug apk and stop (no Firebase upload)")
+    ld.add_argument("--dry-run", action="store_true", help="report the plan, build nothing")
+    ld.set_defaults(fn=cmd_local_delivery)
     a = sub.add_parser("alarm");       a.add_argument("project"); a.set_defaults(fn=cmd_alarm)
     rs = sub.add_parser("research");   rs.add_argument("project"); rs.add_argument("--no-llm", action="store_true")
     rs.add_argument("--apply-result", help="synthesis JSON produced by the host tool's native agent; applies through the same validation + goal gate")

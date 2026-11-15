@@ -90,6 +90,7 @@ The trigger for `main` is **the gates passed**, not "a human is about to look".
 | stopped mid-flight (verify FAIL, blocker) | committed + pushed to `dt/<task-id>`, tree pruned, attempt listed as `⏸ parked` | no |
 | stopped for an owner ask | same as above, **plus** `record --result blocked --note "<the question>"` | yes — the ask itself |
 | a DEBUG build for testers | Firebase App Distribution, same tag as the release (only when `profile.ci.firebase` is declared) | no |
+| CI cannot start (GitHub Actions billing) | `release` builds the DEBUG apk locally and sends it to that Firebase group; **Play is untouched**, the run records `failed` with the billing ask | yes — Billing & plans, and a re-run of the release |
 
 Nothing about a finished change needs a human in the loop; the human only enters
 for a launch they choose to trigger (`devteam promote`, never raised by an agent),
