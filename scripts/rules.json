@@ -377,6 +377,14 @@
       "kind": "enforcible",
       "proposal": "stitch-export: when a screen's htmlCode file name changed since the last export but its screenshot file name did not, WARN and re-render the snapshot from the exported index.html (a local headless render already exists in this stack) instead of silently writing a stale screen.png",
       "note": "found 2026-11-15 on a UI task: stitch-tweak accepted the edit as DOM operations and exported nothing, the documented fallback (stitch_mcp.update_screen_content) wrote new HTML, and the exported screen.png was still the old layout until it was rendered by hand"
+    },
+    {
+      "id": "storefront-spec-is-the-source-of-the-harness",
+      "rule": "docs/storefront.json's `fixtures` and `imports` ARE the Kotlin harness: the render regenerates the test from them, so a JSON snapshot that predates an API change silently rewrites a compiling harness into code that cannot build",
+      "doc": "docs/store.md",
+      "kind": "enforcible",
+      "proposal": "storefront-scenes --render (and storefront-build): compile the harness it is about to run and, on failure, name the drift (the spec's fixtures/imports vs the app's types) instead of returning the bare ':composeApp:testDebugUnitTest failed' seen on 2026-11-15; also refuse a spec whose `renderer` disagrees with what the module can run",
+      "note": "found 2026-11-15: the tracked harness had been hand-fixed twice while docs/storefront.json kept a 2026-11-09 copy, so every regeneration put the broken one back \u2014 the render failed, and the error named a gradle task, not the cause"
     }
   ]
 }
