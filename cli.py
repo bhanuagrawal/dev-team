@@ -2577,26 +2577,31 @@ def cmd_design_consult(args: argparse.Namespace) -> int:
     project = resolve_project(args.project)
     from team import designer
     task = _design_task(project, args.task)
+    # The design gate judges the TASK WORKTREE (verify passes root=<worktree>),
+    # and a project's checkout lags origin/main as a rule. Fingerprinting the
+    # checkout therefore recorded an answer that verify always called "stale" —
+    # the fix is to ask against the same tree the gate will read.
+    root = Path(args.worktree).expanduser() if getattr(args, "worktree", None) else None
 
     if args.record:
         raw = sys.stdin.read() if args.record == "-" else Path(args.record).read_text()
         try:
             answer = json.loads(raw)
-            rec = designer.record(project, task, answer)
+            rec = designer.record(project, task, answer, root=root)
         except Exception as exc:
             raise SystemExit(f"could not record the designer answer: {exc}")
         print(json.dumps(rec, indent=2))
         return 0
 
     if args.prompt:
-        brief = designer.compile_brief(project, task)
+        brief = designer.compile_brief(project, task, root=root)
         if args.json:
             print(json.dumps(brief, indent=2))
         else:
             print(brief["prompt"])
         return 0
 
-    st = designer.status(project, task)
+    st = designer.status(project, task, root=root)
     if args.json:
         print(json.dumps(st, indent=2))
     else:
@@ -5335,6 +5340,13 @@ def main() -> None:
     dc.add_argument("--prompt", action="store_true", help="print the designer prompt")
     dc.add_argument("--record", help="path to the designer's JSON answer ('-' for stdin)")
     dc.add_argument("--json", action="store_true", help="machine-readable output")
+    dc.add_argument(
+        "--worktree",
+        help="the task worktree whose docs/stitch the design gate will judge. The "
+             "answer is fingerprinted against THIS tree, so a project whose checkout "
+             "lags origin/main (the normal case) records against the manifest verify "
+             "will read, instead of recording against a stale checkout and coming back "
+             "'stale' no matter what the designer said")
     dc.set_defaults(fn=cmd_design_consult)
     comp = sub.add_parser("competition", help="run competitive recon on rivals, pricing models, and weakness analysis")
     comp.add_argument("project")
