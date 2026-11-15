@@ -129,15 +129,15 @@ def agent_requirements(profile: dict, project: Path) -> dict[str, list[tuple[str
             ("nightly launchd job loaded and active", sched_loaded,
              f"launchd job for {project.name} is not loaded. Run: `devteam setup --project {project.name} --schedule auto`"),
         ]
-        # Every app must hold RUNS_PER_DAY slots inside the owner's 23:00–11:00
-        # window. Machine-wide spacing is best-effort: the run lock skips an
-        # overlapping app rather than deferring it, but with two runs a night
-        # a skip no longer costs the app its night (owner directive 2026-11-05).
+        # Every app must hold RUNS_PER_DAY slots inside the owner's 02:00–11:00
+        # window. Machine-wide spacing matters more now: the run lock skips an
+        # overlapping app rather than deferring it, and with a single daily run
+        # a skip costs the app its whole day (owner directive 2026-11-15).
         job = next((j for j in scheduler.list_installed_jobs()
                     if j["label"] == scheduler.project_label(project.name)
                     or j["project"] == project.name), None)
         slots = job["slots"] if job else []
-        expected = f"{scheduler.RUNS_PER_DAY} runs/night ({scheduler.WINDOW_START_HOUR:02d}:00–{scheduler.WINDOW_END_HOUR:02d}:00)"
+        expected = f"{scheduler.RUNS_PER_DAY} run(s)/day ({scheduler.WINDOW_START_HOUR:02d}:00–{scheduler.WINDOW_END_HOUR:02d}:00)"
         ok = (len(slots) == scheduler.RUNS_PER_DAY
               and all(scheduler.in_window(h, m) for h, m in slots))
         detail = (", ".join(f"{h:02d}:{m:02d}" for h, m in slots) if slots

@@ -2205,7 +2205,7 @@ def cmd_poll(args: argparse.Namespace) -> None:
 
 
 def cmd_schedules(args: argparse.Namespace) -> None:
-    """Owner-visible schedule map: two runs a night for every registered app."""
+    """Owner-visible schedule map: one run a day (from 02:00) for every registered app."""
     if getattr(args, "remove", None):
         project = resolve_project(args.remove)
         scheduler.uninstall_launchd(project.name)
@@ -2216,7 +2216,7 @@ def cmd_schedules(args: argparse.Namespace) -> None:
         before = {j["project"]: j["slots"] for j in jobs}
         plan = scheduler.rebalance([j["project"] for j in jobs if j["project"]])
         changed = [n for n, slots in plan.items() if before.get(n) != slots]
-        print(f"Rebalanced {len(plan)} app(s): {scheduler.RUNS_PER_DAY} runs/night each "
+        print(f"Rebalanced {len(plan)} app(s): {scheduler.RUNS_PER_DAY} run(s)/day each "
               f"inside {scheduler.WINDOW_START_HOUR:02d}:00–"
               f"{scheduler.WINDOW_END_HOUR:02d}:00 "
               f"({len(changed)} schedule(s) updated).")
@@ -2226,7 +2226,7 @@ def cmd_schedules(args: argparse.Namespace) -> None:
         return
     gap = scheduler.plan_gap_minutes(len(jobs))
     print(f"window {scheduler.WINDOW_START_HOUR:02d}:00–{scheduler.WINDOW_END_HOUR:02d}:00 · "
-          f"{scheduler.RUNS_PER_DAY} runs/app/night · "
+          f"{scheduler.RUNS_PER_DAY} run(s)/app/day · "
           f"{gap:.0f} min between consecutive machine-wide runs")
     if gap < scheduler.MIN_GAP_MIN:
         print(f"⚠ {len(jobs)} apps cannot all clear {scheduler.MIN_GAP_MIN} min; an "
@@ -3003,14 +3003,14 @@ def cmd_setup(args: argparse.Namespace) -> None:
         for s in scheduler.list_installed_schedules():
             print(f"    - {s['label']}: {s['hour']:02d}:{s['minute']:02d}")
         return
-    # opt-in auto: two interleaved runs a night inside the owner's window.
+    # opt-in auto: one interleaved run a day inside the owner's window.
     # An explicit --at anchors this app's runs and leaves the others alone.
     if args.at:
         slots = scheduler.propose_schedule(project.name, args.at)
         plist = scheduler.install_launchd(project.name, slots)
         print(f"AUTO schedule installed: {plist.stem} — "
               + ", ".join(f"{h:02d}:{m:02d}" for h, m in slots)
-              + f" ({scheduler.RUNS_PER_DAY}x/night, anchored at {args.at})")
+              + f" ({scheduler.RUNS_PER_DAY}x/day, anchored at {args.at})")
         close = [c for h, m in slots for c in scheduler.clashes(
             h, m, exclude=scheduler.project_label(project.name))]
         if close:
@@ -3029,7 +3029,7 @@ def cmd_setup(args: argparse.Namespace) -> None:
                                      label=job["label"] if job else None)
         print(f"AUTO schedule installed: {plist.stem} — "
               + ", ".join(f"{h:02d}:{m:02d}" for h, m in slots)
-              + f" ({scheduler.RUNS_PER_DAY}x/night)")
+              + f" ({scheduler.RUNS_PER_DAY}x/day)")
         print(f"  window {scheduler.WINDOW_START_HOUR:02d}:00–"
               f"{scheduler.WINDOW_END_HOUR:02d}:00, interleaved across "
               f"{len(plan)} app(s): {scheduler.plan_gap_minutes(len(plan)):.0f} min "
@@ -5436,7 +5436,7 @@ def main() -> None:
     sch.add_argument("--remove", help="remove a project's nightly schedule, keeping it in manual mode")
     sch.add_argument("--rebalance", action="store_true",
                      help=f"re-space every installed app into {scheduler.RUNS_PER_DAY} "
-                          f"runs/night inside "
+                          f"run(s)/day inside "
                           f"{scheduler.WINDOW_START_HOUR:02d}:00–{scheduler.WINDOW_END_HOUR:02d}:00")
     sch.set_defaults(fn=cmd_schedules)
     cp = sub.add_parser(

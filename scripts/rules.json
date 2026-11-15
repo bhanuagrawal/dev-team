@@ -76,11 +76,11 @@
     },
     {
       "id": "nightly-runs-in-window",
-      "rule": "every scheduled app runs RUNS_PER_DAY (2) times a night inside the owner's 23:00\u201311:00 window; apps are interleaved evenly so consecutive machine-wide runs are as far apart as the app count allows, and overlap is tolerated because two runs make a skipped one harmless",
+      "rule": "every scheduled app runs RUNS_PER_DAY (1) time a day inside the owner's 02:00\u201311:00 window; apps are interleaved evenly from the window opening so consecutive machine-wide runs stay as far apart as the app count allows (90 min at six apps), because the single machine-wide run lock skips an overlapping run rather than deferring it",
       "doc": "AGENTS.md",
       "kind": "code",
-      "enforced_by": "devteam setup (scheduler.plan_schedule/apply_plan installs 2 slots per app) + devteam schedules --rebalance (re-spaces every app) + devteam doctor and store-readiness (assert 2 slots inside the window)",
-      "note": "owner directive 2026-11-05: two runs a night, 11pm\u201311am, overlap tolerated but avoided where possible; MIN_GAP_MIN is a best-effort target, not a refusal. 2026-11-11: runs per app lowered 3 \u2192 2"
+      "enforced_by": "devteam setup (scheduler.plan_schedule/apply_plan installs 1 slot per app) + devteam schedules --rebalance (re-spaces every app) + devteam doctor and store-readiness (assert 1 slot inside the window)",
+      "note": "owner directive 2026-11-05: two runs a night, 11pm\u201311am; 2026-11-11: lowered 3 \u2192 2; 2026-11-15: lowered 2 \u2192 1 and the window moved to 02:00\u201311:00 (owner: 'run once in the day from 2') to halve GitHub Actions minutes \u2014 with one shot a day a skip costs the app its day, so spacing is now the protection rather than a nicety"
     },
     {
       "id": "cleanup-is-part-of-the-run",

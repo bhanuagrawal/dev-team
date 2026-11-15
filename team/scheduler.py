@@ -5,7 +5,7 @@ What it sets up:
   1. environment checks (git, gh auth, python3, JDK/JBR, android sdk)
   2. project onboarding if missing (.pipeline/profile.json + state.json)
   3. launchd LaunchAgent running scripts/nightly.sh <project> `RUNS_PER_DAY`
-     times inside the owner's 23:00–11:00 window
+     times inside the owner's 02:00–11:00 window
   4. global skill symlink so any agent CLI can operate the team (dev-team skill)
 """
 from __future__ import annotations
@@ -19,24 +19,27 @@ from pathlib import Path
 from .core import TEAM_ROOT, agent_argv, pipeline_dir, role_cfg, run
 
 LAUNCH_LABEL = "com.devteam.nightly"
-DEFAULT_AT = "23:00"
+DEFAULT_AT = "02:00"
 
-# The owner's run window: 23:00 → 11:00 (12 hours). Every app fires
-# RUNS_PER_DAY times inside it (owner request 2026-11-05) so one skipped run
-# never costs an app its whole night. Lowered 3 → 2 on 2026-11-11 (owner
-# request): two runs a night, ~6 h apart.
-WINDOW_START_HOUR = 23
+# The owner's run window: 02:00 → 11:00 (9 hours). Every app fires
+# RUNS_PER_DAY times inside it. History: 3 runs/night (owner request 2026-11-05)
+# → 2 runs/night, 23:00–11:00 (owner request 2026-11-11) → 1 run/day anchored
+# at 02:00 (owner request 2026-11-15): the nightly orchestrator is expensive in
+# CI minutes, so each app gets exactly one shot, in the small hours, and the
+# window is wide enough that consecutive apps still clear MIN_GAP_MIN.
+WINDOW_START_HOUR = 2
 WINDOW_END_HOUR = 11
-RUNS_PER_DAY = 2
+RUNS_PER_DAY = 1
 
 # Best-effort spacing target between any two slots on the machine.
 #
 # `scripts/nightly.sh` holds ONE machine-wide lock (`.nightly.lock`), so an app
-# that fires while another run is alive is SKIPPED, not deferred. The owner
-# accepts an occasional overlap now that every app gets two chances a night;
-# spacing is therefore a target we optimise, not a hard refusal. Apps are
-# interleaved evenly across the window, which keeps consecutive runs as far
-# apart as the number of apps allows (6 apps × 2 runs = 60 min apart).
+# that fires while another run is alive is SKIPPED, not deferred. With one run
+# per app per day a skip costs that app its whole day, so spacing is now the
+# thing that protects the schedule rather than a nicety: 9 h window ÷ 6 apps =
+# 90 min apart, which is the run watchdog cap exactly. Apps are interleaved
+# evenly across the window, keeping consecutive runs as far apart as the app
+# count allows.
 MIN_GAP_MIN = 30
 
 
@@ -50,7 +53,7 @@ def _hour_minute(total: int) -> tuple[int, int]:
 
 
 def window_span_minutes() -> int:
-    """Length of the owner's run window in minutes (23:00 → 11:00 = 720)."""
+    """Length of the owner's run window in minutes (02:00 → 11:00 = 540)."""
     return (_minutes_of(WINDOW_END_HOUR, 0) - _minutes_of(WINDOW_START_HOUR, 0)) % 1440
 
 
@@ -61,7 +64,7 @@ def gap_minutes(a: tuple[int, int], b: tuple[int, int]) -> int:
 
 
 def slot_order(hour: int, minute: int) -> int:
-    """Position inside one run window, so 01:00 sorts after 23:00."""
+    """Position inside one run window, so 09:00 sorts after 02:00."""
     return (_minutes_of(hour, minute) - _minutes_of(WINDOW_START_HOUR, 0)) % 1440
 
 
@@ -81,11 +84,11 @@ def plan_gap_minutes(project_count: int) -> float:
 
 
 def plan_schedule(projects: list[str] | set[str]) -> dict[str, list[tuple[int, int]]]:
-    """Deterministic two-runs-a-night plan, evenly interleaved across apps.
+    """Deterministic one-run-a-day plan, evenly interleaved across apps.
 
     Slots are computed from the sorted project list, so the same set of apps
     always yields the same schedule (idempotent re-runs, no drift). Consecutive
-    slots go to different apps, and one app's runs are ~6 h apart.
+    slots go to different apps, starting at the window opening (02:00).
     """
     names = sorted({p for p in projects if p})
     if not names:
@@ -101,7 +104,10 @@ def plan_schedule(projects: list[str] | set[str]) -> dict[str, list[tuple[int, i
 
 
 def explicit_slots(anchor: str) -> list[tuple[int, int]]:
-    """`--at HH:MM` anchors the first run; the other follows 6 h later."""
+    """`--at HH:MM` anchors the first run; later runs follow one step apart.
+
+    With RUNS_PER_DAY == 1 the anchor is simply the app's only daily slot.
+    """
     try:
         hh, mm = (int(x) for x in anchor.split(":"))
     except Exception:
@@ -211,12 +217,12 @@ def is_project_loaded(project_name: str) -> bool:
 
 def propose_schedule(project_name: str, pref_at: str | None = None,
                      projects: list[str] | None = None) -> list[tuple[int, int]]:
-    """The two slots this project would get.
+    """The slot(s) this project would get.
 
     With no `--at`, the project joins the machine-wide interleaved plan, so it
     lands as far from every other app's runs as the window allows. An explicit
-    `--at` anchors its first run (the other follows 6 h later) and leaves the
-    rest of the plan untouched.
+    `--at` anchors its first run (any further run follows one step later) and
+    leaves the rest of the plan untouched.
     """
     if pref_at:
         return explicit_slots(pref_at)
@@ -240,7 +246,7 @@ def apply_plan(projects: list[str] | set[str], install_missing: bool = True) -> 
 
 
 def rebalance(projects: list[str] | None = None) -> dict[str, list[tuple[int, int]]]:
-    """Re-space every installed app into the current two-a-night plan."""
+    """Re-space every installed app into the current one-run-a-day plan."""
     names = projects or [j["project"] for j in list_installed_jobs() if j["project"]]
     return apply_plan(names)
 
@@ -296,7 +302,7 @@ def _loaded_job_plist(label: str) -> str | None:
 
 
 def install_launchd(project_name: str, at, label: str | None = None) -> Path:
-    """Write a plist that fires `RUNS_PER_DAY` times a night.
+    """Write a plist that fires `RUNS_PER_DAY` times a day.
 
     `at` is either "HH:MM" (one legacy slot) or a list of (hour, minute) slots.
     """

@@ -1272,7 +1272,7 @@ def run_store_readiness_audit(project: Path, tree: Path | None = None) -> list[R
             passed=runs_ok,
             severity="INFO" if runs_ok else "BLOCKER",
             detail=detail if runs_ok else
-                   (f"{sched_name} does not run {scheduler.RUNS_PER_DAY}x/night inside "
+                   (f"{sched_name} does not run {scheduler.RUNS_PER_DAY}x/day inside "
                     f"{scheduler.WINDOW_START_HOUR:02d}:00–{scheduler.WINDOW_END_HOUR:02d}:00 "
                     f"(found {detail})"),
             fix="" if runs_ok else
@@ -1285,7 +1285,7 @@ def run_store_readiness_audit(project: Path, tree: Path | None = None) -> list[R
             passed=False,
             severity="BLOCKER",
             detail=f"No nightly schedule registered in launchd for {sched_name}",
-            fix=f"Run `devteam setup --project {sched_name} --schedule auto` to register {scheduler.RUNS_PER_DAY}x/night launchd triggers",
+            fix=f"Run `devteam setup --project {sched_name} --schedule auto` to register {scheduler.RUNS_PER_DAY}x/day launchd triggers",
         ))
 
     # ── 10. Discovery & Product Architecture ──────────────────────────────
