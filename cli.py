@@ -1195,6 +1195,25 @@ def cmd_release(args: argparse.Namespace) -> int:
     project = resolve_project(args.project)
     log = RunLog(project, "release-" + today())
     worktree = Path(args.worktree).resolve()
+    # ONE UNDELIVERED VERSION AT A TIME. A red run caused by GitHub Actions
+    # billing leaves a tagged, verified version that never reached Play; the next
+    # release must not mint another one on top of it, or a billed-out account
+    # piles up tags nobody can install. The block clears itself the moment that
+    # run is actually green (see shipper.pending_delivery).
+    pending = shipper.pending_delivery(project, log)
+    if pending:
+        print(json.dumps({
+            "delivered": False,
+            "blocked_by": "pending_delivery",
+            "version": pending.get("version"),
+            "reason": pending.get("reason"),
+            "next": ("fix GitHub Billing & plans and re-run that CI run "
+                     "(`gh run rerun <id> --failed`), or hand testers the debug "
+                     "build with `devteam local-delivery <project>`"),
+        }, indent=2))
+        log(f"release refused: v{pending.get('version')} is released but not delivered "
+            f"({pending.get('reason')}) — not allocating another version on top of it")
+        return 1
     latest = shipper.remote_latest_version(project)
     if latest is None:
         raise SystemExit("no v* tags on origin; cannot compute next version")

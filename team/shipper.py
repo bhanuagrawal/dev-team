@@ -823,6 +823,41 @@ def push_and_deliver(project: Path, worktree: Path, task: dict, new_version: str
     return result
 
 
+def pending_delivery(project: Path, log: RunLog | None = None) -> dict | None:
+    """The last released version, WHEN ITS CI RUN NEVER STARTED FOR BILLING.
+
+    Derived from git and GitHub — never from remembered state — so it cannot
+    outlive the condition it describes: the moment that run is green the answer
+    is None and the next release proceeds normally. A red run for any OTHER
+    reason is not returned: that is an ordinary failure to fix and re-release.
+    """
+    from . import local_delivery
+    profile = profile_of(project)
+    latest = remote_latest_release(project)
+    if not latest:
+        return None
+    tag = f"{profile.get('tag_prefix', 'v')}{latest['version']}"
+    sha = git(["rev-parse", f"{tag}^{{commit}}"], cwd=project).stdout.strip()
+    if not sha:
+        return None
+    for entry in _ci_runs(project, profile.get("repo_slug", ""), _workflow(profile)):
+        if str(entry.get("headSha") or "") != sha:
+            continue
+        if entry.get("conclusion") == "success":
+            return None
+        rid = str(entry.get("databaseId") or "")
+        blocked, why = local_delivery.billing_blocked(project, rid, log)
+        if blocked:
+            return {"version": latest["version"], "run_id": rid, "commit": sha,
+                    "reason": "github_actions_billing", "evidence": why}
+        return None
+    return None
+
+
+def _workflow(profile: dict) -> str:
+    return str(profile.get("ci_workflow") or profile.get("ci", {}).get("workflow") or "release.yml")
+
+
 def _pushed_sha(worktree: Path) -> str:
     return git(["rev-parse", "HEAD"], cwd=worktree).stdout.strip()
 
