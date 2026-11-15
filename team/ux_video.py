@@ -369,7 +369,28 @@ def build_and_install(project: Path, serial: str, log=None,
     res = _adb(serial, ["install", "-r", "-d", "-g", str(apk)], timeout=300)
     if res.returncode != 0:
         out = (res.stdout or "") + (res.stderr or "")
-        raise SystemExit("adb install failed: " + out.strip()[-500:])
+        # A DEVICE THAT HAS RUN THIS APP MANY TIMES IS FULL. The walk pass installs
+        # a debug build on every run and the AVD keeps the old data, videos and
+        # caches, so after a few passes /data is exhausted and the install dies
+        # with INSTALL_FAILED_INSUFFICIENT_STORAGE — which reads like an APK
+        # problem and stops a run that is otherwise green (2026-11-15). The app
+        # under audit is ours; clearing ITS data is safe and is what the retry
+        # does. A device still full after that is named plainly, with the one
+        # command that fixes it, instead of a raw adb line.
+        if "INSUFFICIENT_STORAGE" in out:
+            pkg = package_name(project)
+            if log:
+                log(f"~ ux-video: the device is out of space — clearing {pkg} and retrying")
+            _adb(serial, ["shell", "pm", "clear", pkg], timeout=120)
+            _adb(serial, ["uninstall", pkg], timeout=120)
+            res = _adb(serial, ["install", "-r", "-d", "-g", str(apk)], timeout=300)
+            if res.returncode != 0:
+                out = (res.stdout or "") + (res.stderr or "")
+        if res.returncode != 0:
+            extra = (" — the AVD's data partition is full; wipe it "
+                     f"(`emulator -avd <avd> -wipe-data`) and walk again"
+                     if "INSUFFICIENT_STORAGE" in out else "")
+            raise SystemExit("adb install failed: " + out.strip()[-400:] + extra)
     _grant_audit_permissions(serial, package_name(project), log)
     return {"apk": str(apk), "tree": str(tree), "task": task}
 
