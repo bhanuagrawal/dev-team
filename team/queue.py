@@ -75,6 +75,18 @@ def verdict_for(old: dict, incoming: list[dict],
     # that was already delivered — whatever its type. This is label-level only:
     # a bugfix/feature may legitimately re-touch a shipped *path*, so the
     # path-overlap test below stays motion-only (see lesson 2026-10-16 #37).
+    # An EXPLICIT supersede beats "already shipped". Without this, a task whose
+    # label had ever been written to the shipped ledger could never be re-opened:
+    # every re-admission was answered "obsolete — already shipped", even when the
+    # shipped entry was the one with unmet acceptance. (Seen live 2026-11-15: the
+    # offer-screen task was refused three times by runs that had shipped nothing.)
+    for new in incoming or []:
+        supersedes = {_norm(x) for x in (new.get("supersedes") or [])}
+        oid = _norm(old.get("id", ""))
+        if _norm(olabel) in supersedes or (oid and oid in supersedes):
+            return ("superseded",
+                    new.get("reason") or "explicitly superseded by the new task",
+                    label_of(new))
     if shipped_labels and _norm(olabel) in shipped_labels:
         return ("redundant",
                 "already shipped (its task label is in the shipped ledger)", "")
