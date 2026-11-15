@@ -369,6 +369,14 @@
       "kind": "enforcible",
       "proposal": "team/stitch_mcp tweak path: when edit_screens/generate_variants persist no screen artifact, do not stop at 'STITCH TWEAK FAILED' \u2014 write the recorded change into the surface's own committed export (docs/stitch/screens/<id>/index.html) and render it with the existing _render_html_png at the screen's own size, then record snapshot_source=authored-from-shipped-screen plus the reason in the manifest note. The design gate already accepts a touched-or-changed snapshot, so no run should have to hand-author the export.",
       "note": "Seen twice: 2026-11-13 (the Victory Match Summary redraw) and 2026-11-14 (the nudge row on the same screen) \u2014 Stitch returned 'applied 1 DOM operation(s) but persisted no screen artifact' both times, so each run hand-wrote the export HTML and rendered it with headless Chrome. The workaround is correct and reproducible; it belongs in code, not in a runner's memory."
+    },
+    {
+      "id": "stitch-html-update-renders-its-own-snapshot",
+      "rule": "when a Stitch screen's htmlCode is replaced (update_screen_content), Stitch does NOT re-render the screen's screenshot: the exported screen.png keeps showing the previous layout, so the design spec lies about the screen it is named after",
+      "doc": "docs/loop.md",
+      "kind": "enforcible",
+      "proposal": "stitch-export: when a screen's htmlCode file name changed since the last export but its screenshot file name did not, WARN and re-render the snapshot from the exported index.html (a local headless render already exists in this stack) instead of silently writing a stale screen.png",
+      "note": "found 2026-11-15 on a UI task: stitch-tweak accepted the edit as DOM operations and exported nothing, the documented fallback (stitch_mcp.update_screen_content) wrote new HTML, and the exported screen.png was still the old layout until it was rendered by hand"
     }
   ]
 }
