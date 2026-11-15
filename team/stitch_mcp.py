@@ -378,8 +378,16 @@ def generate_screen(project_id: str, prompt: str, *, device: str = "MOBILE",
 
 def edit_screens(project_id: str, screen_ids: list[str], prompt: str, *,
                  device: str = "MOBILE", model_id: str = "GEMINI_3_8_FLASH",
-                 timeout: int = 900, log=None) -> list[dict[str, Any]]:
-    """Apply a targeted tweak to existing Stitch screen(s) via edit_screens (never retries)."""
+                 timeout: int = 300, log=None) -> list[dict[str, Any]]:
+    """Apply a targeted tweak to existing Stitch screen(s) via edit_screens (never retries).
+
+    The budget is 300s, not the 900s this used to take: on 2026-11-15 the editor
+    accepted a tweak, answered with DOM operations only, and the call itself hung
+    until the caller's own 900s shell timeout killed it — no verdict, no export,
+    and a run left with neither a design nor a refusal, while `stitch-tweak`'s
+    auto mode would have failed over to `generate_variants(REFINE)` in five
+    minutes. A hung editor must surface as a refusal the caller can act on.
+    """
     pid = _clean_project_id(project_id)
     ids = [_clean_screen_id(sid) for sid in screen_ids if str(sid or "").strip()]
     if not ids:

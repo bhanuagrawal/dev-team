@@ -4550,7 +4550,7 @@ def cmd_stitch_tweak(args: argparse.Namespace) -> int:
     aspects = list(getattr(args, "aspects", None) or []) or None
     variants = int(getattr(args, "variants", 1) or 1)
 
-    print(f"Tweaking Stitch screen '{screen_title}' ({sid}) via mode={mode}...")
+    print(f"Tweaking Stitch screen '{screen_title}' ({sid}) via mode={mode}...", flush=True)
     updated_screens: list[dict] = []
     try:
         if mode == "refine":
