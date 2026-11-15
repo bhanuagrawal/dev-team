@@ -393,6 +393,14 @@
       "kind": "enforcible",
       "proposal": "plate_clean: before healing, judge the box's content shape \u2014 a vendor stamp is a compact blob on otherwise flat background, a device/dock is structure crossing the box edges; when it is structure, do not heal (report corner_mark='content') and make storefront-build re-paint that frame with the reserved-corner instruction rather than blending it",
       "note": "found 2026-11-15: all four painted frames carried a visible grey smear over the app's dock; the raw renders were clean, so the damage was the heal, and the run still recorded every heal 'verified'. The prompt now reserves the last 14% of width and height as plain background, which keeps the heal box off the device."
+    },
+    {
+      "id": "scene-render-always-executes",
+      "rule": "the screenshot test's product is the PNGs, so a Gradle UP-TO-DATE result means the render step produces nothing and the run dies with 'no reference PNGs'",
+      "doc": "docs/store.md",
+      "kind": "code",
+      "enforced_by": "team/storefront_preview: the scene task runs with --rerun-tasks",
+      "note": "observed 2026-11-15 on a --force repaint: the test was cached, wrote no PNGs, and the error blamed the harness's output property"
     }
   ]
 }

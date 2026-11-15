@@ -933,6 +933,10 @@ def render_previews(project: Path, log: Any = None, timeout: int = 900,
         out_dir_tree = tree / ".pipeline/storefront_scenes"
         task = f":{module}:test{variant}UnitTest"
         args = [gw, task, "--tests", f"{pkg}.StorefrontScreenshotsTest",
+                # A cached test task writes NO PNGs and the run then dies with
+                # "no reference PNGs" — the scenes are the task's product, so it
+                # must always execute (observed 2026-11-15 on a --force repaint).
+                "--rerun-tasks",
                 "-Proborazzi.test.record=true", "--no-configuration-cache", "--console=plain", "-q"]
     else:
         task = f":{module}:update{variant}ScreenshotTest"
