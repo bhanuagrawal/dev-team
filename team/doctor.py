@@ -625,6 +625,29 @@ def run_doctor(project: Path, log) -> dict:
     # keeps reading as current while it describes an older release. Checked BEFORE
     # this run's own state write (itself a rebuild), so the warn names exactly what
     # the last reader was shown; a successful run clears it.
+    # A SHIPPED TASK MUST BE BACKED BY A COMMIT. The ledger used to record a
+    # label and nothing else; a task was "shipped" with acceptance lines that
+    # were plainly false, three times in one day. This does not judge the work —
+    # it refuses an entry whose commit is missing or touches none of its target.
+    try:
+        from . import evidence as evidence_mod
+        bad = evidence_mod.shipped_without_evidence(project)
+        if bad:
+            report["shipped-evidence"] = {
+                "status": "warn", "blocked": [],
+                "checks_passed": 0,
+                "note": ("; ".join(f"{b['label']} — {b['why']}" for b in bad[:3])
+                         + " — a shipped entry is a rumour until its commit shows the work"),
+            }
+            log(f"doctor shipped-evidence: WARN — {len(bad)} shipped entr(ies) have no "
+                "commit under their target: "
+                + ", ".join(b["label"] for b in bad[:3]))
+        else:
+            report["shipped-evidence"] = {"status": "ready", "blocked": [], "checks_passed": 1}
+            log("doctor shipped-evidence: ready — every shipped entry's commit touches its target")
+    except Exception as e:  # a check must never hide the report
+        log(f"doctor shipped-evidence: could not check ({e})")
+
     try:
         from . import report as report_mod
         st = report_mod.status()
