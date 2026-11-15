@@ -800,20 +800,19 @@ def push_and_deliver(project: Path, worktree: Path, task: dict, new_version: str
     # claim that Play was updated.
     try:
         from . import local_delivery
-        blocked, why = local_delivery.billing_blocked(
-            project, (ci or {}).get("run_id"), log)
-        if blocked:
-            if local_delivery.firebase_config(profile_of(project)) is not None:
-                log("CI billed-out: building a debug apk locally and sending it to "
-                    "Firebase App Distribution instead of leaving testers empty-handed")
-                local = local_delivery.deliver(
-                    project, log, version=new_version, reason=why,
-                    notes_extra=f"Commit {sha[:12]}.")
-                result["local_delivery"] = local
-                log(local_delivery.summary_line(local))
-            else:
-                log("CI billed-out and no ci.firebase app is declared — no local "
-                    "channel to deliver through; the release is still not delivered")
+        use_local, why = should_deliver_locally(project, ci, log)
+        if use_local:
+            log("CI billed-out: building a debug apk locally and sending it to "
+                "Firebase App Distribution instead of leaving testers empty-handed")
+            local = local_delivery.deliver(
+                project, log, version=new_version, reason=why,
+                notes_extra=f"Commit {sha[:12]}.")
+            result["local_delivery"] = local
+            log(local_delivery.summary_line(local))
+        elif why:
+            log(f"CI billed-out ({why}) and no ci.firebase app is declared — no local "
+                "channel to deliver through; the release is still not delivered")
+        if why:
             result["ci_blocked_by_billing"] = True
             result["error"] = ("CI could not start: GitHub Actions billing "
                                f"({why}) — Play internal testing was NOT updated")
@@ -821,6 +820,25 @@ def push_and_deliver(project: Path, worktree: Path, task: dict, new_version: str
         log(f"local delivery failed: {e}")
         result["local_delivery_error"] = str(e)
     return result
+
+
+def should_deliver_locally(project: Path, ci: dict | None,
+                           log: RunLog | None = None) -> tuple[bool, str]:
+    """(hand testers a local debug build?, why the run was blocked).
+
+    Three facts decide it, in this order, and each one is cheap to falsify:
+    the run is not green, the red run names billing, and the project declares a
+    Firebase App Distribution target. Anything else returns ("", ...) so an
+    ordinary failure is never papered over with a debug apk.
+    """
+    from . import local_delivery
+    ci = ci or {}
+    if ci.get("conclusion") == "success":
+        return (False, "")
+    if local_delivery.firebase_config(profile_of(project)) is None:
+        return (False, "")
+    blocked, why = local_delivery.billing_blocked(project, ci.get("run_id"), log)
+    return (blocked, why)
 
 
 def pending_delivery(project: Path, log: RunLog | None = None) -> dict | None:

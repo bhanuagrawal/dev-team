@@ -65,5 +65,35 @@ class DebugApkPathTest(unittest.TestCase):
         self.assertEqual(str(p), "/repo/out/custom.apk")
 
 
+class FallbackDecisionTest(unittest.TestCase):
+    """`release` hands testers a debug build ONLY when all three facts hold."""
+
+    def _decide(self, ci, firebase, billing):
+        from unittest import mock
+        from team import shipper
+        with mock.patch.object(shipper, "profile_of", lambda p: {}), \
+             mock.patch.object(local_delivery, "firebase_config", lambda pr: firebase), \
+             mock.patch.object(local_delivery, "billing_blocked", lambda *a, **k: billing):
+            return shipper.should_deliver_locally(Path("/repo"), ci)
+
+    def test_green_run_never_falls_back(self):
+        self.assertEqual(self._decide({"conclusion": "success", "run_id": "1"},
+                                      {"app_id": "x"}, (True, "billing")), (False, ""))
+
+    def test_red_for_any_other_reason_never_falls_back(self):
+        self.assertEqual(self._decide({"conclusion": "failure", "run_id": "1"},
+                                      {"app_id": "x"}, (False, "")), (False, ""))
+
+    def test_no_firebase_target_means_build_only(self):
+        self.assertEqual(self._decide({"conclusion": "failure", "run_id": "1"},
+                                      None, (True, "billing")), (False, ""))
+
+    def test_billed_out_red_run_with_a_target_is_the_fallback(self):
+        self.assertEqual(self._decide({"conclusion": "failure", "run_id": "1"},
+                                      {"app_id": "x"},
+                                      (True, "recent account payments have failed")),
+                         (True, "recent account payments have failed"))
+
+
 if __name__ == "__main__":
     unittest.main()
