@@ -208,6 +208,11 @@ class _Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
+    def _received_status(self) -> str:
+        """The received offer's status, as the walk has moved it."""
+        return str((getattr(self.server, "state", {}) or {}).get("received_status")
+                   or "REQUESTED")
+
     def _sse_response(self, events: list[tuple[str, dict]]):
         self.send_response(200)
         self.send_header("Content-Type", "text/event-stream")
@@ -351,13 +356,23 @@ class _Handler(BaseHTTPRequestHandler):
             return
 
         if path == "/api/v1/offers":
-            self._json({"offers": list(self.server.state.get("offers") or [])})
+            # The inbox always holds the RECEIVED offer: it is the one state whose
+            # actions (choose a copy, accept, decline, counter) no sent offer can
+            # reach, and every walk that means to prove them needs it there.
+            rows = [received_offer_json(self._received_status())]
+            rows += [row for row in (self.server.state.get("offers") or [])
+                     if row.get("transaction_id") != RECEIVED_TRANSACTION_ID]
+            self._json({"offers": rows})
             return
 
         if path.startswith("/api/v1/offers/"):
+            tx = path.rsplit("/", 1)[-1]
+            if tx == RECEIVED_TRANSACTION_ID:
+                self._json(received_offer_json(self._received_status()))
+                return
             terms = getattr(self.server, "state", {}).get("offer") or {}
             self._json(offer_json(
-                path.rsplit("/", 1)[-1],
+                tx,
                 mode=str(terms.get("mode") or "PERMANENT"),
                 days=int(terms.get("days") or 21),
             ))
@@ -532,6 +547,22 @@ class _Handler(BaseHTTPRequestHandler):
                 path.endswith("/accept") or path.endswith("/release")
                 or path.endswith("/counter") or path.endswith("/decline")):
             tx = path.split("/api/v1/offers/")[-1].rsplit("/", 1)[0]
+            if tx == RECEIVED_TRANSACTION_ID:
+                # The received offer answers its own act: accept, decline and a
+                # counter each move the status, and an accept remembers WHICH copy
+                # was taken, so a walk can prove the tap named that copy.
+                state = self.server.state
+                if path.endswith("/accept"):
+                    state["received_status"] = "ACCEPTED"
+                    chosen = body.get("offeredBookId") if isinstance(body, dict) else None
+                    if chosen:
+                        state["received_chosen"] = str(chosen)
+                elif path.endswith("/decline"):
+                    state["received_status"] = "DECLINED"
+                elif path.endswith("/counter"):
+                    state["received_status"] = "REQUESTED"
+                self._json(received_offer_json(self._received_status()))
+                return
             terms = getattr(self.server, "state", {}).get("offer") or {}
             self._json(offer_json(
                 tx,
@@ -846,6 +877,56 @@ def offer_json(transaction_id: str = "", mode: str = "PERMANENT",
         }],
         "counterpart": {"id": OWNER_ID, "username": "sneha_kora"},
         "updated_at": "2026-11-12T09:00:00Z",
+    }
+
+
+#: A second, RECEIVED offer — the reader is the side whose turn it is. The mock
+#: could only ever produce an offer the audit itself SENT, so the whole turn the
+#: product is built around was unreachable by construction: the "choose the copy
+#: you are taking" tap, accept, decline and the revision counter all live behind
+#: `canAccept`, which is false on your own proposal. A journey that never reached
+#: that tap could not see a crash that lived there (owner report 2026-11-15).
+RECEIVED_TRANSACTION_ID = "11111111-2222-3333-4444-000000000002"
+
+#: The two copies the neighbour puts on the table: a POOL, so the receiver has a
+#: choice to make. One copy would hide the very control a pool exists for.
+RECEIVED_OFFERED = [
+    {"user_book_id": "b0000001-0000-0000-0000-000000000003",
+     "title": "Piranesi", "author": "Susanna Clarke", "cover_url": None},
+    {"user_book_id": "b0000001-0000-0000-0000-000000000004",
+     "title": "The Left Hand of Darkness", "author": "Ursula K. Le Guin",
+     "cover_url": None},
+]
+
+
+def received_offer_json(status: str = "REQUESTED",
+                        transaction_id: str = RECEIVED_TRANSACTION_ID) -> dict:
+    """An OPEN offer the audit reader RECEIVES, in the shape `OffersRepository`
+    decodes: the neighbour proposed, two copies are on the table, and it is this
+    reader's turn — so `canAccept` is true and the offered rows are selectable.
+    """
+    return {
+        "transaction_id": transaction_id,
+        "status": status,
+        "offer_version": 1,
+        "last_offered_by": OWNER_ID,
+        "lender_id": READER_ID,
+        "borrower_id": OWNER_ID,
+        "primary_book_id": "b0000001-0000-0000-0000-000000000002",
+        "my_user_id": READER_ID,
+        "is_mine": False,
+        "note": "Happy to swap for your Sapiens — pick whichever of these you like.",
+        "exchange_mode": "PERMANENT",
+        "duration_days": 21,
+        "wanted": {
+            "user_book_id": "b0000001-0000-0000-0000-000000000002",
+            "title": "Sapiens",
+            "author": "Yuval Noah Harari",
+            "cover_url": None,
+        },
+        "offered": [dict(book) for book in RECEIVED_OFFERED],
+        "counterpart": {"id": OWNER_ID, "username": "sneha_kora"},
+        "updated_at": "2026-11-12T09:05:00Z",
     }
 
 
