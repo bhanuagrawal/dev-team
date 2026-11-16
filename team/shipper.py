@@ -1,10 +1,11 @@
 """Shipper — generic. Version bump + whatsnew + commit + push origin main.
 CI (owned by the project, not this team) then delivers to the Play
-internal-testing track. Production promotion is human-only — this team
-structurally has no path to it. The ONE owner-facing release question it raises
-is "is this build a release candidate?": it is asked, recorded and shown, and
-nothing in the pipeline acts on the answer (promoting stays the owner's manual
-step in Play Console), so asking it never becomes a promotion request.
+internal-testing track. Production promotion is never a side effect of this
+path. The ONE owner-facing release question it raises is "is this build a
+release candidate?": it is asked, recorded and shown. The answer is not a
+launch request by itself — an app must be armed with `devteam autopromote --on`
+before the team executes a promotion automatically, and an `rc --no` vetoes
+that version.
 
 All project facts come from profile.json: version file, tag scheme, repo slug,
 whatsnew path (and whether the owner curates those notes by hand), and the

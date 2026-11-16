@@ -311,8 +311,9 @@ prints what the owner needs to USE the build — quoted verbatim by the banner:
   session that wrote the code (or answers itself if that session is gone), then
   records it with `cli.py rc <project> --version <v> --yes|--no --note "…"` — one
   line of why, stored per version in `state['release_candidates']`. The owner can
-  replace any call with `--owner`. Nothing acts on the verdict: there is still no
-  promotion path here, and it is never phrased as "should we promote it".
+  replace any call with `--owner`. The verdict is not a launch request by itself,
+  and the question is never phrased as "should we promote it": a build shipped to
+  `internal` still needs one of the two owner asks described in `AGENTS.md`.
 
 Every one of those blocks is printed by code on every outcome, so the banner
 cannot drop one by forgetting: a run that ships while the app has no long-term

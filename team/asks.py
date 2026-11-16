@@ -121,9 +121,11 @@ VETO: list[dict] = [
         "match": (r"\bpromot\w*\b.{0,40}\bproduction\b|"
                   r"\bproduction\b.{0,40}\bpromot\w*\b|\bpublic listing\b"),
         "why": ("promoting beyond internal testing happens only on the owner's "
-                "explicit word (`devteam promote … --requested-by \"<their words>\"`); "
-                "the agent never raises it, never treats it as a run's next step, and "
-                "never promotes as a side effect — report it as a fact, act only when asked"),
+                "explicit word (`devteam promote … --requested-by \"<their words>\"`) or "
+                "under a provision they recorded (`devteam autopromote --on`, executed by "
+                "the nightly); the agent never raises either, never treats it as a run's "
+                "next step, and never promotes as a side effect — report it as a fact, act "
+                "only when asked"),
     },
     {
         "id": "payment-instrument",

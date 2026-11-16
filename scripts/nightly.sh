@@ -98,6 +98,12 @@ fi
 # only ever the ones this run started (see team/emulator.py).
 python3 "$TEAM/cli.py" emulators "$PROJECT" >> "$TEAM/logs/launchd.log" 2>&1
 
+# The owner's standing provision (owner ask 2026-11-17): an app the owner armed
+# promotes its newest release candidate once CI has put it on the internal track.
+# A no-op for every app without the provision, and an explicit `rc --no` on the
+# version still vetoes it — this runs the recorded ask, it does not create one.
+python3 "$TEAM/cli.py" autopromote "$PROJECT" --run --yes >> "$TEAM/logs/launchd.log" 2>&1
+
 # staleness + CI reconciliation + issue filing (deterministic)
 python3 "$TEAM/cli.py" alarm "$PROJECT" >> "$TEAM/logs/launchd.log" 2>&1
 echo "=== nightly done $(date '+%F %T') ===" >> "$TEAM/logs/launchd.log"

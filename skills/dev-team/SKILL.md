@@ -181,13 +181,20 @@ memorise sections; follow the pointer.
   do not change either for them; propose instead. When in doubt whether a fix
   is generic enough, keep it out of team code and put it in the skill prose.
 - The ONLY delivery goal is CI → Play **internal testing** (the version-bump
-  push triggers the project's CI). Production promotion is human-only: no path
-  in this team, and never an owner ask or a filed issue — the owner promotes
-  manually in Play Console whenever they choose. The team DOES make one release
-  call and states it (owner directive 2026-10-24): **is this build a release
-  candidate?** — computed from the plan, told to the owner, never asked of them
-  (see `references/handover.md`). Stating it is not a promotion request and
-  must never be phrased as one.
+  push triggers the project's CI). Production promotion is the ONE act the team
+  performs, and only from a recorded owner ask: `devteam promote` for one named
+  version, or an app the owner armed with `devteam autopromote --on
+  --requested-by "<their words>"`, which the nightly executes for the newest
+  release candidate once CI has put it on `internal` — an explicit `rc --no`
+  vetoes that version. Never arm a provision yourself, and never treat a launch
+  as an owner ask or a filed issue. The team DOES make one release call and
+  states it (owner directive 2026-10-24): **is this build a release candidate?**
+  — computed from the plan, told to the owner, never asked of them (see
+  `references/handover.md`). Stating it is not an offer to promote and must never
+  be phrased as one. For an app the owner HAS armed, a shipped run is not done
+  until the delivered build is promoted: run `devteam autopromote <project>
+  --run --yes` once CI has put it on `internal` (the nightly runs the same
+  command; `--run` without `--yes` is a dry run).
 - **Release notes are a first-class deliverable, not a by-product.** They are
   what a user reads in the store, they are length-limited by the store (Play
   rejects a note over `profile['whatsnew_max_chars']`, default 500), and a
@@ -256,7 +263,9 @@ A run ends in EXACTLY ONE of these — never in silence:
 - ❓ **OWNER ASK** — the ONLY questions you ever ask are ones no agent can
   answer: a freeze lift/sign-off, a kill-switch flip, discard-vs-keep on user
   WIP. Production promotion is NOT one of them (see the delivery rule above) —
-  never ask it, never file it. **The release-candidate call is NOT an owner ask:
+  never ask it, never file it, never arm `devteam autopromote` on your own
+  initiative; the one standing form is an owner ask the owner records.
+  **The release-candidate call is NOT an owner ask:
   the LLM that made the change makes it and the owner is told** (owner directive
   2026-10-24) — it is part of the RELEASE HANDOVER, recorded with `devteam rc`
   (the owner can replace it with `--owner`). Even then: ask AFTER squeezing every

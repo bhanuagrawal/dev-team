@@ -67,9 +67,11 @@ by code (`record`) and quoted verbatim by the orchestrator:
      in `state['release_candidates']` (newest wins, so it cannot drift).
    **State the call in the run banner** — as a statement, not a question: the
    owner is told whether the build is a release candidate, never asked to guess.
-   **Nothing acts on the verdict**: there is still no promotion path in this
-   team, and the line is never phrased as "should we promote it" — promoting
-   beyond internal testing stays the owner's manual step in Play Console.
+   **The verdict is not a launch request**: a build on `internal` reaches
+   production only from a recorded owner ask (`devteam promote`, or an app the
+   owner armed with `devteam autopromote --on`). In an armed app this very call
+   is the veto — an `rc --no` stops the promotion — so never phrase the line as
+   "should we promote it", and never arm a provision yourself.
 
 ## When the owner hands over a SPEC (do this before planning it)
 A spec arrives as a document, not as a queue entry, and it is usually part-wrong

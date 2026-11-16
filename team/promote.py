@@ -1,4 +1,4 @@
-"""Promotion to production, on the owner's explicit word — never on its own.
+"""Promotion to production, on the owner's explicit word — or a recorded provision.
 
 WHY THIS EXISTS (owner directive 2026-11-05)
 -------------------------------------------
@@ -9,12 +9,23 @@ kardo" — because a launch is not a place where a UI detour helps him: every
 promotion meant opening Play Console, finding the track, typing a note, and
 pressing buttons he has already paid for someone else to press.
 
+THE STANDING FORM (owner ask 2026-11-17)
+----------------------------------------
+The owner can also say "after CI completes, always" for one app. That is a
+provision, not a looser rule: `team/autopromote.py` stores his words in the
+project profile and then calls THIS function for the newest release candidate
+once Play's internal track reads it back. Every guarantee below still holds —
+the version must already be on internal, the note must exist, and the record
+names the standing ask that caused it.
+
 WHAT STAYS TRUE
 ---------------
-Promotion is never a side effect. It is a verb, it is invoked on an explicit
-owner request, and it refuses to run on its own:
+Promotion is never a side effect of building. It is a verb, invoked on an
+explicit owner request (or a provision recorded from one), and it refuses to run
+on its own:
   * CI never calls it (the generated release workflow uploads to `internal` only);
-  * `release`, `record`, `loop` and the nightly never call it;
+  * `release`, `record`, `loop` and the nightly never call it — the nightly runs
+    `autopromote --run`, which does nothing for an app the owner never armed;
   * it requires `--yes` AND the owner's words (`--requested-by`), and both are
     recorded with the edit id, so "who asked for this launch" is never a guess;
   * it only promotes a version that is ALREADY on an internal track — an

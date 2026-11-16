@@ -7,7 +7,9 @@ workflow (team/templates/ci-release.yml) and renders it from the project's own
 `profile["ci"]` block, so a new app gets the same delivery path as the old ones
 and a project copy is never hand-edited.
 
-Nothing here can promote to production — by design, promotion is a human action.
+Nothing here can promote to production — the workflow ends at `internal`.
+Promotion is run by the team from the owner's ask (`team/promote.py`) or an
+app's recorded provision (`team/autopromote.py`), never by CI.
 """
 from __future__ import annotations
 

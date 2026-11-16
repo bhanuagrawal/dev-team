@@ -109,14 +109,16 @@ def file_asks(project: Path, log: RunLog, issues: list[dict]) -> None:
 
 
 # A release sitting on internal testing is the run's DELIVERABLE, never an open
-# question: production promotion is the owner's own manual step in Play Console
-# (standing decision, recorded in the profile of every project). The runbook has
+# question: production promotion is the owner's own act — one `devteam promote`
+# on their word, or a per-app provision they recorded once (`devteam
+# autopromote --on`, executed by the nightly). The runbook has
 # told the synthesizer for months never to file such an ask, and nothing checked
 # it — so the owner's tracker accumulated exactly those issues (2026-10-25: two
 # promotion asks closed as "must not exist"). This enforces the rule in code.
 # TITLES ONLY, deliberately: the body of a legitimate ask may discuss promotion
-# as a FACT ("promotion is human-only, so this does not ask for it") and must
-# never be rejected for saying so. It is a guard against the ask, not a topic ban.
+# as a FACT ("promotion is the owner's act, so this does not ask for it") and
+# must never be rejected for saying so. It is a guard against the ask, not a
+# topic ban.
 _PROMOTION_TITLE_RE = re.compile(
     r"\b(?:promot\w+|publish\w+)\b[^\n]{0,60}?"
     r"\b(?:production|play\s+store|unattended|pipeline|lineage)\b"
@@ -1172,7 +1174,8 @@ Rules:
   buildable work at all, your job is the ask: file the decision issue that
   would unlock one (e.g. a feature proposal for approval, a freeze lift, a
   scope subtraction) — never a "what should we do?" question. Production
-  promotion is NOT unlockable work: it is human-only (see the rule below).
+  promotion is NOT unlockable work: it is the owner's own act (see the rule
+  below), never planned work.
 - queue ordering = execution order; at most {max_queue} entries.
 - IMPACT REVIEW (required): signals.repo.current_queue is the queue already
   waiting to be built. Judge EVERY entry's fate before proposing. If your plan
@@ -1235,8 +1238,9 @@ Rules:
   disabled features, analytics instrumentation sign-off, a freeze lift,
   an owner call on the next milestone when the active one is met).
   PRODUCTION PROMOTION IS NEVER SUCH A DECISION: promoting a built release
-  beyond internal testing is human-only and the owner's own manual step in Play
-  Console. Never ask about it, never file an issue about it, never queue work
+  beyond internal testing is the owner's own act — one `devteam promote` on
+  their word, or a provision they recorded once for that app. Never ask about
+  it, never file an issue about it, never queue work
   for it — a release sitting on internal testing is the run's DELIVERABLE and
   may be reported as a fact, never as an open question.
   NEVER re-file or re-raise anything listed in
@@ -1555,16 +1559,16 @@ def _validate(result: dict, research: dict | None = None) -> str | None:
     if not isinstance(result.get("off_goal", []), list):
         return "'off_goal' must be a list"
     # The runbook's one PERMANENT prohibition, enforced instead of merely stated:
-    # an owner ask must never be a production promotion (human-only, the owner's
-    # own manual step) — see _PROMOTION_TITLE_RE.
+    # an owner ask must never be a production promotion (the owner's own act —
+    # one named launch or a provision they recorded) — see _PROMOTION_TITLE_RE.
     for iss in result.get("issues_to_file", []) or []:
         title = (iss.get("title") or "") if isinstance(iss, dict) else ""
         if _PROMOTION_TITLE_RE.search(title):
             return ("issues_to_file asks for production promotion/publishing — "
-                    f"'{title[:80]}'. That is human-only and permanently out of "
-                    "scope: the team never raises it as an owner ask and never "
-                    "files an issue about it. Report the build on internal testing "
-                    "as a FACT and drop the ask")
+                    f"'{title[:80]}'. That is the owner's own act and permanently "
+                    "out of scope: the team never raises it as an owner ask and "
+                    "never files an issue about it. Report the build on internal "
+                    "testing as a FACT and drop the ask")
     return None
 
 

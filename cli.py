@@ -2225,6 +2225,14 @@ def cmd_status(args: argparse.Namespace) -> None:
         else:
             print(f"last release: v{rel} — release-candidate call not recorded yet "
                   f"(`devteam rc {project.name} --yes|--no` records the making agent's call)")
+    # The owner can make promotion a standing consequence of a delivered release
+    # candidate instead of a per-launch word. An armed app is a fact the next
+    # agent must see, because it is the one place the team ships by itself.
+    try:
+        from team import autopromote as autopromote_mod
+        print(autopromote_mod.line(project))
+    except Exception:
+        pass
     r = subprocess.run(["git", "log", "--oneline", "-1"], cwd=project,
                        capture_output=True, text=True)
     print(f"local HEAD: {r.stdout.strip()}")
@@ -4331,6 +4339,93 @@ def cmd_promote(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_autopromote(args: argparse.Namespace) -> int:
+    """The owner's standing ask, recorded once per app — and then executed.
+
+    Three jobs, one verb:
+      * `--on` / `--off` write the provision (`.pipeline/profile.json` →
+        `promote.after_ci`), `--on` only with the owner's own words;
+      * no flags prints the state of the provision;
+      * `--run` executes it now: newest shipped version, internal-track proof
+        that CI delivered, an `rc --no` veto respected, then the ordinary
+        `promote` path. The nightly runs the same command, so "after CI
+        completes" does not depend on anyone remembering.
+    """
+    project = resolve_project(args.project)
+    from team import autopromote
+
+    if args.on and args.off:
+        raise SystemExit("pass exactly one of --on / --off")
+    if args.on or args.off:
+        block = autopromote.provision(project, on=bool(args.on),
+                                      requested_by=args.requested_by,
+                                      note=args.note)
+        if args.on:
+            print(f"autopromote: {project.name} is PROVISIONED — after CI puts a build on "
+                  f"the internal track, the newest release candidate goes to production "
+                  f"(owner: \"{block.get('requested_by')}\")")
+            print(f"  runs from: the nightly, and `devteam autopromote {project.name} --run --yes`")
+            print(f"  holds on:  an explicit `devteam rc {project.name} --no` for that version")
+            print("  recorded:  .pipeline/profile.json (project state, ignored by git — "
+                  "this machine's team runs from it)")
+        else:
+            print(f"autopromote: {project.name} is NOT provisioned — promotion is manual again")
+        if args.json:
+            print(json.dumps(block, indent=2))
+        return 0
+
+    if not args.run:
+        print(autopromote.line(project))
+        block = autopromote.provision_of(project)
+        if block.get("after_ci"):
+            state = state_of(project)
+            target = autopromote.candidate(state)
+            if target:
+                call = autopromote.rc_call(state, target)
+                verdict = ("called NOT a release candidate — VETOED"
+                           if call is not None and not call.get("rc")
+                           else "release candidate" if call is not None
+                           else "no rc call recorded — provision decides")
+                print(f"  candidate: v{target} — {verdict}")
+            else:
+                print("  candidate: none — the ledger names no shipped version yet")
+        return 0
+
+    res = autopromote.run(project, version=args.version, yes=bool(args.yes), log=print)
+    status = str(res.get("status") or "")
+    if args.json:
+        print(json.dumps(res, indent=2))
+    if status == "not-provisioned":
+        print(f"AUTOPROMOTE: not provisioned — {res.get('error')}")
+        return 1
+    if status == "nothing-to-promote":
+        print(f"AUTOPROMOTE: nothing to promote — {res.get('error')}")
+        return 0
+    if status == "already-promoted":
+        print(f"AUTOPROMOTE: v{res.get('version')} is already on production — nothing sent")
+        return 0
+    if status == "held":
+        print(f"AUTOPROMOTE: HELD — {res.get('error')}")
+        return 0
+    if status in ("refused", "ERROR"):
+        print(f"AUTOPROMOTE: {status} — {res.get('error')}")
+        return 1
+    if status == "DRY-RUN":
+        print(f"AUTOPROMOTE: dry run — v{res.get('version')} would go to production "
+              f"({', '.join(res.get('versionCodes') or [])}); re-run with --yes")
+        return 0
+    print(f"AUTOPROMOTE: {status} — v{res.get('version')} "
+          f"({', '.join(res.get('versionCodes') or [])})")
+    if res.get("review_pending"):
+        print("  ⚠ Play held the automatic review (open policy issue) — send it from "
+              "Play Console → Publishing overview")
+    elif res.get("managed_publishing"):
+        print("  ⚠ read back as DRAFT — managed publishing is ON: press Publish in Play Console")
+    else:
+        print("  → Google now reviews it; the console's Publishing overview shows the verdict")
+    return 0
+
+
 def _package_of(project: Path) -> str:
     profile = profile_of(project)
     for conn in (profile.get("connections") or {}).values():
@@ -6067,6 +6162,27 @@ def main() -> None:
                           "production track reads back holding this build")
     prm.add_argument("--json", action="store_true", help="machine-readable result")
     prm.set_defaults(fn=cmd_promote)
+    apm = sub.add_parser("autopromote",
+                         help="provision an app to promote its newest release candidate to "
+                              "production once CI has put it on internal (OWNER ONLY); "
+                              "--run executes it now, and the nightly does too")
+    apm.add_argument("project")
+    apm.add_argument("--on", action="store_true",
+                     help="arm the provision (requires --requested-by)")
+    apm.add_argument("--off", action="store_true",
+                     help="disarm it — promotion goes back to being manual")
+    apm.add_argument("--requested-by", default="",
+                     help="the owner's own words asking for this standing promotion — "
+                          "stored with the flag and with every launch it causes")
+    apm.add_argument("--note", default="", help="one line of context stored with the change")
+    apm.add_argument("--run", action="store_true",
+                     help="execute the provision now (what the nightly runs)")
+    apm.add_argument("--version", default="",
+                     help="with --run: name the version instead of taking the newest shipped one")
+    apm.add_argument("--yes", action="store_true",
+                     help="with --run: actually commit the production release (dry run without it)")
+    apm.add_argument("--json", action="store_true", help="machine-readable result")
+    apm.set_defaults(fn=cmd_autopromote)
     ads_p = sub.add_parser("ads",
                            help="paid acquisition: plan (docs/ads-plan.json) then create — "
                                 "dry run unless --commit, PAUSED unless --enable")

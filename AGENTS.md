@@ -31,10 +31,14 @@ missing kind/milestone) answers before anything executes.
 2. **Read project code from the delivery ref, not the checkout.** `origin/main` is
    what CI ships; the checkout drifts (68 commits behind, twice producing a
    confident wrong answer). `devteam status` prints `DELIVERY:` on every run.
-3. **Production is a verb, not a side effect.** `devteam promote <project>
-   --version <v> --requested-by "<the owner's words>" --yes` — only when the owner
-   asked for that launch in this conversation. Never by `release`, `record`,
-   `loop`, the nightly, or CI; the agent never raises it.
+3. **Production is a verb — and only the owner's word makes it one.**
+   `devteam promote <project> --version <v> --requested-by "<the owner's words>"
+   --yes` launches one build. When the owner asks the team to do it every time,
+   `devteam autopromote <project> --on --requested-by "<their words>"` records a
+   per-app provision: the newest release candidate is promoted once CI has put
+   it on the internal track, and an explicit `rc --no` on that version vetoes it.
+   Never by `release`, `record`, `loop` or CI, and never raised by an agent
+   without one of those two asks.
 4. **Nothing remains uncommitted, ever.** Every change ends in a commit on a
    pushed ref before your turn ends. "Clean tree" is not the test — **"does this
    exist anywhere but this disk"** is. Work you did not write (the owner's WIP) is
