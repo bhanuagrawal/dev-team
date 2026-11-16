@@ -47,8 +47,15 @@ def check(project, log) -> int:
         problems.append("Pipeline has never succeeded while the queue has work remaining. "
                         "Check dev-team/logs/ for failing runs.")
 
-    streak = sum(1 for r in reversed(state.get("runs", []))
-                 if r.get("result") in ("failed", "error"))
+    # A TRAILING streak, not a lifetime count (2026-11-17): the sum used to keep
+    # adding every failed run in the ledger's history, so one project with three
+    # old billing-blocked attempts alarmed "3 consecutive failed runs" forever —
+    # including immediately after a shipped run. The first success ends the streak.
+    streak = 0
+    for r in reversed(state.get("runs", [])):
+        if r.get("result") not in ("failed", "error"):
+            break
+        streak += 1
     if streak >= MAX_CONSECUTIVE_FAILURES:
         problems.append(f"{streak} consecutive failed runs — inspect dev-team/logs "
                         "before assuming the tasks are fine.")
