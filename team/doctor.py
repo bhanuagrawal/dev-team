@@ -435,15 +435,20 @@ def run_doctor(project: Path, log) -> dict:
     # `ci --write` silently rewrites it — so the drift is invisible without this.
     try:
         from . import ci as ci_mod
-        target = project / ci_mod.WORKFLOW_REL
+        from .core import read_delivery_file
+        # THE DELIVERY REF, NOT THE CHECKOUT. CI runs the workflow that is on
+        # `origin/main`; the working tree drifts behind it by design (68 commits
+        # once produced a confident wrong answer), and gating on a stale copy
+        # reports drift that no commit can fix.
+        delivered = read_delivery_file(project, ci_mod.WORKFLOW_REL)
         template_problems = ci_mod.self_check()
         template_ok = not template_problems
-        if not target.is_file():
+        if delivered is None:
             same = False
             checks = [("the canonical workflow exists", False,
                        f"run: devteam ci {project.name} --write")]
         else:
-            same = target.read_text() == ci_mod.render(project)
+            same = delivered == ci_mod.render(project)
             checks = [("the workflow matches the team template" if same else
                        "the workflow has DRIFTED from the team template", same,
                        f"run: devteam ci {project.name} --write (the project copy is generated, "
