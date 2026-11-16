@@ -1208,8 +1208,10 @@ def cmd_release(args: argparse.Namespace) -> int:
             "version": pending.get("version"),
             "reason": pending.get("reason"),
             "next": ("fix GitHub Billing & plans and re-run that CI run "
-                     "(`gh run rerun <id> --failed`), or hand testers the debug "
-                     "build with `devteam local-delivery <project>`"),
+                     "(`gh run rerun <id> --failed`), or deliver the same commit "
+                     "without GitHub (a self-hosted runner running that workflow, "
+                     "or `devteam local-release <project>`); testers can meanwhile "
+                     "get the debug build with `devteam local-delivery <project>`"),
         }, indent=2))
         log(f"release refused: v{pending.get('version')} is released but not delivered "
             f"({pending.get('reason')}) — not allocating another version on top of it")

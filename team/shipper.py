@@ -841,13 +841,45 @@ def should_deliver_locally(project: Path, ci: dict | None,
     return (blocked, why)
 
 
-def pending_delivery(project: Path, log: RunLog | None = None) -> dict | None:
-    """The last released version, WHEN ITS CI RUN NEVER STARTED FOR BILLING.
+def version_code_in(text: str) -> int | None:
+    """The versionCode literal a Gradle version file carries, or None.
 
-    Derived from git and GitHub — never from remembered state — so it cannot
-    outlive the condition it describes: the moment that run is green the answer
-    is None and the next release proceeds normally. A red run for any OTHER
-    reason is not returned: that is an ordinary failure to fix and re-release.
+    The SAME reading the CI template does, so the pipeline and the workflow
+    cannot disagree about which build a commit describes: the last standalone
+    number on a `versionCode` line, ignoring digits inside identifiers
+    (`versionCodeOverride`, `minSdk`) and the other terms of an expression. A
+    file that mentions `versionCode` on an earlier line without a literal (an
+    override expression, a comment) does not hide the assignment below it.
+    """
+    codes: list[str] = []
+    for line in text.splitlines():
+        if "versionCode" not in line:
+            continue
+        codes += re.findall(r"(?<![\w.])(\d+)(?![\w.])", line)
+    return int(codes[-1]) if codes else None
+
+
+def version_code_at(project: Path, sha: str) -> int | None:
+    """The versionCode the COMMIT `sha` stamped, or None when it cannot be read.
+
+    Read from the commit, not the working tree: the whole point is to ask what
+    the tagged release says, and a checkout may have moved on (or be dirty).
+    """
+    profile = profile_of(project)
+    r = git(["show", f"{sha}:{profile['version_file']}"], cwd=project)
+    if r.returncode != 0:
+        return None
+    return version_code_in(r.stdout or "")
+
+
+def pending_delivery(project: Path, log: RunLog | None = None) -> dict | None:
+    """The last released version, WHEN IT IS NEITHER ON PLAY NOR DELIVERED BY CI.
+
+    Derived from the store, git and GitHub — never from remembered state — so it
+    cannot outlive the condition it describes: the moment that version is
+    delivered the answer is None and the next release proceeds normally. A red
+    run for any OTHER reason is not returned: that is an ordinary failure to fix
+    and re-release.
     """
     from . import local_delivery
     profile = profile_of(project)
@@ -858,6 +890,14 @@ def pending_delivery(project: Path, log: RunLog | None = None) -> dict | None:
     sha = git(["rev-parse", f"{tag}^{{commit}}"], cwd=project).stdout.strip()
     if not sha:
         return None
+    # THE STORE IS THE AUTHORITY when we are about to refuse. A version Play
+    # already holds is delivered no matter WHICH runner carried it: a
+    # self-hosted fallback, a re-run, or an upload made outside CI. Keying only
+    # on "a green run for the tag's commit" left a delivered version blocking the
+    # next release forever — observed 2026-11-16: GitHub refused every hosted job
+    # for billing, the stranded v1.0.71 was uploaded to `internal` from the
+    # owner's Mac, and Play reported versionCode 10113 while this said "pending".
+    # Asked only here, so the ordinary green path never pays for a store call.
     for entry in _ci_runs(project, profile.get("repo_slug", ""), _workflow(profile)):
         if str(entry.get("headSha") or "") != sha:
             continue
@@ -865,10 +905,18 @@ def pending_delivery(project: Path, log: RunLog | None = None) -> dict | None:
             return None
         rid = str(entry.get("databaseId") or "")
         blocked, why = local_delivery.billing_blocked(project, rid, log)
-        if blocked:
-            return {"version": latest["version"], "run_id": rid, "commit": sha,
-                    "reason": "github_actions_billing", "evidence": why}
-        return None
+        if not blocked:
+            return None
+        code = version_code_at(project, sha)
+        if code:
+            floor, where = play_max_version_code(project)
+            if floor >= code:
+                if log:
+                    log(f"v{latest['version']} is already on Play (versionCode {code}, "
+                        f"store at {floor} — {where}) — nothing pending")
+                return None
+        return {"version": latest["version"], "run_id": rid, "commit": sha,
+                "reason": "github_actions_billing", "evidence": why}
     return None
 
 
