@@ -591,6 +591,26 @@ def design_gate(project: Path, worktree: Path, spec: dict | None,
     title = str((entry or {}).get("title") or screen.get("title") or "").strip()
     norm_files = {f.replace("\\", "/").lstrip("./") for f in files}
 
+    # A task may cover SEVERAL situations. When it does, the spec names every
+    # surface it must design (`context.design.screens_required`), because one
+    # recorded answer can only point at one screen: without this, a task that
+    # promised four designs shipped with one export and the gap was invisible.
+    required = [str(x) for x in ((spec.get("context") or {}).get("design") or {})
+                .get("screens_required") or [] if str(x).strip()]
+    if required:
+        missing = []
+        for rid in required:
+            m_entry = designer.find_manifest_screen(m, {"id": rid})
+            m_png, m_html, _ = designer.snapshot_paths(worktree, {"id": rid}, m)
+            if not (m_png and m_html and m_entry):
+                missing.append(rid)
+        if missing:
+            return False, (
+                "DESIGN SET INCOMPLETE — this task must design one screen per situation; "
+                f"no exported snapshot + manifest row for: {', '.join(missing)}. Each needs "
+                "docs/stitch/screens/<id>/index.html + screen.png and a row in "
+                "docs/stitch/manifest.json, exported in this change.")
+
     if decision == "new_screen":
         if not (png and html and entry):
             return False, (
