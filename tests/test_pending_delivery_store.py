@@ -71,7 +71,7 @@ class PendingDeliveryTest(unittest.TestCase):
              mock.patch.object(shipper, "play_max_version_code",
                                return_value=(floor, "pkg on Play")), \
              mock.patch.object(shipper, "_ci_runs", return_value=runs), \
-             mock.patch("team.local_delivery.billing_blocked",
+             mock.patch.object(shipper, "billing_blocked",
                         return_value=(blocked, "recent account payments have failed")):
             return shipper.pending_delivery(Path("/project"))
 

@@ -619,32 +619,35 @@ def run_doctor(project: Path, log) -> dict:
     except Exception as e:  # a check must never hide the report
         log(f"doctor ux-flow: could not check ({e})")
 
-    # TESTER CHANNEL — the fallback a billed-out CI run depends on.
+    # TESTER CHANNEL — the QA job inside the release workflow.
     #
-    # `release` hands testers a DEBUG build through Firebase App Distribution when
-    # GitHub refuses to start the jobs, but only when the profile declares
-    # `ci.firebase`. A project without one builds an apk and stops, so every app
-    # that ships through CI should carry the target. WARN, never block: Play
-    # delivery is unaffected, and a project may legitimately have no testers.
+    # The same run that ships the AAB to Play also ships a DEBUG apk to Firebase
+    # App Distribution, but only when the profile declares `ci.firebase` (that
+    # fact decides whether the job is rendered at all). A project without one
+    # builds the apk as a workflow artifact and notifies nobody. WARN, never
+    # block: Play delivery is unaffected, and a project may legitimately have no
+    # testers.
     try:
-        from . import local_delivery
-        fb = local_delivery.firebase_config(profile)
+        from .ci import firebase_config
+        fb = firebase_config(profile)
         if fb:
             report["tester-channel"] = {"status": "ready", "blocked": [],
                                         "checks_passed": 1,
                                         "note": f"app {fb['app_id']} groups {fb['groups'] or '—'}"}
-            log(f"doctor tester-channel: ready — debug builds fall back to Firebase "
-                f"app {fb['app_id']} groups {fb['groups'] or '—'}")
+            log(f"doctor tester-channel: ready — the release run ships the debug apk "
+                f"to Firebase app {fb['app_id']} groups {fb['groups'] or '—'}")
         else:
             report["tester-channel"] = {
                 "status": "warn", "blocked": [], "checks_passed": 0,
-                "note": ("no ci.firebase declared: a GitHub-billed-out release can "
-                         "build a debug apk but has nowhere to send it — set it with "
-                         f"`devteam firebase {project.name} --app-id <id> --groups qa`"),
+                "note": ("no ci.firebase declared: the QA job is not rendered, so "
+                         "testers are never notified — set it with "
+                         f"`devteam firebase {project.name} --app-id <id> --groups qa`, "
+                         f"then `devteam ci {project.name} --write`"),
             }
-            log("doctor tester-channel: WARN — no ci.firebase app declared; a "
-                "billed-out release builds an apk and stops. Run: devteam firebase "
-                f"{project.name} --app-id <id> --groups qa")
+            log("doctor tester-channel: WARN — no ci.firebase app declared; the debug "
+                "build stays a workflow artifact and nobody is notified. Run: devteam "
+                f"firebase {project.name} --app-id <id> --groups qa, then devteam ci "
+                f"{project.name} --write")
     except Exception as e:  # a check must never hide the report
         log(f"doctor tester-channel: could not check ({e})")
 

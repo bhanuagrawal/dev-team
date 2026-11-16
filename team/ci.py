@@ -22,14 +22,14 @@ WORKFLOW_REL = ".github/workflows/release.yml"
 # Bumped whenever the rendered text changes meaning (not formatting). A project's
 # copy carries it in its header, so a reader can tell which generation a workflow
 # came from even without running doctor.
-TEMPLATE_VERSION = 3
+TEMPLATE_VERSION = 4
 
 KNOWN_PLACEHOLDERS = (
     "__BUNDLE_TASKS__", "__RELEASE_FILES__", "__PACKAGE_NAME__",
     "__WHATSNEW_FILE__", "__WHATSNEW_DIR__", "__WHATSNEW_LIMIT__",
     "__VERSION_FILE__",
-    "__MODULE__", "__DEBUG_APK__", "__FIREBASE_APP_ID__", "__FIREBASE_GROUPS__",
-    "__RUNS_ON_LINE__",
+    "__DEBUG_TASK__", "__DEBUG_APK__", "__FIREBASE_APP_ID__",
+    "__FIREBASE_GROUPS__", "__RUNS_ON_LINE__",
 )
 
 # The default the selector falls back to, i.e. what every project used before
@@ -64,9 +64,36 @@ def ci_config(project: Path) -> dict:
     ci.setdefault("whatsnew_limit", profile.get("whatsnew_max_chars") or 500)
     ci.setdefault("version_file", profile.get("version_file") or "app/build.gradle")
     ci.setdefault("debug_apk", f"{module}/build/outputs/apk/debug/{module}-debug.apk")
+    # A flavored module has no plain `assembleDebug`; the profile names the exact
+    # task, so the QA job builds what the testers install instead of failing on a
+    # task that does not exist.
+    ci.setdefault("debug_task", f":{module}:assembleDebug")
     if not ci.get("package_name"):
         ci["package_name"] = profile.get("package_name") or profile.get("application_id") or ""
     return ci
+
+
+def firebase_config(profile: dict) -> dict | None:
+    """The declared App Distribution target, or None when the project never set
+    one up. `app_id` is required; the group is optional (a distribute with no
+    groups uploads to the console only). This is what decides whether the QA job
+    is rendered at all, so it lives with the renderer rather than with a delivery
+    path."""
+    ci = profile.get("ci") or {}
+    fb = ci.get("firebase") or {}
+    app_id = str(fb.get("app_id") or "").strip()
+    if not app_id:
+        return None
+    project_id = str(
+        fb.get("project_id")
+        or (profile.get("connections") or {}).get("firebase", {}).get("project_id")
+        or ""
+    ).strip()
+    return {
+        "app_id": app_id,
+        "groups": str(fb.get("groups") or "").strip(),
+        "project_id": project_id,
+    }
 
 
 def runs_on_line(ci: dict) -> str:
@@ -119,7 +146,7 @@ def render(project: Path) -> str:
         ("whatsnew_dir", "__WHATSNEW_DIR__"),
         ("whatsnew_limit", "__WHATSNEW_LIMIT__"),
         ("version_file", "__VERSION_FILE__"),
-        ("module", "__MODULE__"),
+        ("debug_task", "__DEBUG_TASK__"),
         ("debug_apk", "__DEBUG_APK__"),
         ("firebase_app_id", "__FIREBASE_APP_ID__"),
         ("firebase_groups", "__FIREBASE_GROUPS__"),
@@ -173,6 +200,18 @@ def self_check() -> list[str]:
     if re.search(r"sed -i (?!\.)", text):
         problems.append("the template uses GNU `sed -i` without a backup suffix, which "
                         "macOS misreads as a suffix — use `sed -i.bak`")
+    # The QA upload must be a `run:` step. A container action cannot run on a
+    # macOS runner, and `continue-on-error` turns that refusal into a green step —
+    # the exact silent no-op that reported v1.0.72-rc.2 delivered while App
+    # Distribution received nothing (2026-11-16). The CLI is runner-agnostic and
+    # its exit code is the verdict.
+    if "uses: wzieba/Firebase-Distribution-Github-Action" in text:
+        problems.append("the QA channel uploads with a Docker container action, which "
+                        "GitHub refuses on a macOS runner and `continue-on-error` hides — "
+                        "use `npx firebase-tools appdistribution:distribute` in a run: step")
+    if "appdistribution:distribute" not in text:
+        problems.append("the QA channel has no firebase CLI upload step "
+                        "(`appdistribution:distribute`)")
     # The selector is only honest if the input it reads exists. The template
     # itself carries the placeholder (the expression is rendered per project), so
     # the invariant is checked there.

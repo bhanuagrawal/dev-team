@@ -237,13 +237,13 @@ commands, in order, with the reasoning and the failure branches.
    - **A red run that is not a code failure.** When GitHub refuses to START the
      jobs — the account's Actions spending limit is reached or a payment failed —
      `release` detects it from the run's own annotation (`recent account payments
-     have failed` / `spending limit needs to be increased`), and if the profile
-     declares `ci.firebase` it builds the DEBUG apk locally and sends it to that
-     App Distribution group (`devteam local-delivery <project>` is the on-demand
-     form). That is a testers-only channel: the release still reports NOT
-     delivered and Play internal testing is unchanged, so the run records `failed`
-     with the billing ask — the fix is the owner's Billing & plans, never a
-     retry. Say both facts in the banner.
+     have failed` / `spending limit needs to be increased`) and re-dispatches the
+     SAME workflow on the machine the project declares (`ci.self_hosted`). That
+     run delivers BOTH artifacts: the signed AAB to Play internal testing and the
+     debug apk to the `ci.firebase` group. With no machine declared the release
+     stays NOT delivered and the run records `failed` with the billing ask — the
+     fix is the owner's Billing & plans, never a retry. Say both facts in the
+     banner.
    - READ "NOTICED BUT NOT FIXED" NOTES — THEY ARE THE
      PIPELINE'S ONLY FEED-FORWARD. Note unrelated defects rather than fixing
      them out-of-scope. Before recording the run, take each note and either

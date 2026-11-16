@@ -5,6 +5,17 @@
 # Do not hand-edit a project's copy — change this template, then re-render all
 # projects.
 #
+# TEMPLATE_VERSION 4 — the QA channel uploads with the firebase CLI, not a Docker
+# action. `wzieba/Firebase-Distribution-Github-Action` is a CONTAINER action and
+# GitHub refuses those on a macOS self-hosted runner ("Container action is only
+# supported on Linux"); combined with `continue-on-error` the job stayed green and
+# the run was reported delivered while App Distribution received nothing
+# (observed 2026-11-16: v1.0.72-rc.2 reached Play internal and never reached
+# testers). A `run:` step has no such limitation and its exit code is the real
+# verdict, on ubuntu-latest and on the owner's Mac alike. The debug task is also a
+# profile fact now: a flavored module has no `assembleDebug` (ZenList builds
+# zenlist/zencoach), and the hardcoded task had no way to say so.
+#
 # TEMPLATE_VERSION 3 — a project that declares a self-hosted runner can build on
 # it, and `devteam release` uses that when GitHub refuses the hosted jobs.
 #
@@ -268,10 +279,12 @@ jobs:
 
       # Debug builds are signed by the debug keystore Gradle generates on the
       # runner: no release keystore, no secrets, and nothing that can be published.
+      # The task is a profile fact (`ci.debug_task`), because a flavored module has
+      # no plain `assembleDebug`.
       - name: Build debug APK
         run: |
           sed -i.bak 's/networkTimeout=.*/networkTimeout=120000/' gradle/wrapper/gradle-wrapper.properties 2>/dev/null || true
-          ./gradlew :__MODULE__:assembleDebug -Dorg.gradle.internal.http.socketTimeout=120000 -Dorg.gradle.internal.http.connectionTimeout=120000
+          ./gradlew __DEBUG_TASK__ -Dorg.gradle.internal.http.socketTimeout=120000 -Dorg.gradle.internal.http.connectionTimeout=120000
 
       # The artifact name is `debug-<ref>`, and a branch ref contains `/`
       # (`dt/runner-proof`), which GitHub rejects as an artifact name — it failed
@@ -286,20 +299,40 @@ jobs:
           name: debug-${{ env.REF_SAFE }}
           path: __DEBUG_APK__
 
+      # THE UPLOAD IS A `run:` STEP, NOT AN ACTION. Container actions cannot run on
+      # a macOS runner, and a swallowed failure there reads as a delivered build.
+      # `npx firebase-tools` is the same command the team uses by hand, works on
+      # every runner, and returns the upload's real exit code.
       - name: Share with testers (Firebase App Distribution)
         id: firebase
         if: env.FIREBASE_JSON != ''
         continue-on-error: true
-        uses: wzieba/Firebase-Distribution-Github-Action@v1
-        with:
-          appId: __FIREBASE_APP_ID__
-          serviceCredentialsFileContent: ${{ env.FIREBASE_JSON }}
-          groups: __FIREBASE_GROUPS__
-          file: __DEBUG_APK__
-          releaseNotes: |
-            Debug build ${{ github.ref_name }} — test-only affordances enabled
-            (email/password sign-in, seeded readers, mock backend).
-            Commit ${{ github.sha }}.
+        env:
+          GOOGLE_APPLICATION_CREDENTIALS: ${{ runner.temp }}/firebase-service-account.json
+        run: |
+          printf '%s' "$FIREBASE_JSON" > "$GOOGLE_APPLICATION_CREDENTIALS"
+          npx --yes firebase-tools@15 appdistribution:distribute "__DEBUG_APK__" \
+            --app "__FIREBASE_APP_ID__" \
+            --groups "__FIREBASE_GROUPS__" \
+            --release-notes "Debug build $GITHUB_REF_NAME — test-only affordances enabled
+          (email/password sign-in, seeded readers, mock backend).
+          Commit $GITHUB_SHA."
+
+      # A green run is not proof testers were notified. When the upload step fails,
+      # say so in the run itself: the AAB may already be on Play, and the only
+      # thing missing is the build the testers install.
+      - name: Name a distribution that did not happen
+        if: env.FIREBASE_JSON != '' && steps.firebase.outcome == 'failure'
+        run: |
+          echo "::error::Firebase App Distribution did NOT receive this build — testers were NOT notified."
+          cat >> "$GITHUB_STEP_SUMMARY" <<'EOF'
+          ### Testers were NOT notified
+          The app was built (artifact `debug-${{ env.REF_SAFE }}`) but the upload to
+          Firebase App Distribution failed. The release may still have reached Play;
+          this channel did not. Re-run this job after fixing the cause, or send the
+          artifact by hand:
+          `npx firebase-tools appdistribution:distribute <apk> --app <app-id> --groups <group>`
+          EOF
 
       - name: Say what a missing credential means
         if: env.FIREBASE_JSON == ''

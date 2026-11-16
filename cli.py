@@ -1257,10 +1257,10 @@ def cmd_release(args: argparse.Namespace) -> int:
             "version": pending.get("version"),
             "reason": pending.get("reason"),
             "next": ("fix GitHub Billing & plans and re-run that CI run "
-                     "(`gh run rerun <id> --failed`), or deliver the same commit "
-                     "without GitHub (a self-hosted runner running that workflow, "
-                     "or `devteam local-release <project>`); testers can meanwhile "
-                     "get the debug build with `devteam local-delivery <project>`"),
+                     "(`gh run rerun <id> --failed`), or declare a machine with "
+                     "`devteam runner <project> --labels ...` so the SAME workflow "
+                     "delivers from it (Play and the Firebase tester build are both "
+                     "in that one run)"),
         }, indent=2))
         log(f"release refused: v{pending.get('version')} is released but not delivered "
             f"({pending.get('reason')}) — not allocating another version on top of it")
@@ -1390,13 +1390,11 @@ def cmd_release(args: argparse.Namespace) -> int:
 
     res = shipper.push_and_deliver(project, worktree, task, name, log, code=code)
     print(json.dumps(res, indent=2))
-    if res.get("local_delivery"):
-        from team import local_delivery
-        print(local_delivery.summary_line(res["local_delivery"]))
     if res.get("ci_blocked_by_billing"):
         print("CI BLOCKED BY BILLING — GitHub Actions refused to start the jobs, so "
               "Play internal testing was NOT updated. Fix Billing & plans (spending "
-              "limit / payment) and re-run the release; testers have the debug build.")
+              "limit / payment) and re-run the release. The tester build rides the "
+              "same workflow's QA job, so it is missing too until that job runs.")
     return 0 if res.get("delivered") else 1
 
 
@@ -2296,43 +2294,18 @@ def cmd_poll(args: argparse.Namespace) -> None:
     print("\n".join(lines[-args.tail:]))
 
 
-def cmd_local_delivery(args: argparse.Namespace) -> int:
-    """Deliver a DEBUG build by hand when CI cannot start.
-
-    The automatic path is inside `release` (`shipper.push_and_deliver` calls the
-    same module when the red run names GitHub Actions billing). This verb is the
-    on-demand form — same code, same narrow claim: testers get an apk, Play does
-    not change.
-    """
-    from team import local_delivery
-
-    project = resolve_project(args.project)
-    log = RunLog(project, "local-delivery-" + today())
-    version = str(args.version or "").strip()
-    if not version:
-        from team import shipper
-        latest = shipper.remote_latest_release(project)
-        version = "dev" if not latest else str(latest.get("version") or "dev")
-    tree = Path(args.worktree).expanduser().resolve() if getattr(args, "worktree", None) else None
-    result = local_delivery.deliver(
-        project, log, version=version, reason=str(args.reason or ""),
-        notes_extra=str(args.notes or ""),
-        distribute=not args.no_distribute, dry_run=args.dry_run, tree=tree,
-    )
-    print(json.dumps(result, indent=2))
-    print(local_delivery.summary_line(result))
-    return 0 if (result.get("dry_run") or result.get("apk")) else 1
-
-
 def cmd_firebase(args: argparse.Namespace) -> int:
-    """Declare an app's Firebase App Distribution target, so `local-delivery` has
-    somewhere to put a debug build when CI cannot start.
+    """Declare an app's Firebase App Distribution target — the QA channel the
+    release workflow ships the DEBUG apk to.
 
     This is a CONFIG fact with no other owner: the profile is written by the team
     (`firebase` here, `adapt` elsewhere), never by hand. The app id is the value
     Firebase Console shows for a registered Android app — the registered package
     must equal the profile's `ci.package_name`, or App Distribution refuses the
     apk with a package mismatch, so that is checked before anything is written.
+
+    It also decides whether the QA job is RENDERED at all: `devteam ci <project>
+    --write` omits it for a project with no `ci.firebase`.
     """
     from team.core import load_json, save_json
 
@@ -2371,7 +2344,8 @@ def cmd_firebase(args: argparse.Namespace) -> int:
           f"{', project ' + conn.get('project_id', '') if conn.get('project_id') else ''}")
     if package:
         print(f"  registered package must be {package} — App Distribution refuses any other")
-    print(f"  test now: devteam local-delivery {project.name} --dry-run")
+    print(f"  render it into CI now: devteam ci {project.name} --write "
+          "(adds the debug→Firebase job)")
     return 0
 
 
@@ -5531,23 +5505,9 @@ def main() -> None:
                      help="mark this as the owner's own call rather than the agent's")
     rcp.set_defaults(fn=cmd_rc)
     po = sub.add_parser("poll");       po.add_argument("project"); po.add_argument("--tail", type=int, default=60); po.set_defaults(fn=cmd_poll)
-    ld = sub.add_parser("local-delivery",
-                        help="CI cannot start (e.g. GitHub Actions billing): build a "
-                             "DEBUG apk here and send it to Firebase App Distribution")
-    ld.add_argument("project")
-    ld.add_argument("--version", help="the version being delivered (defaults to the last tag)")
-    ld.add_argument("--reason", help="why CI could not deliver (printed in the tester note)")
-    ld.add_argument("--notes", help="extra release-note text for testers")
-    ld.add_argument("--worktree",
-                    help="build the tree that was JUST VERIFIED instead of origin/main "
-                         "(a blocked release's change lives on its branch until CI runs)")
-    ld.add_argument("--no-distribute", action="store_true",
-                    help="build the debug apk and stop (no Firebase upload)")
-    ld.add_argument("--dry-run", action="store_true", help="report the plan, build nothing")
-    ld.set_defaults(fn=cmd_local_delivery)
     fb = sub.add_parser("firebase",
                         help="declare the Firebase App Distribution target (app id + group) "
-                             "the local-delivery fallback sends debug builds to")
+                             "the release workflow's QA job ships debug builds to")
     fb.add_argument("project")
     fb.add_argument("--app-id", help="Firebase Android app id (1:<number>:android:<hash>)")
     fb.add_argument("--groups", default=None, help="App Distribution group alias (e.g. qa)")

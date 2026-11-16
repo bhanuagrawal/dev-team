@@ -800,17 +800,15 @@ def push_and_deliver(project: Path, worktree: Path, task: dict, new_version: str
     # minutes, retrying three times re-proves the same thing and the run ends
     # with testers holding nothing.
     #
-    # FIRST choice is the project's own machine: the SAME workflow, the same
-    # secrets, the same upload step — a real release to Play internal testing,
-    # which GitHub does not meter and therefore cannot refuse (proved by a real
-    # release on 2026-11-16: the stranded version reached `internal` from the
-    # owner's machine while its hosted jobs were still being refused). Only when
-    # no machine is declared, or
-    # that run fails too, do testers get the narrower DEBUG channel, and that
-    # one never claims Play was updated.
+    # THE ONLY ANSWER TO A BILLED-OUT ACCOUNT IS THE SAME WORKFLOW ON A MACHINE
+    # GITHUB DOES NOT METER (owner directive 2026-11-16). Re-dispatching it with
+    # `runner=local` delivers the real signed AAB to Play internal testing AND the
+    # debug APK to the project's Firebase group, because both jobs are in that one
+    # workflow. There is deliberately no second, local-only channel: it could only
+    # ever reach testers, and three releases ended up tagged-but-undelivered
+    # because a green side channel made the gap look smaller than it was.
     try:
-        from . import local_delivery
-        blocked, why = local_delivery.billing_blocked(project, ci.get("run_id"), log)
+        blocked, why = billing_blocked(project, ci.get("run_id"), log)
         if blocked:
             rid = dispatch_local_run(project, dispatch_ref, log)
             if rid:
@@ -819,29 +817,52 @@ def push_and_deliver(project: Path, worktree: Path, task: dict, new_version: str
                     log("delivered on the self-hosted runner — Play internal testing updated")
                     return {"delivered": True, "commit": sha, "version": new_version,
                             "code": code, "ci": again, "rail": "self-hosted"}
-                log("the self-hosted run did not deliver either — trying the tester channel")
-        use_local, why = should_deliver_locally(project, ci, log)
-        if use_local:
-            log("CI billed-out: building a debug apk locally and sending it to "
-                "Firebase App Distribution instead of leaving testers empty-handed")
-            local = local_delivery.deliver(
-                project, log, version=new_version, reason=why,
-                notes_extra=f"Commit {sha[:12]}.", tree=worktree)
-            result["local_delivery"] = local
-            log(local_delivery.summary_line(local))
-        elif why:
-            log(f"CI billed-out ({why}) and no ci.firebase app is declared — no local "
-                "channel to deliver through; the release is still not delivered")
-        if why:
+                log("the self-hosted run did not deliver either")
             result["ci_blocked_by_billing"] = True
             result["error"] = ("CI could not start: GitHub Actions billing "
                                f"({why}) — Play internal testing was NOT updated"
                                + ("" if profile.get("ci", {}).get("self_hosted")
                                   else "; declare ci.self_hosted to deliver from this machine"))
-    except SystemExit as e:  # a failed fallback must not mask the CI verdict
-        log(f"local delivery failed: {e}")
-        result["local_delivery_error"] = str(e)
+            log(result["error"])
+    except SystemExit as e:  # a failed dispatch must not mask the CI verdict
+        log(f"self-hosted dispatch failed: {e}")
+        result["self_hosted_error"] = str(e)
     return result
+
+
+# The exact words GitHub puts on a run whose jobs never started because the
+# account cannot pay for minutes. Matched case-insensitively; both phrases are
+# emitted today, and a subset match is enough to name the cause rather than
+# guess it.
+BILLING_SIGNS = (
+    "recent account payments have failed",
+    "spending limit needs to be increased",
+)
+
+
+def billing_blocked(project: Path, run_id: str | None,
+                    log: RunLog | None = None) -> tuple[bool, str]:
+    """Is the CI run red because GitHub refused to bill for the job?
+
+    Reads the run's own annotations — the only place GitHub states the cause —
+    and returns (blocked, the line that says so). A missing run id or an
+    unreadable run answers False: a dispatch must never fire on a guess.
+    """
+    rid = str(run_id or "").strip()
+    if not rid:
+        return (False, "")
+    profile = profile_of(project)
+    slug = str(profile.get("repo_slug") or "")
+    r = run(["gh", "run", "view", rid, "-R", slug], project, timeout=90)
+    text = ((r.stdout or "") + (r.stderr or "")).lower()
+    if r.returncode != 0:
+        return (False, "")
+    for sign in BILLING_SIGNS:
+        if sign in text:
+            if log:
+                log("CI is blocked by GitHub Actions billing — this is not a code failure")
+            return (True, sign)
+    return (False, "")
 
 
 def dispatch_local_run(project: Path, ref: str, log: RunLog | None = None) -> str:
@@ -884,25 +905,6 @@ def dispatch_local_run(project: Path, ref: str, log: RunLog | None = None) -> st
     return ""
 
 
-def should_deliver_locally(project: Path, ci: dict | None,
-                           log: RunLog | None = None) -> tuple[bool, str]:
-    """(hand testers a local debug build?, why the run was blocked).
-
-    Three facts decide it, in this order, and each one is cheap to falsify:
-    the run is not green, the red run names billing, and the project declares a
-    Firebase App Distribution target. Anything else returns ("", ...) so an
-    ordinary failure is never papered over with a debug apk.
-    """
-    from . import local_delivery
-    ci = ci or {}
-    if ci.get("conclusion") == "success":
-        return (False, "")
-    if local_delivery.firebase_config(profile_of(project)) is None:
-        return (False, "")
-    blocked, why = local_delivery.billing_blocked(project, ci.get("run_id"), log)
-    return (blocked, why)
-
-
 def version_code_in(text: str) -> int | None:
     """The versionCode literal a Gradle version file carries, or None.
 
@@ -943,7 +945,6 @@ def pending_delivery(project: Path, log: RunLog | None = None) -> dict | None:
     run for any OTHER reason is not returned: that is an ordinary failure to fix
     and re-release.
     """
-    from . import local_delivery
     profile = profile_of(project)
     latest = remote_latest_release(project)
     if not latest:
@@ -966,7 +967,7 @@ def pending_delivery(project: Path, log: RunLog | None = None) -> dict | None:
         if entry.get("conclusion") == "success":
             return None
         rid = str(entry.get("databaseId") or "")
-        blocked, why = local_delivery.billing_blocked(project, rid, log)
+        blocked, why = billing_blocked(project, rid, log)
         if not blocked:
             return None
         code = version_code_at(project, sha)

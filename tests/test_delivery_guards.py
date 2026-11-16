@@ -1,0 +1,129 @@
+"""The two facts a release depends on, and the one way they used to lie.
+
+A release is delivered when Play has the version, and testers are notified when
+the workflow's QA job actually reaches App Distribution. Both were reported
+"green" on 2026-11-16 while the tester channel received nothing: the QA upload
+was a Docker container action, which GitHub refuses on a macOS runner, and
+`continue-on-error` turned that refusal into a passing step. So these tests pin
+
+  * where the tester target is declared (`ci.firebase`),
+  * how a billed-out run is recognised (the run's own annotation),
+  * that the template uploads with the CLI in a `run:` step, and
+  * that `self_check` refuses the container action if anyone puts it back.
+"""
+
+import sys
+import tempfile
+import unittest
+from pathlib import Path
+from unittest import mock
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+from team import ci, shipper
+
+
+class FirebaseTargetTest(unittest.TestCase):
+    def test_no_declaration_means_no_qa_job(self):
+        self.assertIsNone(ci.firebase_config({"ci": {}}))
+        self.assertIsNone(ci.firebase_config({}))
+        self.assertIsNone(ci.firebase_config({"ci": {"firebase": {"groups": "qa"}}}))
+
+    def test_a_declared_app_carries_its_group_and_project(self):
+        cfg = ci.firebase_config({
+            "ci": {"firebase": {"app_id": "1:2:android:3", "groups": "qa"}},
+            "connections": {"firebase": {"project_id": "bookswapkmp"}},
+        })
+        self.assertEqual(cfg["app_id"], "1:2:android:3")
+        self.assertEqual(cfg["groups"], "qa")
+        self.assertEqual(cfg["project_id"], "bookswapkmp")
+
+    def test_the_group_is_optional(self):
+        cfg = ci.firebase_config({"ci": {"firebase": {"app_id": "1:2:android:3"}}})
+        self.assertEqual(cfg["groups"], "")
+
+
+class BillingBlockedTest(unittest.TestCase):
+    def test_both_phrases_github_emits_are_recognised(self):
+        for sign in shipper.BILLING_SIGNS:
+            with mock.patch.object(shipper, "profile_of",
+                                   return_value={"repo_slug": "o/r"}), \
+                 mock.patch.object(shipper, "run",
+                                   return_value=mock.Mock(
+                                       returncode=0, stdout=f"annotation: {sign}",
+                                       stderr="")):
+                blocked, why = shipper.billing_blocked(Path("/p"), "123")
+            self.assertTrue(blocked, sign)
+            self.assertEqual(why, sign)
+
+    def test_an_ordinary_red_run_is_not_billing(self):
+        with mock.patch.object(shipper, "profile_of",
+                               return_value={"repo_slug": "o/r"}), \
+             mock.patch.object(shipper, "run",
+                               return_value=mock.Mock(returncode=0,
+                                                      stdout="step failed: compileDebugKotlin",
+                                                      stderr="")):
+            self.assertEqual(shipper.billing_blocked(Path("/p"), "123"), (False, ""))
+
+    def test_a_missing_run_id_never_blocks(self):
+        self.assertEqual(shipper.billing_blocked(Path("/p"), ""), (False, ""))
+        self.assertEqual(shipper.billing_blocked(Path("/p"), None), (False, ""))
+
+
+class TemplateUploadTest(unittest.TestCase):
+    """The QA lane must upload where every runner can, and say when it cannot."""
+
+    def test_the_upload_is_a_cli_run_step(self):
+        text = ci.TEMPLATE.read_text()
+        self.assertIn("appdistribution:distribute", text)
+        self.assertNotIn("uses: wzieba/Firebase-Distribution-Github-Action", text)
+
+    def test_self_check_refuses_a_container_action(self):
+        # Put the action back the way it was, and watch the gate catch it.
+        broken = ci.TEMPLATE.read_text().replace(
+            "      - name: Share with testers (Firebase App Distribution)",
+            "      - name: Share with testers (Firebase App Distribution)\n"
+            "        uses: wzieba/Firebase-Distribution-Github-Action@v1")
+        with tempfile.TemporaryDirectory() as d:
+            p = Path(d) / "ci.yml"
+            p.write_text(broken)
+            with mock.patch.object(ci, "TEMPLATE", p):
+                problems = ci.self_check()
+        self.assertTrue(any("container action" in p for p in problems), problems)
+
+    def test_a_failed_distribution_is_named_in_the_run(self):
+        text = ci.TEMPLATE.read_text()
+        self.assertIn("steps.firebase.outcome == 'failure'", text)
+        self.assertIn("testers were NOT notified", text)
+
+
+class DebugTaskTest(unittest.TestCase):
+    """A flavored module has no `assembleDebug`, so the task is a profile fact."""
+
+    def test_the_default_is_the_plain_task(self):
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            (root / "composeApp").mkdir()
+            with mock.patch.object(ci, "profile_of",
+                                   return_value={"ci": {"package_name": "a.b"}}):
+                cfg = ci.ci_config(root)
+        self.assertEqual(cfg["debug_task"], ":composeApp:assembleDebug")
+
+    def test_a_declared_task_wins(self):
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            (root / "app").mkdir()
+            with mock.patch.object(ci, "profile_of", return_value={
+                    "ci": {"package_name": "a.b",
+                           "debug_task": ":app:assembleZenlistDebug"}}):
+                cfg = ci.ci_config(root)
+        self.assertEqual(cfg["debug_task"], ":app:assembleZenlistDebug")
+
+    def test_the_template_uses_the_placeholder_not_a_hardcoded_task(self):
+        text = ci.TEMPLATE.read_text()
+        self.assertIn("__DEBUG_TASK__", text)
+        self.assertNotIn(":__MODULE__:assembleDebug", text)
+
+
+if __name__ == "__main__":
+    unittest.main()
