@@ -36,6 +36,7 @@ before (goal-less mode).
 from __future__ import annotations
 
 from .core import now_iso
+from .queue import label_of
 
 _OPS = {"<": lambda a, b: a < b, "<=": lambda a, b: a <= b,
         ">": lambda a, b: a > b, ">=": lambda a, b: a >= b,
@@ -745,13 +746,16 @@ def goal_block(profile: dict, state: dict) -> str:
     # the page must too, or it names a delivered task as the next run.
     _delivered = {str(x.get("label") or "").strip().lower()
                   for x in (state.get("shipped") or [])}
+    # A queue entry may be a full task spec (surface.label) rather than the
+    # admitted shape (label) — `queue add --spec` stores the spec verbatim, so
+    # reading only 'label' printed the next run as "1. None".
     pending = [q for q in queue
-               if str(q.get("label") or "").strip().lower() not in _delivered]
+               if label_of(q).strip().lower() not in _delivered]
     if not pending:
         lines.append("  (empty — the next plan fills it)")
     for i, q in enumerate(pending[:6], 1):
         tag = "  ← NEXT RUN" if i == 1 else ""
-        lines.append(f"  {i}. {q.get('label')}{tag}")
+        lines.append(f"  {i}. {label_of(q)}{tag}")
         prob = str(q.get("problem") or "").strip()
         if prob:
             lines.append(f"       problem: {prob}")
