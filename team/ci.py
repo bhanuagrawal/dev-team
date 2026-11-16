@@ -22,14 +22,19 @@ WORKFLOW_REL = ".github/workflows/release.yml"
 # Bumped whenever the rendered text changes meaning (not formatting). A project's
 # copy carries it in its header, so a reader can tell which generation a workflow
 # came from even without running doctor.
-TEMPLATE_VERSION = 2
+TEMPLATE_VERSION = 3
 
 KNOWN_PLACEHOLDERS = (
     "__BUNDLE_TASKS__", "__RELEASE_FILES__", "__PACKAGE_NAME__",
     "__WHATSNEW_FILE__", "__WHATSNEW_DIR__", "__WHATSNEW_LIMIT__",
     "__VERSION_FILE__",
     "__MODULE__", "__DEBUG_APK__", "__FIREBASE_APP_ID__", "__FIREBASE_GROUPS__",
+    "__RUNS_ON_LINE__",
 )
+
+# The default the selector falls back to, i.e. what every project used before
+# a machine was declared.
+CLOUD_RUNNER = "ubuntu-latest"
 
 # The optional QA channel. Everything between these markers is rendered ONLY for a
 # project whose profile declares ci.firebase {app_id, groups}; for every other
@@ -64,6 +69,25 @@ def ci_config(project: Path) -> dict:
     return ci
 
 
+def runs_on_line(ci: dict) -> str:
+    """The YAML that decides WHERE the job runs.
+
+    No machine declared → the plain hosted label, byte-identical to every
+    project's workflow before this existed. Declared → one job with a selector,
+    because a second job carrying its own copy of the build steps is exactly the
+    divergence this file exists to prevent.
+    """
+    labels = ci.get("self_hosted") or []
+    if isinstance(labels, str):
+        labels = [part.strip() for part in labels.split(",") if part.strip()]
+    labels = [str(l).strip() for l in labels if str(l).strip()]
+    if not labels:
+        return CLOUD_RUNNER
+    as_json = "[" + ",".join(f'"{l}"' for l in labels) + "]"
+    return (f"${{{{ inputs.runner == 'local' && fromJSON('{as_json}') "
+            f"|| '{CLOUD_RUNNER}' }}}}")
+
+
 def render(project: Path) -> str:
     ci = ci_config(project)
     missing = [k for k in ("package_name", "bundle_tasks", "release_files", "version_file")
@@ -72,6 +96,9 @@ def render(project: Path) -> str:
         raise SystemExit("cannot render CI — profile is missing: " + ", ".join(missing)
                          + f". Add them to {project}/.pipeline/profile.json under 'ci'.")
     text = TEMPLATE.read_text()
+    # Where the job runs is derived, not stored: the profile declares the machine
+    # (`ci.self_hosted`), the template carries one selector line.
+    ci["runs_on_line"] = runs_on_line(ci)
     # The QA job is optional: pull it out, then put it back only when the project
     # declared a Firebase app + tester group.
     firebase = ci.get("firebase") or {}
@@ -96,6 +123,7 @@ def render(project: Path) -> str:
         ("debug_apk", "__DEBUG_APK__"),
         ("firebase_app_id", "__FIREBASE_APP_ID__"),
         ("firebase_groups", "__FIREBASE_GROUPS__"),
+        ("runs_on_line", "__RUNS_ON_LINE__"),
     ):
         if key == "firebase_app_id":
             value = firebase.get("app_id") or ""
@@ -135,6 +163,22 @@ def self_check() -> list[str]:
     if text.count("#@@FIREBASE_JOB@@") != 1 or text.count("#@@/FIREBASE_JOB@@") != 1:
         problems.append("the optional Firebase job must be wrapped in exactly one "
                         "#@@FIREBASE_JOB@@ / #@@/FIREBASE_JOB@@ pair")
+    # RUNNER PORTABILITY. A declared self-hosted runner is macOS on this machine,
+    # and two GNU-isms in this file are hard or silent failures there: BSD base64
+    # has no --decode, and BSD `sed -i` reads the script as a backup suffix. Both
+    # cost a release attempt to discover, so the template refuses to ship them.
+    if "base64 --decode" in text:
+        problems.append("the template decodes the keystore with `base64 --decode`, "
+                        "which BSD base64 rejects — use `openssl base64 -d -A`")
+    if re.search(r"sed -i (?!\.)", text):
+        problems.append("the template uses GNU `sed -i` without a backup suffix, which "
+                        "macOS misreads as a suffix — use `sed -i.bak`")
+    # The selector is only honest if the input it reads exists. The template
+    # itself carries the placeholder (the expression is rendered per project), so
+    # the invariant is checked there.
+    if "__RUNS_ON_LINE__" in text and "      runner:" not in text:
+        problems.append("the template selects a runner but does not declare the "
+                        "`runner` input that `devteam` dispatch sets")
     return problems
 
 

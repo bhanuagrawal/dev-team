@@ -5,6 +5,23 @@
 # Do not hand-edit a project's copy — change this template, then re-render all
 # projects.
 #
+# TEMPLATE_VERSION 3 — a project that declares a self-hosted runner can build on
+# it, and `devteam release` uses that when GitHub refuses the hosted jobs.
+#
+# Why this exists (2026-11-16): the account's Actions budget was a $0 stop, so
+# every hosted job was refused in ~2s with "recent account payments have failed"
+# and three releases sat tagged-but-undelivered. The block only stops PAID jobs —
+# GitHub does not meter self-hosted runners, so the same workflow, the same
+# secrets and the same upload step deliver normally on the owner's machine
+# (proved on BookSwapKMP v1.0.71: versionCode 10113 reached `internal` from the
+# Mac while the hosted jobs were still being refused).
+#
+# It is ONE JOB with a runner selector, not a second workflow: a fallback job
+# with its own copy of these steps would drift, and the whole point of this file
+# is that there is one shape to review. `devteam` decides when to pull the
+# selector (see shipper.dispatch_local_run); a human can pull it by hand from
+# Actions → Run workflow → runner: local.
+#
 # TEMPLATE_VERSION 2 — the version is READ FROM THE RELEASE COMMIT, not derived
 # from the tag. `devteam release` writes versionName/versionCode into the version
 # file and tags the commit that carries them, so there is exactly one author of
@@ -29,6 +46,14 @@ on:
         description: 'Version name to build (e.g. 1.4.1). Leave empty to use the tag.'
         required: false
         type: string
+      runner:
+        description: 'Where to build. `local` = the self-hosted runner this project declares.'
+        required: false
+        type: choice
+        options:
+          - cloud
+          - local
+        default: cloud
 
 permissions:
   contents: read
@@ -39,7 +64,7 @@ concurrency:
 
 jobs:
   release:
-    runs-on: ubuntu-latest
+    runs-on: __RUNS_ON_LINE__
     # Secret availability is read through an env var: `if:` cannot test a secret
     # directly, and an unset secret must mean "build only", not "fail".
     env:
@@ -94,7 +119,7 @@ jobs:
 
       - name: Restore keystore
         run: |
-          echo "${{ secrets.RELEASE_KEYSTORE_BASE64 }}" | base64 --decode > "$RUNNER_TEMP/release.jks"
+          echo "${{ secrets.RELEASE_KEYSTORE_BASE64 }}" | openssl base64 -d -A > "$RUNNER_TEMP/release.jks"
           cat > "$GITHUB_WORKSPACE/keystore.properties" <<EOF
           storeFile=$RUNNER_TEMP/release.jks
           storePassword=${{ secrets.KEYSTORE_PASSWORD }}
@@ -130,7 +155,7 @@ jobs:
           VERSION_NAME: ${{ env.VERSION_NAME }}
           VERSION_CODE: ${{ env.VERSION_CODE }}
         run: |
-          sed -i 's/networkTimeout=.*/networkTimeout=120000/' gradle/wrapper/gradle-wrapper.properties 2>/dev/null || true
+          sed -i.bak 's/networkTimeout=.*/networkTimeout=120000/' gradle/wrapper/gradle-wrapper.properties 2>/dev/null || true
           ./gradlew __BUNDLE_TASKS__ -Dorg.gradle.internal.http.socketTimeout=120000 -Dorg.gradle.internal.http.connectionTimeout=120000
 
       - name: Upload AAB as workflow artifact
@@ -224,7 +249,7 @@ jobs:
   # credential the APK is still built and kept as an artifact, so a project that
   # has not set this up ships nothing and stays green.
   debug-to-firebase:
-    runs-on: ubuntu-latest
+    runs-on: __RUNS_ON_LINE__
     env:
       FIREBASE_JSON: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_JSON }}
     steps:
@@ -245,13 +270,20 @@ jobs:
       # runner: no release keystore, no secrets, and nothing that can be published.
       - name: Build debug APK
         run: |
-          sed -i 's/networkTimeout=.*/networkTimeout=120000/' gradle/wrapper/gradle-wrapper.properties 2>/dev/null || true
+          sed -i.bak 's/networkTimeout=.*/networkTimeout=120000/' gradle/wrapper/gradle-wrapper.properties 2>/dev/null || true
           ./gradlew :__MODULE__:assembleDebug -Dorg.gradle.internal.http.socketTimeout=120000 -Dorg.gradle.internal.http.connectionTimeout=120000
+
+      # The artifact name is `debug-<ref>`, and a branch ref contains `/`
+      # (`dt/runner-proof`), which GitHub rejects as an artifact name — it failed
+      # a branch-dispatched run of this workflow on 2026-11-16. Sanitize the ref
+      # once, into the environment, instead of interpolating it into a name.
+      - name: Name the artifact safely
+        run: echo "REF_SAFE=$(echo "$GITHUB_REF_NAME" | tr '/' '-')" >> "$GITHUB_ENV"
 
       - name: Upload debug APK as workflow artifact
         uses: actions/upload-artifact@v4
         with:
-          name: debug-${{ github.ref_name }}
+          name: debug-${{ env.REF_SAFE }}
           path: __DEBUG_APK__
 
       - name: Share with testers (Firebase App Distribution)

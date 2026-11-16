@@ -2311,6 +2311,49 @@ def cmd_firebase(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_runner(args: argparse.Namespace) -> int:
+    """Declare the machine a project's release workflow may build on.
+
+    This is a CONFIG fact with no other owner — the profile is written by the
+    team, never by hand — and it exists because GitHub can refuse to start a
+    PAID job (a $0 Actions budget did exactly that on 2026-11-16) while leaving
+    self-hosted jobs alone, since their minutes are not metered. With a machine
+    declared, `release` re-dispatches the same workflow there and Play internal
+    testing is updated by the real signed AAB instead of the run dying red.
+
+    The labels must match what the runner registered itself with
+    (`./config.sh --labels ...`); `self-hosted` is always implied by GitHub, so
+    the conventional declaration is "self-hosted, macOS, ARM64, devteam".
+    """
+    from team.core import save_json
+    from team import ci as ci_module
+
+    project = resolve_project(args.project)
+    pdir = pipeline_dir(project)
+    profile = profile_of(project)
+    ci = dict(profile.get("ci") or {})
+    if args.clear:
+        ci.pop("self_hosted", None)
+        profile["ci"] = ci
+        save_json(pdir / "profile.json", profile)
+        print(f"runner: {project.name} — no machine declared; releases build on "
+              f"{ci_module.CLOUD_RUNNER} only")
+        return 0
+    labels = [l.strip() for l in str(args.labels or "").split(",") if l.strip()]
+    if not labels:
+        raise SystemExit("runner needs --labels (the labels the runner registered with, "
+                         "e.g. 'self-hosted,macOS,ARM64,devteam') or --clear")
+    ci["self_hosted"] = labels
+    profile["ci"] = ci
+    save_json(pdir / "profile.json", profile)
+    print(f"runner: {project.name} → {', '.join(labels)}")
+    print(f"  workflow must be re-rendered to carry the selector: "
+          f"devteam ci {project.name} --write")
+    print(f"  and a runner with those labels must be online: "
+          f"gh api repos/{profile.get('repo_slug', '<slug>')}/actions/runners")
+    return 0
+
+
 def cmd_schedules(args: argparse.Namespace) -> None:
     """Owner-visible schedule map: one run a day (from 02:00) for every registered app."""
     if getattr(args, "remove", None):
@@ -5448,6 +5491,14 @@ def main() -> None:
     fb.add_argument("--debug-task", help="exact Gradle debug task for a flavored module")
     fb.add_argument("--debug-apk", help="path to the debug apk a distributed build produces")
     fb.set_defaults(fn=cmd_firebase)
+    rn = sub.add_parser("runner",
+                        help="declare the machine (self-hosted runner labels) a project's "
+                             "release workflow may build on when GitHub refuses paid jobs")
+    rn.add_argument("project")
+    rn.add_argument("--labels", help="labels the runner registered with, comma separated "
+                                     "(e.g. 'self-hosted,macOS,ARM64,devteam')")
+    rn.add_argument("--clear", action="store_true", help="undeclare the machine")
+    rn.set_defaults(fn=cmd_runner)
     a = sub.add_parser("alarm");       a.add_argument("project"); a.set_defaults(fn=cmd_alarm)
     rs = sub.add_parser("research");   rs.add_argument("project"); rs.add_argument("--no-llm", action="store_true")
     rs.add_argument("--apply-result", help="synthesis JSON produced by the host tool's native agent; applies through the same validation + goal gate")

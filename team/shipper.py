@@ -683,6 +683,9 @@ def push_and_deliver(project: Path, worktree: Path, task: dict, new_version: str
     """
     profile = profile_of(project)
     branch = profile["main_branch"]
+    # What a self-hosted dispatch should build: the version TAG when delivery
+    # is tag-gated (the tag carries the release), otherwise the main branch.
+    dispatch_ref = str(profile.get("main_branch") or "main")
     run_id: str | None = None
 
     for attempt in range(1, max_retries + 1):
@@ -775,6 +778,7 @@ def push_and_deliver(project: Path, worktree: Path, task: dict, new_version: str
                 r = git(["push", "origin", tag], cwd=worktree, timeout=120)
                 if r.returncode == 0:
                     log(f"pushed tag {tag} → CI (tag-gated delivery)")
+                    dispatch_ref = tag
                 else:
                     log(f"tag push failed: {(r.stdout + r.stderr)[-200:]}")
         ci = await_ci(project, {"commit": sha})
@@ -794,12 +798,26 @@ def push_and_deliver(project: Path, worktree: Path, task: dict, new_version: str
     # A RED RUN IS NOT ALWAYS A CODE FAILURE (owner directive 2026-11-16). When
     # GitHub refuses to start the jobs because the account cannot pay for
     # minutes, retrying three times re-proves the same thing and the run ends
-    # with testers holding nothing — "generate a debug build on the local
-    # machine and publish it to Firebase App Testing if it is set up" is the
-    # fallback, and it is narrow on purpose: a DEBUG apk for testers, never a
-    # claim that Play was updated.
+    # with testers holding nothing.
+    #
+    # FIRST choice is the project's own machine: the SAME workflow, the same
+    # secrets, the same upload step — a real release to Play internal testing,
+    # which GitHub does not meter and therefore cannot refuse (proved
+    # 2026-11-16 on BookSwapKMP v1.0.71). Only when no machine is declared, or
+    # that run fails too, do testers get the narrower DEBUG channel, and that
+    # one never claims Play was updated.
     try:
         from . import local_delivery
+        blocked, why = local_delivery.billing_blocked(project, ci.get("run_id"), log)
+        if blocked:
+            rid = dispatch_local_run(project, dispatch_ref, log)
+            if rid:
+                again = await_ci(project, {"commit": sha, "run_id": rid}, log)
+                if again.get("conclusion") == "success":
+                    log("delivered on the self-hosted runner — Play internal testing updated")
+                    return {"delivered": True, "commit": sha, "version": new_version,
+                            "code": code, "ci": again, "rail": "self-hosted"}
+                log("the self-hosted run did not deliver either — trying the tester channel")
         use_local, why = should_deliver_locally(project, ci, log)
         if use_local:
             log("CI billed-out: building a debug apk locally and sending it to "
@@ -815,11 +833,53 @@ def push_and_deliver(project: Path, worktree: Path, task: dict, new_version: str
         if why:
             result["ci_blocked_by_billing"] = True
             result["error"] = ("CI could not start: GitHub Actions billing "
-                               f"({why}) — Play internal testing was NOT updated")
+                               f"({why}) — Play internal testing was NOT updated"
+                               + ("" if profile.get("ci", {}).get("self_hosted")
+                                  else "; declare ci.self_hosted to deliver from this machine"))
     except SystemExit as e:  # a failed fallback must not mask the CI verdict
         log(f"local delivery failed: {e}")
         result["local_delivery_error"] = str(e)
     return result
+
+
+def dispatch_local_run(project: Path, ref: str, log: RunLog | None = None) -> str:
+    """Ask the SAME workflow to build on the project's declared machine.
+
+    Returns the new run id, or "" when this cannot help: no `ci.self_hosted`
+    labels declared, a project copy rendered before TEMPLATE_VERSION 3 (no
+    `runner` input to set), or gh refusing the dispatch. Silence would be worse
+    than a wasted call — every reason is logged, and the caller falls through to
+    the tester channel either way.
+    """
+    profile = profile_of(project)
+    ci = profile.get("ci") or {}
+    if not ci.get("self_hosted"):
+        return ""
+    slug = str(profile.get("repo_slug") or "")
+    wf = _workflow(profile)
+    if not slug or not ref:
+        return ""
+    before = {str(e.get("databaseId") or "") for e in _ci_runs(project, slug, wf, how=12)}
+    r = run(["gh", "workflow", "run", wf, "-R", slug, "--ref", ref,
+             "-f", "runner=local"], project, timeout=120)
+    if r.returncode != 0:
+        detail = ((r.stdout or "") + (r.stderr or "")).strip().splitlines()
+        if log:
+            log("could not dispatch a self-hosted release"
+                + (f": {detail[-1][:200]}" if detail else "")
+                + " (a workflow rendered before TEMPLATE_VERSION 3 has no runner input)")
+        return ""
+    # The dispatch answers with nothing, so the run has to be found: it is the
+    # newest run this repository did not have a moment ago.
+    for _ in range(12):
+        time.sleep(5)
+        for entry in _ci_runs(project, slug, wf, how=12):
+            rid = str(entry.get("databaseId") or "")
+            if rid and rid not in before:
+                if log:
+                    log(f"dispatched CI run {rid} on the self-hosted runner for {ref}")
+                return rid
+    return ""
 
 
 def should_deliver_locally(project: Path, ci: dict | None,

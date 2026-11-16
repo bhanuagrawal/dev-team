@@ -167,6 +167,10 @@ _RAW: list[tuple[str, str, str, str, str, bool]] = [
      "Play review, state", "version not on an internal track; no --requested-by", True),
     ("ci", "deliver", "print or write the canonical release workflow",
      ".github/workflows/release.yml (with --write)", "no profile", True),
+    ("runner", "deliver",
+     "declare the machine (self-hosted runner labels) the release workflow may build on "
+     "when GitHub refuses its paid jobs — the run then delivers the real AAB to Play",
+     ".pipeline/profile.json (ci.self_hosted)", "no --labels and no --clear", True),
     # ---- assets ------------------------------------------------------------ #
     ("storefront-direction", "assets", "decide what the listing SAYS, before drawing",
      "docs/storefront-direction.json", "no locked concept", True),
