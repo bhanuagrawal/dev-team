@@ -402,6 +402,80 @@ def _draws_a_screenshot(worktree: Path, f: str, ui_path: str) -> bool:
         return True
 
 
+LISTING_FILES = {
+    "title": "distribution/listing/en-US/title.txt",
+    "short": "distribution/listing/en-US/short_description.txt",
+    "full": "distribution/listing/en-US/full_description.txt",
+    "whatsnew": "distribution/whatsnew/whatsnew-en-US",
+}
+
+
+def listing_text_check(worktree: Path, files: list[str] | None = None) -> tuple[bool, str]:
+    """The listing's WORDS must describe the product that ships.
+
+    Screenshots were gated and the copy was not: after a rename or a retirement,
+    the title, the short description, the long description or What's New could
+    still name the product this app no longer is, and Play would show it to every
+    reader who found the app (owner request 2026-11-15: "Play listing text is
+    never checked ... audit them against PRODUCT.md and fail the release").
+
+    Two deterministic claims, no judgement:
+      * every text carries the app's OWN name — the launcher label users see
+        under the icon, so the listing and the install cannot disagree;
+      * none of them carries a name the project has RETIRED (declared, never
+        guessed: `docs/storefront-direction.json` -> "retired_names", or the
+        profile's `ci.retired_names`).
+
+    What's New is checked for a retired name only: a change note legitimately
+    describes a fix without repeating the product's name. A project with no
+    listing copy passes — this gate only ever refuses text that exists.
+    """
+    profile = profile_of(worktree) if (worktree / ".pipeline").is_dir() else {}
+    texts: dict[str, str] = {}
+    for key, rel in LISTING_FILES.items():
+        path = worktree / rel
+        if path.is_file():
+            texts[key] = path.read_text(encoding="utf-8", errors="ignore")
+    if not texts:
+        return True, "no listing copy in the tree — nothing to compare"
+
+    retired: list[str] = []
+    direction = worktree / "docs/storefront-direction.json"
+    if direction.is_file():
+        try:
+            retired += [str(n) for n in (json.loads(direction.read_text()).get("retired_names") or [])]
+        except (ValueError, OSError):
+            pass
+    retired += [str(n) for n in ((profile.get("ci") or {}).get("retired_names") or [])]
+    retired = [n.strip() for n in retired if str(n).strip()]
+
+    lowered = {k: v.lower() for k, v in texts.items()}
+    for name in retired:
+        for key, text in lowered.items():
+            if name.lower() in text:
+                return False, (f"the {key} copy still names the retired product "
+                               f"\"{name}\" — the listing and the app disagree about "
+                               "what this is")
+
+    try:
+        from .store_readiness import _launcher_label
+        label = _launcher_label(worktree) or ""
+    except Exception:
+        label = ""
+    # The TITLE is where the name has to be: it is the field Play shows next to
+    # the icon, so it must agree with the label the reader installs. The
+    # descriptions are prose about the product and are judged only for a retired
+    # name — requiring the app's name in every field would refuse good copy
+    # ("Zero-cash, hyper-local book swaps and lending near you.").
+    base = label.split(":")[0].strip()
+    title = lowered.get("title")
+    if base and title is not None and base.lower() not in title:
+        return False, (f"the listing title never names the app \"{base}\" — Play shows "
+                       "that title beside an icon the reader installs under that name")
+    return True, (f"{len(texts)} listing text(s) name the app"
+                  + (f" and no retired name" if retired else ""))
+
+
 def storefront_listing_fresh_check(worktree: Path,
                                    files: list[str] | None = None) -> tuple[bool, str]:
     """The listing's pictures must describe the build a user installs.
@@ -1117,6 +1191,14 @@ def verify_all(project: Path, worktree: Path, base: str, log, gradle: bool = Tru
     # function unconditionally, so a stale picture still cannot reach Play.
     ok, msg = storefront_listing_fresh_check(worktree, files)
     log("storefront listing: ok — " + msg if ok else "storefront listing: FAIL — " + msg)
+    if not ok:
+        failures.append(msg)
+        return False, failures
+
+    # LISTING TEXT: the words Play shows, against the product that ships. The
+    # pictures were gated and the copy was not (owner request 2026-11-15).
+    ok, msg = listing_text_check(worktree, files)
+    log("listing text: ok — " + msg if ok else "listing text: FAIL — " + msg)
     if not ok:
         failures.append(msg)
         return False, failures
