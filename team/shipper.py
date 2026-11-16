@@ -838,6 +838,11 @@ def push_and_deliver(project: Path, worktree: Path, task: dict, new_version: str
 BILLING_SIGNS = (
     "recent account payments have failed",
     "spending limit needs to be increased",
+    # 2026-11-17: GitHub refuses the job with this annotation when a plan's
+    # included Actions minutes are exhausted. It is the same cause as the two
+    # above (the account cannot pay for the job), and a run that never started
+    # can only be carried by the same workflow on a self-hosted runner.
+    "actions budget is preventing further use",
 )
 
 
