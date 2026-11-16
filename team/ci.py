@@ -24,7 +24,7 @@ WORKFLOW_REL = ".github/workflows/release.yml"
 # Bumped whenever the rendered text changes meaning (not formatting). A project's
 # copy carries it in its header, so a reader can tell which generation a workflow
 # came from even without running doctor.
-TEMPLATE_VERSION = 4
+TEMPLATE_VERSION = 5
 
 KNOWN_PLACEHOLDERS = (
     "__BUNDLE_TASKS__", "__RELEASE_FILES__", "__PACKAGE_NAME__",

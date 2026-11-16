@@ -5,6 +5,14 @@
 # Do not hand-edit a project's copy — change this template, then re-render all
 # projects.
 #
+# TEMPLATE_VERSION 5 — the workflow artifact uploads are NON-FATAL. The store
+# upload and the tester distribution are the deliverables; an artifact is a
+# convenience. GitHub's artifact storage quota is account-wide and slow to
+# recalculate, so a full quota failed both jobs before Play was ever reached
+# (2026-11-17: v1.0.73 built green, no upload step ran). `continue-on-error` is
+# right here because the step's own failure is already reported, and delivery
+# must not depend on how much storage the account has left.
+#
 # TEMPLATE_VERSION 4 — the QA channel uploads with the firebase CLI, not a Docker
 # action. `wzieba/Firebase-Distribution-Github-Action` is a CONTAINER action and
 # GitHub refuses those on a macOS self-hosted runner ("Container action is only
@@ -169,8 +177,13 @@ jobs:
           sed -i.bak 's/networkTimeout=.*/networkTimeout=120000/' gradle/wrapper/gradle-wrapper.properties 2>/dev/null || true
           ./gradlew __BUNDLE_TASKS__ -Dorg.gradle.internal.http.socketTimeout=120000 -Dorg.gradle.internal.http.connectionTimeout=120000
 
+      # The artifact is a convenience, never the delivery: Play is. On 2026-11-17
+      # this step failed the whole job with "Artifact storage quota has been hit"
+      # and the AAB never reached Play, even though the build was green — the
+      # upload is non-fatal on purpose so a storage cap cannot strand a release.
       - name: Upload AAB as workflow artifact
         uses: actions/upload-artifact@v4
+        continue-on-error: true
         with:
           name: release-${{ env.VERSION_NAME }}
           path: __RELEASE_FILES__
@@ -295,6 +308,7 @@ jobs:
 
       - name: Upload debug APK as workflow artifact
         uses: actions/upload-artifact@v4
+        continue-on-error: true
         with:
           name: debug-${{ env.REF_SAFE }}
           path: __DEBUG_APK__
