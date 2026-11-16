@@ -13,8 +13,8 @@
 # and three releases sat tagged-but-undelivered. The block only stops PAID jobs —
 # GitHub does not meter self-hosted runners, so the same workflow, the same
 # secrets and the same upload step deliver normally on the owner's machine
-# (proved on BookSwapKMP v1.0.71: versionCode 10113 reached `internal` from the
-# Mac while the hosted jobs were still being refused).
+# (proved by a real release on 2026-11-16: the stranded version reached
+# `internal` from the Mac while its hosted jobs were still being refused).
 #
 # It is ONE JOB with a runner selector, not a second workflow: a fallback job
 # with its own copy of these steps would drift, and the whole point of this file

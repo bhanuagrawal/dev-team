@@ -802,8 +802,10 @@ def push_and_deliver(project: Path, worktree: Path, task: dict, new_version: str
     #
     # FIRST choice is the project's own machine: the SAME workflow, the same
     # secrets, the same upload step — a real release to Play internal testing,
-    # which GitHub does not meter and therefore cannot refuse (proved
-    # 2026-11-16 on BookSwapKMP v1.0.71). Only when no machine is declared, or
+    # which GitHub does not meter and therefore cannot refuse (proved by a real
+    # release on 2026-11-16: the stranded version reached `internal` from the
+    # owner's machine while its hosted jobs were still being refused). Only when
+    # no machine is declared, or
     # that run fails too, do testers get the narrower DEBUG channel, and that
     # one never claims Play was updated.
     try:
