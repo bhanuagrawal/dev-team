@@ -91,6 +91,7 @@ The trigger for `main` is **the gates passed**, not "a human is about to look".
 | stopped for an owner ask | same as above, **plus** `record --result blocked --note "<the question>"` | yes — the ask itself |
 | a DEBUG build for testers | Firebase App Distribution, same tag as the release (only when `profile.ci.firebase` is declared) | no |
 | CI cannot start (GitHub Actions billing) | `release` builds the DEBUG apk locally and sends it to that Firebase group; **Play is untouched**, the run records `failed` with the billing ask. The next `release` REFUSES to allocate another version while that one is undelivered (it clears itself when the run goes green) | yes — Billing & plans, then re-run that CI run |
+| a project with no tester channel | `devteam firebase <project> --app-id <id> --groups qa` declares it (the app id is Firebase Console → App Distribution; the registered package must equal `ci.package_name`). `doctor` WARNs while it is missing: without it a billed-out release builds an apk and stops. `local-delivery --worktree <tree>` sends the tree that was just verified, not origin/main | no — one-time setup |
 
 Nothing about a finished change needs a human in the loop; the human only enters
 for a launch they choose to trigger (`devteam promote`, never raised by an agent),

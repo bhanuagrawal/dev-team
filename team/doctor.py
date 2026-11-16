@@ -619,6 +619,35 @@ def run_doctor(project: Path, log) -> dict:
     except Exception as e:  # a check must never hide the report
         log(f"doctor ux-flow: could not check ({e})")
 
+    # TESTER CHANNEL — the fallback a billed-out CI run depends on.
+    #
+    # `release` hands testers a DEBUG build through Firebase App Distribution when
+    # GitHub refuses to start the jobs, but only when the profile declares
+    # `ci.firebase`. A project without one builds an apk and stops, so every app
+    # that ships through CI should carry the target. WARN, never block: Play
+    # delivery is unaffected, and a project may legitimately have no testers.
+    try:
+        from . import local_delivery
+        fb = local_delivery.firebase_config(profile)
+        if fb:
+            report["tester-channel"] = {"status": "ready", "blocked": [],
+                                        "checks_passed": 1,
+                                        "note": f"app {fb['app_id']} groups {fb['groups'] or '—'}"}
+            log(f"doctor tester-channel: ready — debug builds fall back to Firebase "
+                f"app {fb['app_id']} groups {fb['groups'] or '—'}")
+        else:
+            report["tester-channel"] = {
+                "status": "warn", "blocked": [], "checks_passed": 0,
+                "note": ("no ci.firebase declared: a GitHub-billed-out release can "
+                         "build a debug apk but has nowhere to send it — set it with "
+                         f"`devteam firebase {project.name} --app-id <id> --groups qa`"),
+            }
+            log("doctor tester-channel: WARN — no ci.firebase app declared; a "
+                "billed-out release builds an apk and stops. Run: devteam firebase "
+                f"{project.name} --app-id <id> --groups qa")
+    except Exception as e:  # a check must never hide the report
+        log(f"doctor tester-channel: could not check ({e})")
+
     # The report page answers "what shipped, what do I test?" on the owner's phone.
     # Every ledger write rebuilds it (`core.save_state`), so a page older than the
     # ledger means a rebuild FAILED or a writer bypassed the ledger — and the page

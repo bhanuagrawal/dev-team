@@ -97,3 +97,24 @@ class FallbackDecisionTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class DeliveryTreeTest(unittest.TestCase):
+    """The fallback must build the tree that was just verified.
+
+    On 2026-11-16 a blocked release handed testers the PREVIOUS app: `deliver`
+    built origin/main, and the change under test lived on a branch nothing had
+    merged. A tester could not tell the two builds apart except by size.
+    """
+
+    def test_a_verified_worktree_can_be_the_build_tree(self):
+        import inspect
+        sig = inspect.signature(local_delivery.deliver)
+        self.assertIn("tree", sig.parameters)
+        self.assertIsNone(sig.parameters["tree"].default)
+
+    def test_a_flavored_module_may_name_its_debug_task(self):
+        import inspect
+        src = inspect.getsource(local_delivery._run_gradle)
+        self.assertIn("debug_task", src)
+        self.assertIn("assembleDebug", src)

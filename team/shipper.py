@@ -806,7 +806,7 @@ def push_and_deliver(project: Path, worktree: Path, task: dict, new_version: str
                 "Firebase App Distribution instead of leaving testers empty-handed")
             local = local_delivery.deliver(
                 project, log, version=new_version, reason=why,
-                notes_extra=f"Commit {sha[:12]}.")
+                notes_extra=f"Commit {sha[:12]}.", tree=worktree)
             result["local_delivery"] = local
             log(local_delivery.summary_line(local))
         elif why:

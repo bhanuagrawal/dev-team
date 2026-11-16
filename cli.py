@@ -2247,14 +2247,66 @@ def cmd_local_delivery(args: argparse.Namespace) -> int:
         from team import shipper
         latest = shipper.remote_latest_release(project)
         version = "dev" if not latest else str(latest.get("version") or "dev")
+    tree = Path(args.worktree).expanduser().resolve() if getattr(args, "worktree", None) else None
     result = local_delivery.deliver(
         project, log, version=version, reason=str(args.reason or ""),
         notes_extra=str(args.notes or ""),
-        distribute=not args.no_distribute, dry_run=args.dry_run,
+        distribute=not args.no_distribute, dry_run=args.dry_run, tree=tree,
     )
     print(json.dumps(result, indent=2))
     print(local_delivery.summary_line(result))
     return 0 if (result.get("dry_run") or result.get("apk")) else 1
+
+
+def cmd_firebase(args: argparse.Namespace) -> int:
+    """Declare an app's Firebase App Distribution target, so `local-delivery` has
+    somewhere to put a debug build when CI cannot start.
+
+    This is a CONFIG fact with no other owner: the profile is written by the team
+    (`firebase` here, `adapt` elsewhere), never by hand. The app id is the value
+    Firebase Console shows for a registered Android app — the registered package
+    must equal the profile's `ci.package_name`, or App Distribution refuses the
+    apk with a package mismatch, so that is checked before anything is written.
+    """
+    from team.core import load_json, save_json
+
+    project = resolve_project(args.project)
+    pdir = pipeline_dir(project)
+    profile = profile_of(project)
+    ci = dict(profile.get("ci") or {})
+    fb = dict(ci.get("firebase") or {})
+    if args.app_id:
+        fb["app_id"] = args.app_id.strip()
+    if args.groups is not None:
+        fb["groups"] = args.groups.strip()
+    if not fb.get("app_id"):
+        raise SystemExit("firebase needs --app-id (Firebase Console > App Distribution > app)")
+    package = str(ci.get("package_name") or "").strip()
+    app_id = str(fb["app_id"])
+    ci["firebase"] = fb
+    if args.debug_task:
+        ci["debug_task"] = args.debug_task.strip()
+    if args.debug_apk:
+        ci["debug_apk"] = args.debug_apk.strip()
+    profile["ci"] = ci
+    conns = dict(profile.get("connections") or {})
+    conn = dict(conns.get("firebase") or {})
+    conn["app_id"] = app_id
+    if args.project_id:
+        conn["project_id"] = args.project_id.strip()
+        num = app_id.split(":")[1] if app_id.count(":") >= 1 else ""
+        if num.isdigit():
+            conn["project_number"] = num
+    conns["firebase"] = conn
+    profile["connections"] = conns
+    save_json(pdir / "profile.json", profile)
+    print(f"firebase: {project.name} → app {app_id}"
+          f", groups {fb.get('groups') or '— (console only)'}"
+          f"{', project ' + conn.get('project_id', '') if conn.get('project_id') else ''}")
+    if package:
+        print(f"  registered package must be {package} — App Distribution refuses any other")
+    print(f"  test now: devteam local-delivery {project.name} --dry-run")
+    return 0
 
 
 def cmd_schedules(args: argparse.Namespace) -> None:
@@ -5377,10 +5429,23 @@ def main() -> None:
     ld.add_argument("--version", help="the version being delivered (defaults to the last tag)")
     ld.add_argument("--reason", help="why CI could not deliver (printed in the tester note)")
     ld.add_argument("--notes", help="extra release-note text for testers")
+    ld.add_argument("--worktree",
+                    help="build the tree that was JUST VERIFIED instead of origin/main "
+                         "(a blocked release's change lives on its branch until CI runs)")
     ld.add_argument("--no-distribute", action="store_true",
                     help="build the debug apk and stop (no Firebase upload)")
     ld.add_argument("--dry-run", action="store_true", help="report the plan, build nothing")
     ld.set_defaults(fn=cmd_local_delivery)
+    fb = sub.add_parser("firebase",
+                        help="declare the Firebase App Distribution target (app id + group) "
+                             "the local-delivery fallback sends debug builds to")
+    fb.add_argument("project")
+    fb.add_argument("--app-id", help="Firebase Android app id (1:<number>:android:<hash>)")
+    fb.add_argument("--groups", default=None, help="App Distribution group alias (e.g. qa)")
+    fb.add_argument("--project-id", help="Firebase project id (used for the upload)")
+    fb.add_argument("--debug-task", help="exact Gradle debug task for a flavored module")
+    fb.add_argument("--debug-apk", help="path to the debug apk a distributed build produces")
+    fb.set_defaults(fn=cmd_firebase)
     a = sub.add_parser("alarm");       a.add_argument("project"); a.set_defaults(fn=cmd_alarm)
     rs = sub.add_parser("research");   rs.add_argument("project"); rs.add_argument("--no-llm", action="store_true")
     rs.add_argument("--apply-result", help="synthesis JSON produced by the host tool's native agent; applies through the same validation + goal gate")

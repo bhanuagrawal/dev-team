@@ -111,16 +111,32 @@ def billing_blocked(project: Path, run_id: str | None, log: RunLog | None = None
     return (False, "")
 
 
-def _run_gradle(project: Path, profile: dict, log: RunLog) -> Path:
-    """Build the debug apk in the delivery-ref worktree (never the owner's
-    checkout, which may lag or carry WIP)."""
+def _run_gradle(project: Path, profile: dict, log: RunLog,
+                tree: Path | None = None) -> Path:
+    """Build the debug apk in a tree, never the owner's checkout.
+
+    Default is the delivery-ref scan tree. A caller that just VERIFIED a worktree
+    passes that tree instead: building origin/main there sends testers the build
+    they already have while the change under test sits on a branch — observed
+    2026-11-16, when an offer-flow fallback delivered the previous app under the
+    new version's name.
+    """
     from . import scan as scan_mod
 
-    tree = scan_mod.origin_tree(project, log)
+    if tree is None:
+        tree = scan_mod.origin_tree(project, log)
+    else:
+        tree = Path(tree)
+        if not (tree / ".git").exists():
+            raise SystemExit(f"local delivery: not a worktree: {tree}")
     module = str((profile.get("ci") or {}).get("module") or "").strip() or "app"
-    log(f"local delivery: building :{module}:assembleDebug in {tree}")
+    # A flavored module has no `assembleDebug` (ZenList builds zenlist/zencoach),
+    # so the profile may name the exact debug task and apk path it produces.
+    task = str((profile.get("ci") or {}).get("debug_task") or "").strip() \
+        or f":{module}:assembleDebug"
+    log(f"local delivery: building {task} in {tree}")
     r = run(
-        ["./gradlew", f":{module}:assembleDebug", "--console=plain",
+        ["./gradlew", task, "--console=plain",
          "-Dorg.gradle.internal.http.socketTimeout=120000",
          "-Dorg.gradle.internal.http.connectionTimeout=120000"],
         tree, timeout=2400,
@@ -170,7 +186,7 @@ def _distribute(project: Path, profile: dict, apk: Path, version: str,
 
 def deliver(project: Path, log: RunLog, version: str = "", reason: str = "",
             notes_extra: str = "", distribute: bool = True,
-            dry_run: bool = False) -> dict:
+            dry_run: bool = False, tree: Path | None = None) -> dict:
     """Build a debug apk locally and (optionally) send it to the declared
     Firebase App Distribution group. Returns a dict; `release` merges it into
     its own result WITHOUT turning it into a Play delivery."""
@@ -183,7 +199,8 @@ def deliver(project: Path, log: RunLog, version: str = "", reason: str = "",
     module = str((profile.get("ci") or {}).get("module") or "app")
     if dry_run:
         result.update({"dry_run": True, "module": module,
-                       "apk": str(debug_apk_path(project, profile)),
+                       "apk": str(debug_apk_path(tree or project, profile)),
+                       "tree": str(tree) if tree else "",
                        "firebase": fb or {}})
         return result
     if not fb:
@@ -191,9 +208,15 @@ def deliver(project: Path, log: RunLog, version: str = "", reason: str = "",
             "distribute to; build only")
         distribute = False
 
-    apk = _run_gradle(project, profile, log)
+    apk = _run_gradle(project, profile, log, tree=tree)
     result["apk"] = str(apk)
     result["apk_kb"] = apk.stat().st_size // 1024
+    if tree is not None:
+        from .core import git as _git
+        head = (_git(["rev-parse", "HEAD"], cwd=Path(tree)).stdout or "").strip()
+        result["tree"] = str(tree)
+        result["commit"] = head[:12]
+        notes_extra = (notes_extra + f"\nBuilt from {head[:12]} in {Path(tree).name}.").strip()
 
     if not distribute:
         result["distributed"] = False

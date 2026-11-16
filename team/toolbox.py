@@ -154,9 +154,15 @@ _RAW: list[tuple[str, str, str, str, str, bool]] = [
     ("poll", "deliver", "tail the last run log",
      "nothing", "nothing", True),
     ("local-delivery", "deliver",
-     "CI cannot start (GitHub Actions billing): build a DEBUG apk here → Firebase App Distribution",
+     "CI cannot start (GitHub Actions billing): build a DEBUG apk here → Firebase App Distribution "
+     "(`--worktree` sends the tree that was just verified, not origin/main)",
      "a debug apk, a Firebase release, .pipeline/runs/ log",
      "no gradle/workspace; no firebase CLI or npx; an upload that fails", True),
+    ("firebase", "deliver",
+     "declare the App Distribution target (app id + group) the local-delivery fallback sends to — "
+     "one per app, written by the team, never hand-edited",
+     ".pipeline/profile.json (ci.firebase, connections.firebase)",
+     "no --app-id", True),
     ("promote", "deliver", "send an internal-track build to production (OWNER ONLY)",
      "Play review, state", "version not on an internal track; no --requested-by", True),
     ("ci", "deliver", "print or write the canonical release workflow",
