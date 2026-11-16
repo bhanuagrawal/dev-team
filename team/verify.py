@@ -517,6 +517,27 @@ def storefront_listing_fresh_check(worktree: Path,
                          + (", …" if len(drawing) > 1 else "") + ")")
 
 
+def _repo_relative(project: Path, raw: str) -> str:
+    """A surface path as the repo-relative path the diff and worktree speak.
+
+    `ux_audit.surfaces` resolves paths against the DELIVERY tree
+    (`.pipeline/scan`), which is correct for fingerprints and WRONG as an mtime
+    source: `verify` re-checks that tree out on every run, so every file in it
+    looks freshly written and a walk that happened ten minutes ago reports
+    "its screen changed after the last walk". The walk describes the task tree,
+    so the comparison must read the same relative path there.
+    """
+    p = Path(raw)
+    if not p.is_absolute():
+        return p.as_posix()
+    text = p.as_posix()
+    for anchor in (project / ".pipeline" / "scan", project):
+        root = Path(anchor).as_posix().rstrip("/")
+        if text.startswith(root + "/"):
+            return text[len(root) + 1:]
+    return p.name
+
+
 def flow_gate(project: Path, worktree: Path, spec: dict | None,
               files: list[str]) -> tuple[bool, str]:
     """THE release audit: every declared journey must have passed, on this diff.
@@ -554,9 +575,12 @@ def flow_gate(project: Path, worktree: Path, spec: dict | None,
             # It passed, but does the pass describe THIS diff? A walk older than
             # the screen it walks is evidence about an older build.
             surface = surfaces.get(str(flow.get("surface") or "").strip().lower())
-            touched = [p for p in (surface or {}).get("paths") or []
-                       if Path(p).as_posix() in changed
-                       or any(Path(c).name == Path(p).name for c in changed)]
+            touched = [rel for rel in
+                       (_repo_relative(project, p)
+                        for p in (surface or {}).get("paths") or [])
+                       if rel and (rel in changed
+                                   or any(Path(c).name == Path(rel).name
+                                          for c in changed))]
             if touched:
                 result = ux_flow.run_dir(project) / ux_flow._slug(fid) / "result.json"
                 try:
