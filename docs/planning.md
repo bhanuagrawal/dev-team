@@ -95,6 +95,31 @@ resume point or its scope. If the crash makes a phase task wrong, supersede that
 one task with a recorded reason; do not silently drop it or re-plan the phase.
 The plan page shows the interrupt, the resume task and the phase as paused.
 
+### The plan heals itself; it never blocks on being stale
+
+A queue entry is stale the moment its task ships — the ledger says delivered
+while the plan still says waiting. That is a thing to FIX, not a thing to
+refuse: a stale plan stops nothing, and every command that reads or writes it
+already runs the same pass.
+
+- **`save_state` reconciles before the write** (`queue.reconcile`): an entry
+  whose label is in the shipped ledger, or an exact duplicate of an earlier
+  entry, is dropped and recorded in `state['queue_events']`. Every verb inherits
+  this — including a verb written next month — so nobody has to remember a step.
+- **`pick` reconciles again on read**, because a state written by a bypass must
+  not hand a delivered task to a run.
+- **`devteam reconcile <project>`** (or `--all`, `--dry-run`) is the same pass as
+  a verb: for a sweep from a schedule or a watcher, and the repair when a writer
+  bypassed `save_state`. Deterministic, idempotent, and it never exits non-zero
+  on staleness.
+- **`doctor` reports it as a WARN**, never BLOCKED — a stale queue is healed on
+  the next write; stopping the machine over it would be the one thing this check
+  must never do.
+
+Reconcile only removes what the ledgers already answer. Judgement — a scope a
+newer change invalidated, two tasks that should merge — stays with the planner
+(`plan` / `replan`) and its impact block, which keeps reporting every verdict.
+
 ## Done is earned, not exhausted (owner directive 2026-11-09)
 
 When the last task of a feature ships, the feature is not done — it is **built**.

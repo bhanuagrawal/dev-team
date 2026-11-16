@@ -233,7 +233,7 @@ def state_of(project: Path) -> dict:
 
 
 def save_state(project: Path, state: dict) -> None:
-    """Write the ledger, then refresh the page that describes it.
+    """Write the ledger, then refresh the two views that describe it.
 
     The report page is a VIEW of the ledger, so the refresh belongs to the WRITE,
     not to the two commands (`record`, `rc`) that happened to remember it. It used
@@ -241,11 +241,40 @@ def save_state(project: Path, state: dict) -> None:
     `research` writing state that the page never saw, and left the rebuild itself
     wrapped in `except Exception: pass` — a stale page and a silent one.
 
+    The QUEUE is the other view: an entry whose task already shipped is stale the
+    moment its ledger row lands, and dropping it used to wait for whoever ran the
+    next plan review. `queue.reconcile` runs here, before the single atomic write,
+    so every verb inherits it and no future command can forget the step. It never
+    refuses: a stale plan is healed, never a reason to stop.
+
     Never fatal: a broken view must not fail the thing it describes. Never silent:
     a view nobody rebuilt is an answer the owner reads as current when it is not.
     """
+    _reconcile_queue(state)
     save_json(pipeline_dir(project) / "state.json", state)
     _refresh_report(project)
+
+
+def _reconcile_queue(state: dict) -> None:
+    """Drop the queue entries the ledgers already answer (idempotent, no blocking).
+
+    A failure here must not cost the write — the ledger row is the record, and a
+    plan that could not be pruned is recoverable (the next save retries, `pick`
+    retries, `devteam reconcile` repairs). It is printed, never swallowed.
+    """
+    try:
+        from . import queue as queue_mod
+        result = queue_mod.reconcile(state)
+        if result["changed"]:
+            print(f"queue: reconciled — dropped {len(result['dropped'])} entr"
+                  f"{'y' if len(result['dropped']) == 1 else 'ies'} the ledgers "
+                  "already answer: "
+                  + ", ".join(d["label"] for d in result["dropped"][:4]),
+                  file=sys.stderr, flush=True)
+    except Exception as exc:
+        print(f"queue: reconcile FAILED ({exc.__class__.__name__}: {exc}) — the write "
+              "still lands; the next save or `devteam reconcile` retries",
+              file=sys.stderr, flush=True)
 
 
 def _refresh_report(project: Path) -> None:

@@ -25,6 +25,8 @@ work without judging it.
 """
 from __future__ import annotations
 
+import hashlib
+import json
 import re
 
 from .core import now_iso
@@ -343,3 +345,93 @@ def review(state: dict) -> str:
         verdicts.append({"label": label_of(q), "entry": q, "verdict": verdict,
                          "reason": reason, "superseded_by": by})
     return impact_block("queue-review", [], verdicts)
+
+
+# --------------------------------------------------------------------------- #
+# The plan heals itself
+# --------------------------------------------------------------------------- #
+def queue_fingerprint(queue: list[dict]) -> str:
+    """Stable digest of what the queue still claims — labels + the goal each
+    serves. Two queues with the same digest are the same plan, whatever else the
+    entries carry."""
+    material = [[label_of(q), str(q.get("advances") or "")] for q in queue or []]
+    return hashlib.sha1(json.dumps(material, sort_keys=True).encode("utf-8")).hexdigest()
+
+
+def reconcile(state: dict, source: str = "reconcile") -> dict:
+    """Drop the entries the ledgers already answer. Deterministic, idempotent,
+    and it NEVER refuses or blocks anything: a stale queue is fixed here, not
+    reported and stopped on.
+
+    This is the second half of the rule `save_state` follows for the report page:
+    the queue is a VIEW of the ledgers, so pruning belongs to the write — not to
+    the release, the record or the agent that happened to remember it. It runs
+    inside `save_state`, so every verb inherits it, and again at pick time so a
+    state written by any bypass cannot hand a delivered task to a run.
+
+    Two kinds of staleness are answered by the ledgers alone (no judgement):
+    - the task has already shipped (`scan.already_delivered`, the ONE definition
+      shared with the picker), or
+    - an earlier entry in the queue IS the same task (same normalised label).
+
+    Anything that needs an opinion — a scope that a newer change invalidated, a
+    task that should split or merge — stays with the planner (`plan`/`replan`).
+    Reconcile never rewrites what a queued task says.
+
+    Every drop is recorded in `state['queue_events']` (source 'reconcile'), so a
+    plan never loses an entry silently.
+    """
+    from . import scan as scan_mod
+
+    queue = list(state.get("queue") or [])
+    kept: list[dict] = []
+    dropped: list[dict] = []
+    seen: set[str] = set()
+    for entry in queue:
+        label = label_of(entry)
+        key = _norm(label)
+        if scan_mod.already_delivered(entry, state):
+            dropped.append({"label": label, "action": "dropped",
+                            "reason": "already shipped (its task label is in the "
+                                      "shipped ledger)"})
+            continue
+        if key and key in seen:
+            # The FIRST copy is the one a pick serves; a later duplicate is the
+            # stale one. (review() reports the opposite, because there it only
+            # flags; here the head keeps its place.)
+            dropped.append({"label": label, "action": "superseded",
+                            "reason": "the same task is already queued above"})
+            continue
+        kept.append(entry)
+        if key:
+            seen.add(key)
+    changed = len(kept) != len(queue)
+    if changed:
+        state["queue"] = kept
+        for d in dropped:
+            _record(state, source, d["action"], d["label"], d["reason"])
+    state["queue_reconciled_at"] = now_iso()
+    state["queue_fingerprint"] = queue_fingerprint(kept)
+    return {"changed": changed, "dropped": dropped, "kept": len(kept)}
+
+
+def stale(state: dict) -> list[dict]:
+    """What `reconcile` WOULD drop, without touching `state` — the read-only form
+    `doctor` and the status line use. Same definition, no mutation."""
+    probe = {"queue": [dict(q) for q in (state.get("queue") or [])],
+             "shipped": list(state.get("shipped") or []),
+             "runs": list(state.get("runs") or [])}
+    return reconcile(probe)["dropped"]
+
+
+def drop_task(state: dict, label: str, source: str = "orchestrator",
+              reason: str = "") -> bool:
+    """Remove ONE entry by label (the `queue --done` door). True when it was there."""
+    queue = list(state.get("queue") or [])
+    kept = [q for q in queue if label_of(q) != label]
+    if len(kept) == len(queue):
+        return False
+    state["queue"] = kept
+    _record(state, source, "dropped", label,
+            reason=reason or "popped by hand — removed outside a plan review")
+    return True

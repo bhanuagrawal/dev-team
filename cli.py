@@ -1100,25 +1100,74 @@ def cmd_queue(args: argparse.Namespace) -> None:
     queue = state.get("queue", [])
     if args.done:
         before = len(queue)
-        queue = [q for q in queue if q.get("label") != args.done]
-        if len(queue) != before:
-            state["queue"] = queue
-            # A pop is a queue verdict, so it must leave an audit trail: without
-            # this the next plan review saw an empty queue where plan_review had
-            # recorded "1 waiting", with no event explaining the disappearance —
-            # exactly the silent drop the impact review exists to prevent.
-            qmod._record(state, "orchestrator", "dropped", args.done,
-                         reason="popped by hand (`queue --done`) — removed "
-                                "outside a plan review")
+        # ONE writer owns state['queue'] (see queue.py): the pop goes through it
+        # so the audit row and the reconcile cannot be forgotten here.
+        popped = qmod.drop_task(
+            state, args.done, source="orchestrator",
+            reason="popped by hand (`queue --done`) — removed outside a plan review")
+        queue = state.get("queue", [])
+        if popped:
             save_state(project, state)
-        print(f"queue: {len(queue)} left (popped '{args.done}')" if len(queue) != before
+        print(f"queue: {len(queue)} left (popped '{args.done}')" if popped
               else f"'{args.done}' not found in queue — nothing popped")
-        if len(queue) != before:
+        if popped:
             from team import tree as tree_mod
             tree_mod.write(project)
             print_page(project, "the queue changed")
     else:
         print(json.dumps(queue, indent=2))
+
+
+def cmd_reconcile(args: argparse.Namespace) -> int:
+    """THE PLAN HEALS ITSELF: drop the queue entries the ledgers already answer.
+
+    The same pass `save_state` runs on every write, offered as a verb so a
+    schedule or a watcher can sweep a project that nobody has written to. It is
+    deterministic and idempotent and it never refuses: staleness is fixed here,
+    never a reason to stop. Judgement (re-scoping, splitting, superseding by a
+    newer change) stays with the planner — this only removes what the ledgers
+    answer and collapses an exact duplicate.
+    """
+    from team import queue as queue_mod
+
+    if getattr(args, "all", False):
+        from team.report import projects as all_projects
+        targets = all_projects()
+        if not targets:
+            print("reconcile --all: no onboarded projects found")
+            return 0
+    elif args.project:
+        targets = [resolve_project(args.project)]
+    else:
+        print("reconcile: name a project (or --all)")
+        return 2
+
+    total = 0
+    for project in targets:
+        state = state_of(project)
+        before = len(state.get("queue") or [])
+        result = queue_mod.reconcile(state)
+        if result["changed"] and not getattr(args, "dry_run", False):
+            save_state(project, state)
+        total += len(result["dropped"])
+        head = ("  " if len(targets) == 1 or not result["changed"]
+                else f"=== {project.name} ===\n  ")
+        if result["dropped"]:
+            lines = [f"{head}queue: dropped {len(result['dropped'])} — "
+                     + ("would drop (dry run)" if getattr(args, "dry_run", False)
+                        else "already answered by the ledgers")]
+            lines += [f"    x {d['label']}  ({d['reason']})" for d in result["dropped"]]
+            lines.append(f"    {result['kept']} still open (was {before})")
+            print("\n".join(lines))
+        elif len(targets) > 1:
+            print(f"=== {project.name} ===\n  queue: clean — every entry is still open work")
+        else:
+            print(f"queue: clean — every one of the {result['kept']} entr"
+                  f"{'y' if result['kept'] == 1 else 'ies'} is still open work")
+    if len(targets) > 1:
+        print(f"RECONCILE: {total} stale entr{'y' if total == 1 else 'ies'} "
+              f"across {len(targets)} app(s)")
+    return 0
 
 
 def cmd_verify(args: argparse.Namespace) -> int:
@@ -1574,6 +1623,21 @@ def cmd_pick(args: argparse.Namespace) -> int:
     project = resolve_project(args.project)
     profile = profile_of(project)
     state = state_of(project)
+    # The plan heals itself BEFORE it is read. `save_state` already reconciles on
+    # every write, so this is the second belt: a state written by a bypass (a hand
+    # edit, a newer command that saved differently) must not hand a delivered task
+    # to a run. It never refuses the pick — a stale queue is dropped, not a reason
+    # to stop.
+    try:
+        from team import queue as queue_mod
+        healed = queue_mod.reconcile(state)
+        if healed["changed"]:
+            save_state(project, state)
+            print(f"queue: reconciled — dropped {len(healed['dropped'])} entr"
+                  f"{'y' if len(healed['dropped']) == 1 else 'ies'} the ledgers "
+                  "already answer", file=sys.stderr, flush=True)
+    except Exception as e:  # healing must never block a pick
+        print(f"queue: reconcile skipped ({e})", file=sys.stderr, flush=True)
     seq = len(state.get("runs", [])) + 1
     # A dead session's leftovers are reclaimed by the NEXT run, not by the owner
     # remembering (`worktree-prune` is the manual form). Safe by construction:
@@ -5866,6 +5930,15 @@ def main() -> None:
     rpl.add_argument("--dry-run", action="store_true", help="report only, write nothing")
     rpl.add_argument("--no-llm", action="store_true", help="collect and write the planner prompt instead")
     rpl.set_defaults(fn=cmd_replan)
+    rec = sub.add_parser(
+        "reconcile",
+        help="heal the plan: drop the queue entries the ledgers already answer "
+             "(the same pass save_state runs on every write; never refuses)")
+    rec.add_argument("project", nargs="?", help="omit with --all")
+    rec.add_argument("--all", action="store_true", help="sweep every onboarded app")
+    rec.add_argument("--dry-run", action="store_true",
+                     help="report what would be dropped, write nothing")
+    rec.set_defaults(fn=cmd_reconcile)
     cl = sub.add_parser("closure",
                         help="CLOSURE: is a 'done' real? A branch whose tasks are all "
                              "delivered but whose measures have no evidence is a GAP — "

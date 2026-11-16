@@ -85,6 +85,11 @@ _RAW: list[tuple[str, str, str, str, str, bool]] = [
      "state.queue", "no active milestone", True),
     ("queue", "plan", "queue add/drop/focus, one entry at a time",
      "state.queue", "no goal tree (needs --advances)", True),
+    ("reconcile", "plan", "heal the plan: drop the queue entries the ledgers already "
+                          "answer (runs inside every save_state and before every pick; "
+                          "`--all` sweeps, `--dry-run` reports)",
+     "state.queue, state.queue_events", "nothing — a stale plan is dropped, never a "
+                                        "reason to stop", True),
     ("vision", "plan", "set THE one-sentence goal (owner's words)",
      "profile.goals.vision", "never — the owner is the authority", True),
     ("goal", "plan", "change the goal tree below the vision, with a logged why",

@@ -677,6 +677,30 @@ def run_doctor(project: Path, log) -> dict:
     except Exception as e:  # a check must never hide the report
         log(f"doctor shipped-evidence: could not check ({e})")
 
+    # THE PLAN IS A VIEW TOO. Every state write reconciles the queue and every
+    # pick re-checks it, so this should always be clean; when it is not, a writer
+    # bypassed `save_state` and the owner is about to read a plan that claims
+    # work already on internal testing. Reported as a WARN, never BLOCKED: a
+    # stale plan is healed on the next write, and stopping the machine over it
+    # would be the one thing this check must never do.
+    try:
+        from . import queue as queue_mod
+        stale = queue_mod.stale(state_of(project))
+        if stale:
+            report["queue"] = {
+                "status": "warn", "blocked": [], "checks_passed": 0,
+                "note": ("; ".join(f"{d['label']} — {d['reason']}" for d in stale[:3])
+                         + " — the next state write (or `devteam reconcile`) drops them"),
+            }
+            log(f"doctor queue: WARN — {len(stale)} entr"
+                f"{'y' if len(stale) == 1 else 'ies'} the ledgers already answer: "
+                + ", ".join(d["label"] for d in stale[:3]))
+        else:
+            report["queue"] = {"status": "ready", "blocked": [], "checks_passed": 1}
+            log("doctor queue: ready — every queued entry is still open work")
+    except Exception as e:  # a check must never hide the report
+        log(f"doctor queue: could not check ({e})")
+
     try:
         from . import report as report_mod
         st = report_mod.status()
