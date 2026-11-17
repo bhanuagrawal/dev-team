@@ -869,6 +869,7 @@ def _delivery_tree(project: Path, log: Any = None) -> Path:
     # the checkout's copy win only when the checkout is not behind origin/main.
     from .core import git, git_ref_state
     from .storefront_direction import DIRECTION_REL
+    from .storefront_review import REVIEW_REL
     # The spec AND the direction are project-owned dev-team outputs, not app code:
     # a run must see the corrected one, or it paints a listing from yesterday's
     # words (2026-11-07: a corrected spec was silently ignored) or from the team's
@@ -876,11 +877,12 @@ def _delivery_tree(project: Path, log: Any = None) -> Path:
     # kept using the shipped one). Restore the SHIPPED copies first — the tree is a
     # disposable cache — then let the checkout's copy win only when the checkout is
     # not behind origin/main.
-    rels = (SPEC_REL, DIRECTION_REL)
+    rels = (SPEC_REL, DIRECTION_REL, REVIEW_REL)
     if (tree / ".git").exists():
         restored = git(["checkout", "--", *rels], cwd=tree, timeout=60)
         if restored.returncode == 0 and log:
-            log(f"  = delivery tree restored to the shipped {SPEC_REL} + {DIRECTION_REL}")
+            log(f"  = delivery tree restored to the shipped {SPEC_REL}, {DIRECTION_REL}, "
+                    f"{REVIEW_REL}")
     state = git_ref_state(project)
     behind = int(state.get("behind") or 0)
     for rel in rels:
