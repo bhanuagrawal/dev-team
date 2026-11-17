@@ -421,7 +421,8 @@ def build(project: Path, *, frame: str = "auto", plate: str | None = None,
           frame_html: str | None = None, stitch_source: str = "",
           brief: str = "", builtin: bool = False, force: bool = False,
           poster: bool = False, strict: bool = False, publish: bool = False,
-          why: str = "", owner_approved: bool = False, log=None) -> dict[str, Any]:
+          why: str = "", owner_approved: bool = False, screens: str = "",
+          log=None) -> dict[str, Any]:
     from . import asset_critic, storefront_brand as sbf
     from . import storefront_direction as sd, storefront_frames as sfr
     from . import storefront_preview as sp, storefront_review as sr, vision_layout as vl
@@ -493,10 +494,20 @@ def build(project: Path, *, frame: str = "auto", plate: str | None = None,
                      "; ".join(sd.validate(raw, spec)[:3]))
     _say(log, f"~ direction: {direction.get('concept')}")
 
-    # 3 — render the app's own composables (from origin/main, never a mock).
-    run_step(project, "render")
-    _say(log, "~ render: the app's own composables (origin/main)")
-    rendered = sp.render_previews(project, log=log, tree=tree)
+    # 3 — render the app's own composables (from origin/main, never a mock) —
+    # unless the run supplies DEVICE captures, which are the same screens as the
+    # device drew them (owner request 2026-11-17: seeded reader, live data).
+    if screens:
+        if not poster:
+            return _fail("BLOCKED", "--screens feeds the poster path only",
+                         "captured screens are the model's input; the code-composed paths "
+                         "need the off-device render — drop --screens or the fallback flags")
+        _say(log, f"~ render: device captures from {screens} (no off-device render)")
+        rendered = sp.adopt_device_screens(project, shipping, Path(screens), log=log)
+    else:
+        run_step(project, "render")
+        _say(log, "~ render: the app's own composables (origin/main)")
+        rendered = sp.render_previews(project, log=log, tree=tree)
     if rendered.get("status") != "OK":
         return _fail(rendered.get("status", "ERROR"), rendered.get("error", "render failed"),
                      rendered.get("hint", ""))

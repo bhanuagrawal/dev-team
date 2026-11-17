@@ -46,6 +46,10 @@ Loaded by: `devteam storefront-build` / `store-publish` (their refusal prints it
    A listing ships **at least four** phone screenshots (`storefront-build` refuses
    fewer): two cannot show what the app is, how it works, that it works, and who is
    in control — and the control frame is the one that went missing when three shipped.
+   When the listing must show what a real reader sees, `storefront-build --screens
+   <dir>` paints from screenshots captured on a device as a seeded reader (one
+   `<scene-id>.png` per scene; provenance `device_capture`, no cap) instead of the
+   off-device composable render. A missing capture is refused, never substituted.
    What the listing SAYS is decided before anything is drawn, in
    `docs/storefront-direction.json` (concept, per-frame argument, palette emphasis,
    frame `composition`, evidence) — a direction without its own composition is refused.

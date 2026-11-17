@@ -63,6 +63,7 @@ BEZEL_X = (FRAME_W - BEZEL_W) // 2
 BEZEL_TOP = 740
 
 SPEC_REL = "docs/storefront.json"
+SCENES_DIR_REL = ".pipeline/storefront_scenes"
 MARKER = "devteam storefront-preview"
 
 _SCENE_DEFAULTS: dict[str, list[dict[str, str]]] = {
@@ -867,19 +868,103 @@ def _delivery_tree(project: Path, log: Any = None) -> Path:
     # So: restore the SHIPPED spec first (the tree is a disposable cache), then let
     # the checkout's copy win only when the checkout is not behind origin/main.
     from .core import git, git_ref_state
+    from .storefront_direction import DIRECTION_REL
+    # The spec AND the direction are project-owned dev-team outputs, not app code:
+    # a run must see the corrected one, or it paints a listing from yesterday's
+    # words (2026-11-07: a corrected spec was silently ignored) or from the team's
+    # previous frame recipe (2026-11-17: per-app composition landed and the render
+    # kept using the shipped one). Restore the SHIPPED copies first — the tree is a
+    # disposable cache — then let the checkout's copy win only when the checkout is
+    # not behind origin/main.
+    rels = (SPEC_REL, DIRECTION_REL)
     if (tree / ".git").exists():
-        restored = git(["checkout", "--", SPEC_REL], cwd=tree, timeout=60)
+        restored = git(["checkout", "--", *rels], cwd=tree, timeout=60)
         if restored.returncode == 0 and log:
-            log(f"  = delivery tree restored to the shipped {SPEC_REL}")
-    if (project / SPEC_REL).is_file():
-        state = git_ref_state(project)
-        if int(state.get("behind") or 0) > 0:
+            log(f"  = delivery tree restored to the shipped {SPEC_REL} + {DIRECTION_REL}")
+    state = git_ref_state(project)
+    behind = int(state.get("behind") or 0)
+    for rel in rels:
+        if not (project / rel).is_file():
+            continue
+        if behind > 0:
             if log:
-                log(f"  = checkout is {state.get('behind')} behind {state.get('ref')} — "
-                    f"using the shipped {SPEC_REL}, not the checkout's older copy")
+                log(f"  = checkout is {behind} behind {state.get('ref')} — "
+                    f"using the shipped {rel}, not the checkout's older copy")
         else:
-            shutil.copy2(project / SPEC_REL, tree / SPEC_REL)
+            shutil.copy2(project / rel, tree / rel)
     return tree
+
+
+def adopt_device_screens(project: Path, scenes: list[dict[str, Any]], screens_dir: Path,
+                         log: Any = None) -> dict[str, Any]:
+    """Use screenshots CAPTURED from the running app instead of the off-device render.
+
+    Owner request 2026-11-17: assets painted from the app a SEEDED reader actually
+    sees ("use seed user with data ... and capture image"), because the fixture
+    preview shows invented readers while the live backend has none in that city.
+    A device capture is the app's own UI drawn by the device — a stronger witness
+    than a composable preview — so it carries its own provenance and no cap.
+
+    The caller supplies one `<scene-id>.png` per shipping scene. A missing capture
+    is refused, never substituted: a frame painted from the wrong screen is the one
+    failure no downstream gate can see.
+    """
+    import struct
+
+    from .core import now_iso
+
+    src_dir = Path(screens_dir).expanduser()
+    if not src_dir.is_dir():
+        return {"status": "BLOCKED", "error": f"no capture directory at {src_dir}"}
+    out_dir = project / SCENES_DIR_REL
+    out_dir.mkdir(parents=True, exist_ok=True)
+    collected: list[dict[str, Any]] = []
+    missing: list[str] = []
+    for scene in scenes:
+        sid = str(scene.get("id"))
+        src = src_dir / f"{sid}.png"
+        if not src.is_file():
+            missing.append(sid)
+            continue
+        try:
+            head = src.read_bytes()[:24]
+            width, height = struct.unpack(">II", head[16:24]) if head[:8] == b"\x89PNG\r\n\x1a\n" else (0, 0)
+        except OSError:
+            width, height = 0, 0
+        # Play's phone screenshots are >= 1080 wide; a capture smaller than that is
+        # an upscale waiting to happen, and an upscale is not a screenshot.
+        if width < 900 or height < 900:
+            return {"status": "BLOCKED",
+                    "error": f"{src.name} is {width}x{height} — a capture must be at least "
+                             "900px on both sides to be a Play screenshot"}
+        dest = out_dir / f"{sid}.png"
+        shutil.copy2(src, dest)
+        try:
+            os.utime(dest, None)
+        except OSError:
+            pass
+        collected.append({"id": sid, "file": str(dest.relative_to(project)),
+                          "bytes": dest.stat().st_size, "source": str(src),
+                          "size": [width, height]})
+    if missing:
+        return {"status": "BLOCKED",
+                "error": "no capture for: " + ", ".join(missing),
+                "hint": f"drop one <scene-id>.png per scene into {src_dir} (ids from "
+                        f"{SPEC_REL}) and re-run"}
+    manifest = {
+        "provenance": "device_capture",
+        "renderer": "adb-screencap",
+        "captured_from": {"directory": str(src_dir), "app": "installed debug build"},
+        "captured_at": now_iso(),
+        "scenes": collected,
+        "unresolved": [],
+    }
+    save_json(out_dir / "manifest.json", manifest)
+    if log:
+        for c in collected:
+            log(f"  ✓ {c['id']} ({round(c['bytes'] / 1024, 1)} KB, "
+                f"{c['size'][0]}x{c['size'][1]}) — device capture")
+    return {"status": "OK", **manifest}
 
 
 def render_previews(project: Path, log: Any = None, timeout: int = 900,

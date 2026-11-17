@@ -3764,7 +3764,8 @@ def cmd_storefront_build(args: argparse.Namespace) -> int:
             layout=args.layout, frame_html=args.frame_html, stitch_source=args.stitch_source,
             brief=args.brief, builtin=args.builtin, force=args.force,
             poster=args.poster, strict=args.strict, publish=False, why=args.why,
-            owner_approved=getattr(args, "owner_approved", False), log=print,
+            owner_approved=getattr(args, "owner_approved", False),
+            screens=getattr(args, "screens", "") or "", log=print,
         )
     finally:
         sb.run_end(project, res, log=print)
@@ -6008,6 +6009,10 @@ def main() -> None:
     sb.add_argument("project")
     sb.add_argument("--frame", default="auto",
                     help="frame name to adopt for every scene (default: auto — one frame per scene)")
+    sb.add_argument("--screens", default="", metavar="DIR",
+                    help="paint from screenshots CAPTURED on a device (one <scene-id>.png "
+                         "per shipping scene in DIR) instead of the off-device composable "
+                         "render — the seeded-reader path; poster only")
     sb.add_argument("--strict", action="store_true",
                     help="refuse an asset whose watermark heal cannot be proved clean "
                          "(default: heal best-effort, report it, and let the owner decide)")

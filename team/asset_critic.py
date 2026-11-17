@@ -36,6 +36,7 @@ def _png_dimensions(path: Path) -> tuple[int, int] | None:
 
 PROVENANCE_CAP: dict[str, int | None] = {
     "compose_preview": None,   # rendered from the app's own composables — no cap
+    "device_capture": None,    # captured from the running app on a device — no cap
     "stitch": None,            # canonical Stitch screen, design-locked
     "html_mock": 70,           # an impression of the UI, not the UI
     "unknown": 70,
@@ -50,7 +51,8 @@ def _provenance(project: Path) -> str:
             data = json.loads(manifest.read_text())
         except Exception:
             data = {}
-        if data.get("provenance") in ("compose_preview", "stitch") and data.get("scenes"):
+        if data.get("provenance") in ("compose_preview", "device_capture", "stitch") \
+                and data.get("scenes"):
             return data.get("provenance")
     stitch_manifest = project / ".pipeline/stitch_manifest.json"
     if stitch_manifest.is_file():

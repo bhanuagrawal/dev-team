@@ -43,6 +43,48 @@ class ProviderOrderTests(unittest.TestCase):
             self.assertEqual(sp._providers(), ["gemini"])
 
 
+class DeviceCaptureTests(unittest.TestCase):
+    @staticmethod
+    def _png(path: Path, width: int, height: int) -> None:
+        import struct
+        import zlib
+
+        raw = b"\x00" * (width * 3 + 1)
+        body = b"".join(raw for _ in range(height))
+
+        def chunk(tag: bytes, data: bytes) -> bytes:
+            return (struct.pack(">I", len(data)) + tag + data
+                    + struct.pack(">I", zlib.crc32(tag + data) & 0xFFFFFFFF))
+
+        path.write_bytes(b"\x89PNG\r\n\x1a\n"
+                         + chunk(b"IHDR", struct.pack(">IIBBBBB", width, height, 8, 2, 0, 0, 0))
+                         + chunk(b"IDAT", zlib.compress(body))
+                         + chunk(b"IEND", b""))
+
+    def test_captures_become_the_scene_renders_with_their_own_provenance(self):
+        from team import storefront_preview as sp
+
+        project = Path(tempfile.mkdtemp())
+        shots = project / "shots"
+        shots.mkdir()
+        self._png(shots / "01_hero.png", 1080, 2270)
+        scenes = [{"id": "01_hero"}]
+        made = sp.adopt_device_screens(project, scenes, shots)
+        self.assertEqual(made["status"], "OK")
+        self.assertEqual(made["provenance"], "device_capture")
+        self.assertTrue((project / sp.SCENES_DIR_REL / "01_hero.png").is_file())
+
+    def test_a_missing_capture_is_refused_not_substituted(self):
+        from team import storefront_preview as sp
+
+        project = Path(tempfile.mkdtemp())
+        shots = project / "shots"
+        shots.mkdir()
+        made = sp.adopt_device_screens(project, [{"id": "01_hero"}], shots)
+        self.assertEqual(made["status"], "BLOCKED")
+        self.assertIn("01_hero", made["error"])
+
+
 class CompositionTests(unittest.TestCase):
     scene = {"id": "01_hero", "badge": "Near You", "headline": "Books within reach",
              "sub": "Real copies on real shelves near you."}
