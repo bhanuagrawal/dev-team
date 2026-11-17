@@ -646,22 +646,61 @@ def generate_all(project: Path, scenes: list[dict[str, Any]], direction: dict[st
                      "sha": sha, "source_sha": source_sha, "sidecar": str(sidecar),
                      "ar": aspect})
     if not jobs:
+        wrong = _wrong_frames(posters, scenes)
+        if wrong:
+            return {"status": "BLOCKED",
+                    "error": f"cached frame(s) do not carry their own words: {', '.join(wrong)}",
+                    "scene": wrong[0],
+                    "hint": "they were removed, so re-running repaints only them"}
         dup = _refuse_duplicate_posters(posters)
         if dup:
             return dup
         return {"status": "OK", "posters": posters, "chat": None, "painted": 0,
                 "painter": None}
-    outcome = paint_batch(jobs, timeout=900, log=log)
-    value = outcome.get("value") or {}
-    if outcome.get("script_invalid"):
-        return {"status": "ERROR", "error": outcome["script_invalid"],
-                "hint": "this is a team-code bug, not a model one — nothing was painted"}
-    if outcome.get("provider") is None and not outcome.get("ok"):
-        return {"status": "BLOCKED",
-                "error": outcome.get("error") or "no image model produced the frames",
-                "detail": "; ".join(outcome.get("attempts") or [])[:400]}
+    # ONE CHAT PER FRAME when every attachment has the same shape.
+    #
+    # "The sent message carries an image of this shape" is the proof that a frame's
+    # screen reached the model. Device captures of one phone are all the same shape,
+    # so that proof cannot tell frame 2 from frame 1 — and a model that answers late
+    # hands back the previous frame's picture. It did, on 2026-11-17: the swap frame
+    # came back with the hero screen AND the hero words, and the hero frame came
+    # back as the bare screenshot. One fresh chat per frame leaves exactly one
+    # screen on the canvas, so the only thing it can answer with is that screen.
+    # The set still reads as one listing because the direction now pins the frame
+    # recipe and the palette, not the chat's memory of itself.
+    shapes = {str(j.get("ar")) for j in jobs}
+    chunks = [[j] for j in jobs] if len(jobs) > 1 and len(shapes) == 1 else [jobs]
+    results: list[dict[str, Any]] = []
+    provider: str | None = None
+    chat: str | None = None
+    attempts: list[str] = []
+    for chunk in chunks:
+        outcome = paint_batch(chunk, timeout=900, log=log)
+        attempts.extend(outcome.get("attempts") or [])
+        if outcome.get("script_invalid"):
+            return {"status": "ERROR", "error": outcome["script_invalid"],
+                    "hint": "this is a team-code bug, not a model one — nothing was painted"}
+        provider = outcome.get("provider") or provider
+        value = outcome.get("value") or {}
+        chat = value.get("chat") or chat
+        got = value.get("results") or []
+        if not outcome.get("ok"):
+            if outcome.get("provider") is None:
+                return {"status": "BLOCKED",
+                        "error": outcome.get("error") or "no image model produced the frames",
+                        "detail": "; ".join(attempts)[:400]}
+            bad = next((r for r in got if not r.get("ok")), {})
+            return {"status": "BLOCKED",
+                    "error": str(bad.get("error") or outcome.get("error") or "no image produced"),
+                    "chat": chat,
+                    "scene": _poster_scene_hint(bad.get("out") or chunk[0].get("out") or "")}
+        results.extend(got)
+    outcome = {"ok": True, "provider": provider, "attempts": attempts,
+               "value": {"ok": True, "results": results, "chat": chat}}
+    value = outcome["value"]
     if log:
         log(f"  poster: painted by {outcome.get('provider')}")
+    by_id = {str(s.get("id")): s for s in scenes}
     for job, made in zip(jobs, value.get("results") or []):
         if not made.get("ok"):
             return {"status": "BLOCKED", "error": str(made.get("error") or "no image produced"),
@@ -674,15 +713,89 @@ def generate_all(project: Path, scenes: list[dict[str, Any]], direction: dict[st
                 f"{path.stat().st_size // 1024} KB)")
         (project / ".pipeline" / f"gemini-poster-{path.stem.replace('poster-', '')}.txt").write_text(
             job["prompt"])
-    if not outcome.get("ok"):
-        return {"status": "BLOCKED", "error": "one or more posters were not generated",
-                "chat": value.get("chat")}
+
+    # A FRAME MUST CARRY ITS OWN WORDS. Every failure above looks like a picture;
+    # only reading the pixels back says whether the model drew THIS frame's copy
+    # around THIS frame's screen. A frame that fails is deleted with its sidecar, so
+    # the next run repaints it instead of reusing it from cache.
+    wrong = _wrong_frames(posters, scenes)
+    if wrong:
+        return {"status": "BLOCKED",
+                "error": f"frame(s) did not carry their own words: {', '.join(wrong)}",
+                "chat": value.get("chat"),
+                "scene": wrong[0],
+                "hint": "the model answered with another frame's screen/copy or with a bare "
+                        "screenshot. The failed frame(s) were removed, so re-running repaints "
+                        "only them; every other frame is reused from cache"}
     dup = _refuse_duplicate_posters(posters)
     if dup:
         dup["chat"] = value.get("chat") or dup.get("chat")
         return dup
     return {"status": "OK", "posters": posters, "chat": value.get("chat"),
             "painted": len(jobs), "painter": outcome.get("provider")}
+
+
+def _wrong_frames(posters: dict[str, Path], scenes: list[dict[str, Any]]) -> list[str]:
+    """The frames whose pixels do not carry their own headline — deleted, not reused."""
+    by_id = {str(s.get("id")): s for s in scenes}
+    wrong: list[str] = []
+    for sid, path in posters.items():
+        if _shows_copy(path, by_id.get(sid) or {}):
+            continue
+        wrong.append(sid)
+        Path(path).unlink(missing_ok=True)
+        path.with_suffix(".json").unlink(missing_ok=True)
+    return wrong
+
+
+def _shows_copy(poster: Path, scene: dict[str, Any]) -> bool:
+    """Does the painted frame actually carry this frame's HEADLINE, in order?
+
+    The one check a picture cannot pass by looking plausible. A model that answers a
+    prompt late, or that returns the attached screenshot untouched, produces an image
+    every copy-based critic accepts — the run put the HERO screen (and the hero's
+    words) into the swap frame while the critic scored the set 100/100 (observed
+    2026-11-17). Reading the words back is the only honest witness, and it needs no
+    API: tesseract on the poster.
+
+    The match is a CONTIGUOUS RUN of the headline's own words, in order — not a
+    bag of words. A bag passes on the app's ordinary vocabulary ("book", "shelf",
+    "copies" appear in the UI itself), which is exactly how a bare screenshot
+    passed the first version of this check.
+
+    A machine without tesseract cannot make this call, and a run that cannot check
+    must not pretend it did: it returns True (no evidence of a wrong frame).
+    """
+    exe = shutil.which("tesseract")
+    if not exe:
+        return True
+
+    def tokens(text: str) -> list[str]:
+        clean = re.sub(r"[^a-z0-9 ]+", " ", str(text or "").lower())
+        return [w for w in clean.split() if w]
+
+    want = tokens(scene.get("headline") or "")
+    if len(want) < 2:
+        return True
+    try:
+        res = subprocess.run([exe, str(poster), "stdout"], capture_output=True, text=True,
+                             timeout=120)
+    except (OSError, subprocess.SubprocessError):
+        return True
+    seen = tokens(res.stdout or "")
+    # Short headlines must match WHOLE: "your shelf" is UI vocabulary, and a
+    # two-word run of it cleared the check on a bare screenshot (2026-11-17).
+    need = len(want) if len(want) <= 5 else round(len(want) * 0.8)
+    best = 0
+    for i, w in enumerate(want):
+        for j, got in enumerate(seen):
+            if got != w:
+                continue
+            run = 0
+            while i + run < len(want) and j + run < len(seen) and want[i + run] == seen[j + run]:
+                run += 1
+            best = max(best, run)
+    return best >= need
 
 
 def _refuse_duplicate_posters(posters: dict[str, Path]) -> dict[str, Any] | None:
