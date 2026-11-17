@@ -346,7 +346,11 @@ def _chatgpt_batch_script(jobs: list[dict[str, str]]) -> str:
           results.push({{ ok: false, scene: job.out, error: "no NEW image in the model's answer" }});
           continue;
         }}
-        if (picked.startsWith("blob:")) {{
+        // ChatGPT serves some answers as a data: URI, not a blob: — and
+        // apiRequestContext.get refuses a data: URL, which failed a whole frame
+        // after the image had already been painted (observed 2026-11-17). The
+        // canvas path decodes both.
+        if (picked.startsWith("blob:") || picked.startsWith("data:")) {{
           const data = await page.evaluate(async (s) => {{
             const img = new Image(); img.src = s; await img.decode();
             const c = document.createElement("canvas");
