@@ -62,8 +62,11 @@ class StitchDomOperationsFailFastTest(unittest.TestCase):
             stitch_mcp.edit_screens("11111", ["aaa"], "change the CTA")
         elapsed = time.time() - started
         message = str(caught.exception)
-        self.assertIn("update_screen_content", message)
-        self.assertIn("stitch-export", message)
+        # The remedy must name a route an AGENT can take. It used to name
+        # stitch_mcp.update_screen_content — a python function no agentic tool
+        # can reach, so a real run had to hand-roll it (2026-11-18). The verb
+        # `stitch-write` IS that route now, and it exports the snapshot too.
+        self.assertIn("stitch-write", message)
         self.assertLess(elapsed, 5, "a DOM-only answer must not be polled twice")
         self.assertEqual(
             len(self.polled), 1,
@@ -74,7 +77,7 @@ class StitchDomOperationsFailFastTest(unittest.TestCase):
     def test_generate_variants_names_the_write_back_route_and_stops(self):
         with self.assertRaises(stitch_mcp.NoExportableArtifact) as caught:
             stitch_mcp.generate_variants("11111", ["aaa"], "change the CTA")
-        self.assertIn("update_screen_content", str(caught.exception))
+        self.assertIn("stitch-write", str(caught.exception))
         self.assertEqual(len(self.polled), 1, f"polls: {self.polled}")
 
     def test_the_fast_error_is_still_a_stitch_error(self):

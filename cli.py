@@ -4780,6 +4780,67 @@ def cmd_stitch_screen(args: argparse.Namespace) -> int:
         return 0
 
 
+def cmd_stitch_write(args: argparse.Namespace) -> int:
+    """Put a screen's OWN html back on its own Stitch id, then export it.
+
+    The inch Stitch leaves open: `edit_screens`/`generate_variants` sometimes
+    answer with DOM operations and no htmlCode artifact, so there is nothing to
+    export and the design gate refuses the tweak (`TWEAK_SCREEN DID NOT EXPORT A
+    STITCH TWEAK`). The failure message told the agent to write the change into
+    the screen's HTML "via stitch_mcp.update_screen_content" — which no agent
+    could reach, because Stitch MCP is not their tool. This verb is that path:
+    the agent authors the HTML, this writes it in place (the id survives, so
+    nothing needs retiring) and exports the snapshot the gate reads.
+    """
+    from team import stitch_mcp
+
+    project = resolve_project(args.project)
+    profile = profile_of(project)
+    clean_pid = str((profile.get("design") or {}).get("stitch_project_id") or "").split("/")[-1]
+    if not clean_pid:
+        print(f"  ✗ No stitch_project_id declared in {project.name}/.pipeline/profile.json under 'design'.")
+        return 1
+
+    wt = getattr(args, "worktree", None)
+    root = Path(wt).resolve() if wt else project
+
+    entry = _resolve_stitch_screen_entry(project, str(args.screen), stitch_pid=clean_pid)
+    repo_id = str((entry or {}).get("id") or args.screen).split("/")[-1]
+    sid = str((entry or {}).get("stitch_id") or repo_id).split("/")[-1]
+    title = str((entry or {}).get("title") or repo_id)
+
+    html_path = Path(args.html)
+    if not html_path.is_file():
+        print(f"  ✗ {html_path} does not exist")
+        return 1
+    html = html_path.read_text(errors="ignore")
+    if not html.strip():
+        print(f"  ✗ {html_path} is empty — refusing to blank the screen")
+        return 1
+    png = Path(args.png).read_bytes() if getattr(args, "png", None) else None
+
+    try:
+        stitch_mcp.update_screen_content(clean_pid, sid, html=html, png=png)
+    except stitch_mcp.StitchError as exc:
+        print(f"STITCH WRITE FAILED: {exc}")
+        return 1
+    print(f"  ✓ wrote {len(html)} bytes onto {title} ({sid})"
+          + (f" + {len(png or b'')} PNG bytes" if png else ""))
+
+    if not getattr(args, "no_export", False):
+        live = stitch_mcp.get_screen(clean_pid, sid)
+        screens_dir = root / "docs" / "stitch" / "screens"
+        exported = stitch_mcp.export_one_screen(live, screens_dir, log=print, logical_id=repo_id)
+        if exported:
+            exported["title"] = str(exported.get("title") or title)
+            _upsert_stitch_manifest_entry(project, root, clean_pid, exported)
+            print(f"  ✓ exported docs/stitch/screens/{repo_id} (index.html + screen.png)")
+            _commit_stitch_docs(project, root,
+                                f"design({repo_id}): the screen's own HTML, written back", 
+                                getattr(args, "no_commit", False))
+    return 0
+
+
 def cmd_stitch_tweak(args: argparse.Namespace) -> int:
     """Apply a targeted in-place tweak to an existing Stitch screen rather than a full redesign."""
     project = resolve_project(args.project)
@@ -6255,6 +6316,20 @@ def main() -> None:
     stw.add_argument("--no-commit", action="store_true", help="skip auto-committing docs/stitch")
     stw.add_argument("--worktree", help="optional worktree path to write docs/stitch into")
     stw.set_defaults(fn=cmd_stitch_tweak)
+    swr = sub.add_parser(
+        "stitch-write",
+        help="write a screen's own HTML (and optional PNG) back in place, then export the snapshot")
+    swr.add_argument("project")
+    swr.add_argument("--screen", required=True,
+                     help="screen title/id to resolve from docs/stitch/manifest.json")
+    swr.add_argument("--html", required=True,
+                     help="file holding the screen's complete new HTML")
+    swr.add_argument("--png", help="optional file holding the screen's new screenshot")
+    swr.add_argument("--no-export", action="store_true",
+                     help="update Stitch only; do not write docs/stitch")
+    swr.add_argument("--no-commit", action="store_true", help="skip auto-committing docs/stitch")
+    swr.add_argument("--worktree", help="optional worktree path to write docs/stitch into")
+    swr.set_defaults(fn=cmd_stitch_write)
     scur = sub.add_parser("stitch-curate", help="inventory and curate Stitch canvas screens into canonical manifest vs stale candidate screens")
     scur.add_argument("project")
     scur.add_argument("--screens-json", help="path to raw Stitch list_screens JSON dump")

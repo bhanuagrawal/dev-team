@@ -428,8 +428,9 @@ def edit_screens(project_id: str, screen_ids: list[str], prompt: str, *,
                 "exported no new htmlCode artifact, so there is nothing to export and "
                 "the design snapshot would still be the pre-tweak screen. Apply the same "
                 "change to the screen's own HTML and write it back in place with "
-                "stitch_mcp.update_screen_content(project, screen_id, html=...), then "
-                "`devteam stitch-export <project>` — the screen id survives, nothing to retire.")
+                "`devteam stitch-write <project> --screen <id> --html <file> --worktree "
+                "<tree>` — that updates the screen's own id and exports the snapshot — "
+                "then re-run verify. The screen id survives, nothing to retire.")
         say("  stitch: edit_screens returned no screen reference — polling for updated screen")
     except NoExportableArtifact:
         raise
@@ -486,8 +487,8 @@ def generate_variants(project_id: str, screen_ids: list[str], prompt: str, *,
             raise NoExportableArtifact(
                 "Stitch applied the variant as DOM operations on the live screen but "
                 "exported no new htmlCode artifact, so there is nothing to export. Write "
-                "the change into the screen's own HTML via stitch_mcp.update_screen_content "
-                "and re-run `devteam stitch-export <project>`.")
+                "the change into the screen's own HTML and push it with `devteam "
+                "stitch-write <project> --screen <id> --html <file> --worktree <tree>`.")
         say("  stitch: generate_variants returned no screen reference — polling")
     except NoExportableArtifact:
         raise
