@@ -6012,8 +6012,9 @@ def main() -> None:
                     help="refuse an asset whose watermark heal cannot be proved clean "
                          "(default: heal best-effort, report it, and let the owner decide)")
     sb.add_argument("--poster", action="store_true",
-                    help="THE rule's path, and the default: Gemini paints the WHOLE asset from the "
-                         "rendered screen, one prompt per scene (browser), then removes its "
+                    help="THE rule's path, and the default: the signed-in image model paints "
+                         "the WHOLE asset from the rendered screen, one prompt per scene "
+                         "(browser; ChatGPT first, Gemini as fallback), then removes its "
                          "watermark and upscales to Play size")
     sb.add_argument("--plate", help="FALLBACK (needs --why): backdrop plate PNG painted by Gemini or another image model")
     sb.add_argument("--gemini", action="store_true", help="FALLBACK (needs --why): paint the backdrop plate in Gemini through the owner's Chrome")

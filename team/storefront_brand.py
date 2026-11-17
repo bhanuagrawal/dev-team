@@ -41,7 +41,10 @@ SPECS: dict[str, tuple[int, int]] = {"icon": (512, 512), "feature": (1024, 500)}
 # screenshot are painted by Gemini. One owner-supplied file is the only other
 # legitimate source. Anything else — an HTML template nobody adopted, an upscale of
 # the launcher bitmap — is refused by `gate()`.
-APPROVED = ("gemini", "stitch", "owner")
+# Who may have made a listing's brand asset. A model-painted asset names the
+# signed-in model that painted it (ChatGPT first, Gemini fallback), plus Stitch
+# designs and the owner's own files — nothing else reaches Play.
+APPROVED = ("chatgpt", "gemini", "stitch", "owner")
 GEMINI_KINDS: tuple[str, ...] = ("feature",)
 ICON_HTML_REL = "docs/storefront-icon.html"
 FILES = {"icon": "icon.png", "feature": "featureGraphic.png"}
@@ -343,6 +346,7 @@ def generate(project: Path, kinds: tuple[str, ...] = GEMINI_KINDS,
                          "prompt": prompt, "ar": aspect})
 
     chat = None
+    provider = ""
     painted: dict[str, list[int] | None] = {}
     if jobs:
         if log:
@@ -355,6 +359,7 @@ def generate(project: Path, kinds: tuple[str, ...] = GEMINI_KINDS,
                     "detail": "; ".join(outcome.get("attempts") or [])[:300]}
         value = outcome.get("value") or {}
         chat = value.get("chat")
+        provider = str(outcome.get("provider") or "")
         results = value.get("results") or []
         for job, result in zip(jobs, results):
             if not result.get("ok"):
@@ -391,7 +396,7 @@ def generate(project: Path, kinds: tuple[str, ...] = GEMINI_KINDS,
         if sized.get("status") != "OK":
             return {"status": "ERROR", "error": sized.get("error", "resize failed")}
         data.setdefault("assets", {})[kind] = {
-            "source": "gemini",
+            "source": provider or record.get("source") or "gemini",
             "generated_at": _now(),
             "chat": chat or record.get("chat"),
             "prompt_file": f".pipeline/gemini-brand-{kind}.txt",

@@ -1,4 +1,4 @@
-"""Full-poster generation: Gemini draws the asset, the render is its input.
+"""Full-poster generation: an image model draws the asset, the render is its input.
 
 Why this exists
 ---------------
@@ -7,10 +7,12 @@ BACKDROP: the phone, the copy and the screenshot are all drawn by code, so the
 listing can never show a screen the app did not render. That is the safest shape,
 and it is not the only one the owner wants.
 
-This module is the other shape, on purpose: the real scene render is handed to
-Gemini (browser, the owner's Chrome) as an INPUT IMAGE, and the model returns the
-finished marketing image — phone, background, headline, all of it — which is what
-gets uploaded to Play.
+This module is the other shape, on purpose: the real scene render is handed to a
+signed-in image model (browser, the owner's Chrome) as an INPUT IMAGE, and the
+model returns the finished marketing image — phone, background, headline, all of
+it — which is what gets uploaded to Play. ChatGPT is asked first (owner directive
+2026-11-17: "give first priority to chatgpt"); Gemini is the fallback when
+ChatGPT's image quota is reached.
 
 What it can and cannot promise
 ------------------------------
@@ -18,7 +20,7 @@ What it can and cannot promise
   depiction of the render, not the render; the tool therefore MEASURES how far
   the drawn screen sits from the real one and reports it, instead of pretending
   the two are identical. A poster that drifts far is refused by `--strict`.
-* Resolution: the Gemini web UI returns roughly 9:16 at ~572x1024. Play's phone
+* Resolution: the web UI returns roughly 9:16 at ~572x1024. Play's phone
   screenshots must be at least 1080x1920, so the poster is upscaled here — the
   layout survives, the small type softens. Posters that must stay crisp belong on
   the plate path; posters that must look painted belong here.
@@ -58,15 +60,36 @@ def _app_name(project: Path) -> str:
     return profile.get("name") or "my Android app"
 
 
+def _default_composition() -> str:
+    """The team's original frame recipe, kept only as a safety net.
+
+    Since 2026-11-17 a listing must carry its OWN composition in
+    `docs/storefront-direction.json` (`storefront_direction.validate` refuses a
+    direction without one), because quoting this paragraph for every app is what
+    made every listing look like the same poster. It survives for one reason: a
+    direction file written before the field existed must not crash a paint — the
+    gate names the missing judgement instead. Text unchanged from the version that
+    sized the device reliably (owner, 2026-11-07: "ratio lot of empty space and
+    phone not taking enough space").
+    """
+    return (
+        "COMPOSITION — this decides whether the frame is usable: the phone is the SUBJECT, "
+        "not a prop. Draw it 68-74% of the canvas height, anchored to the right edge, with "
+        "its ENTIRE DISPLAY VISIBLE. Its top edge sits at 10-13% and its bottom edge at "
+        "78-82%. Put the copy in the upper-left, no wider than 44% of the canvas, so it "
+        "never overlaps the device. Fill the space under the phone with its soft contact "
+        "shadow — no wide blank band, no small floating device, no broad empty top margin.")
+
+
 def poster_prompt(project: Path, scene: dict[str, Any], direction: dict[str, Any],
                   extra: str = "", index: int = 0, total: int = 0) -> str:
-    """The prompt handed to Gemini WITH the real render attached.
+    """The prompt handed to the image model WITH the real render attached.
 
-    Deliberately says NOTHING about creative direction — no glow, no film grain, no
-    phone styling. Composing the asset is the model's job. What the prompt pins is
-    the part that must stay true: WHICH screen, WHICH words, WHICH numbers, and the
-    app's own palette, because four frames painted in different chats must still
-    read as one listing.
+    What the prompt must pin is the part that has to stay true: WHICH screen, WHICH
+    words, WHICH numbers, and the app's own palette and frame recipe, because four
+    frames painted in different chats must still read as one listing. The frame
+    recipe itself is NOT pinned here: it is read from the direction file, one per
+    app, so two apps never ship the same poster with different words.
 
     Each instruction below exists because the run got it wrong once, with a real
     listing (2026-11-04):
@@ -107,26 +130,33 @@ def poster_prompt(project: Path, scene: dict[str, Any], direction: dict[str, Any
         "Every element inside the phone must come from the attachment, in the same order "
         "and position. The frame around it (background, headline, caption) is yours to "
         "compose; the screen is not.")
-    # Composition is a CONTRACT, not a suggestion: the first painted sets read as a
-    # small phone floating in a mostly empty canvas (owner, 2026-11-07: "ratio lot
-    # of empty space and phone not taking enough space"). Naming the proportions is
-    # the only instruction that reliably sizes the device, and the bottom band is
-    # bounded by the watermark corner the cleaner must keep plain.
+    # Composition is a CONTRACT, but it is THIS APP'S contract — not a constant.
+    # The first version of this prompt pinned one layout for every project (phone
+    # anchored right, copy upper-left, same bands), so every listing the team ever
+    # painted came out as the same poster with different words (owner, 2026-11-17:
+    # "generating play store assets for all apps in same format, always"). A frame
+    # recipe is a brand decision like the palette, so it lives in the direction
+    # file per app, and the prompt quotes it verbatim.
+    composition = str(direction.get("composition") or "").strip()
+    if composition:
+        parts.append(
+            "COMPOSITION — this app's own frame recipe, decided for this listing. Follow it "
+            "as written and do NOT fall back to a generic store-poster layout (phone on one "
+            "side, headline stacked above it) just because that is what such images usually "
+            "look like: " + composition)
+    else:
+        parts.append(_default_composition())
+    # What follows is NOT art direction: two production constraints that hold under
+    # any layout. The whole display must be visible (a cropped screen made a model
+    # invent what it could not see), and the reserved corner is where the cleaner
+    # heals the vendor mark — a device or a word there gets smeared into the file
+    # that ships (observed 2026-11-15 on every painted frame).
     parts.append(
-        "COMPOSITION — this decides whether the frame is usable: the phone is the SUBJECT, "
-        "not a prop. Draw it 68-74% of the canvas height, anchored to the right edge, with "
-        "its ENTIRE DISPLAY VISIBLE — the device body may bleed 0-2% past the edge but never "
-        "the screen's own content (a cropped screen made the model invent what it could not "
-        "see). Its top edge sits at 10-13% and its bottom edge at 78-82%. Put the copy in "
-        "the upper-left, no wider than 44% of the canvas, so it never overlaps the device. "
-        "Fill the space under the phone with its soft contact shadow — no wide blank band, "
-        "no small floating device, no broad empty top margin. "
-        # The reserved corner is a MEASUREMENT, not a request: the cleaner heals a fixed
-        # box at the bottom-right, and a device that reaches into it was blended into a
-        # grey smear across the dock (observed 2026-11-15 on all four painted frames).
+        "Whatever the layout: the phone stays the SUBJECT, and its ENTIRE DISPLAY is visible "
+        "— the device body may bleed 0-2% past an edge but never the screen's own content. "
         "The last 14% of the canvas width and the last 14% of its height must be plain "
-        "background with nothing in them — the device's body ends above and left of that "
-        "corner, and no shadow, no copy and no artwork enters it.")
+        "background with nothing in them — no device, no shadow, no copy and no artwork "
+        "enters that corner.")
     parts += [
         "Every number and status on that screen (counts, percentages, dates, PASS/FAIL, "
         "severity) is part of the screenshot: copy each one exactly as it appears. Never "
@@ -202,13 +232,13 @@ def _script_syntax_error(script: str) -> str:
         return lines[0][:200] if lines else "node --check failed"
 
 
-def _batch_script(jobs: list[dict[str, str]], provider: str = "gemini") -> str:
+def _batch_script(jobs: list[dict[str, str]], provider: str = "chatgpt") -> str:
     """Build the painter script for one provider.
 
     The transport is identical (the browser-control relay); only the site's
-    selectors and the definition of "the model finished" differ. Gemini is the
-    default because it keeps a chat-scoped look; ChatGPT is the fallback when
-    Gemini's daily image limit is reached (owner directive 2026-11-07).
+    selectors and the definition of "the model finished" differ. ChatGPT is asked
+    first (owner directive 2026-11-17: "give first priority to chatgpt"); Gemini is
+    the fallback when ChatGPT's image quota is reached.
     """
     if provider == "chatgpt":
         return _chatgpt_batch_script(jobs)
@@ -216,10 +246,10 @@ def _batch_script(jobs: list[dict[str, str]], provider: str = "gemini") -> str:
 
 
 def _providers() -> list[str]:
-    """Painter order. `DEVTEAM_IMAGE_PROVIDERS` overrides (e.g. 'chatgpt')."""
-    raw = (os.environ.get("DEVTEAM_IMAGE_PROVIDERS") or "gemini,chatgpt").strip()
+    """Painter order. ChatGPT first; `DEVTEAM_IMAGE_PROVIDERS` overrides (e.g. 'gemini')."""
+    raw = (os.environ.get("DEVTEAM_IMAGE_PROVIDERS") or "chatgpt,gemini").strip()
     order = [p.strip().lower() for p in raw.split(",") if p.strip()]
-    return [p for p in order if p in ("gemini", "chatgpt")] or ["gemini"]
+    return [p for p in order if p in ("gemini", "chatgpt")] or ["chatgpt"]
 
 
 def _chatgpt_batch_script(jobs: list[dict[str, str]]) -> str:
@@ -439,7 +469,7 @@ def _gemini_batch_script(jobs: list[dict[str, str]]) -> str:
           if (w >= 300) {{ picked = await last.getAttribute("src"); break; }}
         }}
         // Gemini's cap must be NAMED, not waited out: without this the run sits
-        // here until it times out and reports "no image", and the ChatGPT fallback
+        // here until it times out and reports "no image", and the next provider
         // never fires (owner directive 2026-11-07).
         const tail = (await page.locator("body").innerText()).slice(-700);
         if (/(reached your limit|limit reached|daily limit|image limit|quota|too many requests|try again (tomorrow|later))/i.test(tail)) {{
@@ -473,11 +503,13 @@ def paint_batch(jobs: list[dict[str, str]], timeout: int = 900,
                 log=None) -> dict[str, Any]:
     """Paint a batch of assets, walking the signed-in image models in order.
 
-    Gemini first (it keeps a chat-scoped look). When it reports its image limit,
-    the SAME jobs go to ChatGPT in the owner's signed-in Chrome (owner directive
-    2026-11-07: "use logged-in chatgpt session like gemini if limit of gemini
-    reaches"). Only a LIMIT moves to the next model — a composition failure is a
-    prompt problem and would burn the second model's quota for nothing.
+    ChatGPT first (owner directive 2026-11-17: "give first priority to chatgpt").
+    When it reports its image limit, the SAME jobs go to Gemini in the owner's
+    signed-in Chrome (owner directive 2026-11-07: "use logged-in chatgpt session
+    like gemini if limit of gemini reaches" — the same rule, in the other
+    direction). Only a LIMIT or a signed-out session moves to the next model — a
+    composition failure is a prompt problem and would burn the second model's
+    quota for nothing.
     """
     from . import gemini_browser
 
@@ -494,7 +526,8 @@ def paint_batch(jobs: list[dict[str, str]], timeout: int = 900,
             # A whole listing in one chat can outlast a single frame: ChatGPT's
             # turns are slower than Gemini's, so its batch gets a longer budget.
             res = gemini_browser.execute(
-                script, timeout=(1800 if provider == "chatgpt" else timeout), log=log)
+                script, timeout=(1800 if provider == "chatgpt" else timeout), log=log,
+                provider=provider)
         except FileNotFoundError:
             return {"ok": False, "value": {}, "provider": None, "attempts": attempts,
                     "error": "Playwright or browser-control is not installed"}
@@ -515,6 +548,14 @@ def paint_batch(jobs: list[dict[str, str]], timeout: int = 900,
         value = payload.get("value") or {}
         if payload.get("ok") and value.get("ok"):
             return {"ok": True, "value": value, "provider": provider, "attempts": attempts}
+        # A signed-out session is the same kind of answer as a limit: nothing was
+        # painted, so the next provider can still do the work. A composition
+        # failure stays final (it is a prompt problem, not availability).
+        if value.get("signin"):
+            attempts.append(f"{provider}: not signed in")
+            if log:
+                log(f"  {provider}: not signed in — trying the next signed-in image model")
+            continue
         if value.get("limit") or re.search(r"\blimit\b|quota|usage cap",
                                            json.dumps(value), re.I):
             attempts.append(f"{provider}: image limit reached")
@@ -530,9 +571,9 @@ def paint_batch(jobs: list[dict[str, str]], timeout: int = 900,
 def generate_all(project: Path, scenes: list[dict[str, Any]], direction: dict[str, Any],
                  log=None, extra: str = "", force: bool = False,
                  only: set[str] | None = None) -> dict[str, Any]:
-    """Paint every poster in ONE Gemini chat, one prompt per scene.
+    """Paint every poster in ONE signed-in chat (ChatGPT first), one prompt per scene.
 
-    Returns {"status", "posters": {scene_id: path}, "chat", "painted"}.
+    Returns {"status", "posters": {scene_id: path}, "chat", "painted", "painter"}.
 
     The cache is keyed by the PROMPT, not by the scene name. Reusing on the file
     name alone meant an edit to poster_prompt never reached a listing: the run
@@ -604,7 +645,8 @@ def generate_all(project: Path, scenes: list[dict[str, Any]], direction: dict[st
         dup = _refuse_duplicate_posters(posters)
         if dup:
             return dup
-        return {"status": "OK", "posters": posters, "chat": None, "painted": 0}
+        return {"status": "OK", "posters": posters, "chat": None, "painted": 0,
+                "painter": None}
     outcome = paint_batch(jobs, timeout=900, log=log)
     value = outcome.get("value") or {}
     if outcome.get("script_invalid"):
@@ -636,7 +678,7 @@ def generate_all(project: Path, scenes: list[dict[str, Any]], direction: dict[st
         dup["chat"] = value.get("chat") or dup.get("chat")
         return dup
     return {"status": "OK", "posters": posters, "chat": value.get("chat"),
-            "painted": len(jobs)}
+            "painted": len(jobs), "painter": outcome.get("provider")}
 
 
 def _refuse_duplicate_posters(posters: dict[str, Path]) -> dict[str, Any] | None:

@@ -928,7 +928,7 @@ def run_store_readiness_audit(project: Path, tree: Path | None = None) -> list[R
             adaptive = [p for p in src.glob("**/res/mipmap-anydpi-v26/ic_launcher.xml")
                         if not re.search(r"(^|/)(build|\.pipeline|\.git)/",
                                          p.relative_to(src).as_posix())]
-            if brand_icon.get("source") in ("stitch", "gemini", "owner") and adaptive:
+            if brand_icon.get("source") in ("stitch", "chatgpt", "gemini", "owner") and adaptive:
                 checks.append(ReadinessCheck(
                     category="Storefront Graphic Assets",
                     name="Installed Icon Matches Store Listing",

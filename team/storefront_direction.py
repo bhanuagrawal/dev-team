@@ -15,10 +15,12 @@ This module is that decision, as a committed artifact:
 
     docs/storefront-direction.json
 
-It is READ by three consumers and trusted by none of them blindly:
+It is READ by four consumers and trusted by none of them blindly:
 
+  * the poster prompt — `composition`: this app's own frame recipe, so two apps
+                        never ship the same marketing image with different words;
   * the plate prompt  — concept, palette emphasis, and the avoid-list shape the
-                        atmospheric plate Gemini paints;
+                        atmospheric backdrop an image model paints;
   * the layout brief  — the vision model composes the poster around the stated
                         concept, not around its own taste;
   * the scene copy    — the review ranks scenes; the direction says what each one
@@ -93,6 +95,11 @@ def seed(project: Path, spec: dict[str, Any]) -> dict[str, Any]:
             "base": brand["base"],
             "emphasis": "",         # where the accent leads the eye
         },
+        # THIS app's frame recipe: where the device sits, where the copy goes and
+        # what fills the space. Required, because a listing without its own recipe
+        # is painted with the team's default one — and then every app's screenshots
+        # are the same poster with different words (owner, 2026-11-17).
+        "composition": "",
         "avoid": [
             "a monetization surface (paywall/purchase/price) in any frame",
             "inventing metrics, features or copy the app does not have",
@@ -127,6 +134,16 @@ def validate(direction: dict[str, Any], spec: dict[str, Any]) -> list[str]:
     palette = direction.get("palette") or {}
     if not str(palette.get("emphasis") or "").strip():
         issues.append("palette.emphasis is empty — where should the accent lead the eye?")
+    # The frame recipe is per app on purpose: one hardcoded layout in the prompt is
+    # what made every app's listing look identical (owner, 2026-11-17).
+    composition = str(direction.get("composition") or "").strip()
+    if not composition:
+        issues.append("composition is empty — this app's frame recipe: where the phone sits, "
+                      "where the copy goes, what fills the rest of the canvas (the same "
+                      "recipe for every app ships the same poster for every app)")
+    elif len(composition) < 40:
+        issues.append("composition is too short to paint — say where the device sits, where "
+                      "the copy goes and what fills the frame, in one or two sentences")
     if not (direction.get("avoid") or []):
         issues.append("avoid is empty — say what this listing must not do")
     if not (direction.get("evidence") or []):

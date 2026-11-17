@@ -7,9 +7,16 @@ Loaded by: `devteam storefront-build` / `store-publish` (their refusal prints it
    generated artefact a user reads (store note, screenshots, release text) needs
    the consumer's constraints and an owner who can overwrite it. The real render is
    the **input** to the marketing image: `storefront-build --poster` attaches the
-   scene's rendered screen and has **Gemini paint the whole asset in the browser,
-   one prompt per scene** (`--poster`), then strips its watermark and upscales to a
-   size Play accepts. The heal is strict: the corner the prompt keeps plain is
+   scene's rendered screen and has **the owner's signed-in image model paint the
+   whole asset in the browser, one prompt per scene** (ChatGPT first — owner
+   directive 2026-11-17 — with Gemini as the fallback when its image quota is
+   reached), then strips its watermark and upscales to a size Play accepts. The
+   **frame recipe is the app's own**: `docs/storefront-direction.json` carries a
+   required `composition` (where the device sits, where the copy goes, what fills
+   the rest), and the prompt quotes it instead of a team-wide layout — a shared
+   layout is what made every app's listing the same poster with different words.
+   `DEVTEAM_IMAGE_PROVIDERS` overrides the painter order for one run.
+   The heal is strict: the corner the prompt keeps plain is
    re-checked as a contract, a frame whose corner still shows the model's mark is
    refused (never shipped with a warning), and the verdict is recorded per frame
    and re-read at publish. The prompt also asks the model to match the frames it
@@ -28,18 +35,20 @@ Loaded by: `devteam storefront-build` / `store-publish` (their refusal prints it
    finished: read that record. The two other brand assets follow the same rule with
    different makers: the **icon is a Stitch design**, adopted from the artboard it
    returns (`storefront-brand --stitch-prompt` → `--adopt-stitch`), and the feature
-   graphic is painted by Gemini from the hero screen. A listing whose icon or banner
+   graphic is painted by the same signed-in image model (ChatGPT first) from the
+   hero screen. A listing whose icon or banner
    has no recorded provenance is refused, not graded. The code-rendered poster stays for work whose type must be
    pixel-crisp: Stitch (`--design-frame`/`--adopt-frame`), the vision model
    (`--vision-frame`), or a Gemini backdrop plate (`--gemini`/`--backdrop`) with
-   every letter drawn by us. An image model repaints what it is shown, so a Gemini
+   every letter drawn by us. An image model repaints what it is shown, so a painted
    poster is a **depiction** of the app, never proof of it — say so, and never let
    a frame assert a feature or number the app does not have.
    A listing ships **at least four** phone screenshots (`storefront-build` refuses
    fewer): two cannot show what the app is, how it works, that it works, and who is
    in control — and the control frame is the one that went missing when three shipped.
    What the listing SAYS is decided before anything is drawn, in
-   `docs/storefront-direction.json` (concept, per-frame argument, palette emphasis, evidence).
+   `docs/storefront-direction.json` (concept, per-frame argument, palette emphasis,
+   frame `composition`, evidence) — a direction without its own composition is refused.
    Publishing a listing is a **browser** step, not an API call: the Play API uploads and
    commits an edit, but permissions ("Manage store presence") and **Managed publishing** are
    console-only, so `store-publish` ends in Play Console through `browser-control` and nothing
@@ -47,8 +56,8 @@ Loaded by: `devteam storefront-build` / `store-publish` (their refusal prints it
 
 5. **Storefront Brand & Marketing Posters (Rule 5):**
    - App Icon (512x512): Created by Stitch MCP (`storefront-brand --stitch-prompt` → adopt).
-   - Feature Graphic (1024x500): Painted by Gemini from the hero render (`storefront-brand --generate`).
-   - Phone Screenshots (minimum 4): Rendered from real app composables via `storefront-scenes` → framed by Gemini posters (`storefront-build`).
+   - Feature Graphic (1024x500): Painted by the signed-in image model (ChatGPT first, Gemini fallback) from the hero render (`storefront-brand --generate`).
+   - Phone Screenshots (minimum 4): Rendered from real app composables via `storefront-scenes` → painted posters by the owner's signed-in image model, ChatGPT first (`storefront-build`).
    - Zero procedural HTML mocks or cross-app template leakage. Critic score ≥ 90/100 [Grade A].
 
 NEXT: `devteam storefront-direction <project>` before anything is drawn; `--plan`

@@ -226,20 +226,30 @@ def headless_signed_in(log: Callable[[str], None] | None = None) -> tuple[bool, 
 
 def execute(script: str, timeout: int = 900,
             log: Callable[[str], None] | None = None,
-            fallback: bool = True) -> subprocess.CompletedProcess:
-    """Execute a Playwright script against Gemini.
+            fallback: bool = True,
+            provider: str = "gemini") -> subprocess.CompletedProcess:
+    """Execute a Playwright script against a signed-in image model.
 
     Prefers standalone headless Playwright when a valid profile exists.
     Falls back to `browser-control execute --json` if headless execution is not
     ready or encounters an error.
+
+    `provider` names whose session the script drives. Only Gemini has a persistent
+    headless profile (the one `gemini-auth` writes); ChatGPT is signed in in the
+    owner's own Chrome, so its scripts go straight to the relay instead of taking
+    a headless turn that can only answer "signed out" (owner directive 2026-11-17:
+    ChatGPT first).
     """
-    ready, reason = is_headless_ready()
-    if ready:
-        signed, why = headless_signed_in(log)
-        if not signed:
-            if log:
-                log(f"  gemini: headless profile unusable — {why}")
-            ready, reason = False, why
+    if provider == "chatgpt":
+        ready, reason = False, "ChatGPT is driven in the owner's Chrome"
+    else:
+        ready, reason = is_headless_ready()
+        if ready:
+            signed, why = headless_signed_in(log)
+            if not signed:
+                if log:
+                    log(f"  gemini: headless profile unusable — {why}")
+                ready, reason = False, why
     if ready:
         release_stale_profile_lock(gemini_profile_dir(), log)
         chrome = _find_chrome_executable()
@@ -297,7 +307,7 @@ def execute(script: str, timeout: int = 900,
 
     # Fallback to browser-control
     if log and not ready:
-        log(f"  gemini: headless Playwright not active ({reason}) — using browser-control")
+        log(f"  {provider}: headless Playwright not active ({reason}) — using browser-control")
 
     res = subprocess.run(
         ["browser-control", "execute", "--json", script],

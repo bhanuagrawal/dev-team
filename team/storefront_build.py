@@ -217,6 +217,7 @@ def _compose_scene(project: Path, scene: dict[str, Any], name: str, *,
 def _record_composition(project: Path, path: str, why: str = "", flags: list[str] | None = None,
                         chat: str | None = None, watermark: dict[str, dict[str, Any]] | None = None,
                         painted: int | None = None, owner_approved: bool = False,
+                        painter: str | None = None,
                         grade: dict[str, Any] | None = None, log=None) -> None:
     """Write HOW the listing's frames were made into the frames registry.
 
@@ -239,6 +240,10 @@ def _record_composition(project: Path, path: str, why: str = "", flags: list[str
         "flags": flags or [],
         "why": (why or "").strip(),
         "chat": chat or previous.get("chat") or "",
+        # WHICH signed-in model painted the frames (chatgpt | gemini). The record
+        # must not claim Gemini after the owner asked for ChatGPT first — the
+        # provenance of a model-painted listing is a fact about the file on disk.
+        "painter": painter or previous.get("painter") or "",
         "painted": painted if painted is not None else previous.get("painted", 0),
         "watermark": watermark or {},
         # Code composition is the exception, and the exception is the owner's to
@@ -430,7 +435,8 @@ def build(project: Path, *, frame: str = "auto", plate: str | None = None,
     fallback_flags = choice["flags"]
     poster = choice["path"] == "poster"
     if poster and log:
-        log("~ composition: --poster (Gemini paints each frame from the real render)")
+        log("~ composition: --poster (the signed-in image model paints each frame from "
+            "the real render; ChatGPT first, Gemini as fallback)")
 
     # 1 — the spec is the project's, and it must exist before anything renders.
     spec_file = project / sp.SPEC_REL
@@ -579,12 +585,14 @@ def build(project: Path, *, frame: str = "auto", plate: str | None = None,
         _say(log, f"  critic: {score}/100")
         if report.get("hard_fail") or score < 80:
             return _fail("BLOCKED", f"critic {score}/100", "; ".join(report.get("issues") or [])[:400])
-        out = {"status": "OK", "score": score, "frame": "gemini-poster",
+        out = {"status": "OK", "score": score, "frame": "painted-poster",
+               "painter": made.get("painter"),
                "concept": direction.get("concept"),
                "order": [s["id"] for s in ordered],
                "screenshots": written, "chat": made.get("chat")}
         _record_composition(project, "poster", chat=made.get("chat"), log=log,
                             watermark=watermark, painted=made.get("painted"),
+                            painter=made.get("painter"),
                             grade=spt.grade_of(spec))
         if publish:
             from .play_listing import publish_listing_assets
