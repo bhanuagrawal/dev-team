@@ -94,6 +94,17 @@ The trigger for `main` is **the gates passed**, not "a human is about to look".
 | CI cannot start (GitHub Actions billing) | `release` re-dispatches the SAME workflow on the machine the project declares (`ci.self_hosted`) — GitHub does not meter self-hosted runners, so Play internal testing is updated by the real signed AAB **and** the QA job notifies testers, both from that one run. With no machine declared the release is NOT delivered and says so. The next `release` REFUSES to allocate another version while that one is undelivered (it clears itself when **Play holds that versionCode**, whichever runner carried it, or when that run goes green) | only to change the billing settings — delivery does not need a human |
 | a project with no tester channel | `devteam firebase <project> --app-id <id> --groups qa` declares it (the app id is Firebase Console → App Distribution; the registered package must equal `ci.package_name`), then `devteam ci <project> --write` renders the QA job. `doctor` WARNs while it is missing: without it the debug apk stays a workflow artifact and nobody is notified | no — one-time setup |
 
+**Standing up the machine that carries it.** A self-hosted runner is only as
+configured as its own `.env`: a fresh one copied from another project carries
+the other project's identity and no Android SDK path, so the first release dies
+in the build step with `SDK location not found` while `Set up job` and the
+Gradle setup both print success (observed 2026-11-17 on the first run after a
+runner was registered from a copy). `./config.sh` does not write `.env` — put
+`ANDROID_HOME` and `ANDROID_SDK_ROOT` in `~/.devteam-runners/<app>/.env` (another
+runner's `.env` is the template), then `./svc.sh stop && ./svc.sh start` so the
+service re-reads it, and re-dispatch. It is machine config, never a code defect:
+the repo needs no change, and the failed run's log says which step to look at.
+
 Nothing about a finished change needs a human in the loop; the human only enters
 for a launch, and a launch is one of exactly two recorded asks: `devteam promote`
 (one named version) or an app the owner armed with `devteam autopromote --on
