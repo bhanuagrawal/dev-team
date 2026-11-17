@@ -261,8 +261,8 @@ def release_blocker(state: dict, worktree: Path) -> str:
     return ""
 
 
-def base_drift(project: Path, base: str) -> list[dict] | None:
-    """Commits on the delivery ref that this worktree was NOT cut from.
+def base_drift(project: Path, base: str, worktree: Path | None = None) -> list[dict] | None:
+    """Commits on the delivery ref that this worktree's gates did NOT judge.
 
     The gates judge a diff against a base; if main has gained commits since that
     base, the verdict describes a tree users no longer receive. Naming the commits
@@ -271,9 +271,19 @@ def base_drift(project: Path, base: str) -> list[dict] | None:
     what those commits changed. Warn-only by design — `release` rebases a rejected
     push and would otherwise fail a run that is merely behind.
 
+    A REBASED WORKTREE HAS NO DRIFT, and [worktree] is what tells the two cases
+    apart: the drift is measured from `since=base`, and `base` is the tip the tree
+    was CUT from, so a tree that has since rebased onto the delivery ref still
+    listed the commits it now contains and the run read "gates judged an older
+    tree" while standing on the newest one — cleared only by moving `dt-base` by
+    hand, which no page tells an agent to do (seen 2026-11-17, cost one confusing
+    verify re-run). The delivery ref's tip being an ancestor of the worktree's
+    HEAD is the exact statement "the gates judged this tree", so it wins over the
+    base arithmetic.
+
     `None` means "could not tell" (no readable delivery ref) — never "nothing moved".
     """
-    from .core import git_ref_state, recent_commits
+    from .core import git_ref_state, recent_commits, run
     if not base:
         return []
     # git_ref_state fetches first: a worktree's own origin/main is frozen at the
@@ -281,6 +291,13 @@ def base_drift(project: Path, base: str) -> list[dict] | None:
     ref = git_ref_state(project)
     if not ref.get("ref_sha"):
         return None
+    if worktree is not None:
+        head = run(["git", "rev-parse", "--verify", "HEAD"], worktree, timeout=60)
+        tip = str(ref["ref_sha"])
+        rooted = run(["git", "merge-base", "--is-ancestor", tip, "HEAD"], worktree,
+                     timeout=60)
+        if head.returncode == 0 and rooted.returncode == 0:
+            return []
     return recent_commits(project, ref=ref["ref"], since=base, limit=5)
 
 
@@ -1064,7 +1081,7 @@ def verify_all(project: Path, worktree: Path, base: str, log, gradle: bool = Tru
     # longer receive (and the queue may be describing work main already has). This
     # is a WARNING, not a gate: the remedy is a rebase + diff-scoped re-run, or a
     # replan, and both are decisions the agent makes with the commits in hand.
-    drift = base_drift(project, base)
+    drift = base_drift(project, base, worktree)
     if drift is None:
         log("base: unknown — the delivery ref could not be read; these gates speak only "
             "for the worktree's own base")

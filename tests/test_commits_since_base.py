@@ -139,6 +139,26 @@ class CommitsSinceBaseTests(unittest.TestCase):
     def test_base_drift_is_empty_on_the_delivery_ref(self):
         self.assertEqual(verify.base_drift(self.project, "origin/main"), [])
 
+    def test_a_rebased_worktree_has_no_drift(self):
+        """The gates speak for a tree that already contains main's tip.
+
+        Drift is measured from the base the tree was CUT from, so a tree that has
+        since rebased onto the delivery ref kept reporting the commits it now
+        contains — "gates judged an older tree" while standing on the newest one,
+        clearable only by moving `dt-base` by hand (2026-11-17).
+        """
+        worktree = Path(self.tmp.name) / "wt"
+        _git(self.project, "worktree", "add", "--detach", str(worktree), "origin/main")
+        drift = verify.base_drift(self.project, self.first, worktree)
+        self.assertEqual(drift, [])
+
+    def test_an_unrebased_worktree_still_names_the_drift(self):
+        worktree = Path(self.tmp.name) / "wt_behind"
+        _git(self.project, "worktree", "add", "--detach", str(worktree), self.first)
+        drift = verify.base_drift(self.project, self.first, worktree)
+        self.assertEqual([c["subject"] for c in drift],
+                         ["fix(ux-flow): a walk can finish signup"])
+
 
 if __name__ == "__main__":
     unittest.main()

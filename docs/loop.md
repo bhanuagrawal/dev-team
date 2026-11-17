@@ -105,6 +105,31 @@ runner's `.env` is the template), then `./svc.sh stop && ./svc.sh start` so the
 service re-reads it, and re-dispatch. It is machine config, never a code defect:
 the repo needs no change, and the failed run's log says which step to look at.
 
+A project with NO runner at all gets one the same way every other app did, and
+the whole trip is three commands plus the declaration:
+
+```bash
+mkdir -p ~/.devteam-runners/<app> && rsync -a --exclude '_work' --exclude '.runner' \
+    --exclude '.credentials*' --exclude '_diag' --exclude '.service' --exclude '.path' \
+    ~/.devteam-runners/<another-app>/ ~/.devteam-runners/<app>/
+printf 'ANDROID_HOME=%s\nANDROID_SDK_ROOT=%s\n' "$ANDROID_HOME" "$ANDROID_HOME" \
+    > ~/.devteam-runners/<app>/.env
+cd ~/.devteam-runners/<app> && ./config.sh --unattended --replace \
+    --url https://github.com/<owner>/<repo> \
+    --token "$(gh api -X POST repos/<owner>/<repo>/actions/runners/registration-token --jq .token)" \
+    --name <app>-mac --labels self-hosted,macOS,ARM64,devteam --work _work \
+  && ./svc.sh install && ./svc.sh start
+devteam runner <app> --labels self-hosted,macOS,ARM64,devteam
+devteam ci <app> --write          # the template carries the selector only when declared
+```
+
+The copy is only the runner BINARY: `.runner`/`.credentials*`/`.service`/`.path`
+describe the other repo and make `./config.sh` answer "already configured", so
+they must stay behind. `gh api repos/<owner>/<repo>/actions/runners` must say
+`online` before the dispatch can land (observed 2026-11-17, ZenListKMP: the
+whole trip took one run and unblocked a version that had been tagged but
+undelivered for a day).
+
 Nothing about a finished change needs a human in the loop; the human only enters
 for a launch, and a launch is one of exactly two recorded asks: `devteam promote`
 (one named version) or an app the owner armed with `devteam autopromote --on
