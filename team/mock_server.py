@@ -420,6 +420,60 @@ class _Handler(BaseHTTPRequestHandler):
             })
             return
 
+        if path.startswith("/api/v1/users/") and path.endswith("/library"):
+            # One inventory read: every copy with its state, plus what the reader
+            # borrows. Mirrors GET /api/v1/users/{id}/library on the deployed
+            # service so the library journey can be walked before a release.
+            uid = path.split("/api/v1/users/")[-1].rsplit("/library", 1)[0]
+            copies = []
+            for index, b in enumerate(BOOKS[:4]):
+                copies.append({
+                    "listingId": b["listing_id"],
+                    "workId": b.get("work_id") or f"mock-work-{index}",
+                    "isbn": b.get("isbn") or "",
+                    "title": b["title"],
+                    "author": b["author"],
+                    "coverUrl": b.get("cover_url"),
+                    "state": "LOCKED" if index == 3 else "AVAILABLE",
+                    "exchangeMode": b.get("exchange_mode") or "TEMPORARY",
+                    "defaultDurationDays": 21,
+                    "condition": b.get("condition") or "LIKE_NEW",
+                    "isSmokeFree": True,
+                    "petFree": True,
+                    "hasNotes": False,
+                    "copySeq": 1,
+                    "lockedBy": ({
+                        "tradeId": "mock-trade-locked",
+                        "status": "HANDOFF_SCHEDULED",
+                        "counterpartId": OWNER_ID,
+                        "counterpartName": "arjun_gk1",
+                    } if index == 3 else None),
+                })
+            borrowed = [{
+                "tradeId": "mock-trade-borrow",
+                "listingId": "mock-borrowed-copy",
+                "workId": "mock-borrowed-work",
+                "title": "Klara and the Sun",
+                "author": "Kazuo Ishiguro",
+                "coverUrl": None,
+                "lenderName": "arjun_gk1",
+                "status": "ACTIVE_BORROW",
+                "exchangeMode": "TEMPORARY",
+                "durationDays": 21,
+                "dueDate": "2026-12-03T00:00:00+00:00",
+            }]
+            self._json({
+                "user": {"userId": uid or OWNER_ID,
+                         "username": BOOKS[0].get("owner_username") or "sneha_kora",
+                         "trustScore": 82.0, "locationName": "Indiranagar",
+                         "trustTier": "PROVEN", "trustTierLabel": "Proven reader",
+                         "shieldBadge": "bronze", "isFrozen": False},
+                "copies": copies,
+                "borrowed": borrowed,
+                "counts": {"available": len(copies) - 1, "locked": 1, "borrowed": 1},
+            })
+            return
+
         if path.startswith("/api/v1/users/") and path.endswith("/shelf"):
             uid = path.split("/api/v1/users/")[-1].rsplit("/shelf", 1)[0]
             shelf = [{
