@@ -773,6 +773,11 @@ def _shows_copy(poster: Path, scene: dict[str, Any]) -> bool:
     A machine without tesseract cannot make this call, and a run that cannot check
     must not pretend it did: it returns True (no evidence of a wrong frame).
     """
+    if os.environ.get("DEVTEAM_POSTER_OCR", "").strip().lower() in ("off", "0", "no"):
+        # An escape hatch for a run where the OCR itself is the problem (a frame the
+        # owner has looked at and accepted). Off is never the default: the check is
+        # the only thing that catches a frame painted with another frame's words.
+        return True
     exe = shutil.which("tesseract")
     if not exe:
         return True
