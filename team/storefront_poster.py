@@ -109,10 +109,17 @@ def poster_prompt(project: Path, scene: dict[str, Any], direction: dict[str, Any
     if total:
         parts.append(f"This is frame {index + 1} of {total} of the listing.")
     parts.append(
+        "The answer is a NEW marketing image, not the attachment: draw a phone that holds "
+        "the attached screen, and build the frame around it (background, headline, caption). "
+        "Returning the attached screenshot unchanged is a failed answer — it is the content "
+        "of this image, never the image itself (observed 2026-11-17: four frames came back "
+        "as the bare capture, pixel-for-pixel, and every one of them looked plausible).")
+    parts.append(
         "The attached image is the ONLY app screen this frame may show. Treat it as the "
-        "source of truth for the phone's display: the screen in your image must be that "
-        "image, kept as it is. Do not redraw, restyle, merge or complete it — and do not "
-        "reuse a screen from another image in this conversation.")
+        "source of truth for the phone's display: the screen inside your drawn phone must "
+        "be that image, and everything in it must be recognisable at a glance. Do not "
+        "restyle or merge it — and do not reuse a screen from another image in this "
+        "conversation.")
     screen = str(scene.get("screen") or "").strip()
     if screen:
         parts.append(f"The attached screen is: {screen}. If the image you are about to "

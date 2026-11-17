@@ -101,7 +101,10 @@ class CompositionTests(unittest.TestCase):
                              {"composition": "Phone on the right, copy upper-left, cream field."})
         b = sp.poster_prompt(_project("App B"), self.scene,
                              {"composition": "Phone centred low, headline across the top, deep green."})
-        self.assertNotEqual(a.split("\n")[3], b.split("\n")[3])
+        self.assertIn("Phone on the right, copy upper-left, cream field.", a)
+        self.assertIn("Phone centred low, headline across the top, deep green.", b)
+        self.assertNotIn("Phone centred low", a)
+        self.assertNotIn("Phone on the right", b)
 
     def test_corner_invariant_survives_any_recipe(self):
         prompt = sp.poster_prompt(_project(), self.scene,
