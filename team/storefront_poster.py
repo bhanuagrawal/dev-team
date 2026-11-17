@@ -251,6 +251,13 @@ def _chatgpt_batch_script(jobs: list[dict[str, str]]) -> str:
       .map(i => ({{ src: i.getAttribute("src") || "", w: i.naturalWidth, h: i.naturalHeight,
                    composer: !!i.closest("[data-composer-attachments]") }})));
     const results = [];
+    // An image this batch has ALREADY taken is not a new frame. Without this, a
+    // model that answers a prompt with prose (no new image) left the previous
+    // frame on the canvas as the "fresh" candidate and every remaining scene got
+    // a byte-identical copy of it — five different screens shipped as one
+    // picture, and the critic still scored the set 100/100 because it only reads
+    // copy and order (observed 2026-11-17, ChatGPT fallback).
+    const captured = new Set();
     for (const job of JOBS) {{
       try {{
         const beforeAttach = (await imgs()).filter(i => i.composer).length;
@@ -292,10 +299,11 @@ def _chatgpt_batch_script(jobs: list[dict[str, str]]) -> str:
         let dims = [0, 0];
         while (Date.now() - start < 240000) {{
           const fresh = (await imgs()).filter(x => !x.composer && x.src !== attachSrc
+                                                 && !captured.has(x.src)
                                                  && x.w >= 600 && x.h >= 600);
           if (fresh.length) {{
             const got = fresh[fresh.length - 1];
-            picked = got.src; dims = [got.w, got.h];
+            picked = got.src; dims = [got.w, got.h]; captured.add(got.src);
             break;
           }}
           const tail = (await page.locator("body").innerText()).slice(-700);
@@ -593,6 +601,9 @@ def generate_all(project: Path, scenes: list[dict[str, Any]], direction: dict[st
                      "sha": sha, "source_sha": source_sha, "sidecar": str(sidecar),
                      "ar": aspect})
     if not jobs:
+        dup = _refuse_duplicate_posters(posters)
+        if dup:
+            return dup
         return {"status": "OK", "posters": posters, "chat": None, "painted": 0}
     outcome = paint_batch(jobs, timeout=900, log=log)
     value = outcome.get("value") or {}
@@ -620,8 +631,41 @@ def generate_all(project: Path, scenes: list[dict[str, Any]], direction: dict[st
     if not outcome.get("ok"):
         return {"status": "BLOCKED", "error": "one or more posters were not generated",
                 "chat": value.get("chat")}
+    dup = _refuse_duplicate_posters(posters)
+    if dup:
+        dup["chat"] = value.get("chat") or dup.get("chat")
+        return dup
     return {"status": "OK", "posters": posters, "chat": value.get("chat"),
             "painted": len(jobs)}
+
+
+def _refuse_duplicate_posters(posters: dict[str, Path]) -> dict[str, Any] | None:
+    """Refuse a set where two scenes resolved to the same bytes.
+
+    A listing is eight claims about eight screens; when a provider answers one
+    prompt by leaving the previous frame on the canvas — or answers with prose —
+    the picker can hand back the same picture for the next scene. That set reads
+    as a complete listing to every copy-based critic (the critic compares order
+    and words, not pixels) and it is a lie to a store visitor. The frame is data,
+    so this is checked by hashing, at the one place every poster passes through.
+    """
+    seen: dict[str, str] = {}
+    for sid, path in posters.items():
+        try:
+            digest = hashlib.sha256(Path(path).read_bytes()).hexdigest()
+        except OSError:
+            continue
+        twin = seen.get(digest)
+        if twin:
+            return {"status": "BLOCKED",
+                    "error": f"two scenes got the same image ('{twin}' and '{sid}') — "
+                             "the model never painted one of them",
+                    "scene": sid,
+                    "hint": f"delete .pipeline/storefront_posters/poster-{sid}.png and its "
+                            f".json, then re-run — every other frame is reused from cache, "
+                            f"or drop a finished image at that path"}
+        seen[digest] = sid
+    return None
 
 
 def _scene_id_for(stem: str) -> str:
