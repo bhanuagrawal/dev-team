@@ -584,6 +584,18 @@ def build(project: Path, *, frame: str = "auto", plate: str | None = None,
             p.unlink()
         if stale and log:
             log("  − removed superseded frame(s): " + ", ".join(sorted(p.name for p in stale)))
+        # THE LISTING CARRIES ITS OWN PROVENANCE ON THIS PATH TOO. `verify`,
+        # `store-publish` and `store-readiness` all read `listing_freshness`, which
+        # compares the PNGs on disk against a recorded block; only the code-composed
+        # path recorded one. So a painted set shipped while the registry still
+        # described the previous contactsheet listing, and the gate refused it as
+        # "edited after it was drawn" at Play's size (observed 2026-11-18). Recorded
+        # only after every frame was written, so a partial pass stamps nothing.
+        recorded = sfr.record_listing(project, tree=tree)
+        if log:
+            log(f"  = listing provenance recorded ({len(recorded.get('files') or [])} "
+                f"frame(s), {recorded.get('app_version') or 'version?'} @ "
+                f"{str(recorded.get('ref_sha') or '')[:7]})")
         # The icon and the banner are brand assets too: the image model paints them from
         # the app's own icon and hero screen, and the gate refuses anything else.
         brand = sbf.ensure(project, log=log)

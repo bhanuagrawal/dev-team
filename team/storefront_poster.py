@@ -394,7 +394,8 @@ def _chatgpt_batch_script(jobs: list[dict[str, str]]) -> str:
           fs.writeFileSync(job.out, await resp.body());
         }}
         if (job.sidecar) fs.writeFileSync(job.sidecar,
-          JSON.stringify({{ prompt_sha: job.sha, source_sha: job.source_sha, chat: page.url() }}));
+          JSON.stringify({{ prompt_sha: job.sha, source_sha: job.source_sha, chat: page.url(),
+                            painter: "chatgpt" }}));
         results.push({{ ok: true, out: job.out, w: dims[0], h: dims[1] }});
       }} catch (err) {{
         results.push({{ ok: false, scene: job.out, error: String(err && err.message || err) }});
@@ -522,7 +523,8 @@ def _gemini_batch_script(jobs: list[dict[str, str]]) -> str:
       fs.writeFileSync(job.out, Buffer.from(data.data.split(",")[1], "base64"));
       // The cache key travels with the image: which prompt painted it.
       if (job.sidecar) fs.writeFileSync(job.sidecar,
-        JSON.stringify({{ prompt_sha: job.sha, source_sha: job.source_sha, chat: page.url() }}));
+        JSON.stringify({{ prompt_sha: job.sha, source_sha: job.source_sha, chat: page.url(),
+                          painter: "gemini" }}));
       results.push({{ ok: true, out: job.out, w: data.w, h: data.h }});
     }}
     return {{ ok: results.length && results.every(r => r.ok), chat: page.url(), results }};
@@ -602,6 +604,42 @@ def paint_batch(jobs: list[dict[str, str]], timeout: int = 900,
             "error": "no image model produced the assets"}
 
 
+def _painter_of(sidecar: dict[str, Any]) -> str:
+    """Which signed-in model painted this frame, from its own sidecar.
+
+    The sidecar records `painter` when the batch that painted it knew; a sidecar
+    written before that field existed still says where the chat lives, and the
+    chat's host IS the model (chatgpt.com / gemini.google.com). Inferring from the
+    host is a read of recorded evidence, not a guess, and it is what lets a run
+    that only reuses the cache record the truth instead of "" (observed
+    2026-11-18: a full painted listing recorded painter="" because every frame came
+    from cache).
+    """
+    explicit = str(sidecar.get("painter") or "").strip().lower()
+    if explicit in ("chatgpt", "gemini"):
+        return explicit
+    host = ""
+    try:
+        from urllib.parse import urlparse
+
+        host = (urlparse(str(sidecar.get("chat") or "")).netloc or "").lower()
+    except Exception:
+        host = ""
+    if "chatgpt.com" in host:
+        return "chatgpt"
+    if "gemini.google.com" in host:
+        return "gemini"
+    return ""
+
+
+def _one_painter(painters: list[str]) -> str:
+    """The single model behind a cached set, or 'mixed' — never a fabricated name."""
+    known = sorted({p for p in painters if p})
+    if not known:
+        return ""
+    return known[0] if len(known) == 1 else "mixed"
+
+
 def generate_all(project: Path, scenes: list[dict[str, Any]], direction: dict[str, Any],
                  log=None, extra: str = "", force: bool = False,
                  only: set[str] | None = None) -> dict[str, Any]:
@@ -620,6 +658,11 @@ def generate_all(project: Path, scenes: list[dict[str, Any]], direction: dict[st
     out_dir.mkdir(parents=True, exist_ok=True)
     posters: dict[str, Path] = {}
     jobs: list[dict[str, Any]] = []
+    # Which model painted each cached frame — read from its sidecar, so a run that
+    # REUSES the cache can still record the truth instead of an empty `painter`
+    # (the record's whole job is saying whether an image model made the frame and
+    # which one — `storefront-status` and the publish gate read it).
+    painters: list[str] = []
     for order, scene in enumerate(scenes):
         name = _poster_name(scene)
         out = out_dir / f"poster-{name}.png"
@@ -651,12 +694,15 @@ def generate_all(project: Path, scenes: list[dict[str, Any]], direction: dict[st
         aspect = round(size[0] / size[1], 3)
         painted_by = ""
         painted_source = ""
+        reused_painter = ""
         try:
             _side = json.loads(sidecar.read_text()) or {}
             painted_by = _side.get("prompt_sha") or ""
             painted_source = _side.get("source_sha") or ""
+            reused_painter = _painter_of(_side)
         except Exception:
             painted_by = ""
+        painters.append(reused_painter)
         if out.is_file() and not force and painted_by == sha and painted_source == source_sha:
             if log:
                 log(f"  poster: reusing {out.name} ({out.stat().st_size // 1024} KB, same prompt)")
@@ -686,7 +732,7 @@ def generate_all(project: Path, scenes: list[dict[str, Any]], direction: dict[st
         if dup:
             return dup
         return {"status": "OK", "posters": posters, "chat": None, "painted": 0,
-                "painter": None}
+                "painter": _one_painter(painters)}
     # ONE CHAT PER FRAME when every attachment has the same shape.
     #
     # "The sent message carries an image of this shape" is the proof that a frame's

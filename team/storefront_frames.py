@@ -235,6 +235,18 @@ def png_dims(path: Path) -> tuple[int, int] | None:
     return None
 
 
+def _play_sized(width: int, height: int) -> bool:
+    """Is this a size Play accepts for a phone screenshot?
+
+    A painted poster is resampled to Play's own size by `storefront_poster.
+    to_play_size` (1080x1920), so its frames are never on the compose canvas. The
+    rule is Play's, not a team constant: at least 1080 on the short side, no side
+    over 3840, no aspect beyond 2:1.
+    """
+    short, long = min(width, height), max(width, height)
+    return short >= 1080 and long <= 3840 and long <= 2 * short
+
+
 def listing_record(project: Path, tree: Path | None = None) -> dict[str, Any]:
     """What the shipped frames were drawn from, as data a re-run reproduces.
 
@@ -361,7 +373,19 @@ def listing_freshness(project: Path) -> tuple[bool, str]:
             problems.append(f"{p.name} is not a readable PNG")
             continue
         w, h = dims
-        if (w, h) != (CANVAS_W, CANVAS_H):
+        # WHICH SIZE IS RIGHT DEPENDS ON HOW THE FRAME WAS MADE. A code-composed
+        # frame is drawn on the app's own 1620x3200 canvas, and a clamped headless
+        # window is what the canvas equality catches. A PAINTED poster is upscaled
+        # to the size Play receives (1080x1920) by `to_play_size`, so asking it for
+        # the compose canvas was a permanent false accusation: every painted frame
+        # read as "not the 1620x3200 frame Play gets" the moment it existed
+        # (observed 2026-11-18). The recipe, not a constant, decides the expectation.
+        painted = str((registry.get("composition") or {}).get("path") or "") == "poster"
+        if painted:
+            if not _play_sized(w, h):
+                problems.append(f"{p.name} is {w}x{h} — a painted frame ships at Play's "
+                                "size (at least 1080 on the short side, no wider than 2:1)")
+        elif (w, h) != (CANVAS_W, CANVAS_H):
             problems.append(f"{p.name} is {w}x{h}, not the {CANVAS_W}x{CANVAS_H} frame Play gets")
         elif (int(meta.get("width") or 0), int(meta.get("height") or 0)) != (w, h):
             problems.append(f"{p.name} is recorded at {meta.get('width')}x{meta.get('height')} "
