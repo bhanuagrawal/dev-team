@@ -54,6 +54,9 @@ Never assume; ask in ONE message:
    - `devteam doctor <project>` must show the property **readable** before the
      first plan run — the probe is a real runReport, so a key file that exists but
      cannot read the property stays BLOCKED.
+7. Web companion: **no** (default) / **yes, a desktop browser client**. A yes
+   makes you read `skills/js-client/SKILL.md` before any UI work and plan one
+   extra surface per screen set — never a stretched phone layout.
 Backup ask (one line): after you generate the keystore, they copy it + password
 off-machine (you generate; they never generate).
 
@@ -78,6 +81,14 @@ off-machine (you generate; they never generate).
    androidMain — prefer that to expect/actual when only one target exists).
 3. Install the dev-team MVI core (references/mvi-core/*.kt) under
    `composeApp/src/commonMain/kotlin/<pkg>/core/event/` + rename package.
+   **Also install the headless store from the same directory:**
+   `StateStore.kt` and `StoreViewModel.kt` under
+   `composeApp/src/commonMain/kotlin/<pkg>/core/store/` (package line
+   `<pkg>.core.store`). New screens extend `StoreViewModel` and pass their
+   handlers; `BaseViewModel` stays for nothing but legacy screens, because the
+   same rules must run in a browser tab (see `skills/js-client/SKILL.md`). A
+   feature with rules inside a ViewModel is a second implementation waiting to
+   disagree with the web client.
    CI is NOT hand-written any more: set the project's `profile['ci']`
    (`module`, `package_name`, and `flavors` when the app builds more than one
    AAB) and run `python3 <team>/cli.py ci <project> --write`. That renders the
@@ -119,6 +130,12 @@ off-machine (you generate; they never generate).
       A Compose screen is built against that export and its render is compared to it.
       There is no `docs/design.md`; tokens alone are not a design. A screen with no
       Stitch export is not ready to build.
+   **If the intake asked for a web companion,** every surface gets a second,
+   desktop design: Stitch `generate_screen_from_text` with
+   `deviceType: "DESKTOP"` against the same design system, exported to
+   `docs/stitch/screens/<slug>/` with `"deviceType": "DESKTOP"` in the
+   manifest. Read `skills/js-client/SKILL.md` for the desktop rules, the React
+   binding and the build gate; a phone screen stretched to 1440 px is refused.
    **Also stamp `"profile_schema": 2`** (the team's current data shape) so the
    project is born current. From then on `devteam adapt <project>` — step 0 of
    every workflow run — keeps it that way as the team itself changes; a project
