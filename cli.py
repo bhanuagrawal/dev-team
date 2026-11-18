@@ -4694,7 +4694,23 @@ def cmd_stitch_screen(args: argparse.Namespace) -> int:
     force = getattr(args, "force", False)
     wt = getattr(args, "worktree", None)
     root = Path(wt).resolve() if wt else project
-    prompt = compile_stitch_screen_prompt(project, screen_type=screen_type)
+    # A SCREEN IS ONLY AS PRECISE AS ITS PROMPT. `compile_stitch_screen_prompt`
+    # takes a per-surface spec (zones, CTAs, context); without one it describes
+    # the screen from the project's generic vision, and the model may answer for
+    # a neighbouring surface (seen 2026-11-18: an onboarding request produced a
+    # second shelf-scan screen, fidelity 100/100 against the wrong brief).
+    spec = None
+    spec_path = getattr(args, "spec", None)
+    if spec_path:
+        try:
+            spec = json.loads(Path(spec_path).read_text())
+        except (OSError, ValueError) as exc:
+            print(f"  ✗ --spec is not readable JSON: {exc}")
+            return 1
+        if not isinstance(spec, dict):
+            print("  ✗ --spec must be a JSON object ({title, context, zones, ctas, telemetry})")
+            return 1
+    prompt = compile_stitch_screen_prompt(project, screen_type=screen_type, spec=spec)
 
     profile = profile_of(project)
     design_cfg = profile.get("design") or {}
@@ -6302,6 +6318,9 @@ def main() -> None:
     sscr.add_argument("--model", default="GEMINI_3_8_FLASH", help="model ID (default: GEMINI_3_8_FLASH)")
     sscr.add_argument("--generate", action="store_true", help="call Stitch MCP to generate screen and export into docs/stitch")
     sscr.add_argument("--force", action="store_true", help="generate even if an existing screen matches")
+    sscr.add_argument("--spec", help="JSON spec for THIS surface ({title, context, zones[], ctas[], telemetry}) — "
+                                    "the prompt compiler has always accepted one; without it the screen is described "
+                                    "from the project's generic context and can drift to a neighbouring surface")
     sscr.add_argument("--worktree", help="optional worktree path to write docs/stitch into")
     sscr.set_defaults(fn=cmd_stitch_screen)
     stw = sub.add_parser("stitch-tweak", help="apply a surgical in-place tweak to an existing Stitch screen instead of a full redesign")
