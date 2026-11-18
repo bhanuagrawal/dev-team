@@ -287,6 +287,18 @@ def _chatgpt_batch_script(jobs: list[dict[str, str]]) -> str:
     const imgs = () => page.evaluate(() => Array.from(document.querySelectorAll("main img"))
       .map(i => ({{ src: i.getAttribute("src") || "", w: i.naturalWidth, h: i.naturalHeight,
                    composer: !!i.closest("[data-composer-attachments]") }})));
+    // The ANSWER is only ever an image the model GENERATED, and ChatGPT marks those:
+    // every one lives inside its generated-image gallery node. The user's attachment
+    // is a plain `main img` (class h-full w-full rounded-md) with no such ancestor, so
+    // this scope is what separates "the model painted something" from "the prompt I
+    // sent is on screen" — the distinction the src bookkeeping below cannot make on
+    // its own, because the bubble's src is assigned after the element appears
+    // (observed 2026-11-18: eight frames saved as the attachment at its own aspect,
+    // every chat holding the real 9:16 answer beside it, unpicked).
+    const answerImgs = () => page.evaluate(() => Array.from(document.querySelectorAll(
+      "[data-testid=generated-image-gallery] img, [data-testid=generated-image-preview] img, "
+      + "[data-testid=generated-image] img"))
+      .map(i => ({{ src: i.getAttribute("src") || "", w: i.naturalWidth, h: i.naturalHeight }})));
     const results = [];
     // An image this batch has ALREADY taken is not a new frame. Without this, a
     // model that answers a prompt with prose (no new image) left the previous
@@ -331,13 +343,24 @@ def _chatgpt_batch_script(jobs: list[dict[str, str]]) -> str:
           continue;
         }}
 
+        // The SENT attachment is also a non-composer image on the same canvas, so the
+        // "a fresh image appeared" test below used to accept it: the run saved the
+        // bare capture re-encoded at the capture's own aspect, seconds after sending,
+        // while the model was still painting. The painted frame WAS in the chat
+        // afterwards (a 9:16 answer beside the attachment) — the picker just never
+        // waited for it (observed 2026-11-18: eight frames, all the attachment; the
+        // prompt-only fix of 2026-11-17 addressed a different cause and left this one
+        // live). Everything on the canvas when delivery is proved is content; only a
+        // src that appears AFTER that moment can be the answer.
+        const known = new Set((await imgs()).filter(x => !x.composer).map(x => x.src));
+
         const start = Date.now();
         let picked = null;
         let dims = [0, 0];
         while (Date.now() - start < 240000) {{
-          const fresh = (await imgs()).filter(x => !x.composer && x.src !== attachSrc
-                                                 && !captured.has(x.src)
-                                                 && x.w >= 600 && x.h >= 600);
+          const fresh = (await answerImgs()).filter(x => x.w >= 600 && x.h >= 600
+                                                 && !known.has(x.src)
+                                                 && !captured.has(x.src));
           if (fresh.length) {{
             const got = fresh[fresh.length - 1];
             picked = got.src; dims = [got.w, got.h]; captured.add(got.src);
