@@ -214,7 +214,12 @@ only when the page, its modules and both hosts answer a real origin:
 
 1. **Static host** — serve `web/dist` (`base: "./"` works under a sub-path).
 2. **Identity allowlist** — the provider's redirect URL must name the exact
-   origin; add it in Supabase → Authentication → URL Configuration.
+   origin; add it in Supabase → Authentication → URL Configuration
+   (`http://localhost:5173/**` for dev, the exact hosted page URL otherwise).
+   **An unlisted redirect is not an error:** Supabase silently falls back to the
+   project's Site URL, so the token lands on a different page (in BookSwap's
+   case the GitHub Pages marketing site) and the app never sees it. If sign-in
+   "works" but leaves your app, check the allowlist before the code.
 3. **API CORS** — the backend's `CORS_ORIGINS` must include the origin. `curl`
    ignores CORS, so it always "passes"; test with a real browser request from
    the page's own origin and read `Access-Control-Allow-Origin`.
@@ -232,6 +237,9 @@ Then commit: the app, the screens, the docs page, and the dev-team changes.
   element (0×0 box, blank page, no error) — use a `<div>`. (The wasm build
   learned this the hard way.)
 - **The first "live" run is usually CORS**, and it fails only in the browser.
+- **A sign-in that lands on the wrong page is the redirect allowlist**, not an
+  auth bug: an unlisted `redirect_to` falls back to the Site URL. The token in
+  that URL is real — close the tab and add the origin.
 - **A cached answer is not a mock** only if it came from the server, is labelled,
   and is replaced by the live read.
 - **Duplicate tags are real data.** Dedupe for display, never invent
