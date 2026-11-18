@@ -1,6 +1,7 @@
 """THE LAW — clauses are declared once, cited everywhere, and never fiction."""
 
 import sys
+import json
 import tempfile
 import unittest
 from pathlib import Path
@@ -81,6 +82,70 @@ class LawParsingTest(unittest.TestCase):
             "PRODUCT.md": "- **P1** — a wish is an ad (see P1)\n",
         })
         self.assertEqual(["P1"], law.audit(root, state={})["orphans"])
+
+
+class LawBindingTest(unittest.TestCase):
+    """`binds:` — a clause that spans platforms, checked per platform.
+
+    The incident: a location clause was satisfied by the Kotlin seam alone while
+    the browser client shipped a hand-copy of the old rule on the same disk.
+    """
+
+    def _project(self, files: dict) -> Path:
+        root = Path(tempfile.mkdtemp())
+        for name, body in files.items():
+            path = root / name
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(body, encoding="utf-8")
+        return root
+
+    def _bindings(self, mapping: dict) -> str:
+        return json.dumps({"law_bindings": mapping})
+
+    def test_the_marker_leaves_the_sentence(self):
+        root = self._project({
+            "PRODUCT.md": "- **P1** — a place is named by the device (binds: app, web)\n",
+        })
+        clause = law.clauses(root)[0]
+        self.assertEqual(["app", "web"], clause["binds"])
+        self.assertEqual("a place is named by the device", clause["text"])
+
+    def test_a_binding_its_own_platform_ignores_is_a_finding(self):
+        root = self._project({
+            "PRODUCT.md": "- **P1** — a place is named by the device (binds: app, web)\n",
+            "composeApp/A.kt": "// Law: P1\n",
+            ".pipeline/profile.json": self._bindings({
+                "app": ["composeApp/**"], "web": ["web/**"],
+            }),
+        })
+        result = law.audit(root, state={})
+        self.assertEqual([], result["orphans"])  # cited, so not dead law
+        self.assertEqual(
+            [{"clause": "P1", "binding": "web", "reason": "uncited"}],
+            result["unbound"],
+        )
+
+    def test_every_declared_platform_citing_it_passes(self):
+        root = self._project({
+            "PRODUCT.md": "- **P1** — a place is named by the device (binds: app, web)\n",
+            "composeApp/A.kt": "// Law: P1\n",
+            "web/src/location.ts": "// Law: P1\n",
+            ".pipeline/profile.json": self._bindings({
+                "app": ["composeApp/**"], "web": ["web/**"],
+            }),
+        })
+        self.assertEqual([], law.audit(root, state={})["unbound"])
+
+    def test_a_binding_the_project_never_mapped_is_a_finding(self):
+        root = self._project({
+            "PRODUCT.md": "- **P1** — one copy each way (binds: backend)\n",
+            "code.py": "# Law: P1\n",
+            ".pipeline/profile.json": self._bindings({"app": ["composeApp/**"]}),
+        })
+        self.assertEqual(
+            [{"clause": "P1", "binding": "backend", "reason": "unmapped"}],
+            law.audit(root, state={})["unbound"],
+        )
 
 
 if __name__ == "__main__":

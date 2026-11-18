@@ -1105,6 +1105,19 @@ def verify_all(project: Path, worktree: Path, base: str, log, gradle: bool = Tru
         failures.append(msg)
         return False, failures
 
+    # EVERY PLATFORM THE DIFF TOUCHES HAS TO BE BUILT BY SOMETHING (2026-11-18).
+    # BookSwap's browser client merged while `verify` ran Gradle and nothing else:
+    # a shared rule could change, PASS, ship, and leave `web/` on the old copy.
+    # The check is diff-scoped on purpose — an ungated directory this diff never
+    # opened is `doctor`'s warning, not a refusal of unrelated work.
+    from . import platforms
+    ok, msg = platforms.diff_gate(worktree, profile, files)
+    log("platforms: ok — every unit this diff touches has a gate" if ok
+        else "platforms: FAIL — " + msg.splitlines()[0])
+    if not ok:
+        failures.append(msg)
+        return False, failures
+
     # TEAM GENERIC: the team repo must contain zero project references, whichever
     # agent is driving the run. A project-keyed branch sat in team code for a day
     # because doctor was the only check and nobody ran it (2026-10-30).
@@ -1257,8 +1270,11 @@ def verify_all(project: Path, worktree: Path, base: str, log, gradle: bool = Tru
         # collected above is a refusal, not "nothing to report".
         return (not failures), failures
 
-    # Compile gate
-    ok, msg = gradle_task(worktree, profile["verify"]["compile"], 900, log)
+    # COMPILE GATE — one entry per platform the project declares (`verify.tasks`),
+    # or the single Gradle task it has always declared (`verify.compile`). A
+    # project with a second client names its build here; a project with one is
+    # unchanged. See team/platforms.py for why the list is derived, not assumed.
+    ok, msg = platforms.run_gates(worktree, profile, log)
     if not ok:
         failures.append(msg)
         return False, failures

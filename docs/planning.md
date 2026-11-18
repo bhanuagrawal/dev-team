@@ -160,6 +160,25 @@ header (`-- Law: P1`), a test name, a source file's header comment. Then:
   citation of a clause that does not exist (*fiction*), and a queued task with no
   clause (*work with no reason in the product*).
 
+**A clause that spans platforms says so.** `- **P11** — … (binds: app, web,
+backend)`. The project maps each name to the paths that own it, in
+`profile.json → law_bindings`:
+
+```json
+"law_bindings": {
+  "app":     ["composeApp/**"],
+  "web":     ["web/**"],
+  "backend": ["supabase/**", "python-backend/**"]
+}
+```
+
+`devteam law` then refuses a declared binding that nothing under its own globs
+cites, and `doctor` reports it. One citation from one client is not coverage:
+without `binds:`, "cited" meant only "somebody mentioned it" — BookSwap's
+location clause passed on a Kotlin citation while the browser client shipped a
+hand-copy of the old rule on the same disk. A binding the project never mapped
+is a finding too, so the marker can never silently pass.
+
 A project with no `PRODUCT.md` is not blocked — declaring the law is a choice,
 and once declared the team holds you to it. An amendment must touch the clause,
 the code that cites it, and a test in one commit.

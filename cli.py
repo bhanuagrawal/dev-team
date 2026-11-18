@@ -4141,7 +4141,8 @@ def cmd_law(args: argparse.Namespace) -> int:
     result = law_mod.audit(project)
     print(law_mod.format_audit(result))
     if result.get("present") and (result["orphans"] or result["unknown"]
-                                  or result["tasks_without_law"]):
+                                  or result["tasks_without_law"]
+                                  or result.get("unbound")):
         return 1
     return 0
 

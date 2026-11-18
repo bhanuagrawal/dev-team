@@ -756,6 +756,37 @@ def run_doctor(project: Path, log) -> dict:
     except Exception as e:  # a check must never hide the report
         log(f"doctor report-page: could not check ({e})")
 
+    # EVERY BUILDABLE UNIT HAS A GATE (2026-11-18). A second client (BookSwap's
+    # `web/`) merged with its own build and its own copy of a product rule while
+    # `verify` ran Gradle alone. The inventory is derived from the tree; the
+    # refusal is diff-scoped in `verify`, so doctor only WARNS here — a directory
+    # this diff never opens must not stop the machine, but it must be visible.
+    try:
+        from . import platforms as platforms_mod
+        inventory = platforms_mod.report(project, profile)
+        ungated = inventory["ungated"]
+        if ungated:
+            lines = "; ".join(
+                f"{u['manifest']} ({u['kind']}) has no gate" for u in ungated[:4]
+            )
+            report["platforms"] = {
+                "status": "warn",
+                "blocked": [],
+                "checks_passed": len(inventory["units"]) - len(ungated),
+                "note": (lines + " — declare verify.tasks so every platform is built, "
+                         "or `verify` will refuse the first diff that opens it"),
+            }
+            log(f"doctor platforms: WARN — {lines}")
+        else:
+            report["platforms"] = {
+                "status": "ready",
+                "blocked": [],
+                "checks_passed": len(inventory["units"]),
+            }
+            log(f"doctor platforms: ready ({len(inventory['units'])} unit(s), each gated)")
+    except Exception as e:  # an inventory check must never hide the report
+        log(f"doctor platforms: could not check ({e})")
+
     # THE LAW — is the declared product law alive, cited, and obeyed? A project
     # with no PRODUCT.md is not blocked; declaring the law is a choice, and once
     # declared the team holds you to it. Three failures: a clause nothing cites
@@ -781,6 +812,11 @@ def run_doctor(project: Path, log) -> dict:
                 problems.append(f"{len(ledger['tasks_without_law'])} queued task(s) "
                                 "name no clause: "
                                 + ", ".join(ledger["tasks_without_law"][:3]))
+            if ledger.get("unbound"):
+                problems.append(
+                    f"{len(ledger['unbound'])} clause binding(s) uncited: "
+                    + ", ".join(f"{b['clause']}→{b['binding']}" for b in ledger["unbound"][:4])
+                )
             if problems:
                 report["law"] = {
                     "status": "warn", "blocked": [],

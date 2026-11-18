@@ -25,6 +25,7 @@ the law is a choice, and once declared the team holds you to it.
 """
 from __future__ import annotations
 
+import fnmatch
 import re
 from pathlib import Path
 from typing import Any
@@ -50,6 +51,25 @@ _CLAUSE_TABLE = re.compile(
 #: Clause ids start at P1 — `P0` is a priority word, never a clause.
 CITATION = re.compile(r"\b(P[1-9]\d{0,2})\b")
 
+#: A clause may say WHO it binds: `… (binds: app, web, backend)`. The marker is
+#: declared once in the clause and read by every platform's own check.
+_BINDS = re.compile(r"[\(\[]\s*binds?\s*:\s*([^)\]]+?)\s*[\)\]]", re.IGNORECASE)
+
+
+def _split_binds(text: str) -> tuple[list[str], str]:
+    """`(binds: app, web)` → `(["app", "web"], text without the marker)`.
+
+    The marker is law, not prose: it leaves the sentence so `devteam law` prints
+    one readable line per clause, and it names the platforms the clause is
+    checked against (see `audit`).
+    """
+    match = _BINDS.search(text)
+    if match is None:
+        return [], text
+    binds = [part.strip().lower() for part in re.split(r"[,\s]+", match.group(1))
+             if part.strip()]
+    return binds, (text[:match.start()] + text[match.end():]).strip()
+
 
 def path_of(project: Path) -> Path | None:
     """The project's law file, or None when the law is not declared."""
@@ -60,12 +80,12 @@ def path_of(project: Path) -> Path | None:
     return None
 
 
-def clauses(project: Path) -> list[dict[str, str]]:
-    """Every clause, in file order. `[{id, text}]` — an empty list means no law."""
+def clauses(project: Path) -> list[dict[str, Any]]:
+    """Every clause, in file order. `[{id, text, binds}]` — empty means no law."""
     path = path_of(project)
     if path is None:
         return []
-    out: list[dict[str, str]] = []
+    out: list[dict[str, Any]] = []
     seen: set[str] = set()
     for raw in path.read_text(encoding="utf-8", errors="ignore").splitlines():
         match = _CLAUSE_TABLE.match(raw) or _CLAUSE_BULLET.match(raw)
@@ -75,7 +95,8 @@ def clauses(project: Path) -> list[dict[str, str]]:
         if clause_id in seen or not text:
             continue
         seen.add(clause_id)
-        out.append({"id": clause_id, "text": text.rstrip("|").strip()})
+        binds, spoken = _split_binds(text.rstrip("|").strip())
+        out.append({"id": clause_id, "text": spoken, "binds": binds})
     return out
 
 
@@ -114,7 +135,7 @@ def audit(project: Path, state: dict | None = None) -> dict[str, Any]:
     `state` is the project ledger, when the caller has it; queued tasks are then
     checked for the clause they claim to serve.
     """
-    from .core import state_of
+    from .core import profile_of, state_of
 
     declared = clauses(project)
     present = bool(path_of(project))
@@ -122,6 +143,34 @@ def audit(project: Path, state: dict | None = None) -> dict[str, Any]:
     ids = {clause["id"] for clause in declared}
     orphans = [c["id"] for c in declared if not cited.get(c["id"])]
     unknown = sorted(cid for cid in cited if cid not in ids)
+
+    # A CLAUSE MAY BIND SEVERAL PLATFORMS, and one citation from one client is not
+    # coverage: BookSwap's location law was "cited" by the Kotlin seam on the same
+    # disk where the browser client still shipped the old list. `binds:` turns
+    # "remember every platform" into a file count — the project declares which
+    # globs belong to which name (`profile.law_bindings`), and a binding with no
+    # citation under its own globs is a finding, not a footnote.
+    try:
+        profile = profile_of(Path(project)) or {}
+    except (Exception, SystemExit):
+        profile = {}
+    mapping = {
+        str(name).strip().lower(): [str(g) for g in (globs or []) if str(g)]
+        for name, globs in (profile.get("law_bindings") or {}).items()
+    }
+    unbound: list[dict[str, str]] = []
+    for clause in declared:
+        for binding in clause.get("binds") or []:
+            globs = mapping.get(binding) or []
+            if not globs:
+                unbound.append({"clause": clause["id"], "binding": binding,
+                                "reason": "unmapped"})
+                continue
+            places = [where.rsplit(":", 1)[0] for where in (cited.get(clause["id"]) or [])]
+            if not any(fnmatch.fnmatch(place, pattern)
+                       for place in places for pattern in globs):
+                unbound.append({"clause": clause["id"], "binding": binding,
+                                "reason": "uncited"})
 
     tasks_without_law: list[str] = []
     if present:
@@ -143,6 +192,7 @@ def audit(project: Path, state: dict | None = None) -> dict[str, Any]:
         "cited": cited,
         "orphans": orphans,
         "unknown": unknown,
+        "unbound": unbound,
         "tasks_without_law": tasks_without_law,
     }
 
@@ -157,8 +207,16 @@ def format_audit(result: dict[str, Any]) -> str:
         where = result["cited"].get(clause["id"]) or []
         mark = "ok " if where else "!! "
         first = where[0] if where else "nothing cites this clause"
-        lines.append(f"  {mark}{clause['id']}  {clause['text'][:80]}")
+        binds = ""
+        if clause.get("binds"):
+            binds = "  (binds " + ", ".join(clause["binds"]) + ")"
+        lines.append(f"  {mark}{clause['id']}  {clause['text'][:80]}{binds}")
         lines.append(f"        {first}" + (f"  (+{len(where) - 1})" if len(where) > 1 else ""))
+    for gap in result.get("unbound") or []:
+        reason = ("the project declares no law_bindings glob for it"
+                  if gap["reason"] == "unmapped"
+                  else "nothing under its own globs cites it")
+        lines.append(f"  !! {gap['clause']} binds {gap['binding']} — {reason}")
     if result["unknown"]:
         lines.append("  !! cited but not declared: " + ", ".join(result["unknown"]))
     if result["tasks_without_law"]:

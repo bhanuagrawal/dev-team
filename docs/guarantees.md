@@ -24,6 +24,20 @@ refuses.
    `devteam design-consult … --record`, and a `new_screen` answer must have its
    snapshot exported in the same change. Building a screen from tokens alone is
    what the gate refuses.
+   **EVERY BUILDABLE UNIT HAS A GATE** (owner directive 2026-11-18). The
+   inventory is DERIVED from the tree (`team/platforms.py`), never hand-listed: a
+   tracked directory carrying `settings.gradle*`, `package.json`, `Package.swift`,
+   `*.xcodeproj`, `Cargo.toml`, `go.mod`, `pubspec.yaml` or `pyproject.toml` is a
+   platform. `verify` REFUSES a diff that touches a platform no gate builds, and
+   the refusal names the exact `verify.tasks` entry to add; `doctor` reports an
+   ungated unit as a WARN, so the gap is visible before a run reaches it. A gate
+   covers the unit it runs in and nothing below it — the root Gradle task never
+   covers a nested client. A project with one Gradle task is unchanged:
+   `verify.compile` is still that one gate. Why: BookSwap's browser client (`web/`,
+   its own `package.json`, its own `tsc --noEmit && vite build`) merged with a
+   hand-copy of a product rule while `verify` ran Gradle alone and CI had no node
+   step — a shared rule could change, PASS, ship, and leave the second client on
+   the old copy.
    **TESTS ARE RETIRED — ALL OF THEM** (owner policy 2026-11-10, restated as
    "get rid of them completely"). There is no unit-test gate, no UI-test gate, no
    test run in `verify` and no coverage floor: `config/coverage.json` carries
