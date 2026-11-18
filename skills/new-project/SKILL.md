@@ -78,6 +78,9 @@ off-machine (you generate; they never generate).
    androidMain — prefer that to expect/actual when only one target exists).
 3. Install the dev-team MVI core (references/mvi-core/*.kt) under
    `composeApp/src/commonMain/kotlin/<pkg>/core/event/` + rename package.
+   This installs the headless `StateStore` alongside `BaseViewModel` so the core
+   business logic can be shared directly with web/JS clients.
+   When building or adding a Web/JS companion client, follow `skills/js-client/SKILL.md`.
    CI is NOT hand-written any more: set the project's `profile['ci']`
    (`module`, `package_name`, and `flavors` when the app builds more than one
    AAB) and run `python3 <team>/cli.py ci <project> --write`. That renders the
