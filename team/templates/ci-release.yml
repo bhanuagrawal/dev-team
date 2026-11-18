@@ -5,6 +5,14 @@
 # Do not hand-edit a project's copy — change this template, then re-render all
 # projects.
 #
+# TEMPLATE_VERSION 7 — a transient transport failure gets a plain retry before
+# the policy flag. On v1.0.82 (2026-11-18) the bundle upload died on
+# `read ECONNRESET`; the only fallback was `changesNotSentForReview: true`, and
+# Play answered "Changes are sent for review automatically. The query parameter
+# changesNotSentForReview must not be set." — so a network blip turned into a
+# red release that needed a hand-dispatched re-run. Retrying the SAME upload
+# once, before reaching for the flag, is what actually recovers from it.
+#
 # TEMPLATE_VERSION 6 — the QA channel sends detailed tester release notes to
 # Firebase App Distribution from distribution/tester-notes.md (or constructed
 # fallback). Public Google Play What's New is consumer copy; Firebase App
@@ -231,13 +239,26 @@ jobs:
       # Please set the query parameter changesNotSentForReview to true"). The build and
       # the upload were fine — the previous run died here, after the AAB was already
       # uploaded, so the operator saw a red release with nothing to fix in the code.
-      # Retry the SAME upload committing the edit WITHOUT the automatic review
-      # submission: testers on `internal` get the build, and sending it for review
-      # becomes an explicit, recorded step instead of a silent CI failure. Turned into
-      # a loud warning so nobody reads a green run as "the store has it".
+      # A TRANSPORT FAILURE IS NOT THAT CASE (2026-11-18): `read ECONNRESET` in the
+      # bundle upload reached this step, Play rejected the flag this project does not
+      # need, and the release stayed red over a network blip. So retry the SAME upload
+      # plainly once first; only a second refusal is allowed to mean "policy hold".
+      - name: Retry the upload once (transient transport failure)
+        id: play-upload-retry
+        if: env.PLAY_JSON != '' && steps.play-upload.outcome == 'failure'
+        continue-on-error: true
+        uses: r0adkll/upload-google-play@v1
+        with:
+          serviceAccountJsonPlainText: ${{ env.PLAY_JSON }}
+          packageName: __PACKAGE_NAME__
+          releaseFiles: __RELEASE_FILES__
+          tracks: internal
+          status: completed
+          whatsNewDirectory: __WHATSNEW_DIR__
+
       - name: Commit the edit without sending it for review (policy hold)
         id: play-upload-hold
-        if: env.PLAY_JSON != '' && steps.play-upload.outcome == 'failure'
+        if: env.PLAY_JSON != '' && steps.play-upload-retry.outcome == 'failure'
         uses: r0adkll/upload-google-play@v1
         with:
           serviceAccountJsonPlainText: ${{ env.PLAY_JSON }}
