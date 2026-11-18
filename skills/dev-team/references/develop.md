@@ -54,6 +54,10 @@ design tokens. Copy the project's idiom; do not introduce a second one.
    if you start one by hand, stop it before you finish.
 6. **Do not widen the diff.** No drive-by reformatting, no unrelated renames, no
    "while I was here" refactors. The reviewer reads the diff, not your intent.
+7. **A browser/desktop client task reads `skills/js-client/SKILL.md` first.** Its
+   rules live in a headless `StateStore` (never a ViewModel), it talks only to the
+   app's real backend (no PostgREST, no fixtures), and its surfaces are Stitch
+   `DESKTOP` exports, not a stretched phone layout.
 
 ## Done
 
@@ -62,6 +66,9 @@ design tokens. Copy the project's idiom; do not introduce a second one.
 - For a UI task: the change matches the exported screen in
   `docs/stitch/screens/<id>/` (layout, type, spacing, imagery), not a token
   description of it.
+- For a web client task: `./scripts/web-check.sh` is green (tokens in sync, law
+  tests, `tsc --noEmit`, `vite build`) and the changed components match
+  `docs/stitch/screens/web-*/`.
 - Then stop. `devteam verify` decides — run it, read the refusal, fix it, up to
   two iterations.
 

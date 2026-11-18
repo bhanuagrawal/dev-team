@@ -146,6 +146,7 @@ answer).
 | `references/handover.md` | end of a run / a SPEC arrives | this skill dir |
 | `references/ops.md` | one agent only, asks, upkeep | this skill dir |
 | `skills/new-project/SKILL.md` | Mode B, a new app | `skills/` |
+| `skills/js-client/SKILL.md` | an app is getting a browser/desktop client | `skills/` |
 | `~/dev-team/docs/*.md` | the team's own rules and why | team repo |
 
 Nothing here is a guarantee: every page ends with the ONE next command, and the
