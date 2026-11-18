@@ -96,7 +96,7 @@ def _targets(profile: dict, kind: str) -> list[str]:
 
 
 def entry_for(profile: dict, query: str, kind: str, advances: str,
-              why: str, law: str = "") -> dict[str, Any]:
+              why: str, law: str = "", whatsnew: str = "") -> dict[str, Any]:
     """The queue entry an admitted request becomes. One shape, always."""
     from . import goals
 
@@ -126,6 +126,19 @@ def entry_for(profile: dict, query: str, kind: str, advances: str,
             part.strip().upper() for part in (law or "").split(",") if part.strip()
         ),
     }
+    if whatsnew and whatsnew.strip():
+        entry["whatsnew"] = whatsnew.strip()
+    else:
+        from . import shipper
+        clean = shipper._clean_consumer_copy(query)
+        if clean and not shipper._is_internal_copy(clean):
+            if kind == "bugfix":
+                entry["whatsnew"] = f"✓ Fixed: {clean}\n✓ Everything you already use behaves the same way"
+            elif kind == "feature":
+                entry["whatsnew"] = f"✓ New in this update: {clean}\n✓ Everything you already use keeps working the same way"
+            elif kind in ("visual", "revamp"):
+                entry["whatsnew"] = f"✓ Refreshed: {clean}\n✓ Everything you already use keeps working smoothly"
+
     raw, _ = goals.raw_node(profile, str(advances or ""))
     measures = [
         str(m.get("text")).strip()
@@ -138,7 +151,7 @@ def entry_for(profile: dict, query: str, kind: str, advances: str,
 
 
 def check(project: Path, query: str, kind: str | None, advances: str,
-          why: str, verdict: str | None, law: str = "") -> dict[str, Any]:
+          why: str, verdict: str | None, law: str = "", whatsnew: str = "") -> dict[str, Any]:
     """Deterministic findings + the agent's verdict → one decision.
 
     Returns {ok, verdict, who, findings, question, next, milestone, title}.
@@ -153,6 +166,15 @@ def check(project: Path, query: str, kind: str | None, advances: str,
         return {"ok": False, "verdict": "flag", "who": who, "findings": findings,
                 "question": question, "next": nxt, "milestone": advances or "",
                 "title": ""}
+
+    if whatsnew and whatsnew.strip():
+        from . import shipper
+        if shipper._is_internal_copy(whatsnew):
+            hits = sorted({m.group(0).lower() for m in shipper._INTERNAL_COPY_RE.finditer(whatsnew)})
+            findings.append(f"the requested --whatsnew contains technical jargon ({', '.join(hits[:5])})")
+            return flag("agent",
+                        f"Google Play What's New must be consumer-facing and explain the user benefit, not technical jargon ({', '.join(hits[:5])}). Re-run admit with user-facing words.",
+                        "re-run admit with --whatsnew \"<consumer copy>\"")
 
     # 1. there must be something to align to.
     if goals.vision_required(profile) and not goals.vision(profile):
@@ -261,12 +283,12 @@ def check(project: Path, query: str, kind: str | None, advances: str,
 
 def admit(project: Path, query: str, kind: str | None, advances: str, why: str,
           verdict: str | None, dry_run: bool = False,
-          law: str = "") -> dict[str, Any]:
+          law: str = "", whatsnew: str = "") -> dict[str, Any]:
     """Run the gate; on OK pin the task at the head of the queue (once)."""
     from . import queue as qmod
 
     profile, state = profile_of(project), state_of(project)
-    res = check(project, query, kind, advances, why, verdict, law=law)
+    res = check(project, query, kind, advances, why, verdict, law=law, whatsnew=whatsnew)
     res["query"] = query
     res["kind"] = kind or ""
     res["law"] = ",".join(
@@ -288,7 +310,7 @@ def admit(project: Path, query: str, kind: str | None, advances: str, why: str,
             save_state(project, state)
         return res
 
-    entry = entry_for(profile, query, kind or "", advances, why, law=law)
+    entry = entry_for(profile, query, kind or "", advances, why, law=law, whatsnew=whatsnew)
     if dry_run:
         res["entry"] = entry
         res["dry_run"] = True

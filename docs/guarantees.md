@@ -36,8 +36,11 @@ refuses.
    (the generated `StorefrontScreenshotsTest` that `devteam storefront-preview`
    writes) because a listing frame needs a composable rendered to a bitmap. It
    asserts nothing, is never required by a gate and is never run by `verify`.
-   `verify` also runs: team-generic, localization, brand, release-note freshness
-   (the note may not repeat the last shipped one), the design gate, and compile.
+   `verify` also runs: team-generic, localization, brand, release-note consumer copy
+   (the note may not repeat the last shipped one, and Google Play What's New must
+   describe consumer benefit without technical engineering vocabulary; detailed
+   changelogs belong in tester notes for Firebase App Distribution), the design gate,
+   and compile.
    **A store picture may not describe an older build** (owner ask 2026-11-11):
    `verify` runs `team/storefront_frames.listing_freshness` on every task, and
    `store-publish` / `store-readiness` / `storefront-status` read the same

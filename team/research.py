@@ -940,7 +940,7 @@ Decide what to BUILD NEXT. Output STRICT JSON only (no prose, no code fence):
       "priority": 1, "reason": "one line grounded in research",
       "problem": "<one line, in the user's words: what is broken or missing>",
       "done_when": ["<acceptance line observable in the shipped app>", "..."],
-      "whatsnew": "<1-2 lines of USER-FACING Play store copy for this release, no engineering words ('render', 'test', 'composable', 'scene') — the release ships exactly this>",
+      "whatsnew": "<1-2 lines of USER-FACING Play store copy for this release. Written for everyday consumers/readers, NOT engineers. Absolutely NO engineering jargon ('render', 'test', 'composable', 'scene', 'analytics', 'tracker', 'telemetry', 'api', 'viewmodel', 'database', 'sqlite', 'room', 'token', 'oauth', 'backend', 'crash', 'refactor', 'sdk', 'kmp'). Describe the user benefit or experience — the release ships exactly this to Google Play>",
       "user_sees": "<optional: what the user notices after>",
       "not_in_scope": "<optional: what this task must not change>",
       "advances": "<milestone id this task serves, or 'none'>",
@@ -1085,13 +1085,14 @@ Rules:
   or an issues_to_file for an owner decision) rather than inventing off-goal
   polish.
 - STORE COPY IS PART OF THE PLAN — every executable entry carries `whatsnew`, one or
-  two lines a USER would understand (no 'render', 'test', 'composable', 'scene',
-  'unit', file names or ids; the store cap is 500 chars). The release ships that
-  string verbatim as the Play "What's new". When it is missing, code falls back to
-  a generic "Under-the-hood reliability and performance improvements" note — which
-  is what a release that visibly changed a screen told its users on 2026-11-10,
-  because the label itself contained the word "rendering". Write the user's line
-  yourself; `pick` carries it into the task spec, so it can never be too late.
+  two lines a USER would understand. Google Play release notes are for public readers,
+  NOT engineers: describe what the user can now do or what experience feels smoother,
+  never internal engineering details (zero 'render', 'test', 'composable', 'scene',
+  'analytics', 'tracker', 'telemetry', 'api', 'endpoint', 'viewmodel', 'database',
+  'token', 'oauth', 'backend', 'sdk', 'kmp', file names, or ids; the store cap is 500 chars).
+  Detailed technical changes for QA testers belong in tester notes (Firebase App Distribution),
+  not in the store What's New. The release ships that string verbatim as the Play "What's new".
+  When missing or technical, code falls back to clean user-facing performance and reliability copy.
 - SIZE EVERY ENTRY — a queue entry is ONE developer session, sized at ~{target_effort}
   minutes of developer work (hard band {min_effort}-{max_effort}). Set `effort_min` to
   your honest estimate; code rejects entries outside the band and prints a SIZING

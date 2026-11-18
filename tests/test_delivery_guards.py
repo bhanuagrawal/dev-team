@@ -96,6 +96,61 @@ class TemplateUploadTest(unittest.TestCase):
         self.assertIn("steps.firebase.outcome == 'failure'", text)
         self.assertIn("testers were NOT notified", text)
 
+    def test_the_upload_uses_release_notes_file(self):
+        text = ci.TEMPLATE.read_text()
+        self.assertIn("--release-notes-file", text)
+
+
+class WhatsNewAndTesterNotesTest(unittest.TestCase):
+    """Store notes must be consumer copy; tester notes must carry rich change details."""
+
+    def test_whatsnew_gate_refuses_technical_jargon(self):
+        with tempfile.TemporaryDirectory() as d:
+            p = Path(d)
+            (p / ".pipeline").mkdir()
+            (p / "distribution" / "whatsnew").mkdir(parents=True)
+            (p / ".pipeline" / "profile.json").write_text('{"whatsnew_file": "distribution/whatsnew/whatsnew-en-US"}')
+            (p / ".pipeline" / "state.json").write_text('{"shipped": []}')
+            (p / "distribution" / "whatsnew" / "whatsnew-en-US").write_text(
+                "Standardized AnalyticsTracker and instrumented shelf scanner"
+            )
+            ok, msg = shipper.whatsnew_gate(p, {"whatsnew": "Standardized AnalyticsTracker and instrumented shelf scanner"})
+            self.assertFalse(ok)
+            self.assertIn("technical engineering vocabulary", msg)
+            self.assertIn("analytics", msg)
+
+    def test_whatsnew_gate_accepts_consumer_benefit_copy(self):
+        with tempfile.TemporaryDirectory() as d:
+            p = Path(d)
+            (p / ".pipeline").mkdir()
+            (p / "distribution" / "whatsnew").mkdir(parents=True)
+            (p / ".pipeline" / "profile.json").write_text('{"whatsnew_file": "distribution/whatsnew/whatsnew-en-US"}')
+            (p / ".pipeline" / "state.json").write_text('{"shipped": []}')
+            note = "✓ Faster shelf scanning when adding books\n✓ Everything you already use keeps working smoothly"
+            (p / "distribution" / "whatsnew" / "whatsnew-en-US").write_text(note)
+            ok, msg = shipper.whatsnew_gate(p, {"whatsnew": note})
+            self.assertTrue(ok, msg)
+
+    def test_write_tester_notes_generates_detailed_markdown(self):
+        with tempfile.TemporaryDirectory() as d:
+            w = Path(d)
+            task = {
+                "type": "feature",
+                "label": "shelf-scanner-v2",
+                "advances": "shelf-vision",
+                "problem": "Reader wants fast multi-book detection on their bookshelf",
+                "user_sees": "Scanned books appear in your tradable library instantly",
+                "done_when": ["Tap camera button captures shelf", "Detects 5 books cleanly"],
+                "surface": {"targets": ["composeApp/src/commonMain/shelf/**"]},
+                "whatsnew": "✓ Faster book scanning from your shelves",
+            }
+            notes = shipper.write_tester_notes(w, task, "1.0.83", code=10132)
+            self.assertTrue((w / "distribution" / "tester-notes.md").exists())
+            self.assertIn("# Build v1.0.83 (10132) — Tester Notes", notes)
+            self.assertIn("Reader wants fast multi-book detection", notes)
+            self.assertIn("- [ ] Tap camera button captures shelf", notes)
+            self.assertIn("Test-only affordances enabled", notes)
+
 
 class DebugTaskTest(unittest.TestCase):
     """A flavored module has no `assembleDebug`, so the task is a profile fact."""

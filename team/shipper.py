@@ -338,8 +338,8 @@ _INTERNAL_KIND_PREFIXES = ("feature-", "bugfix-", "visual-", "brand-", "store-",
                            "release-", "direction-")
 
 _UNDER_THE_HOOD_NOTE = (
-    "✓ Under-the-hood reliability and performance improvements\n"
-    "✓ Everything you already use keeps working the same way\n"
+    "✓ Reliability and performance improvements across your library and discovery\n"
+    "✓ Everything you already use keeps working smoothly\n"
 )
 
 # A queue label may be perfectly readable English and still be pipeline
@@ -351,19 +351,46 @@ _UNDER_THE_HOOD_NOTE = (
 # note, and a task spec that wants specific user copy supplies the `whatsnew`
 # field (which always wins).
 _INTERNAL_COPY_RE = re.compile(
-    r"\b(declared|assertion|assertions|asserted|asserts?|composables?|harness|"
-    r"tests?|"
-    r"scenes?|renders?|rendered|rendering|unit[- ]tests?|instrumented|"
+    r"\b("
+    r"declared|assertion|assertions|asserted|asserts?|composables?|harness|"
+    r"tests?|scenes?|renders?|rendered|rendering|unit[- ]tests?|instrumented|"
     r"roborazzi|robolectric|coverage|refactor(?:ed|ing)?|codegen|"
     r"gradle|kotlin|versionCode|version code|api level|lint|"
-    r"smoke tests?|test suite|test file|diff)\b",
+    r"smoke tests?|test suite|test file|diff|"
+    r"analytics|telemetry|trackers?|funnels?|lifecycle|"
+    r"apis?|endpoints?|backends?|servers?|"
+    r"viewmodels?|repository|repositories|dao|database|sqlite|sql|schema|migrations?|room|"
+    r"oauth|tokens?|jwt|credentials?|payloads?|http|rest|json|urls?|"
+    r"bugfix|features?|worktrees?|branches|repos?|pipelines?|ci|pr|pull request|git|commits?|"
+    r"crashes?|exceptions?|null pointer|npe|stack trace|handlers?|callbacks?|"
+    r"kmp|sdks?|dependencies|dependency|wiring|dispatch(?:ed|er|es)?|"
+    r"singletons?|impl|interfaces?|enums?"
+    r")\b",
     re.IGNORECASE,
 )
 
 
+def _clean_consumer_copy(text: str) -> str:
+    """Format an internal-ish phrase into clean consumer language if possible."""
+    t = (text or "").strip()
+    # Strip pipeline prefixes
+    t = re.sub(r"^(dt[-_]|parked/)+", "", t, flags=re.I)
+    t = re.sub(r"^(bugfix|feature|visual|revamp|motion|brand|store)[-_]+", "", t, flags=re.I)
+    # Strip trailing date or hash or counter
+    t = re.sub(r"[-_]\d{4}[-_]\d{2}[-_]\d{2}.*$", "", t)
+    t = re.sub(r"[-_][0-9a-f]{7,}.*$", "", t)
+    t = re.sub(r"[-_]\d{2,4}$", "", t)
+    t = t.replace("-", " ").replace("_", " ").strip()
+    if t:
+        return t[0].upper() + t[1:]
+    return ""
+
+
 def _is_internal_copy(text: str) -> bool:
     """True when a derived note line describes the pipeline, not the product."""
-    return bool(_INTERNAL_COPY_RE.search(str(text or "")))
+    raw = str(text or "")
+    split = re.sub(r"([a-z0-9])([A-Z])", r"\1 \2", raw)
+    return bool(_INTERNAL_COPY_RE.search(raw) or _INTERNAL_COPY_RE.search(split))
 
 
 def _is_internal_label(label: str) -> bool:
@@ -405,24 +432,33 @@ def _whatsnew_text(task: dict, max_chars: int = WHATS_NEW_MAX_CHARS) -> str:
     if explicit:
         text = explicit if explicit.endswith("\n") else explicit + "\n"
     else:
-        label = _short_label((task.get("surface", {}) or {}).get("label"))
-        ttype = task.get("type", "motion")
-        if _generic_note_reason(task):
-            # An id — or a sentence about declared screens, scenes and assertions,
-            # or a label cut to a fragment — is not a release note: say what
-            # actually changed for the user instead of printing the pipeline's
-            # own vocabulary.
-            text = _UNDER_THE_HOOD_NOTE
-        elif ttype == "motion":
-            text = (f"✓ Polished: {label}\n"
-                    "✓ No functional changes — everything works exactly as before\n")
-        elif ttype == "bugfix":
-            text = (f"✓ Fixed: {label}\n"
-                    "✓ Nothing else changed — everything you already use behaves the same way\n")
+        # Check if user_sees is available and clean of engineering words
+        user_sees = (task.get("user_sees") or "").strip()
+        if user_sees and not _is_internal_copy(user_sees):
+            clean_sees = user_sees.rstrip(". ") + "."
+            text = (f"✓ {clean_sees}\n"
+                    "✓ Everything you already use keeps working smoothly\n")
         else:
-            # feature / anything else that changes behaviour: never claim "no changes"
-            text = (f"✓ New in this update: {label}\n"
-                    "✓ Everything you already use keeps working the same way\n")
+            raw_label = (task.get("surface", {}) or {}).get("label") or task.get("label") or ""
+            cleaned = _clean_consumer_copy(raw_label)
+            label = _short_label(cleaned or raw_label)
+            ttype = task.get("type", "motion")
+            if _generic_note_reason(task) or not cleaned or _is_internal_copy(label):
+                # An id — or a sentence about declared screens, scenes and assertions,
+                # or a label cut to a fragment — is not a release note: say what
+                # actually changed for the user instead of printing the pipeline's
+                # own vocabulary.
+                text = _UNDER_THE_HOOD_NOTE
+            elif ttype == "motion":
+                text = (f"✓ Polished: {label}\n"
+                        "✓ No functional changes — everything works exactly as before\n")
+            elif ttype == "bugfix":
+                text = (f"✓ Fixed: {label}\n"
+                        "✓ Nothing else changed — everything you already use behaves the same way\n")
+            else:
+                # feature / anything else that changes behaviour: never claim "no changes"
+                text = (f"✓ New in this update: {label}\n"
+                        "✓ Everything you already use keeps working the same way\n")
     return _trim_whatsnew(text, max_chars)[0]
 
 
@@ -530,15 +566,15 @@ def previous_shipped_note(project: Path, rel: str) -> tuple[str, str]:
 
 def whatsnew_gate(project: Path, task, root: Path | None = None,
                   log: RunLog | None = None) -> tuple[bool, str]:
-    """Refuse a release whose store note would repeat the previous one verbatim.
+    """Refuse a release whose store note would repeat the previous one verbatim,
+    or contains internal engineering vocabulary.
 
-    THE DEFECT THIS CLOSES: `whatsnew_curated` was a freeze — the pipeline read
-    the file and never wrote it, and nothing but a warning line in the handover
-    ever looked at it. One project shipped 28 consecutive releases behind a
-    single old note, so every "What's new" on its listing was the same text.
-    A stale note is now a failing gate (verify + release), not a warning: the
-    remedy is one line in the task spec's `whatsnew`, which the orchestrator
-    owns and can write without the owner.
+    THE DEFECT THIS CLOSES:
+    1. A stale note: one project shipped 28 consecutive releases behind a single note.
+    2. A technical note: release notes generated for Google Play carried internal engineering
+       jargon (e.g. 'Standardized AnalyticsTracker', 'OAuthCallbackHandler', 'Room migration').
+       Play Store 'What's new' is public copy for everyday users; technical detail belongs in
+       tester notes for Firebase App Distribution.
     """
     profile = profile_of(project)
     rel = profile.get("whatsnew_file")
@@ -549,6 +585,16 @@ def whatsnew_gate(project: Path, task, root: Path | None = None,
         return False, (f"'{rel}' is empty — Play will show no release note for this "
                        "build. Write this release's line into the task spec's "
                        '"whatsnew" field (or the note file) before releasing.')
+
+    if _is_internal_copy(note):
+        split = re.sub(r"([a-z0-9])([A-Z])", r"\1 \2", note)
+        hits = sorted({m.group(0).lower() for m in _INTERNAL_COPY_RE.finditer(f"{note} {split}")})
+        return False, (
+            f"release note contains technical engineering vocabulary ({', '.join(hits[:6])!r}) — "
+            "Google Play 'What's new' is public consumer copy. Describe the user experience or benefit, "
+            f"not internal code or architecture. Edit '{rel}' or the task spec's 'whatsnew' field."
+        )
+
     prev_version, prev_note = previous_shipped_note(project, rel)
     if prev_note.strip() and prev_note.strip() == note:
         return False, (
@@ -561,6 +607,70 @@ def whatsnew_gate(project: Path, task, root: Path | None = None,
     if log:
         log(f"whatsnew gate: ok — {detail}")
     return True, detail
+
+
+def write_tester_notes(worktree: Path, task: dict, version: str, code: int | None = None,
+                       log: RunLog | None = None) -> str:
+    """Write rich, detailed release notes for QA and internal testers to distribution/tester-notes.md.
+
+    This is the counterpart to the public Play Store What's New:
+    - Play Store note: public, non-technical, consumer benefits, length-capped.
+    - Firebase App Distribution: detailed change, problem statement, acceptance checklist,
+      modified surfaces, test affordances.
+    """
+    task = _normalize_task(task)
+    surface = task.get("surface", {}) or {}
+    label = surface.get("label") or task.get("label") or task.get("id") or "release"
+    ttype = task.get("type") or "change"
+    advances = task.get("advances") or "none"
+    problem = (task.get("problem") or task.get("reason") or "").strip()
+    user_sees = (task.get("user_sees") or "").strip()
+    done_when = task.get("done_when") or []
+    if isinstance(done_when, str):
+        done_when = [done_when]
+    areas = whatsnew_test_areas(task)
+
+    code_str = f" ({code})" if code else ""
+    lines = [
+        f"# Build v{version}{code_str} — Tester Notes",
+        "",
+        "### Overview",
+        f"- **Task**: `{label}`",
+        f"- **Kind**: `{ttype}`",
+        f"- **Advances**: `{advances}`",
+    ]
+    if problem:
+        lines.extend(["", "### Problem / Intent", f"{problem}"])
+    if user_sees:
+        lines.extend(["", "### User Impact", f"{user_sees}"])
+
+    if done_when:
+        lines.extend(["", "### Verification Checklist (Done When)"])
+        for item in done_when:
+            lines.append(f"- [ ] {item}")
+
+    if areas:
+        lines.extend(["", "### Modified Surfaces", ", ".join(f"`{a}`" for a in areas)])
+
+    whatsnew = _explicit_whatsnew(task)
+    if whatsnew:
+        lines.extend(["", "### Public Store Note (Play Store)", f"> {whatsnew}"])
+
+    lines.extend([
+        "",
+        "### Test Affordances",
+        "- Test-only affordances enabled (email/password sign-in, seeded readers, mock backend).",
+        "",
+    ])
+
+    content = "\n".join(lines)
+    dest_dir = worktree / "distribution"
+    dest_dir.mkdir(parents=True, exist_ok=True)
+    dest_file = dest_dir / "tester-notes.md"
+    dest_file.write_text(content)
+    if log:
+        log(f"tester notes: written {len(content)} chars to distribution/tester-notes.md for Firebase App Distribution")
+    return content
 
 
 def write_whatsnew(worktree: Path, task, log: RunLog | None = None) -> str | None:
@@ -644,7 +754,8 @@ def whatsnew_test_areas(task: dict, limit: int = 6) -> list[str]:
     again on commas — a path can never contain one, but a joined list always
     does."""
     raw_items: list[str] = []
-    for item in target_items((task.get("surface", {}) or {}).get("targets")):
+    targets = (task.get("surface", {}) or {}).get("targets") or task.get("target") or []
+    for item in target_items(targets):
         raw_items.extend(p.strip() for p in item.split(",") if p.strip())
     items: list[str] = []
     for raw in raw_items:

@@ -482,6 +482,11 @@ def _handover_text(project: Path, task: dict, version: str, commit: str = "") ->
                          "put this release's line in the task spec's `whatsnew` (or edit "
                          f"{wf_rel}) before releasing.")
 
+    tnotes_path = Path(project) / "distribution" / "tester-notes.md"
+    if tnotes_path.exists():
+        line("  TESTER NOTES (Firebase App Distribution) — detailed change for QA/testers:")
+        line(f"    distribution/tester-notes.md ({len(tnotes_path.read_text())} chars)")
+
     areas = shipper.whatsnew_test_areas(task)
     claim = ((task.get("surface", {}) or {}).get("label") or "").strip()
     if not claim:
@@ -1373,6 +1378,7 @@ def cmd_release(args: argparse.Namespace) -> int:
 
     name = shipper.bump_version_file(worktree, name, log, floor_code=floor, code=code)
     shipper.write_whatsnew(worktree, task, log)
+    shipper.write_tester_notes(worktree, task, name, code=code, log=log)
 
     # The call is recorded BEFORE the build, so the handover and the rc command
     # read one answer instead of two competing ones — and ONLY when the agent
@@ -4037,7 +4043,8 @@ def cmd_admit(args: argparse.Namespace) -> int:
         return 2
     res = admit_mod.admit(project, args.query, args.kind, args.advances,
                           args.why, args.verdict, dry_run=args.dry_run,
-                          law=getattr(args, "law", "") or "")
+                          law=getattr(args, "law", "") or "",
+                          whatsnew=getattr(args, "whatsnew", "") or "")
     if args.json:
         print(json.dumps(res, indent=2))
     else:
@@ -6022,6 +6029,9 @@ def main() -> None:
         "--law", default="",
         help="the product clause(s) this serves or amends (PRODUCT.md ids, e.g. "
              "P1,P4); required once a project declares a law")
+    rt.add_argument(
+        "--whatsnew", default="",
+        help="public consumer-facing release note (Play Store What's New; no technical jargon)")
     rt.add_argument("--dry-run", action="store_true",
                     help="run every check, queue nothing")
     rt.add_argument("--clear", action="store_true",

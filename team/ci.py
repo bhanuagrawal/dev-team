@@ -24,7 +24,7 @@ WORKFLOW_REL = ".github/workflows/release.yml"
 # Bumped whenever the rendered text changes meaning (not formatting). A project's
 # copy carries it in its header, so a reader can tell which generation a workflow
 # came from even without running doctor.
-TEMPLATE_VERSION = 5
+TEMPLATE_VERSION = 6
 
 KNOWN_PLACEHOLDERS = (
     "__BUNDLE_TASKS__", "__RELEASE_FILES__", "__PACKAGE_NAME__",
@@ -214,6 +214,9 @@ def self_check() -> list[str]:
     if "appdistribution:distribute" not in text:
         problems.append("the QA channel has no firebase CLI upload step "
                         "(`appdistribution:distribute`)")
+    if "--release-notes-file" not in text:
+        problems.append("the QA channel must distribute with detailed tester release notes "
+                        "(`--release-notes-file`)")
     # The selector is only honest if the input it reads exists. The template
     # itself carries the placeholder (the expression is rendered per project), so
     # the invariant is checked there.

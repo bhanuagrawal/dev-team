@@ -5,6 +5,12 @@
 # Do not hand-edit a project's copy — change this template, then re-render all
 # projects.
 #
+# TEMPLATE_VERSION 6 — the QA channel sends detailed tester release notes to
+# Firebase App Distribution from distribution/tester-notes.md (or constructed
+# fallback). Public Google Play What's New is consumer copy; Firebase App
+# Distribution receives the rich changelog, verification checklist and test
+# affordances so testers in the Firebase App Tester app see what changed in detail.
+#
 # TEMPLATE_VERSION 5 — the workflow artifact uploads are NON-FATAL. The store
 # upload and the tester distribution are the deliverables; an artifact is a
 # convenience. GitHub's artifact storage quota is account-wide and slow to
@@ -317,6 +323,30 @@ jobs:
       # a macOS runner, and a swallowed failure there reads as a delivered build.
       # `npx firebase-tools` is the same command the team uses by hand, works on
       # every runner, and returns the upload's real exit code.
+      - name: Prepare tester release notes
+        if: env.FIREBASE_JSON != ''
+        run: |
+          NOTES_FILE="${{ runner.temp }}/firebase-release-notes.md"
+          if [ -s "distribution/tester-notes.md" ]; then
+            cp "distribution/tester-notes.md" "$NOTES_FILE"
+          else
+            echo "# Build $GITHUB_REF_NAME (${GITHUB_SHA:0:8}) — Tester Notes" > "$NOTES_FILE"
+            echo "" >> "$NOTES_FILE"
+            echo "### Commit Summary" >> "$NOTES_FILE"
+            git log -1 --pretty=%B >> "$NOTES_FILE" 2>/dev/null || true
+            echo "" >> "$NOTES_FILE"
+            echo "### Public What's New (Play Store)" >> "$NOTES_FILE"
+            if [ -f "__WHATSNEW_FILE__" ]; then
+              sed 's/^/> /' "__WHATSNEW_FILE__" >> "$NOTES_FILE"
+            else
+              echo "> Reliability and performance improvements" >> "$NOTES_FILE"
+            fi
+            echo "" >> "$NOTES_FILE"
+            echo "### Test Affordances" >> "$NOTES_FILE"
+            echo "- Test-only affordances enabled (email/password sign-in, seeded readers, mock backend)." >> "$NOTES_FILE"
+          fi
+          echo "TESTER_NOTES_PATH=$NOTES_FILE" >> "$GITHUB_ENV"
+
       - name: Share with testers (Firebase App Distribution)
         id: firebase
         if: env.FIREBASE_JSON != ''
@@ -328,9 +358,7 @@ jobs:
           npx --yes firebase-tools@15 appdistribution:distribute "__DEBUG_APK__" \
             --app "__FIREBASE_APP_ID__" \
             --groups "__FIREBASE_GROUPS__" \
-            --release-notes "Debug build $GITHUB_REF_NAME — test-only affordances enabled
-          (email/password sign-in, seeded readers, mock backend).
-          Commit $GITHUB_SHA."
+            --release-notes-file "$TESTER_NOTES_PATH"
 
       # A green run is not proof testers were notified. When the upload step fails,
       # say so in the run itself: the AAB may already be on Play, and the only
