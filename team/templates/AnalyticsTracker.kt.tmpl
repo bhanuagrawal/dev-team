@@ -1,0 +1,49 @@
+package {{PACKAGE_NAME}}.analytics
+
+/**
+ * Sink for product analytics events.
+ *
+ * Analytics is best-effort: implementations must not block the caller and must
+ * never throw, so a logging failure can never fail the user flow being measured.
+ */
+interface AnalyticsTracker {
+    fun logEvent(name: String, params: Map<String, Any> = emptyMap())
+}
+
+/**
+ * Default implementation where no platform tracker is wired (iOS, tests).
+ * Keeping it an object makes the tracker a non-null, always-present dependency.
+ */
+object NoOpAnalyticsTracker : AnalyticsTracker {
+    override fun logEvent(name: String, params: Map<String, Any>) = Unit
+}
+
+/** Standard GA4 event names for the pipeline core funnel. */
+object AnalyticsEvent {
+    const val JOB_STARTED = "job_started"
+    const val JOB_COMPLETED = "job_completed"
+    const val JOB_FAILED = "job_failed"
+
+    const val SCREEN_VIEW = "screen_view"
+}
+
+object AnalyticsParam {
+    const val FEATURE = "feature"
+    const val REASON = "reason"
+    const val SCREEN_NAME = "screen_name"
+}
+
+fun AnalyticsTracker.logJobStarted(feature: String, extra: Map<String, Any> = emptyMap()) {
+    logEvent(AnalyticsEvent.JOB_STARTED, mapOf(AnalyticsParam.FEATURE to feature) + extra)
+}
+
+fun AnalyticsTracker.logJobCompleted(feature: String, extra: Map<String, Any> = emptyMap()) {
+    logEvent(AnalyticsEvent.JOB_COMPLETED, mapOf(AnalyticsParam.FEATURE to feature) + extra)
+}
+
+fun AnalyticsTracker.logJobFailed(feature: String, reason: String? = null, extra: Map<String, Any> = emptyMap()) {
+    val params = mutableMapOf<String, Any>(AnalyticsParam.FEATURE to feature)
+    if (reason != null) params[AnalyticsParam.REASON] = reason
+    params.putAll(extra)
+    logEvent(AnalyticsEvent.JOB_FAILED, params)
+}

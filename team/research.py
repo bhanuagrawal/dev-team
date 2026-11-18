@@ -1715,6 +1715,37 @@ def capability_upgrades(signals: dict, profile: dict, project: Path | None = Non
                        "download google-services.json; dev-team feature task wires "
                        "firebase-analytics into androidMain (owner approves in next intake)",
             })
+        else:
+            code_tracked = False
+            for sdir in (project / "composeApp/src", project / "app/src", project / "src", project / "lib"):
+                if sdir.is_dir():
+                    for ext in ("*.kt", "*.java", "*.dart"):
+                        for p in sdir.rglob(ext):
+                            try:
+                                txt = p.read_text(errors="ignore")
+                                if "logEvent" in txt or "AnalyticsTracker" in txt:
+                                    code_tracked = True
+                                    break
+                            except Exception:
+                                pass
+                        if code_tracked:
+                            break
+                if code_tracked:
+                    break
+
+            ev_30d = ga4.get("events_30d") or {}
+            installs = (ev_30d.get("first_open") or {}).get("users") or (ga4.get("new_users_7d") or 0)
+            started = (ev_30d.get("job_started") or {}).get("users") or 0
+
+            if not code_tracked or (installs > 0 and started == 0):
+                up.append({
+                    "id": "funnel-instrumentation",
+                    "title": "Instrument core job lifecycle events (job_started, job_completed, job_failed)",
+                    "benefit": f"GA4 is connected ({installs} installs in 30d), but job_start_rate is 0.0 "
+                               f"— the planner cannot tell where users drop off without lifecycle events",
+                    "how": "wire an AnalyticsTracker (commonMain) delegating to FirebaseAnalytics (androidMain), "
+                           "logging job_started / job_completed / job_failed around primary user actions",
+                })
     if signals.get("vitals", {}).get("status") != "ok":
         up.append({
             "id": "vitals",
@@ -1879,8 +1910,16 @@ def sources_line(research: dict) -> str:
     lines.append(f"- Play readiness: {st(ready)}"
                  + (f" — {len(blockers)} blocker(s)" if isinstance(blockers, list)
                     else (f" — {blockers} blocker(s)" if blockers is not None else "")))
+    ga4_sig = sig.get("ga4") or {}
+    ga4_st = st(ga4_sig)
+    if ga4_sig.get("status") == "ok":
+        ev = ga4_sig.get("events_30d") or {}
+        installs = (ev.get("first_open") or {}).get("users") or 0
+        started = (ev.get("job_started") or {}).get("users") or 0
+        if installs > 0 and not started:
+            ga4_st += " (funnel dark: 0 job_started)"
     lines.append(
-        f"- Product signals: GA4 {st(sig.get('ga4'))} · crashes/vitals "
+        f"- Product signals: GA4 {ga4_st} · crashes/vitals "
         f"{st(sig.get('vitals'))} · store reviews {st(sig.get('reviews'))}")
     lines.append(
         f"- Market: competitors {st(sig.get('competitors'))} · market "

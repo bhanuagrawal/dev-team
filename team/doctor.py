@@ -70,6 +70,30 @@ def agent_requirements(profile: dict, project: Path) -> dict[str, list[tuple[str
         ga4_checks.append(("gcloud CLI available", bool(shutil.which("gcloud")),
                            "install the gcloud SDK (the GA4 collector mints service-account tokens through it)"))
 
+        # Code-level tracking: verify the app actually calls analytics,
+        # not just bundling the SDK in Gradle while remaining dark (2026-11-18).
+        code_tracked = False
+        for sdir in (project / "composeApp/src", project / "app/src", project / "src", project / "lib"):
+            if sdir.is_dir():
+                for ext in ("*.kt", "*.java", "*.dart"):
+                    for p in sdir.rglob(ext):
+                        try:
+                            txt = p.read_text(errors="ignore")
+                            if "logEvent" in txt or "AnalyticsTracker" in txt:
+                                code_tracked = True
+                                break
+                        except Exception:
+                            pass
+                    if code_tracked:
+                        break
+            if code_tracked:
+                break
+        ga4_checks.append((
+            "analytics tracked in source code (AnalyticsTracker / logEvent)",
+            code_tracked,
+            "declare an AnalyticsTracker seam and log job lifecycle events (job_started, job_completed, job_failed)",
+        ))
+
     # Play Console connections (vitals + reviews): declared per project, and the
     # COLLECTOR is what silences the upgrade ask — so verify the key file and the
     # package id here, not just that the block exists (lesson 2026-10-22).
