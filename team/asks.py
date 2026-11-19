@@ -385,12 +385,38 @@ def review(title: str, how: str = "", profile: dict | None = None,
         )
         return row
 
+    # AN ASK THAT WANTS CODE IS NOT A CONSOLE TRIP (2026-11-19). A GA4 upgrade
+    # read "instrument lifecycle events … logging match_started", whose benefit
+    # line says "GA4 is connected" — and the firebase-analytics rule matched, so
+    # the report sent the agent to a browser instead of the file that emits the
+    # events. The console rule is for creating/linking/granting the product; an
+    # ask that names app code and an event to log is work in this repo.
+    wants_code = (
+        re.search(r"\b(?:wire|instrument|emit|log|track|record)\b", text, re.I)
+        and re.search(r"\b(?:events?|tracker|telemetry|lifecycle)\b", text, re.I)
+        and re.search(r"\b(?:commonMain|androidMain|kotlin|viewmodel|composable|"
+                      r"source|module|app code|delegat\w*)\b", text, re.I)
+    )
+    creates_resource = re.search(
+        r"\b(?:create|enable|grant|link|register|add)\b.{0,40}"
+        r"\b(?:api|permission|product|property|account|stream|key)\b", text, re.I)
+    if wants_code and not creates_resource:
+        row.update(
+            verdict="agent", tool=None,
+            steps=["the fix is code in this app: emit the named events from the "
+                   "actions that already exist (match start/finish, screen actions)",
+                   "read them back from the analytics signal on the next `devteam "
+                   "research` run — no console change is needed for this ask"],
+            why=("the ask names app code and the events to log, so nothing has to be "
+                 "created or granted in a console"),
+        )
+        return row
+
     rule = _first(RULES, text)
     if not rule:
         row["why"] = ("no console page, cloud API, OS setting or app dialog is named in "
                       "the ask — nothing a browser or desktop tool can drive")
         return row
-
     meta = tools.get(rule["tool"]) or {"available": False, "evidence": "not detected",
                                        "label": rule["tool"], "run": ""}
     owner_input = [note for pattern, note in OWNER_INPUT

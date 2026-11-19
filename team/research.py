@@ -192,6 +192,29 @@ def _store_status_pull(project: Path) -> dict:
     return {"status": "ok", **snap}
 
 
+# GA4's own automatically-collected events. They say the SDK is alive; they do
+# NOT say the product recorded anything a player did. Everything else in the
+# event table is a domain event, and the first of those is what the funnel is
+# actually made of — whatever the app decided to call it.
+_GA4_AUTO_EVENTS = {
+    "first_open", "first_visit", "session_start", "user_engagement", "app_update",
+    "app_remove", "screen_view", "session_metrics", "app_opened", "(not set)",
+    "ad_impression", "in_app_purchase", "app_store_subscription_convert",
+    "app_store_subscription_renew", "app_exception", "page_view", "scroll",
+    "click", "form_start", "form_submit", "video_start", "video_complete",
+}
+
+
+def _domain_events(events: dict) -> dict:
+    """The events the product itself emits, ordered by users."""
+    out = {
+        str(name): int((row or {}).get("users") or 0)
+        for name, row in (events or {}).items()
+        if str(name) not in _GA4_AUTO_EVENTS and int((row or {}).get("users") or 0) > 0
+    }
+    return dict(sorted(out.items(), key=lambda kv: kv[1], reverse=True))
+
+
 def _ga4_pull(project: Path, profile: dict) -> dict:
     """GA4 via a reader service account — the documented runReport pattern.
 
@@ -285,8 +308,25 @@ def _ga4_pull(project: Path, profile: dict) -> dict:
             out["funnel_30d"] = {s: events_30d.get(s, {}).get("users") for s in steps}
             installs = events_30d.get("first_open", {}).get("users") or 0
             started = events_30d.get("job_started", {}).get("users") or 0
-            out["job_start_rate_30d"] = (
-                round(started / installs, 4) if installs else None)
+            # A MISSING EVENT NAME IS NOT A DARK FUNNEL (2026-11-19). "job_started"
+            # is a convention this team looks for, not a fact about the app: a
+            # scorekeeper emits match_started, and reading its absence as
+            # job_start_rate 0.0 told the planner the product records nothing
+            # while 554 match_started events sat in the same table. When the app
+            # emits its own events, the funnel is whatever the top one is called.
+            domain = _domain_events(events_30d)
+            out["domain_events_30d"] = dict(list(domain.items())[:8])
+            if started:
+                out["job_start_rate_30d"] = (
+                    round(started / installs, 4) if installs else None)
+            elif domain:
+                out["job_start_rate_30d"] = None
+                out["funnel_note"] = (
+                    "no job_* events; the app's own events name the funnel: "
+                    + ", ".join(f"{k} ({v} users)" for k, v in list(domain.items())[:3]))
+            else:
+                out["job_start_rate_30d"] = (
+                    0.0 if installs else None)
         else:
             out["events_30d"] = {}
             out["ga4_event_error"] = (ev or {}).get("error")
@@ -1737,8 +1777,13 @@ def capability_upgrades(signals: dict, profile: dict, project: Path | None = Non
             ev_30d = ga4.get("events_30d") or {}
             installs = (ev_30d.get("first_open") or {}).get("users") or (ga4.get("new_users_7d") or 0)
             started = (ev_30d.get("job_started") or {}).get("users") or 0
+            # The upgrade is for a product that records NOTHING. An app whose own
+            # events are landing is already instrumented — it just does not use
+            # this team's conventional name, and filing "instrument events" at it
+            # is a chore aimed at a hole that is not there.
+            domain = ga4.get("domain_events_30d") or _domain_events(ev_30d)
 
-            if not code_tracked or (installs > 0 and started == 0):
+            if (not domain) and (not code_tracked or (installs > 0 and started == 0)):
                 up.append({
                     "id": "funnel-instrumentation",
                     "title": "Instrument core job lifecycle events (job_started, job_completed, job_failed)",
@@ -1918,7 +1963,13 @@ def sources_line(research: dict) -> str:
         installs = (ev.get("first_open") or {}).get("users") or 0
         started = (ev.get("job_started") or {}).get("users") or 0
         if installs > 0 and not started:
-            ga4_st += " (funnel dark: 0 job_started)"
+            domain = ga4_sig.get("domain_events_30d") or _domain_events(ev)
+            if domain:
+                top = list(domain.items())[:2]
+                ga4_st += (" (no job_* events; app events: "
+                           + ", ".join(f"{k} {v}" for k, v in top) + ")")
+            else:
+                ga4_st += " (funnel dark: no product events)"
     lines.append(
         f"- Product signals: GA4 {ga4_st} · crashes/vitals "
         f"{st(sig.get('vitals'))} · store reviews {st(sig.get('reviews'))}")
