@@ -259,6 +259,88 @@ def banned_present(text: str) -> list[str]:
     return sorted(set(hits))
 
 
+def _visible_text(html: str) -> str:
+    """The words a screen actually renders: tags and scripts removed."""
+    import html as _html
+    t = re.sub(r"<(script|style)[^>]*>.*?</\1>", " ", html or "", flags=re.S | re.I)
+    t = re.sub(r"<[^>]+>", " ", t)
+    return re.sub(r"\s+", " ", _html.unescape(t)).strip()
+
+
+def invented_copy(baseline_html: str, tweaked_html: str,
+                  change_request: str, limit: int = 8) -> list[str]:
+    """Phrases a tweak ADDED that neither the baseline nor the instruction holds.
+
+    A surgical tweak changes how a screen looks, never what it claims. Stitch
+    happily invents the rest: asked to restyle a shipped scoreboard it returned
+    "CT #4 / REC LEAGUE ELITE / SIDE: RIGHT (EVEN)" — copy the product had
+    deliberately deleted — and the preservation score said 45/45 because every
+    existing control survived. Nothing caught it, so the run adopted a screen
+    full of invented data and only a human reading the picture noticed.
+
+    This is that check, and it is generic: it compares the visible text of the
+    tweak against the baseline and the request. A word the baseline never had is
+    either new copy the request asked for, or invented — and an uppercase run or
+    a number-bearing phrase is the shape invented data takes on these screens.
+    """
+    base = _visible_text(baseline_html)
+    new = _visible_text(tweaked_html)
+    if not new:
+        return []
+    base_low = base.lower()
+    req_low = re.sub(r"\s+", " ", (change_request or "")).lower()
+    word_re = re.compile(r"[A-Za-z0-9#][A-Za-z0-9#&:.'-]*")
+
+    def _novel(phrase: str) -> bool:
+        low = phrase.lower()
+        if len(low) < 2:
+            return False
+        if low in base_low or low in req_low:
+            return False
+        # A phrase built only from words the baseline already used is a
+        # rearrangement, not new data.
+        words = [w for w in word_re.findall(low) if len(w) > 1]
+        return any(w not in base_low for w in words)
+
+    flagged: list[str] = []
+
+    # 1. Uppercase runs of two or more words: the ledger/badge copy these screens
+    #    print as labels ("REC LEAGUE ELITE", "COURT B", "GAME BALL AVAILABLE").
+    #    A run is capped at four words so a page of uppercase labels reports each
+    #    one instead of one unreadable mega-phrase.
+    run: list[str] = []
+
+    def _flush() -> None:
+        if len(run) >= 2:
+            phrase = " ".join(run)
+            if _novel(phrase):
+                flagged.append(phrase)
+        run.clear()
+
+    for tok in word_re.findall(new):
+        caps = tok.upper() == tok and bool(re.search(r"[A-Z]", tok))
+        if caps:
+            run.append(tok)
+            if len(run) >= 4:
+                _flush()
+            continue
+        _flush()
+    _flush()
+
+    # 2. Number-bearing phrases: a value is data, and a screen may only print a
+    #    value it measured ("CT #4", "CALL: 7 - 4 - 2", "18:42").
+    for m in re.finditer(r"[A-Za-z#]{0,12}\s?\d[\d:.\-]*", new):
+        phrase = re.sub(r"\s+", " ", m.group(0)).strip()
+        if any(ch.isdigit() for ch in phrase) and _novel(phrase):
+            flagged.append(phrase)
+
+    seen: list[str] = []
+    for phrase in flagged:
+        if phrase not in seen:
+            seen.append(phrase)
+    return seen[:limit]
+
+
 def assert_change_applied(baseline_html: str, tweaked_html: str,
                           change_request: str) -> list[str]:
     """Instructions the tweak was asked for and did not carry out.
@@ -392,6 +474,9 @@ def audit_tweak_drift(
     # did anything forbidden come back with the new render.
     unapplied_changes = assert_change_applied(baseline_html, tweaked_html, change_request)
     banned_present_reasons = banned_present(tweaked_text)
+    # Invented copy: new words the baseline never held and the request never
+    # asked for. A restyle must not change what the screen claims.
+    invented = invented_copy(baseline_html, tweaked_html, change_request)
 
     total_base = len(kept_controls) + len(dropped_controls) + len(kept_headings) + len(dropped_headings)
     kept_base = len(kept_controls) + len(kept_headings)
@@ -410,12 +495,12 @@ def audit_tweak_drift(
     elif dropped_ratio > 0.35 or overall_score < 65:
         verdict = "FAIL"
         status = "OVERSTEPPING OR MISS DETECTED" if dropped_ratio > 0.35 else "TWEAK DRIFT DETECTED"
-    elif overall_score >= 85 and not dropped_controls and not hallucinated_features:
+    elif overall_score >= 85 and not dropped_controls and not hallucinated_features and not invented:
         verdict = "PASS"
         status = "SURGICAL TWEAK PRESERVED"
     else:
         verdict = "WARNING"
-        status = "MINOR TWEAK DRIFT"
+        status = ("INVENTED COPY ADDED" if invented else "MINOR TWEAK DRIFT")
 
     remediation_directives = []
     if dropped_controls or dropped_headings:
@@ -433,6 +518,10 @@ def audit_tweak_drift(
     if banned_present_reasons:
         remediation_directives.append("Remove copy the product forbids: "
                                       + "; ".join(banned_present_reasons))
+    if invented:
+        remediation_directives.append(
+            "Remove or replace copy this screen never carried (a restyle must not "
+            "invent a venue, league, rating, timer or score): " + "; ".join(invented))
 
     retry_prompt = ""
     if unapplied_changes or banned_present_reasons:
@@ -469,6 +558,7 @@ def audit_tweak_drift(
         "anti_pattern_violations": anti_pattern_violations,
         "unapplied_changes": unapplied_changes,
         "banned_present": banned_present_reasons,
+        "invented_copy": invented,
         "remediation_prompt": remediation_prompt,
         "retry_prompt": retry_prompt,
     }
@@ -524,6 +614,12 @@ def format_drift_report(report: dict[str, Any]) -> str:
             out.append(f"  ⚠ UNPROMPTED FEATURE: {h}")
     else:
         out.append("  ✓ Zero Hallucinations: No unprompted features or rogue buttons added.")
+
+    invented = report.get("invented_copy") or []
+    if invented:
+        out.append("\n[INVENTED COPY DETECTED] (this screen never carried these — a restyle must not add data)")
+        for phrase in invented[:8]:
+            out.append(f"  ⚠ NOT IN THE BASELINE: {phrase}")
 
     violations = report.get("anti_pattern_violations", [])
     theme_mode = str(report.get("theme_mode") or "light").upper()
