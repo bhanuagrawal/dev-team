@@ -873,7 +873,13 @@ def cmd_ci(args: argparse.Namespace) -> int:
         else:
             print(f"ci: NOT committed — {landed.get('why', 'unknown')} (next run retries)")
         return 0
-    print(ci.render(project))
+    # The PRINTED copy is the file `--write` would write, byte for byte. `print`
+    # appended a newline of its own, so `ci <project> > release.yml` produced a
+    # workflow one byte longer than the renderer's — doctor then blocked the
+    # project as DRIFTED from a template it matched (observed 2026-11-19,
+    # PdfKitKMP: 20376 delivered vs 20375 rendered).
+    text = ci.render(project)
+    sys.stdout.write(text if text.endswith("\n") else text + "\n")
     return 0
 
 

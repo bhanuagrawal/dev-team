@@ -113,5 +113,52 @@ class DispatchTest(unittest.TestCase):
         self.assertTrue(calls)
 
 
+class PrintedCopyTest(unittest.TestCase):
+    """`devteam ci <project> > release.yml` IS what `--write` would write.
+
+    Why this is pinned: `print(render())` appended a newline of its own, so a
+    copy rendered through the shell was one byte longer than the renderer's.
+    `doctor` compares the delivered file to the render and blocked the project as
+    DRIFTED from the very template it matched (PdfKitKMP, 2026-11-19: 20376
+    delivered vs 20375 rendered), and the only "fix" it could suggest was to
+    rewrite a file nobody had hand-edited.
+    """
+
+    def test_stdout_is_byte_identical_to_the_render(self):
+        import io
+        import sys as _sys
+        from contextlib import redirect_stdout
+        from types import SimpleNamespace
+
+        sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+        import cli
+        from team import ci as ci_mod
+
+        rendered = "on:\n  push:\n    tags: ['v*']\n"
+        buf = io.StringIO()
+        with mock.patch.object(cli, "resolve_project", return_value=Path("/tmp/none")), \
+                mock.patch.object(ci_mod, "render", return_value=rendered), \
+                redirect_stdout(buf):
+            cli.cmd_ci(SimpleNamespace(project="X", write=False))
+        self.assertEqual(buf.getvalue(), rendered)
+        self.assertNotIn("\n\n", buf.getvalue())
+
+    def test_a_render_without_its_own_newline_still_ends_in_exactly_one(self):
+        import io
+        from contextlib import redirect_stdout
+        from types import SimpleNamespace
+
+        sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+        import cli
+        from team import ci as ci_mod
+
+        buf = io.StringIO()
+        with mock.patch.object(cli, "resolve_project", return_value=Path("/tmp/none")), \
+                mock.patch.object(ci_mod, "render", return_value="name: x"), \
+                redirect_stdout(buf):
+            cli.cmd_ci(SimpleNamespace(project="X", write=False))
+        self.assertEqual(buf.getvalue(), "name: x\n")
+
+
 if __name__ == "__main__":
     unittest.main()
