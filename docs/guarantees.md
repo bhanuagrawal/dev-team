@@ -38,6 +38,14 @@ refuses.
    hand-copy of a product rule while `verify` ran Gradle alone and CI had no node
    step — a shared rule could change, PASS, ship, and leave the second client on
    the old copy.
+   **A revamp is counted in the stack it ships.** The revamp gate asks a
+   ground-up rebuild to rewrite application source, and "application source"
+   follows the project's own platforms: Kotlin/Java for the app, and `web/src`'s
+   `.ts/.tsx/.js/.jsx` for a browser client. Test files (`*Test.kt`, `*.test.ts`,
+   anything under `web/tests/`) and generated output do not count. Why:
+   BookSwap's 2026-11-19 website redesign replaced the whole browser client and
+   the gate refused it with "0 code file changes" because no `.kt` moved — a
+   stack-blind gate refusing a real rewrite.
    **TESTS ARE RETIRED — ALL OF THEM** (owner policy 2026-11-10, restated as
    "get rid of them completely"). There is no unit-test gate, no UI-test gate, no
    test run in `verify` and no coverage floor: `config/coverage.json` carries

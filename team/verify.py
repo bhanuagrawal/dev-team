@@ -935,6 +935,25 @@ def integration_check(worktree: Path, profile: dict, log) -> tuple[bool, str]:
 
 
 
+def is_app_code(rel: str) -> bool:
+    """Application source, in every stack this team ships.
+
+    Kotlin/Java for the app; a browser client's own `src` for web surfaces. Test
+    files are not application code, and neither is generated output or a build
+    config — a revamp is judged on the code it replaced.
+    """
+    path = rel.replace("\\", "/")
+    while path.startswith("./"):
+        path = path[2:]
+    if path.endswith((".kt", ".java")):
+        return "/src/test/" not in f"/{path}" and not path.endswith("Test.kt")
+    if "/web/src/" not in f"/{path}":
+        return False
+    if not path.endswith((".ts", ".tsx", ".js", ".jsx")):
+        return False
+    return ".test." not in path and "/tests/" not in f"/{path}"
+
+
 def revamp_gate(project: Path, worktree: Path, spec: dict | None, files: list[str]) -> tuple[bool, str]:
     """Ensure that a revamp / rebuild task genuinely replaced the legacy codebase.
 
@@ -963,8 +982,11 @@ def revamp_gate(project: Path, worktree: Path, spec: dict | None, files: list[st
         return True, "not a revamp task"
 
     # Check that the application code really moved: a one-line cosmetic touch is
-    # not a rebuild.
-    code_changes = [f for f in files if f.endswith(".kt") or f.endswith(".java")]
+    # not a rebuild. The count follows the project's own stack: a KMP app's
+    # Kotlin is application code, and so is the browser client under `web/src`
+    # (a website redesign never touches a .kt file, and calling that "no code
+    # changed" refused a real revamp — BookSwap, 2026-11-19).
+    code_changes = [f for f in files if is_app_code(f)]
     if len(code_changes) < 3:
         return False, (
             f"task is marked as revamp/rebuild, but diff has only {len(code_changes)} code file changes. "
