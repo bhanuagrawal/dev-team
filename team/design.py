@@ -912,10 +912,27 @@ def _target_context_for_screen(project: Path, profile: dict, screen_type: str) -
     return {"target": matched_target, "prd_excerpt": prd_excerpt}
 
 
+def _device_line(device: str) -> str:
+    """The prompt's own device instruction, matching the device Stitch is asked for.
+
+    It used to say "Mobile (390px viewport width, portrait)" on every call, so a
+    `--device DESKTOP` request asked Stitch for a desktop screen in one argument
+    and described a phone in the prompt — the model follows the prompt (seen
+    2026-11-19 while regenerating the BookSwap web set).
+    """
+    key = str(device or "MOBILE").strip().upper()
+    if key == "DESKTOP":
+        return "Desktop (1440px content width inside a 2560px canvas, landscape)"
+    if key == "TABLET":
+        return "Tablet (1024px viewport width, landscape)"
+    return "Mobile (390px viewport width, portrait)"
+
+
 def compile_stitch_screen_prompt(
     project: Path,
     screen_type: str = "main",
     spec: dict[str, Any] | None = None,
+    device: str = "MOBILE",
 ) -> str:
     """Compile an authoritative, project-generic screen prompt for Stitch MCP.
 
@@ -967,7 +984,7 @@ def compile_stitch_screen_prompt(
     theme_mode = tokens.get("theme_mode") or arch.get("theme_mode", "light")
 
     return f"""Title: {screen_title}
-Device: Mobile (390px viewport width, portrait)
+Device: {_device_line(device)}
 Platform Aesthetic: {aesthetic}
 
 === SECTION 1: PRODUCT INTENT & CONTEXT ===

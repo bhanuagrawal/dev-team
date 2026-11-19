@@ -4680,7 +4680,8 @@ def cmd_stitch_prompt(args: argparse.Namespace) -> int:
     project = resolve_project(args.project)
     from team.design import compile_stitch_screen_prompt
     screen_type = getattr(args, "screen", "main")
-    prompt = compile_stitch_screen_prompt(project, screen_type=screen_type)
+    prompt = compile_stitch_screen_prompt(project, screen_type=screen_type,
+                                          device=getattr(args, "device", "MOBILE"))
     print(f"STITCH MCP SCREEN PROMPT ({project.name.upper()} • {screen_type.upper()}):")
     print("=" * 65)
     print(prompt)
@@ -4716,7 +4717,8 @@ def cmd_stitch_screen(args: argparse.Namespace) -> int:
         if not isinstance(spec, dict):
             print("  ✗ --spec must be a JSON object ({title, context, zones, ctas, telemetry})")
             return 1
-    prompt = compile_stitch_screen_prompt(project, screen_type=screen_type, spec=spec)
+    prompt = compile_stitch_screen_prompt(project, screen_type=screen_type, spec=spec,
+                                          device=device)
 
     profile = profile_of(project)
     design_cfg = profile.get("design") or {}
@@ -6316,6 +6318,7 @@ def main() -> None:
     stp = sub.add_parser("stitch-prompt", help="compile specific, pre-locked, anti-generic screen prompt for Stitch MCP")
     stp.add_argument("project")
     stp.add_argument("--screen", default="main", help="screen name or target label (e.g. main, detail, settings)")
+    stp.add_argument("--device", default="MOBILE", help="target device: MOBILE, DESKTOP, TABLET")
     stp.set_defaults(fn=cmd_stitch_prompt)
     sscr = sub.add_parser("stitch-screen", help="generate a new Stitch screen (when no existing screen covers the surface)")
     sscr.add_argument("project")
