@@ -23,7 +23,10 @@ refuses.
    snapshot is reused or tweaked; a surface with none is answered by
    `devteam design-consult … --record`, and a `new_screen` answer must have its
    snapshot exported in the same change. Building a screen from tokens alone is
-   what the gate refuses.
+   what the gate refuses. A **browser client's `web/src/**/*.tsx`** is UI in the
+   same sense (`.ts` modules are logic, `web/tests/` is a test): the gate used to
+   know only `.kt`/`.java` and answered "no UI file changed" to a diff that
+   rewrote the whole website (BookSwap, 2026-11-19).
    **EVERY BUILDABLE UNIT HAS A GATE** (owner directive 2026-11-18). The
    inventory is DERIVED from the tree (`team/platforms.py`), never hand-listed: a
    tracked directory carrying `settings.gradle*`, `package.json`, `Package.swift`,

@@ -209,6 +209,37 @@ class DesignGateTests(unittest.TestCase):
             self.assertFalse(ok)
             self.assertIn("STITCH MANIFEST MISMATCH", msg)
 
+    def test_a_web_component_is_charged_for_a_design(self):
+        """`web/src/**/*.tsx` is UI: no recorded answer, no UI code (2026-11-19).
+
+        The gate used to answer "no UI file changed — no design needed" for a
+        diff that rewrote the whole browser client, so half the product could
+        ship a screen nobody had designed.
+        """
+        with tempfile.TemporaryDirectory() as td:
+            project, wt = _init_project_repo(Path(td))
+            spec = self._spec()
+            page = wt / "web" / "src" / "ui" / "HomePage.tsx"
+            page.parent.mkdir(parents=True, exist_ok=True)
+            page.write_text("export function HomePage() { return <main /> }\n")
+            files = verify.changed_files(wt, "HEAD")
+            ok, msg = verify.design_gate(project, wt, spec, files, base="HEAD")
+            self.assertFalse(ok)
+            self.assertIn("NO DESIGN FOR THIS UI", msg)
+            self.assertIn("HomePage.tsx", msg)
+
+    def test_a_web_logic_change_needs_no_design(self):
+        with tempfile.TemporaryDirectory() as td:
+            project, wt = _init_project_repo(Path(td))
+            spec = self._spec()
+            store = wt / "web" / "src" / "core" / "home.ts"
+            store.parent.mkdir(parents=True, exist_ok=True)
+            store.write_text("export const greeting = () => 'hi'\n")
+            files = verify.changed_files(wt, "HEAD")
+            ok, msg = verify.design_gate(project, wt, spec, files, base="HEAD")
+            self.assertTrue(ok, msg)
+            self.assertIn("no UI file changed", msg)
+
 
 if __name__ == "__main__":
     unittest.main()

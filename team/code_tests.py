@@ -50,6 +50,12 @@ JVM_TEST_DIRS = ("src/test", "src/androidUnitTest", "src/commonTest",
                  "src/jvmTest", "src/desktopTest")
 
 SOURCE_EXTS = (".kt", ".java")
+# A browser client is application source too: BookSwap ships `web/` (its own
+# `package.json`, its own `tsc --noEmit && vite build`). `.tsx`/`.jsx` are UI by
+# convention; a `.ts`/`.js` module is logic, so the design gate asks for a screen
+# for a component but not for a store or an API client.
+WEB_SOURCE_EXTS = (".ts", ".tsx", ".js", ".jsx")
+WEB_UI_EXTS = (".tsx", ".jsx")
 SKIP_DIR_PARTS = {"build", "generated", "__pycache__", ".pipeline", ".gradle",
                   ".git", ".idea", "node_modules"}
 
@@ -131,11 +137,33 @@ def _in_dirs(rel: str, dirs: tuple[str, ...]) -> bool:
     return False
 
 
+def is_web_test_path(rel: str) -> bool:
+    """A browser client's test file — `web/tests/`, `*.test.ts`, `*.spec.tsx`."""
+    p = f"/{rel.replace(chr(92), '/')}"
+    return (".test." in p or ".spec." in p or "/web/tests/" in p
+            or "/web/test/" in p or "__tests__/" in p)
+
+
+def is_web_source(rel: str) -> bool:
+    """A file in a browser client's own source tree (`web/src/...`)."""
+    p = rel.replace("\\", "/")
+    while p.startswith("./"):
+        p = p[2:]
+    if not p.endswith(WEB_SOURCE_EXTS):
+        return False
+    return "/web/src/" in f"/{p}" and not is_web_test_path(p)
+
+
 def is_test_path(rel: str) -> bool:
-    return _in_dirs(rel, TEST_DIRS)
+    return _in_dirs(rel, TEST_DIRS) or is_web_test_path(rel)
 
 
 def is_ui_source(rel: str, text: str) -> bool:
+    if is_web_test_path(rel):
+        return False
+    if is_web_source(rel):
+        # A component file draws a screen; a plain module does not.
+        return rel.endswith(WEB_UI_EXTS)
     if rel.endswith(".xml"):
         return "/res/layout" in rel
     return bool(_UI_CODE_RE.search(text))
@@ -152,6 +180,8 @@ def is_production_source(rel: str) -> bool:
     # are covered by the localization/asset gates, not by a test file.
     if rel.endswith(".xml"):
         return "/res/layout" in rel
+    if is_web_source(rel):
+        return True
     return rel.endswith(SOURCE_EXTS)
 
 
