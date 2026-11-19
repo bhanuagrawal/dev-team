@@ -15,6 +15,7 @@ shape.
 """
 from __future__ import annotations
 
+import json
 import os
 import re
 import time
@@ -957,6 +958,47 @@ BILLING_SIGNS = (
 )
 
 
+def _job_annotations(project: Path, slug: str, rid: str) -> list[str]:
+    """Every annotation message GitHub attached to a run's own jobs.
+
+    `gh run view` prints a run's annotations in some gh versions and silently
+    omits them in others (seen 2026-11-19: `gh run view` showed a red run with a
+    blank job, while the check-run carried "The job was not started because an
+    Actions budget is preventing further use"). A run whose jobs never started
+    has no log at all, so the annotations endpoint is the only place the cause
+    is always stated — but it is the second opinion, never the only one.
+
+    Best-effort by design: an unreadable answer is [], because a dispatch must
+    never fire on a guess.
+    """
+    r = run(["gh", "api", f"repos/{slug}/actions/runs/{rid}/jobs"],
+            project, timeout=90)
+    if r.returncode != 0:
+        return []
+    try:
+        jobs = (json.loads(r.stdout or "{}") or {}).get("jobs") or []
+    except (ValueError, AttributeError):
+        return []
+    messages: list[str] = []
+    for job in jobs:
+        jid = str((job or {}).get("id") or "").strip()
+        if not jid:
+            continue
+        a = run(["gh", "api", f"repos/{slug}/check-runs/{jid}/annotations"],
+                project, timeout=90)
+        if a.returncode != 0:
+            continue
+        try:
+            items = json.loads(a.stdout or "[]")
+        except ValueError:
+            continue
+        for item in items if isinstance(items, list) else []:
+            message = str((item or {}).get("message") or "").strip()
+            if message:
+                messages.append(message)
+    return messages
+
+
 def billing_blocked(project: Path, run_id: str | None,
                     log: RunLog | None = None) -> tuple[bool, str]:
     """Is the CI run red because GitHub refused to bill for the job?
@@ -964,6 +1006,11 @@ def billing_blocked(project: Path, run_id: str | None,
     Reads the run's own annotations — the only place GitHub states the cause —
     and returns (blocked, the line that says so). A missing run id or an
     unreadable run answers False: a dispatch must never fire on a guess.
+
+    Two sources, in order: the run view (one call, which carries the annotation
+    text on most gh versions) and then the jobs' check-run annotations (where it
+    is always present, and the only place it exists for a run whose jobs never
+    started).
     """
     rid = str(run_id or "").strip()
     if not rid:
@@ -979,6 +1026,13 @@ def billing_blocked(project: Path, run_id: str | None,
             if log:
                 log("CI is blocked by GitHub Actions billing — this is not a code failure")
             return (True, sign)
+    if slug:
+        annotations = " \n ".join(_job_annotations(project, slug, rid)).lower()
+        for sign in BILLING_SIGNS:
+            if sign in annotations:
+                if log:
+                    log("CI is blocked by GitHub Actions billing — this is not a code failure")
+                return (True, sign)
     return (False, "")
 
 
