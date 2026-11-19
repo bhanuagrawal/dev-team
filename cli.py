@@ -876,8 +876,8 @@ def cmd_ci(args: argparse.Namespace) -> int:
     # The PRINTED copy is the file `--write` would write, byte for byte. `print`
     # appended a newline of its own, so `ci <project> > release.yml` produced a
     # workflow one byte longer than the renderer's — doctor then blocked the
-    # project as DRIFTED from a template it matched (observed 2026-11-19,
-    # PdfKitKMP: 20376 delivered vs 20375 rendered).
+    # project as DRIFTED from a template it matched (observed 2026-11-19: the
+    # delivered file was one byte longer than the renderer's output).
     text = ci.render(project)
     sys.stdout.write(text if text.endswith("\n") else text + "\n")
     return 0
