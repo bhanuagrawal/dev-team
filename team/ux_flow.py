@@ -31,6 +31,14 @@ A flow is declared in `docs/ux-flows.json` with a `goal` and NO `steps`:
      "goal": "install for the first time, get through whatever the app asks
               for, and reach the neighbourhood feed", "max_steps": 8}
 
+    {"id": "search", "surface": "Discovery", "reader": "aarav",
+     "goal": "describe a book in your own words and get copies in YOUR area"}
+
+`reader` seats a seeded reader on a MOCK run only (the app's own
+`devteam_qa_reader` seam: a release build ignores it, and it refuses the
+production project). A journey that IS about signing in must not declare it —
+`first-run-new-user` walks the sign-up for real.
+
 `ux-video` keeps owning flows that DO declare steps (a recording is evidence of a
 specific journey); this pass owns the ones that only declare what should be true.
 
@@ -407,18 +415,29 @@ def _launcher_component(serial: str, pkg: str) -> str:
     return ""
 
 
-def _launch(serial: str, pkg: str, base_url: str | None = None) -> None:
-    """Open the app; with a mock, say where the API lives.
+def _launch(serial: str, pkg: str, base_url: str | None = None,
+            reader: str | None = None) -> None:
+    """Open the app; with a mock, say where the API lives and who to be.
 
     `monkey` cannot carry extras, and the base-URL handoff has to be an intent
     extra. The DEBUG build honours it (a release build ignores it), so this is the
     one seam that lets an audit reach a local backend without any production code
     path being different.
+
+    [reader] seats a SEEDED reader (`docs/ux-flows.json` -> `"reader": "aarav"`)
+    on a journey that is not about signing in. It is the app's own
+    `devteam_qa_reader` seam: a release build ignores it and it refuses the
+    production project. Without it a walk of `search` spends its one model call
+    trying to type an email into a screen whose fields the accessibility tree
+    does not expose, and reports "needs a credential" instead of walking the
+    search (2026-11-20).
     """
     component = _launcher_component(serial, pkg) if base_url else ""
     if component:
         args = ["shell", "am", "start", "-n", component,
                 "--es", "devteam_mock_base_url", str(base_url)]
+        if reader:
+            args += ["--es", "devteam_qa_reader", str(reader)]
         _adb(serial, args, timeout=45)
         return
     _adb(serial, ["shell", "monkey", "-p", pkg, "-c",
@@ -570,7 +589,8 @@ def audit_flow(project: Path, flow: dict, serial: str, log=None,
     # the app asks for it, or the audit meets a system dialog it cannot tap.
     for permission in ("android.permission.CAMERA",):
         _adb(serial, ["shell", "pm", "grant", pkg, permission], timeout=30)
-    _launch(serial, pkg, base_url=base_url)
+    seated = str(flow.get("reader") or "").strip() or None
+    _launch(serial, pkg, base_url=base_url, reader=seated)
     settled, waited = _settle(serial, pkg)
     if not settled:
         # ONE retry, with room. A cold start right after `pm clear` on a headless
@@ -579,7 +599,7 @@ def audit_flow(project: Path, flow: dict, serial: str, log=None,
         # second attempt is the same launch; only the patience changes.
         if log:
             log(f"~ ux-flow: '{fid}' did not settle in {waited:.1f}s — relaunching once")
-        _launch(serial, pkg, base_url=base_url)
+        _launch(serial, pkg, base_url=base_url, reader=seated)
         settled, waited = _settle(serial, pkg, timeout=30.0)
     if log:
         log(f"~ ux-flow: '{fid}' launch screen settled after {waited:.1f}s"
