@@ -29,7 +29,7 @@ import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import urlparse
+from urllib.parse import parse_qsl, urlparse
 
 DEFAULT_PORT = 54399
 OWNER_ID = "11111111-1111-1111-1111-111111111111"
@@ -95,15 +95,42 @@ for _book in BOOKS:
             f"https://covers.openlibrary.org/b/isbn/{_book['isbn']}-L.jpg")
 
 
+# WHERE THE READER LIVES, in the shape the LIVE row has.
+#
+# This fixture used to carry `SRID=4326;POINT(77.6408 12.9784)` — the WKT spelling
+# the app WRITES. PostGIS returns a geometry as hex EWKB instead, and on
+# 2026-11-20 that difference shipped a release nobody had watched on a device:
+# the parser read only WKT, so every real profile's coordinates were null, the
+# app fell back to a hard-coded Bangalore fix, and a reader whose row says Noida
+# searched a ring 2,000 km away. A mock that answers in a spelling production
+# never sends is a mock that hides the bug. This is the exact string the live
+# `profiles.location` returns for the Noida reader (Sector 137).
+PROFILE_EWKB = "0101000020E61000000AD7A3703D5A5340C3F5285C8F823C40"
+#: The place that string decodes to — the oracle the sentence search checks.
+PROFILE_PLACE = (28.51, 77.41)   # (lat, lng)
+
 PROFILE = {
     "id": READER_ID,
     "username": "audit_reader",
     "full_name": "Audit Reader",
-    "location_name": "Indiranagar",
-    "city": "Bangalore",
+    "location_name": "Sector 137",
+    "city": "Noida",
     "trust_score": 75.0,
-    "location": "SRID=4326;POINT(77.6408 12.9784)",
+    "location": PROFILE_EWKB,
 }
+
+
+def _km(lat1: float, lng1: float, lat2: float, lng2: float) -> float:
+    """Great-circle distance in km; NaN when either point is unreadable."""
+    from math import asin, cos, radians, sin, sqrt
+    try:
+        d_lat = radians(lat2 - lat1)
+        d_lng = radians(lng2 - lng1)
+        a = (sin(d_lat / 2) ** 2
+             + cos(radians(lat1)) * cos(radians(lat2)) * sin(d_lng / 2) ** 2)
+        return 2 * 6371.0 * asin(sqrt(a))
+    except (TypeError, ValueError):
+        return float("nan")
 
 
 def _book_block_items() -> list[dict]:
@@ -224,20 +251,75 @@ class _Handler(BaseHTTPRequestHandler):
             self.wfile.flush()
             time.sleep(0.05)
 
-    def _record(self, method: str, path: str, body: dict):
+    def _record(self, method: str, path: str, body: dict, query: dict | None = None):
         entry = {"method": method, "path": path, "at": round(time.time(), 3)}
         if body:
             entry["keys"] = sorted(body)
             for key in ("p_user_book_id", "p_transaction_id", "p_secret", "email"):
                 if key in body:
                     entry["params"] = {**(entry.get("params") or {}), key: body[key]}
+        if query:
+            # A GET's whole argument is the query string, and a walk's claim about
+            # place ("it searched where its reader lives") is only checkable from
+            # `lat`/`lng`. Keys alone were recorded once and that is why the
+            # 2026-11-20 walk could see a search but not where it was.
+            entry["query"] = {k: v for k, v in query.items() if v != ""}
         self.server.requests.append(entry)
+
+    # -- the sentence door's oracle ------------------------------------------
+    def _sentence_search(self, params: dict):
+        """Answer `GET /api/v1/search`, and answer honestly about WHERE.
+
+        Two things are being judged at once, and the second is the one that
+        shipped broken on 2026-11-20:
+
+        * the app asked a sentence and got rows back, and
+        * the coordinates it asked with are the reader's own place — read from
+          a profile row shaped like production (hex EWKB), which is the only
+          way a device walk can prove the profile was understood.
+        """
+        try:
+            lat = float(params.get("lat") or "")
+            lng = float(params.get("lng") or "")
+        except ValueError:
+            lat = lng = float("nan")
+        away_km = _km(lat, lng, *PROFILE_PLACE)
+        home = PROFILE["location_name"]
+        if away_km <= 2.0:
+            why = (f"Every copy within 25 km of {home} that your search selects "
+                   "— nearest first.")
+            rows = BOOKS
+        else:
+            where = ("no coordinates" if away_km != away_km
+                     else f"{lat:.2f}, {lng:.2f}")
+            why = (f"Every copy within 25 km of {where} that your search "
+                   f"selects — nearest first. This phone is not searching {home}.")
+            rows = []
+        sentence = str(params.get("sentence") or "").strip()
+        self._json({
+            "area": {"city": PROFILE["city"], "radiusMeters": 25000.0, "why": why},
+            "total": len(rows),
+            "items": rows,
+            "facets": {},
+            "nextCursor": None,
+            "tookMs": 3,
+            "reranked": False,
+            "note": why,
+            "understood": ([{"key": "filter:0", "label": sentence}] if sentence else []),
+            "meaning": "",
+            "shelf": "AVAILABLE",
+            "planned": True,
+        })
 
     # -- routes -------------------------------------------------------------
     def do_GET(self):
         parsed = urlparse(self.path)
         path = parsed.path
-        self._record("GET", path, {})
+        # The query string is evidence: "did the app search where its reader
+        # lives" is only answerable from `lat`/`lng`, and a walk that cannot
+        # answer it is a walk that proves nothing about place (2026-11-20).
+        query = dict(parse_qsl(parsed.query, keep_blank_values=True))
+        self._record("GET", path, {}, query=query)
         if path == "/auth/v1/authorize":
             # What a real GoTrue does: bounce the browser back to the app's own
             # scheme with tokens in the FRAGMENT. The Custom Tab hands off to the
@@ -252,8 +334,37 @@ class _Handler(BaseHTTPRequestHandler):
             self.send_header("Content-Length", "0")
             self.end_headers()
             return
-        if path == "/auth/v1/user":
+        # Identity, in the shape the app ASKS for.
+        #
+        # Since 2026-11-19 the app names no provider: signing in goes through
+        # `/api/v1/auth/*` on the backend, not GoTrue's `/auth/v1/*`. This mock
+        # kept answering only the old spelling, so a seeded reader's password
+        # grant 404'd and every walk landed on the sign-in screen — the same
+        # class of lie as the WKT profile: an answer production never gives
+        # (2026-11-20, found while walking search).
+        if path == "/api/v1/auth/providers":
+            self._json({"external": {"google": True}})
+            return
+        if path == "/api/v1/auth/me":
             self._json({"id": READER_ID, "email": "audit@bookswap.test"})
+            return
+        if path == "/api/v1/auth/attest/challenge":
+            # The gate is off on this deployment, so the app collects no proof.
+            self._json({"enabled": False, "mode": "off", "nonce": None,
+                        "expiresIn": 0})
+            return
+        if path == "/api/v1/auth/authorize":
+            # Our backend's door, which redirects to the provider. The mock IS the
+            # provider here: it answers the redirect the app expects, with tokens
+            # in the fragment, so the Custom Tab hands off to the intent filter.
+            provider = dict(parse_qsl(parsed.query)).get("provider") or "google"
+            location = (f"bookswap://auth-callback#access_token={MOCK_TOKEN}"
+                        f"&refresh_token=mock-refresh-token&expires_in=3600"
+                        f"&token_type=bearer&provider={provider}")
+            self.send_response(302)
+            self.send_header("Location", location)
+            self.send_header("Content-Length", "0")
+            self.end_headers()
             return
         if path == "/auth/v1/user":
             # The app asks who the token belongs to; GoTrue answers on GET and POST.
@@ -496,6 +607,20 @@ class _Handler(BaseHTTPRequestHandler):
             })
             return
 
+        # The sentence door: `GET /api/v1/search?sentence=…`. It is a GET, which
+        # is where it belongs — the first draft of this route sat in do_POST and
+        # answered 404 to the only request the app makes.
+        #
+        # It answers as an ORACLE, not a fixture: rows come back only when the
+        # coordinates the app sent are within 2 km of where its profile row says
+        # the reader lives. A client that cannot read its own profile therefore
+        # gets an empty list with an area line naming the place it actually
+        # searched — the bug becomes visible on the screen instead of inside a
+        # log, which is the whole point of walking it.
+        if path == "/api/v1/search":
+            self._sentence_search(query or {})
+            return
+
         if path == "/rest/v1/profiles":
             self._json([PROFILE])
             return
@@ -536,6 +661,20 @@ class _Handler(BaseHTTPRequestHandler):
             except Exception:
                 pass
             self._json(meetup_json(tx, status=status, accepted_at=accepted if status == "ACCEPTED" else None))
+            return
+
+        # The app's own identity contract: one session shape for a password
+        # sign-in, a sign-up and a refresh — the same answer the backend gives.
+        if path in ("/api/v1/auth/login", "/api/v1/auth/signup",
+                    "/api/v1/auth/refresh"):
+            email = str(body.get("email") or "audit@bookswap.test")
+            self._json({
+                "access_token": MOCK_TOKEN,
+                "refresh_token": "mock-refresh-token",
+                "token_type": "bearer",
+                "expires_in": 3600,
+                "user": {"id": READER_ID, "email": email},
+            })
             return
 
         if path in ("/auth/v1/signup", "/auth/v1/token"):

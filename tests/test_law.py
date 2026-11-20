@@ -121,7 +121,11 @@ class LawBindingTest(unittest.TestCase):
         result = law.audit(root, state={})
         self.assertEqual([], result["orphans"])  # cited, so not dead law
         self.assertEqual(
-            [{"clause": "P1", "binding": "web", "reason": "uncited"}],
+            # `glob` names the pattern that was checked and failed: without it
+              # a finding said "web is uncited" and left the reader guessing
+              # which of web's globs was meant (b92faa3).
+            [{"clause": "P1", "binding": "web", "glob": "web/**",
+              "reason": "uncited"}],
             result["unbound"],
         )
 
@@ -143,7 +147,8 @@ class LawBindingTest(unittest.TestCase):
             ".pipeline/profile.json": self._bindings({"app": ["composeApp/**"]}),
         })
         self.assertEqual(
-            [{"clause": "P1", "binding": "backend", "reason": "unmapped"}],
+            [{"clause": "P1", "binding": "backend", "glob": "",
+              "reason": "unmapped"}],
             law.audit(root, state={})["unbound"],
         )
 

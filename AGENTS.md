@@ -22,7 +22,7 @@ the sequence yourself — there is no route table to look for. `devteam admit` i
 the only way a request becomes work; if it flags, the owner (or you, for a
 missing kind/milestone) answers before anything executes.
 
-## The five laws
+## The six laws
 
 1. **Never edit project code on `main`.** Every task runs in
    `.pipeline/worktrees/<task-id>` on branch `dt/<task-id>`, cut from
@@ -43,7 +43,19 @@ missing kind/milestone) answers before anything executes.
    pushed ref before your turn ends. "Clean tree" is not the test — **"does this
    exist anywhere but this disk"** is. Work you did not write (the owner's WIP) is
    reported, never committed on their behalf.
-5. **Commit every artefact, and say which ref holds it.** Code is not the only
+5. **Nothing ships unwalked — walk it on a device, on THIS commit.** Owner rule
+   2026-11-20: *"jo banaya hai usko emulator pe test karo, fir release"*. Every
+   journey declared in `docs/ux-flows.json` — including `search`, so location and
+   query work can never ship unwatched again — must have a device walk whose
+   `result.json` names the tree's `HEAD`; `verify` and `release` refuse a missing
+   walk, a walk that stopped at a wall, or a pass from an older build. The mock
+   that walk runs against must answer in production's shapes (PostGIS geometry as
+   hex EWKB, not the WKT the app writes) and behave as an oracle where it can: a
+   fixture in a spelling production never sends is a fixture that hides the bug.
+   A diff that changes how the app searches, locates a reader, or reads its own
+   profile is a diff that gets opened on a phone before it gets a version code.
+   Full text: `docs/guarantees.md` item 8.
+6. **Commit every artefact, and say which ref holds it.** Code is not the only
    thing a run produces; the rent is paid per artefact, in the same turn:
    - a finished task on a worktree branch → commit **and push** `dt/<task-id>`
      even when it is not released. *Unreleased is not uncommitted.* The report

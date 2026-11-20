@@ -538,7 +538,8 @@ def _sheet(stills: list[Path], out: Path) -> Path | None:
 
 def audit_flow(project: Path, flow: dict, serial: str, log=None,
                max_steps: int | None = None, via: str = "api",
-               base_url: str | None = None, signed_in=None) -> dict:
+               base_url: str | None = None, signed_in=None,
+               commit: str = "") -> dict:
     """Drive one goal-declared journey and judge what a person would hit."""
     from . import ux_video, vision_layout
 
@@ -881,6 +882,11 @@ def audit_flow(project: Path, flow: dict, serial: str, log=None,
 
     result = {
         "flow": fid,
+        # WHAT was walked. Without this a green walk from any earlier release
+        # answered for every later one, which is how a search that never ran on
+        # a device shipped on 2026-11-20 (the gate only re-walked when a diff
+        # touched the flow's own screen files).
+        "commit": commit,
         "surface": str(flow.get("surface") or ""),
         "goal": goal,
         "outcome": outcome,
@@ -1061,6 +1067,9 @@ def run(project: Path, only: str | None = None, log=None, avd: str | None = None
         build = ux_video.build_and_install(project, serial, log,
                                            tree=Path(worktree) if worktree else None)
         build["source"] = ("worktree: " + str(worktree)) if worktree else "delivery (origin/main)"
+        # The commit every walk in this pass is evidence about. A worktree walk
+        # names that tree's HEAD; a delivery walk names origin/main.
+        walked_commit = tree_commit(Path(worktree) if worktree else project)
         if log:
             log(f"~ ux-flow: auditing {build['source']}")
         for flow in todo:
@@ -1080,7 +1089,7 @@ def run(project: Path, only: str | None = None, log=None, avd: str | None = None
             try:
                 res = audit_flow(
                     project, flow, serial, log=log, max_steps=max_steps,
-                    base_url=base_url,
+                    base_url=base_url, commit=walked_commit,
                     signed_in=(lambda: any("/functions/v1/ui-composer" in r["path"]
                                            for r in server.requests)) if server else None)
             except SystemExit as exc:
@@ -1212,6 +1221,22 @@ def status_report(project: Path) -> str:
     if not rows:
         lines.append("  no goal-declared flow — add one with a `goal` and no `steps`")
     return "\n".join(lines)
+
+
+def tree_commit(tree: Path | None) -> str:
+    """The commit a device walk installed, so a pass can be tied to one build."""
+    from .core import git
+
+    root = Path(tree) if tree else None
+    if root is None:
+        return ""
+    try:
+        r = git(["rev-parse", "HEAD"], root, timeout=60)
+    except Exception:
+        return ""
+    if getattr(r, "returncode", 1) != 0:
+        return ""
+    return (r.stdout or "").strip()
 
 
 def walk_problem(project: Path, flow: dict) -> str | None:

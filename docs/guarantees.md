@@ -11,7 +11,19 @@ refuses.
    policy 2026-11-10). `verify` and `release` both run it: every journey declared
    in the project's `docs/ux-flows.json` must have been walked on this diff and
    must have REACHED ITS GOAL (a walk that stopped at a wall is a finding, not a
-   passing audit), with no crash on the walk. There is no excuse field —
+   passing audit), with no crash on the walk. **THE WALK MUST BE OF THIS COMMIT**
+   (owner rule 2026-11-20: "jo banaya hai usko emulator pe test karo, fir
+   release"). Every `result.json` records the tree's `HEAD` it installed, and
+   `verify` refuses a walk whose commit is missing or different — a pass from
+   yesterday is a fact about yesterday, not about the build being released. The
+   rule exists because BookSwap shipped a search that no device had ever run: the
+   gate re-walked a journey only when the diff touched a file its surface
+   declared, `CoarseLocation.kt` belonged to no surface, and search was not a
+   declared journey, so four green walks from older builds vouched for a build
+   none of them had opened. The mock a walk runs against must answer in
+   production's shapes too — it was serving a WKT `location` while Postgres
+   returns hex EWKB, which hid the same bug from every earlier walk. There is no
+   excuse field —
    `"flow_impact": "none"` was the loophole that let a release ship with unwalked
    journeys, and it is gone. `devteam ux-flow` exits non-zero on a journey that
    did not reach its goal, and `doctor` reports the audit as BLOCKED until every
