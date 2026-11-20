@@ -3313,6 +3313,31 @@ def _storefront_scenes_message(project, deliverables, baseline, frames: str) -> 
     return "store: storefront " + (", ".join(labels) or "decision")
 
 
+def _render_tree_is_delivery(tree: Path) -> bool:
+    """Whether a render tree describes the commit CI ships.
+
+    A screenshot is a claim about the installed app, and `--tree` exists so a run
+    can SEE its own pixels — not so those pixels can be published. A run worktree
+    can sit exactly on origin/main and still carry the run's uncommitted app code,
+    so the only test that means anything is "clean, and standing on origin/main".
+    Without it, a `--tree` render published pictures of an unshipped build onto the
+    store listing (seen 2026-11-20: three frames committed to main while the code
+    that drew them was still uncommitted in a worktree).
+    """
+    def git_out(*argv: str) -> str:
+        try:
+            return subprocess.run(["git", "-C", str(tree), *argv],
+                                  capture_output=True, text=True,
+                                  timeout=60).stdout.strip()
+        except Exception:
+            return ""
+
+    head = git_out("rev-parse", "HEAD")
+    remote = git_out("rev-parse", "origin/main")
+    dirty = git_out("status", "--porcelain", "--untracked-files=no")
+    return bool(head) and head == remote and not dirty
+
+
 def cmd_storefront_scenes(args: argparse.Namespace) -> int:
     project = resolve_project(args.project)
     from team import storefront_preview as sp
@@ -3604,6 +3629,15 @@ def cmd_storefront_scenes(args: argparse.Namespace) -> int:
                  getattr(args, "assign", None), getattr(args, "review", False),
                  getattr(args, "vision_frame", None)])
     if wrote:
+        if render_tree is not None and not _render_tree_is_delivery(render_tree):
+            # The render was pointed at a tree that is not the delivery ref: those
+            # pixels are the run's own, not what CI ships. They stay in that tree.
+            print(f"  = NOT committed to origin/main: these frames were drawn from "
+                  f"{render_tree}, which is not the delivery ref (dirty, or not on "
+                  f"origin/main).")
+            print(f"    re-render after the merge from the delivery tree: "
+                  f"devteam storefront-scenes {args.project} --render --frame")
+            return 0
         frames = ", ".join(sorted(sfr.load_registry(project)["assign"].values())) or "builtin"
         # The DECISIONS are deliverables too. They used to be left out of this list, so
         # a review or a direction could be locked, drive a render, and still exist only
