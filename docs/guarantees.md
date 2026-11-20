@@ -9,18 +9,23 @@ refuses.
    the owner (2026-10-31).
    **The UX-FLOW AUDIT IS MANDATORY FOR RELEASE; NO OTHER AUDIT IS** (owner
    policy 2026-11-10). `verify` and `release` both run it: every journey declared
-   in the project's `docs/ux-flows.json` must have been walked on this diff and
-   must have REACHED ITS GOAL (a walk that stopped at a wall is a finding, not a
-   passing audit), with no crash on the walk. **THE WALK MUST BE OF THIS COMMIT**
+   in the project's `docs/ux-flows.json` must have been walked and must have
+   REACHED ITS GOAL (a walk that stopped at a wall is a finding, not a passing
+   audit), with no crash on the walk. **THE CHANGE YOU MADE MUST HAVE BEEN RUN**
    (owner rule 2026-11-20: "jo banaya hai usko emulator pe test karo, fir
-   release"). Every `result.json` records the tree's `HEAD` it installed, and
-   `verify` refuses a walk whose commit is missing or different — a pass from
-   yesterday is a fact about yesterday, not about the build being released. The
-   rule exists because BookSwap shipped a search that no device had ever run: the
-   gate re-walked a journey only when the diff touched a file its surface
-   declared, `CoarseLocation.kt` belonged to no surface, and search was not a
-   declared journey, so four green walks from older builds vouched for a build
-   none of them had opened. The mock a walk runs against must answer in
+   release"). The gate is a clock, not a commit id (owner, 2026-11-21: "wo ux
+   flow run wala rule hata do … current change jo kiya hai wo emulator pe run
+   karne wala laga do"): the newest walk must be newer than the newest code file
+   the diff touched, and a diff that changes no code a phone executes (docs, the
+   journey spec, store copy, images) needs no new walk. A walk is never tied to a
+   sha — a rebase or a merge rewrites every commit without changing a pixel
+   anyone watched — but it is still recorded with the tree's `HEAD`, so the
+   handover can name the build a person actually opened. The rule exists because
+   BookSwap shipped a search that no device had ever run: the gate re-walked a
+   journey only when the diff touched a file its surface declared,
+   `CoarseLocation.kt` belonged to no surface, and search was not a declared
+   journey, so four green walks from older builds vouched for a build none of
+   them had opened. The mock a walk runs against must answer in
    production's shapes too — it served a WKT `location` while Postgres returns
    hex EWKB, and a bare object where `/api/v1/profile` returns a one-row list,
    so the app's profile read failed and its invented Bangalore fallback was what

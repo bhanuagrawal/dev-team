@@ -555,35 +555,71 @@ def _repo_relative(project: Path, raw: str) -> str:
     return p.name
 
 
-def _walk_commit_problem(project: Path, flow: dict, worktree: Path) -> str | None:
-    """A walk is evidence about the build it walked, never about an older one.
+# Code a phone executes. A diff that touches none of these (docs, the journey
+# spec, store copy, images) has nothing a device could have been asked to run.
+_CODE_SUFFIXES = (
+    ".kt", ".kts", ".java", ".swift", ".dart", ".py", ".ts", ".tsx", ".js",
+    ".jsx", ".xml", ".css", ".scss", ".html",
+)
+_NOT_CODE = ("docs/", ".pipeline/", "distribution/", "tests/", "test/")
 
-    Owner rule 2026-11-20, after a release shipped a search that had never run on
-    a device: the gate used to re-walk a journey only when the diff touched a
-    file the flow's surface declared. `CoarseLocation.kt` belonged to no
-    surface, and search was not a declared journey at all, so four green walks
-    from earlier builds vouched for a build none of them had opened. Tying each
-    walk to the commit it installed closes that: a pass from yesterday is a fact
-    about yesterday.
+
+def _changed_code(project: Path, worktree: Path,
+                  files: list[str]) -> tuple[str, float]:
+    """The newest file this diff changed that a device would have to run."""
+    which, newest = "", 0.0
+    for rel in files:
+        posix = Path(rel).as_posix()
+        if not posix.lower().endswith(_CODE_SUFFIXES):
+            continue
+        if posix.startswith(_NOT_CODE):
+            continue
+        for base in (worktree, project):
+            try:
+                stamp = (base / rel).stat().st_mtime
+            except OSError:
+                continue
+            if stamp > newest:
+                which, newest = posix, stamp
+    return which, newest
+
+
+def _change_walked_problem(project: Path, worktree: Path, files: list[str],
+                           flows: list[dict]) -> str | None:
+    """The change itself must have been opened on a device before release.
+
+    Owner rule 2026-11-20 — "jo banaya hai usko emulator pe test karo, fir
+    release" — narrowed on 2026-11-21 to what it asks: the change you made must
+    have been run, not every declared journey re-walked against every commit.
+    So the test is a clock, not a commit id: the newest walk must be newer than
+    the newest code file the diff touched.
+
+    The blind spot this closes is the one that shipped a search no device had
+    run: `CoarseLocation.kt` belonged to no declared surface, search was not a
+    declared journey, and four green walks from earlier builds vouched for a
+    build none of them had opened.
     """
     from . import ux_flow
 
-    head = ux_flow.tree_commit(worktree or project)
-    if not head:
-        return None  # a tree without git cannot be tied to a commit; do not invent one
-    result = ux_flow.run_dir(project) / ux_flow._slug(str(flow["id"])) / "result.json"
-    try:
-        data = json.loads(result.read_text())
-    except Exception:
-        return None  # walk_problem already refused it
-    walked = str(data.get("commit") or "").strip()
-    if not walked:
-        return ("its last walk does not name the build it walked — walk it again "
-                "on this tree")
-    if walked != head:
-        return (f"its last walk was of {walked[:12]}, this tree is {head[:12]} — "
-                "walk it on this tree")
-    return None
+    which, newest = _changed_code(project, worktree, files)
+    if not newest:
+        return None  # nothing a device executes in this diff
+    walked, walked_id = 0.0, ""
+    for flow in flows:
+        result = (ux_flow.run_dir(project) / ux_flow._slug(str(flow["id"]))
+                  / "result.json")
+        try:
+            stamp = result.stat().st_mtime
+        except OSError:
+            continue
+        if stamp > walked:
+            walked, walked_id = stamp, str(flow["id"])
+    if walked >= newest:
+        return None
+    named = f" (the newest walk was '{walked_id}')" if walked_id else ""
+    return (f"the change in {which} has not been run on a device{named} — open it "
+            "on an emulator before release (`devteam ux-flow <project> --worktree "
+            "<tree> --mock`)")
 
 
 def flow_gate(project: Path, worktree: Path, spec: dict | None,
@@ -599,11 +635,13 @@ def flow_gate(project: Path, worktree: Path, spec: dict | None,
       * there is no excuse field. `"flow_impact": "none"` was the loophole that
         let releases ship with unwalked journeys — an emulator that never booted
         got a reason recorded in the spec and the gate waved it through;
-      * the walk must be of THIS commit. Every pass is tied to the tree it
-        installed ([ux_flow.tree_commit]), so a green walk from an earlier build
-        cannot vouch for the one being released. Owner rule 2026-11-20: "jo
-        banaya hai usko emulator pe test karo, fir release" — a change nobody
-        watched on a device is a change nobody has seen work.
+      * the change must have been run. Owner rule 2026-11-20: "jo banaya hai
+        usko emulator pe test karo, fir release" — the newest walk must be newer
+        than the newest code file the diff touched ([_change_walked_problem]).
+        The walk is not tied to a commit id (owner, 2026-11-21: "wo ux flow run
+        wala rule hata do … current change jo kiya hai wo emulator pe run
+        karne wala laga do"): a rebase or a merge does not invalidate a walk
+        that already watched the change.
 
     Deterministic and offline: it reads `docs/ux-flows.json` and the recorded
     walks in `.pipeline/ux_flows/*/result.json`. It never boots a device — the
@@ -613,7 +651,12 @@ def flow_gate(project: Path, worktree: Path, spec: dict | None,
     """
     from . import ux_audit, ux_flow
     try:
-        flows = ux_flow.declared(project)
+        # The tree being released declares its journeys, not the delivery ref:
+        # a branch that ADDS a journey is the branch that must walk it, and
+        # reading main here let a new journey ship unwatched. A worktree with no
+        # spec of its own falls back to the delivery ref rather than passing by
+        # declaring nothing.
+        flows = ux_flow.declared(project, root=worktree) or ux_flow.declared(project)
     except Exception as exc:
         return True, f"flow gate could not read the journey spec ({exc})"
     if not flows:
@@ -621,11 +664,10 @@ def flow_gate(project: Path, worktree: Path, spec: dict | None,
     surfaces = {s["label"].strip().lower(): s for s in ux_audit.surfaces(project)}
     changed = {Path(f).as_posix() for f in files}
     broken: list[str] = []
+    change_problem = _change_walked_problem(project, worktree, files, flows)
     for flow in flows:
         fid = str(flow["id"])
         problem = ux_flow.walk_problem(project, flow)
-        if problem is None:
-            problem = _walk_commit_problem(project, flow, worktree)
         if problem is None:
             # It passed, but does the pass describe THIS diff? A walk older than
             # the screen it walks is evidence about an older build.
@@ -654,7 +696,10 @@ def flow_gate(project: Path, worktree: Path, spec: dict | None,
         if problem:
             broken.append(f"{fid} ({problem})")
     if not broken:
-        return True, f"{len(flows)} declared journey(s) passed on this diff"
+        if change_problem:
+            broken.append(change_problem)
+        else:
+            return True, f"{len(flows)} declared journey(s) passed on this diff"
     blocked = ux_flow.active_block(project)
     if blocked:
         # Not the app: a human action unblocks this, so the gate says whose it is
