@@ -225,5 +225,86 @@ class DebugTaskTest(unittest.TestCase):
         self.assertNotIn(":__MODULE__:assembleDebug", text)
 
 
+class AlreadyRunningRetryTest(unittest.TestCase):
+    """"Already running" is a state, not a delivery verdict.
+
+    2026-11-20: the tag-gated run for v3.13.101 was still in progress — GitHub
+    had queued its jobs and not started them — so `gh run rerun` refused it with
+    "This workflow is already running". The retry treated that refusal as the
+    end of the release: `delivered: false` came back immediately and the
+    billing-blocked fallback below never ran, even though the same workflow
+    delivered the version from the self-hosted machine minutes later. The
+    refusal must fall through to the run that is already there, and then to the
+    fallback — never short-circuit the verdict.
+    """
+
+    SHA = "bcbf141e" + "0" * 32
+    RUN = "44641186319"
+
+    def _deliver(self, conclusions, blocked=False, dispatched_run=""):
+        """Run push_and_deliver with CI conclusions served in order."""
+        queue, dispatched = list(conclusions), []
+
+        def fake_git(args, cwd=None, timeout=300, **kw):
+            out = self.SHA + "\n" if args[:2] == ["rev-parse", "HEAD"] else ""
+            return mock.Mock(returncode=0, stdout=out, stderr="")
+
+        def fake_run(args, cwd=None, timeout=300, **kw):
+            if args[:3] == ["gh", "run", "rerun"]:
+                return mock.Mock(returncode=1, stdout="", stderr=(
+                    f"run {self.RUN} cannot be rerun; This workflow is already running"))
+            return mock.Mock(returncode=0, stdout="", stderr="")
+
+        def fake_await(project, target, log=None, **kw):
+            conclusion = queue.pop(0)
+            return {"conclusion": conclusion,
+                    "run_id": str(target.get("run_id") or self.RUN),
+                    "commit": self.SHA}
+
+        def fake_billing(project, run_id, log=None):
+            return (blocked, "Actions budget is preventing further use" if blocked else "")
+
+        def fake_dispatch(project, ref, log=None):
+            dispatched.append(ref)
+            return dispatched_run
+
+        profile = {"main_branch": "main", "repo_slug": "o/r", "ci_trigger": "tag",
+                   "tag_prefix": "v", "ci": {"self_hosted": ["self-hosted"]}}
+        with mock.patch.object(shipper, "profile_of", return_value=profile), \
+             mock.patch.object(shipper, "git", side_effect=fake_git), \
+             mock.patch.object(shipper, "run", side_effect=fake_run), \
+             mock.patch.object(shipper, "await_ci", side_effect=fake_await), \
+             mock.patch.object(shipper, "billing_blocked", side_effect=fake_billing), \
+             mock.patch.object(shipper, "dispatch_local_run", side_effect=fake_dispatch):
+            res = shipper.push_and_deliver(
+                Path("/wt"), Path("/wt"),
+                {"type": "fix", "surface": {"label": "onboarding"}},
+                "3.13.101", lambda *_: None, max_retries=2)
+        return res, dispatched, queue
+
+    def test_the_refused_run_is_awaited_and_a_success_delivers(self):
+        res, dispatched, queue = self._deliver(["failure", "success"])
+        self.assertTrue(res["delivered"], res.get("error"))
+        self.assertEqual(res["version"], "3.13.101")
+        self.assertEqual(queue, [], "the run already in flight must be awaited")
+        self.assertEqual(dispatched, [])
+
+    def test_a_refusal_does_not_hide_the_self_hosted_fallback(self):
+        """The regression: `delivered: false` used to return before the fallback."""
+        res, dispatched, queue = self._deliver(["failure", "failure", "success"],
+                                               blocked=True, dispatched_run="44641474783")
+        self.assertTrue(res["delivered"], res.get("error"))
+        self.assertEqual(queue, [])
+        self.assertEqual(res["rail"], "self-hosted")
+        self.assertEqual(dispatched, ["v3.13.101"],
+                         "the tag is what a self-hosted dispatch must build")
+
+    def test_the_reason_survives_without_a_fallback(self):
+        res, _, _ = self._deliver(["failure", "failure"], blocked=False)
+        self.assertFalse(res["delivered"])
+        self.assertIn("already running", res["error"])
+        self.assertIn(self.RUN, res["error"])
+
+
 if __name__ == "__main__":
     unittest.main()

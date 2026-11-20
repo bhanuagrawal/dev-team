@@ -800,6 +800,8 @@ def push_and_deliver(project: Path, worktree: Path, task: dict, new_version: str
     # is tag-gated (the tag carries the release), otherwise the main branch.
     dispatch_ref = str(profile.get("main_branch") or "main")
     run_id: str | None = None
+    last_error = ""
+    ci: dict = {}
 
     for attempt in range(1, max_retries + 1):
         if attempt > 1:
@@ -813,9 +815,24 @@ def push_and_deliver(project: Path, worktree: Path, task: dict, new_version: str
             rr = run(["gh", "run", "rerun", str(run_id), "-R", profile["repo_slug"]],
                      project, timeout=120)
             if rr.returncode != 0:
-                return {"delivered": False, "version": new_version,
-                        "error": f"could not re-run CI run {run_id}: {(rr.stdout + rr.stderr)[-160:]}",
-                        "ci": {}}
+                detail = (rr.stdout + rr.stderr)[-160:]
+                # A RUN THAT IS STILL IN PROGRESS CANNOT BE RE-RUN, and that refusal is
+                # not a delivery verdict. On 2026-11-20 a tag-gated run was still
+                # "running" when the retry fired (its jobs had not even started), so
+                # the release returned `undelivered` on the spot — and the
+                # billing-blocked fallback below never ran, while the same workflow
+                # then delivered from the self-hosted machine when dispatched by hand.
+                # Wait for the run that is already there; only a finished, failed run
+                # is a reason to give up on this version.
+                if "already running" in detail.lower():
+                    log(f"CI run {run_id} is still running — waiting for it instead of re-running it")
+                    ci = await_ci(project, {"commit": _pushed_sha(worktree), "run_id": str(run_id)})
+                    if ci.get("conclusion") == "success":
+                        return {"delivered": True, "commit": _pushed_sha(worktree),
+                                "version": new_version, "ci": ci}
+                last_error = f"could not re-run CI run {run_id}: {detail}"
+                log(last_error)
+                break
             ci = await_ci(project, {"commit": _pushed_sha(worktree), "run_id": str(run_id)})
             if ci.get("conclusion") == "success":
                 return {"delivered": True, "commit": _pushed_sha(worktree),
@@ -906,7 +923,7 @@ def push_and_deliver(project: Path, worktree: Path, task: dict, new_version: str
         else:
             log(f"CI failed after {max_retries} attempts — giving up")
 
-    result = {"delivered": False, "error": f"CI failed after {max_retries} attempts",
+    result = {"delivered": False, "error": last_error or f"CI failed after {max_retries} attempts",
               "ci": ci, "commit": sha, "version": new_version}
     # A RED RUN IS NOT ALWAYS A CODE FAILURE (owner directive 2026-11-16). When
     # GitHub refuses to start the jobs because the account cannot pay for
