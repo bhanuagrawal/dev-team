@@ -101,6 +101,8 @@ Choose the SINGLE next action that moves a real user closest to the goal:
             index + text ("added this week"): put those exact WORDS in that field.
             Use this for a search box or any field that is not asking for your
             credentials — the words a person would type, taken from the goal.
+  submit  — press the keyboard's search/enter key after typing, when the field
+            sends nothing by itself (a search box usually needs this)
   tap     — an index from the list above
   scroll  — "down" or "up": reach content below or above the fold. The screenshot
             shows only the visible part of a screen; a request or continue control
@@ -127,6 +129,7 @@ Reply with JSON only, no prose, no code fences:
   {{"action": "type", "index": 4, "field": "email", "why": "one short line"}}
   {{"action": "type", "index": 7, "text": "added this week",
     "why": "the sentence the journey is about"}}
+  {{"action": "submit", "why": "run the search"}}
   {{"action": "type", "index": 6, "field": "name", "why": "one short line"}}
   {{"action": "scroll", "direction": "down", "why": "one short line"}}
   {{"action": "back", "why": "one short line"}}
@@ -769,6 +772,18 @@ def audit_flow(project: Path, flow: dict, serial: str, log=None,
             steps.append({"n": step, "did": f"scrolled {direction}",
                           "then": "the screen moved", "screen": screen,
                           "action": "scroll"})
+            continue
+
+        if action == "submit":
+            # The keyboard's own "go/search" key. A search box that has text but
+            # nothing pressed shows no results, and the walker had no way to press
+            # it — the `search` walk typed its sentence and then judged a blank
+            # screen as the app refusing to search (2026-11-20).
+            _adb(serial, ["shell", "input", "keyevent", "66"], timeout=30)
+            time.sleep(1.6)
+            steps.append({"n": step, "did": "pressed the keyboard's search key",
+                          "then": "the field submitted", "screen": screen,
+                          "action": "submit"})
             continue
 
         if action == "back":
