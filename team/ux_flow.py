@@ -98,6 +98,9 @@ Choose the SINGLE next action that moves a real user closest to the goal:
             "name", "handle" or "phone" for a shelf-onboarding or swap form. ONLY
             when those values are listed below; if they are not, a text field is a
             wall for you, not a dead control — choose stuck.
+            index + text ("added this week"): put those exact WORDS in that field.
+            Use this for a search box or any field that is not asking for your
+            credentials — the words a person would type, taken from the goal.
   tap     — an index from the list above
   scroll  — "down" or "up": reach content below or above the fold. The screenshot
             shows only the visible part of a screen; a request or continue control
@@ -122,6 +125,8 @@ Reply with JSON only, no prose, no code fences:
   {{"action": "tap", "index": 2, "why": "one short line",
     "reaction": {{"line": "one short line, first person", "kind": "confusing|broken|slow|good"}}}}
   {{"action": "type", "index": 4, "field": "email", "why": "one short line"}}
+  {{"action": "type", "index": 7, "text": "added this week",
+    "why": "the sentence the journey is about"}}
   {{"action": "type", "index": 6, "field": "name", "why": "one short line"}}
   {{"action": "scroll", "direction": "down", "why": "one short line"}}
   {{"action": "back", "why": "one short line"}}
@@ -775,9 +780,10 @@ def audit_flow(project: Path, flow: dict, serial: str, log=None,
         if action == "type":
             typed += 1
             field = str(decision.get("field") or "").strip().lower()
+            literal = str(decision.get("text") or "").strip()
             creds = flow.get("credentials") or {}
             profile = flow.get("profile") or {}
-            value = creds.get(field) or profile.get(field) or ""
+            value = literal or creds.get(field) or profile.get(field) or ""
             idx = _pick_field(targets, field)
             if not isinstance(idx, int) or not (0 <= idx < len(targets)) or not value:
                 # An action the DEVICE cannot perform is not the app failing: there
@@ -798,11 +804,16 @@ def audit_flow(project: Path, flow: dict, serial: str, log=None,
             label = (target["label"] or "").strip()
             # The field's own label can be empty in a Compose dump, so trust the
             # model's declared field when it names a credential we actually hold.
-            role = (field if field in creds or field in profile else
+            # A LITERAL has its own name, keyed by the field, so "type the sentence
+            # in the search box" cannot be mistaken for a credential and cannot
+            # collide with one (2026-11-20: the search walk typed the audit's
+            # email into the search field because that was all it could type).
+            role = (f"text@{idx}" if literal else
+                    field if field in creds or field in profile else
                     "email" if any(k in label.lower() for k in ("email", "mail"))
                     else "password" if any(k in label.lower() for k in ("pass", "secret"))
                     else "field")
-            if role in filled or typed > len(creds) + len(profile):
+            if role in filled or typed > len(creds) + len(profile) + 3:
                 # Typing again APPENDS: the field read "…testaudit-pass-123" and the
                 # sign-in then failed for a reason the app never caused.
                 outcome, reason = "error", (
@@ -817,7 +828,8 @@ def audit_flow(project: Path, flow: dict, serial: str, log=None,
             _adb(serial, ["shell", "input", "text", value.replace(" ", "%s")], timeout=30)
             time.sleep(0.6)
             typed = value[:4].lower() in (ux_video._ui_xml(serial) or "").lower()
-            steps.append({"n": step, "did": f"typed the {field} into "
+            what = f"{value[:24]!r}" if literal else f"the {field}"
+            steps.append({"n": step, "did": f"typed {what} into "
                                             f"{target['label'] or 'the field'}",
                           "then": ("the field accepted it" if typed else
                                    "the field did not show the text"),
