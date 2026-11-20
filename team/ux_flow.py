@@ -785,6 +785,44 @@ def audit_flow(project: Path, flow: dict, serial: str, log=None,
             profile = flow.get("profile") or {}
             value = literal or creds.get(field) or profile.get(field) or ""
             idx = _pick_field(targets, field)
+            if idx is None and value:
+                # A search bar on a Compose feed is one control that OPENS a field:
+                # it is not editable until it is tapped, so no field is listed on
+                # this screen. A person taps it and then types; the model named the
+                # control's index in the same action, so do exactly that and look
+                # again. (Without this the walker could not search at all and
+                # called the app's search bar broken — 2026-11-20.)
+                maybe = decision.get("index")
+                if isinstance(maybe, int) and 0 <= maybe < len(targets):
+                    opener = targets[maybe]
+                    _adb(serial, ["shell", "input", "tap",
+                                  str(opener["x"]), str(opener["y"])], timeout=30)
+                    time.sleep(1.4)
+                    opened = tappables(ux_video._ui_xml(serial), pkg)
+                    idx = _pick_field(opened, field)
+                    if idx is None:
+                        # Nothing appears as a field: type into whatever has focus.
+                        # The screen is checked afterwards — text that never showed
+                        # is a dead control, not a success.
+                        _adb(serial, ["shell", "input", "text",
+                                      value.replace(" ", "%s")], timeout=30)
+                        time.sleep(0.6)
+                        shown = value[:4].lower() in (ux_video._ui_xml(serial) or "").lower()
+                        steps.append({"n": step, "did": f"tapped {opener['label']!r} and "
+                                                        f"typed {value[:24]!r}",
+                                      "then": ("the text appeared" if shown else
+                                               "nothing appeared — the control does not "
+                                               "take text"),
+                                      "screen": screen, "action": "type"})
+                        if not shown:
+                            dead.append({"step": step, "label": opener["label"],
+                                         "screen": screen})
+                            _adb(serial, ["shell", "input", "keyevent", "4"], timeout=30)
+                        else:
+                            filled.add(f"text@{maybe}")
+                            _adb(serial, ["shell", "input", "keyevent", "4"], timeout=30)
+                        continue
+                    targets = opened
             if not isinstance(idx, int) or not (0 <= idx < len(targets)) or not value:
                 # An action the DEVICE cannot perform is not the app failing: there
                 # is no editable field on this screen (or no such credential), so
