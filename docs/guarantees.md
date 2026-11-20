@@ -21,9 +21,12 @@ refuses.
    declared, `CoarseLocation.kt` belonged to no surface, and search was not a
    declared journey, so four green walks from older builds vouched for a build
    none of them had opened. The mock a walk runs against must answer in
-   production's shapes too — it was serving a WKT `location` while Postgres
-   returns hex EWKB, which hid the same bug from every earlier walk. There is no
-   excuse field —
+   production's shapes too — it served a WKT `location` while Postgres returns
+   hex EWKB, and a bare object where `/api/v1/profile` returns a one-row list,
+   so the app's profile read failed and its invented Bangalore fallback was what
+   every earlier walk actually searched with (both found on 2026-11-20). A mock
+   that answers in a spelling or a shape production never sends is a mock that
+   hides the bug. There is no excuse field —
    `"flow_impact": "none"` was the loophole that let a release ship with unwalked
    journeys, and it is gone. `devteam ux-flow` exits non-zero on a journey that
    did not reach its goal, and `doctor` reports the audit as BLOCKED until every

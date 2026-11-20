@@ -463,7 +463,13 @@ class _Handler(BaseHTTPRequestHandler):
             return
 
         if path in ("/api/v1/profile", "/api/v1/users/me"):
-            self._json(PROFILE)
+            # A LIST of one row: the app decodes `List<UserProfile>` here
+            # (`AuthRepositoryImpl.getProfile`). Answering the bare object made
+            # every profile read fail to decode, so the app fell back to its
+            # hard-coded Bangalore fix and a second walk "proved" nothing about
+            # place — the mock lying about a shape production really sends, for
+            # the second time in one day (2026-11-20).
+            self._json([PROFILE])
             return
 
         if path == "/api/v1/offers":
