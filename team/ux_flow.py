@@ -591,6 +591,16 @@ def audit_flow(project: Path, flow: dict, serial: str, log=None,
         _adb(serial, ["shell", "pm", "grant", pkg, permission], timeout=30)
     seated = str(flow.get("reader") or "").strip() or None
     _launch(serial, pkg, base_url=base_url, reader=seated)
+    if seated and signed_in is not None:
+        # A seated reader signs in DURING the cold start, so the first screen a
+        # walk sees is the auth screen on its way out. Judging that screen is how
+        # `search` spent its one model call typing an email (2026-11-20). Wait for
+        # the session the app itself asked for, then settle on what follows.
+        for _ in range(40):
+            if signed_in():
+                break
+            time.sleep(0.4)
+        time.sleep(1.2)
     settled, waited = _settle(serial, pkg)
     if not settled:
         # ONE retry, with room. A cold start right after `pm clear` on a headless
@@ -770,10 +780,20 @@ def audit_flow(project: Path, flow: dict, serial: str, log=None,
             value = creds.get(field) or profile.get(field) or ""
             idx = _pick_field(targets, field)
             if not isinstance(idx, int) or not (0 <= idx < len(targets)) or not value:
-                outcome, reason = "error", (
-                    f"type needs a listed index and an available credential "
-                    f"(got index {idx!r}, field {field!r})")
-                break
+                # An action the DEVICE cannot perform is not the app failing: there
+                # is no editable field on this screen (or no such credential), so
+                # nothing was typed. Say so and let the model look again — it used
+                # to end the whole walk on the first such choice.
+                attempts = tried.setdefault("__type__", set())
+                attempts.add(f"{field}:{len(attempts)}")
+                if len(attempts) >= 3:
+                    outcome, reason = "stuck", (
+                        "three attempts to type found no editable field")
+                    break
+                steps.append({"n": step, "did": f"could not type {field!r}",
+                              "then": "this screen exposes no editable field — nothing "
+                                      "happened", "screen": screen, "action": "type"})
+                continue
             target = targets[idx]
             label = (target["label"] or "").strip()
             # The field's own label can be empty in a Compose dump, so trust the
@@ -1110,8 +1130,10 @@ def run(project: Path, only: str | None = None, log=None, avd: str | None = None
                 res = audit_flow(
                     project, flow, serial, log=log, max_steps=max_steps,
                     base_url=base_url, commit=walked_commit,
-                    signed_in=(lambda: any("/functions/v1/ui-composer" in r["path"]
-                                           for r in server.requests)) if server else None)
+                    signed_in=(lambda: any(
+                        "/functions/v1/ui-composer" in r["path"]
+                        or r["path"] == "/api/v1/auth/login"
+                        for r in server.requests)) if server else None)
             except SystemExit as exc:
                 failed.append({"id": fid, "reason": str(exc)[:300]})
                 continue
