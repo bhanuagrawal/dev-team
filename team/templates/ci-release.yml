@@ -5,6 +5,16 @@
 # Do not hand-edit a project's copy — change this template, then re-render all
 # projects.
 #
+# TEMPLATE_VERSION 8 — a transient Play refusal is retried plainly THREE times, and
+# the `changesNotSentForReview` rung is gone. On 2026-11-20 (v1.5.38) Play answered
+# "The service is currently unavailable." on both plain attempts; the old ladder then
+# re-uploaded with `changesNotSentForReview: true` and Play refused THAT flag outright
+# ("Changes are sent for review automatically. The query parameter
+# changesNotSentForReview must not be set."), so a 503 became a red release whose
+# artifacts WERE uploaded but whose commit step was the thing that failed. Play no
+# longer offers a hold, so the workflow stops claiming one: three plain attempts, then
+# an explicit red run that says delivery did not happen and how to re-dispatch.
+#
 # TEMPLATE_VERSION 7 — a transient transport failure gets a plain retry before
 # the policy flag. On v1.0.82 (2026-11-18) the bundle upload died on
 # `read ECONNRESET`; the only fallback was `changesNotSentForReview: true`, and
@@ -234,15 +244,13 @@ jobs:
           status: completed
           whatsNewDirectory: __WHATSNEW_DIR__
 
-      # Play refuses to let an edit be "sent for review automatically" while the app
-      # has an open policy issue ("Changes cannot be sent for review automatically.
-      # Please set the query parameter changesNotSentForReview to true"). The build and
-      # the upload were fine — the previous run died here, after the AAB was already
-      # uploaded, so the operator saw a red release with nothing to fix in the code.
-      # A TRANSPORT FAILURE IS NOT THAT CASE (2026-11-18): `read ECONNRESET` in the
-      # bundle upload reached this step, Play rejected the flag this project does not
-      # need, and the release stayed red over a network blip. So retry the SAME upload
-      # plainly once first; only a second refusal is allowed to mean "policy hold".
+      # A TRANSIENT FAILURE IS NOT A POLICY HOLD. On 2026-11-18 `read ECONNRESET`
+      # reached the upload; on 2026-11-20 Play answered v1.5.38 with "The service is
+      # currently unavailable." on both plain attempts, and the old ladder's last rung
+      # — re-uploading with `changesNotSentForReview: true` — died on "Changes are sent
+      # for review automatically. The query parameter changesNotSentForReview must not
+      # be set." Play no longer offers a hold at all, so that rung is gone: three plain
+      # attempts, then a red run that says delivery did not happen.
       - name: Retry the upload once (transient transport failure)
         id: play-upload-retry
         if: env.PLAY_JSON != '' && steps.play-upload.outcome == 'failure'
@@ -256,9 +264,10 @@ jobs:
           status: completed
           whatsNewDirectory: __WHATSNEW_DIR__
 
-      - name: Commit the edit without sending it for review (policy hold)
-        id: play-upload-hold
-        if: env.PLAY_JSON != '' && steps.play-upload-retry.outcome == 'failure'
+      - name: Retry the upload a third time after Play's 503 (transient transport failure)
+        id: play-upload-retry-2
+        if: env.PLAY_JSON != '' && steps.play-upload.outcome == 'failure' && steps.play-upload-retry.outcome == 'failure'
+        continue-on-error: true
         uses: r0adkll/upload-google-play@v1
         with:
           serviceAccountJsonPlainText: ${{ env.PLAY_JSON }}
@@ -267,25 +276,22 @@ jobs:
           tracks: internal
           status: completed
           whatsNewDirectory: __WHATSNEW_DIR__
-          changesNotSentForReview: true
 
-      - name: Say what the policy hold means
-        if: env.PLAY_JSON != '' && steps.play-upload-hold.outcome == 'success'
+      - name: Say that Play did not take the build
+        if: env.PLAY_JSON != '' && steps.play-upload.outcome == 'failure' && steps.play-upload-retry.outcome == 'failure' && steps.play-upload-retry-2.outcome == 'failure'
         run: |
           cat >> "$GITHUB_STEP_SUMMARY" <<'EOF'
-          ### Delivery: committed to `internal`, NOT sent for review
-          Play refused the automatic review submission (an app policy issue is open),
-          so the edit was committed with `changesNotSentForReview: true`.
+          ### Delivery: NOT made — Play refused the upload three times
+          The AAB is built and attached to this run as an artifact, but the internal
+          track was NOT updated. Read the three upload steps above for Play's own
+          words: a 503 ("The service is currently unavailable.") is worth one more
+          run later, a 403/permission error is a credential fix, and a policy issue
+          has to be answered in Play Console.
 
-          * Testers on the internal track can install this build.
-          * The update will not reach any other track until it is sent for review:
-            Play Console → Publishing overview → **Send for review**.
-          * Record it: `devteam store-status <project> --state review-pending --note "..."`.
-
-          The pipeline reads this from the console, not from this log — a green run
-          here is not proof the store has the change.
+          Re-dispatch this same version once the cause is addressed:
+          `gh workflow run release.yml --ref main -f version_name=<version> -f runner=local`
           EOF
-          echo "::warning::The edit was committed WITHOUT an automatic review submission — send it from Play Console → Publishing overview, then record it with devteam store-status."
+          echo "::error::Play did not accept the build after three attempts — internal testing was NOT updated. The AAB is in this run's artifacts."
 
 #@@FIREBASE_JOB@@
   # THE QA CHANNEL (optional, per project).
