@@ -1140,6 +1140,20 @@ def verify_all(project: Path, worktree: Path, base: str, log, gradle: bool = Tru
         failures.append(msg)
         return False, failures
 
+    # THE LAW AND THE SURFACE THAT PUBLISHES IT (2026-11-20). `platforms` above
+    # asks whether a unit is BUILT. This asks whether the surface a reader opens
+    # still OBEYS the product's own clauses — the gap that let a generated site
+    # ship copy contradicting P3 and P13 for two days while every gate was green,
+    # because the only citations were in the app, the browser client, and a .md.
+    # Diff-scoped: a surface this change never opened is doctor's warning.
+    from . import law as law_mod
+    ok, msg = law_mod.diff_gate(project, worktree, files)
+    log("law: ok — a surface this diff opens still cites the clauses it binds" if ok
+        else "law: FAIL — " + msg.splitlines()[0])
+    if not ok:
+        failures.append(msg)
+        return False, failures
+
     # TEAM GENERIC: the team repo must contain zero project references, whichever
     # agent is driving the run. A project-keyed branch sat in team code for a day
     # because doctor was the only check and nobody ran it (2026-10-30).

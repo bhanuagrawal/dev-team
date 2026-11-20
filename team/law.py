@@ -20,6 +20,18 @@ clause an owner request serves.
   * a citation of a missing id    — fiction, the classic stale-doc drift;
   * a queued task with no clause  — work with no reason in the product.
 
+And `devteam verify` refuses a fourth, which is the one a review cannot see
+(2026-11-20): a diff that prints a clause's law on a surface which does not
+cite it. The project's public site had been generated from a table the law had
+retired two days earlier — `P13` says a place is never named by a list of cities
+— and every gate stayed green: `docs/*.md` cited the clause (prose DESCRIBES the
+law, it does not OBEY it), the browser client cited it, and the marketing pages
+that contradicted it were generated output no gate ever opened. So:
+
+  * a citation in prose covers nothing but prose;
+  * a `binds:` surface is the files that RENDER the law, and a diff that opens
+    one must leave it citing the clauses it binds (`diff_gate`).
+
 The file is optional. A project with no `PRODUCT.md` is not blocked; declaring
 the law is a choice, and once declared the team holds you to it.
 """
@@ -40,7 +52,15 @@ SKIP_DIRS = {
 }
 
 #: Extensions worth reading. A citation in a PNG is not a citation.
-TEXT_EXT = {".py", ".kt", ".kts", ".sql", ".md", ".ts", ".tsx", ".js", ".swift"}
+TEXT_EXT = {".py", ".kt", ".kts", ".sql", ".md", ".ts", ".tsx", ".js", ".swift",
+            ".html"}
+
+#: PROSE DESCRIBES THE LAW; IT DOES NOT OBEY IT. A page of documentation citing
+#: `P13` is evidence that somebody once understood the clause, and for two days
+#: it was the only thing standing behind BookSwap's public site while the site
+#: shipped the opposite. So prose counts for a binding only when the binding IS
+#: prose — never as coverage for the code or the pages that render it.
+PROSE_EXT = {".md"}
 
 _CLAUSE_BULLET = re.compile(
     r"^\s*(?:[-*+]\s+)?\*{0,2}(P[1-9]\d{0,2})\*{0,2}\s*[.)—:–-]?\s+(.+?)\s*$"
@@ -129,6 +149,67 @@ def citations(project: Path) -> dict[str, list[str]]:
     return found
 
 
+def _coverage(where: str, globs: list[str]) -> str:
+    """Why a citation does NOT cover a binding — `""` when it does.
+
+    Three reasons, and they are not the same failure: `outside` means the citing
+    file is not on the surface the clause binds; `prose` means it is, but it is a
+    document talking about the law rather than the thing that renders it.
+    """
+    place = where.rsplit(":", 1)[0]
+    if not any(fnmatch.fnmatch(place, pattern) for pattern in globs):
+        return "outside"
+    if Path(place).suffix.lower() in PROSE_EXT:
+        return "prose"
+    return ""
+
+
+def _tracked(project: Path) -> list[str]:
+    """Every tracked path — a page tree is what git carries, not what is on disk."""
+    from .core import git
+
+    res = git(["ls-files"], Path(project), timeout=120)
+    if res.returncode == 0:
+        return [line.strip() for line in res.stdout.splitlines() if line.strip()]
+    return [str(p.relative_to(project)) for p in Path(project).rglob("*")
+            if p.is_file() and not (SKIP_DIRS & set(p.relative_to(project).parts))]
+
+
+#: A published page tree starts at an `index.html`.
+SITE_SEEDS = {"index.html", "index.htm"}
+
+
+def page_trees(project: Path, extra: list[str] | None = None) -> list[tuple[str, list[str]]]:
+    """Published page trees: `[(root, files under it)]`.
+
+    WHY THIS IS LAW AND NOT PLATFORM BOOKKEEPING (2026-11-20): the project's
+    public site was a page tree generated from a table the law had retired, and
+    nothing in the team could see it — `verify` built the app and the browser
+    client, `doctor` counted the clauses those two cited, and the pages a reader
+    actually opens were generated output outside every check. A page tree is a
+    SURFACE: it prints the law to people who never open the app, so a project that
+    declares clauses must name the tree in `law_bindings`. An unnamed tree is a
+    finding here rather than a warning nobody reads, because the copy it prints is
+    the product's most public claim.
+    """
+    paths = _tracked(project)
+    for path in (extra or []):
+        if path not in paths:
+            paths.append(path)
+    seeds: list[str] = []
+    for rel in paths:
+        parts = rel.split("/")
+        if parts[-1].lower() not in SITE_SEEDS or not 2 <= len(parts) <= 3:
+            continue
+        seeds.append("/".join(parts[:-1]))
+    roots: list[str] = []
+    for root in sorted(set(seeds), key=lambda r: (r.count("/"), r)):
+        if any(root == seen or root.startswith(seen + "/") for seen in roots):
+            continue
+        roots.append(root)
+    return [(root, [p for p in paths if p.startswith(root + "/")]) for root in roots]
+
+
 def audit(project: Path, state: dict | None = None) -> dict[str, Any]:
     """One checkable answer: is the declared law alive, cited, and obeyed?
 
@@ -150,6 +231,15 @@ def audit(project: Path, state: dict | None = None) -> dict[str, Any]:
     # "remember every platform" into a file count — the project declares which
     # globs belong to which name (`profile.law_bindings`), and a binding with no
     # citation under its own globs is a finding, not a footnote.
+    #
+    # And the citation has to be an OBEDIENT one: a `.md` page saying "P13 says a
+    # place is never named by a list of cities" was counted as `web` coverage for
+    # two days while the published pages it describes did the opposite, so prose
+    # no longer covers a binding that renders anything (`_coverage`).
+    #
+    # ONE SURFACE PER GLOB. A name may map to several globs, and coverage is
+    # checked per glob: a citation in the browser client cannot vouch for the
+    # pages served from `docs/`, because those are different things readers open.
     try:
         profile = profile_of(Path(project)) or {}
     except (Exception, SystemExit):
@@ -164,13 +254,27 @@ def audit(project: Path, state: dict | None = None) -> dict[str, Any]:
             globs = mapping.get(binding) or []
             if not globs:
                 unbound.append({"clause": clause["id"], "binding": binding,
-                                "reason": "unmapped"})
+                                "reason": "unmapped", "glob": ""})
                 continue
-            places = [where.rsplit(":", 1)[0] for where in (cited.get(clause["id"]) or [])]
-            if not any(fnmatch.fnmatch(place, pattern)
-                       for place in places for pattern in globs):
+            for glob in globs:
+                reasons = [_coverage(where, [glob])
+                           for where in (cited.get(clause["id"]) or [])]
+                if any(reason == "" for reason in reasons):
+                    continue
                 unbound.append({"clause": clause["id"], "binding": binding,
-                                "reason": "uncited"})
+                                "glob": glob,
+                                "reason": "prose" if "prose" in reasons else "uncited"})
+
+    # A SURFACE NO CLAUSE KNOWS (2026-11-20): the page trees this project
+    # publishes, and which of them no `law_bindings` glob names. Declaring the law
+    # without naming the tree is how the site shipped copy the law forbids while
+    # every binding still read "ok".
+    every_glob = [glob for globs in mapping.values() for glob in globs]
+    uncovered = [
+        {"root": root, "pages": len(files)}
+        for root, files in page_trees(project)
+        if not any(fnmatch.fnmatch(path, glob) for path in files for glob in every_glob)
+    ] if present else []
 
     tasks_without_law: list[str] = []
     if present:
@@ -193,8 +297,100 @@ def audit(project: Path, state: dict | None = None) -> dict[str, Any]:
         "orphans": orphans,
         "unknown": unknown,
         "unbound": unbound,
+        "uncovered": uncovered,
         "tasks_without_law": tasks_without_law,
     }
+
+
+def diff_gate(project: Path, worktree: Path, files: list[str]) -> tuple[bool, str]:
+    """A diff that opens a bound surface leaves that surface citing its clauses.
+
+    THE GAP THIS CLOSES (2026-11-20). `audit` asks "is each clause cited
+    somewhere?" — a question no reviewer and no gate could answer wrongly about a
+    surface that had quietly stopped obeying it. The published site was rebuilt
+    from a table the law had retired, page copy said a city decides which books
+    are near, and every check was green: the app cited `P13`, the browser client
+    cited `P13`, and a `.md` in `docs/` cited `P13`, while the pages in `docs/`
+    that a reader actually opens contradicted it.
+
+    So the check is scoped to the DIFF: if a changed file lands under a
+    `law_bindings` glob whose name some clause binds, then that clause must be
+    cited by a non-prose file under those same globs in this worktree. Diff-scoped
+    on purpose — a surface this change never opened is `doctor`'s warning, not a
+    refusal of unrelated work (the same split `platforms.diff_gate` uses).
+    """
+    from .core import profile_of
+
+    try:
+        profile = profile_of(Path(project)) or {}
+    except (Exception, SystemExit):
+        profile = {}
+    mapping = {
+        str(name).strip().lower(): [str(g) for g in (globs or []) if str(g)]
+        for name, globs in (profile.get("law_bindings") or {}).items()
+    }
+    if not mapping or not files:
+        return True, ""
+    law_file = path_of(Path(worktree)) or path_of(Path(project))
+    if law_file is None:
+        return True, ""
+    declared = clauses(Path(worktree)) or clauses(Path(project))
+    every_glob = [glob for globs in mapping.values() for glob in globs]
+    # A page tree this diff publishes must be a surface the law knows about
+    # BEFORE it is judged on what it says: an unnamed tree has no clause to cite.
+    unnamed = [
+        root for root, pages in page_trees(Path(worktree), extra=files)
+        if any(path == root or path.startswith(root + "/") for path in files)
+        and not any(fnmatch.fnmatch(path, glob) for path in pages for glob in every_glob)
+    ]
+    if unnamed:
+        return False, (
+            "A PUBLISHED SURFACE NO CLAUSE KNOWS: this diff writes "
+            + ", ".join(unnamed) + " — a page tree readers open — and no "
+            "law_bindings glob names it, so nothing checks the law it prints.\n"
+            '  name it in profile.json next to the others: "law_bindings": '
+            '{"<surface>": ["' + unnamed[0] + '/**"]}, and cite the clauses that '
+            "surface renders from the file that generates it."
+        )
+    touched = {
+        name for name, globs in mapping.items()
+        if any(fnmatch.fnmatch(path, pattern) for path in files for pattern in globs)
+    }
+    if not touched:
+        return True, ""
+    cited = citations(Path(worktree)) if path_of(Path(worktree)) else citations(Path(project))
+
+    gaps: list[str] = []
+    for clause in declared:
+        for binding in clause.get("binds") or []:
+            if binding not in touched:
+                continue
+            for glob in (mapping.get(binding) or []):
+                if not any(fnmatch.fnmatch(path, glob) for path in files):
+                    continue
+                if any(_coverage(where, [glob]) == ""
+                       for where in (cited.get(clause["id"]) or [])):
+                    continue
+                gaps.append(f"  {clause['id']} binds {binding}, and this diff changes "
+                            f"{glob} files, but nothing under {glob} cites "
+                            f"{clause['id']} in a file that renders it")
+    if not gaps:
+        return True, ""
+
+    names = ", ".join(sorted(touched))
+    lines = [
+        f"LAW NOT RENDERED BY THE SURFACE THAT PUBLISHED IT: this diff opens "
+        f"{names}, and {len(gaps)} clause(s) bound to it are not cited there."
+    ]
+    lines += gaps
+    lines.append(
+        "  a citation in a .md describes the law; it does not obey it. Cite the "
+        "clause in the file that RENDERS it — a header comment on the generator "
+        "(e.g. `# Law: P3, P13`) or a constant named after it — so the page that "
+        "prints the rule is the page that names it. If the surface does not "
+        "actually obey the clause, fix the surface: that is what the gate is for."
+    )
+    return False, "\n".join(lines)
 
 
 def format_audit(result: dict[str, Any]) -> str:
@@ -213,10 +409,18 @@ def format_audit(result: dict[str, Any]) -> str:
         lines.append(f"  {mark}{clause['id']}  {clause['text'][:80]}{binds}")
         lines.append(f"        {first}" + (f"  (+{len(where) - 1})" if len(where) > 1 else ""))
     for gap in result.get("unbound") or []:
-        reason = ("the project declares no law_bindings glob for it"
-                  if gap["reason"] == "unmapped"
-                  else "nothing under its own globs cites it")
-        lines.append(f"  !! {gap['clause']} binds {gap['binding']} — {reason}")
+        reason = {
+            "unmapped": "the project declares no law_bindings glob for it",
+            "prose": "only prose under it cites the clause — a document describing "
+                     "the law is not a surface obeying it",
+            "uncited": "nothing under it cites the clause",
+        }.get(gap["reason"], "nothing under its own globs cites it")
+        where = f" ({gap['glob']})" if gap.get("glob") else ""
+        lines.append(f"  !! {gap['clause']} binds {gap['binding']}{where} — {reason}")
+    for gap in result.get("uncovered") or []:
+        lines.append(f"  !! {gap['root']} is a published page tree ({gap['pages']} page(s)) "
+                     "that no law_bindings glob names — the law a reader sees there "
+                     "is checked nowhere")
     if result["unknown"]:
         lines.append("  !! cited but not declared: " + ", ".join(result["unknown"]))
     if result["tasks_without_law"]:

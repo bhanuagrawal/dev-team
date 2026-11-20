@@ -817,6 +817,12 @@ def run_doctor(project: Path, log) -> dict:
                     f"{len(ledger['unbound'])} clause binding(s) uncited: "
                     + ", ".join(f"{b['clause']}→{b['binding']}" for b in ledger["unbound"][:4])
                 )
+            if ledger.get("uncovered"):
+                problems.append(
+                    f"{len(ledger['uncovered'])} published page tree(s) no clause knows: "
+                    + ", ".join(f"{u['root']}/ ({u['pages']} pages)"
+                                for u in ledger["uncovered"][:3])
+                )
             if problems:
                 report["law"] = {
                     "status": "warn", "blocked": [],

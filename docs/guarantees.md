@@ -41,6 +41,23 @@ refuses.
    hand-copy of a product rule while `verify` ran Gradle alone and CI had no node
    step — a shared rule could change, PASS, ship, and leave the second client on
    the old copy.
+   **A PUBLISHED PAGE TREE IS A SURFACE THE LAW MUST KNOW** (owner ask 2026-11-20).
+   The law gate is no longer only `doctor`'s: `verify` runs
+   `law.diff_gate` on every diff, and it refuses two things. (a) A diff that
+   writes a tracked `index.html` tree that no `profile.law_bindings` glob names —
+   the pages a reader opens are the product's most public claim, so the change
+   that publishes a surface is the change that must name it. (b) A diff that
+   changes a named surface without a clause bound to that surface being cited
+   *in a non-prose file under the same glob* — a citation in a `.md` describes the
+   law, it does not obey it, and a citation in `web/src` cannot vouch for
+   `docs/**`. Coverage is therefore checked per glob, and a generator emits the
+   marker into the pages it writes (`<!-- Law: P3, P13 -->`). Why: BookSwap's site
+   was generated from a table `P13` had retired two days earlier and shipped "a
+   city and a radius" and "books already on shelves in Bangalore" while the app,
+   the browser client **and** a doc in `docs/` all cited `P13` — three green
+   citations of a clause the fourth surface contradicted in public. `devteam law`
+   exits 1 on an unnamed page tree or a prose-only binding, and `doctor` warns
+   about both before a run reaches them.
    **A revamp is counted in the stack it ships.** The revamp gate asks a
    ground-up rebuild to rewrite application source, and "application source"
    follows the project's own platforms: Kotlin/Java for the app, and `web/src`'s

@@ -179,6 +179,27 @@ location clause passed on a Kotlin citation while the browser client shipped a
 hand-copy of the old rule on the same disk. A binding the project never mapped
 is a finding too, so the marker can never silently pass.
 
+**A citation in prose covers nothing but prose, and each glob is its own
+surface.** Two refinements from 2026-11-20, when BookSwap's public site shipped
+copy that contradicted two clauses for two days with every gate green:
+
+- a `.md` page saying "P13 says a place is never named by a list of cities" is a
+  document *describing* the law, not a surface *obeying* it — so only a non-prose
+  citation (`*.kt`, `*.ts`, `*.py`, `*.html`…) covers a binding, and the generator
+  of a page tree carries the header itself;
+- coverage is checked **per glob**, not per name: a citation in `web/src` cannot
+  vouch for `docs/**`, because those are different things a reader opens. Map the
+  published tree as its own glob under the name it belongs to, and let the
+  generator emit the marker into the pages it writes (`<!-- Law: P3, P13 -->`).
+
+**A published page tree must be a named surface.** Any tracked `index.html` tree
+is a surface, and if a project declares law while leaving it out of
+`law_bindings`, `devteam law` exits 1 and `doctor` warns: the pages a reader opens
+are the product's most public claim, and a tree no clause knows is a claim nothing
+checks. `verify` refuses a diff that writes such a tree — the moment to name it is
+the change that publishes it — and refuses a diff that changes a named surface
+without the clauses bound to it being cited there.
+
 A project with no `PRODUCT.md` is not blocked — declaring the law is a choice,
 and once declared the team holds you to it. An amendment must touch the clause,
 the code that cites it, and a test in one commit.
