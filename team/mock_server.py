@@ -24,6 +24,7 @@ Deterministic by construction: fixed ids, fixed timestamps, no clock, no network
 from __future__ import annotations
 
 import json
+import os
 import socket
 import threading
 import time
@@ -210,9 +211,47 @@ def _sse(event: str, payload: dict) -> bytes:
     return f"event: {event}\ndata: {json.dumps(payload)}\n\n".encode()
 
 
+# The turn's plan, exactly as `bookswap_a2a/progress.py` declares it. An audit
+# that answers with a plan production does not send proves nothing about the
+# screen: the card is drawn from these rows, so these are the rows it must draw.
+A2A_HOME_PLAN = ("Looking for books near you", [
+    ("NEIGHBORHOOD_SCAN", "Looking around your neighbourhood"),
+    ("CONTEXT_CHECK", "Checking your shelf"),
+    ("PLANNER_THINKING", "Composing your card"),
+])
+A2A_SEARCH_PLAN = ("Finding that book near you", [
+    ("RESOLVING_QUERY", "Understanding your search"),
+    ("POSTGIS_SPATIAL_INDEX", "Looking on nearby shelves"),
+    ("EXPANDING_CITY_RADIUS", "Looking a little further out"),
+    ("MATCHING_READER_WISHES", "Checking readers' wishlists"),
+    ("SIMILAR_WITHIN_WALKING", "Finding books like this one"),
+])
+
+
+def _area_strip() -> dict:
+    """The one block Home states its area with, in the shape the client decodes."""
+    return {
+        "type": "card",
+        "layout": "strip",
+        "preset": "area",
+        "tone": "INFO",
+        "slot": "TOP_STRIP",
+        "title": "Bangalore · 3 km around you",
+        "body": "8 copies within 3 km.",
+        "artifactId": "mock-area",
+    }
+
+
 class _Handler(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
     server_version = "devteam-mock/1"
+
+    # How long one streamed beat stays on screen. A live turn spends seconds in
+    # a step (a model call, a PostGIS query); a mock that blinks through the plan
+    # in 0.45s is a screen no screenshot can catch — and a walk that cannot photograph
+    # the card cannot prove the card exists. The audit stretches it when it needs
+    # frames of a mid-turn screen.
+    BEAT = float(os.environ.get("DEVTEAM_MOCK_BEAT", "0.45"))
 
     # every request is recorded, so the audit can show what the app asked for
     def log_message(self, fmt, *args):  # noqa: D401 - silence stdlib logging
@@ -250,6 +289,93 @@ class _Handler(BaseHTTPRequestHandler):
             self.wfile.write(_sse(event, payload))
             self.wfile.flush()
             time.sleep(0.05)
+
+    def _a2a_stream(self, body: dict, blocks: list[dict]):
+        """One home or search turn, streamed the way the live service streams it.
+
+        Every status update carries the whole plan with the row it just entered
+        ACTIVE and the rows it passed DONE — the app draws those rows verbatim
+        and keeps no stage table, so a mock that answered in one completed task
+        (the shape a non-streaming `SendMessage` returns) could never prove the
+        card ticks before the feed arrives. That is the walk that let "nothing
+        until the feed appears" ship, and this is the frame that closes it.
+
+        The beats are paced: a screen a person is meant to see cannot be proven
+        from a turn that begins and ends between two screenshots.
+        """
+        params = body.get("params") or {}
+        message = params.get("message") or {}
+        mode = str((message.get("metadata") or {}).get("mode") or "HOME").upper()
+        title, rows = A2A_SEARCH_PLAN if mode == "SEARCH" else A2A_HOME_PLAN
+        task_id = "mock-task-" + str(int(getattr(self.server, "turn", 0)))
+        context_id = "mock-context"
+
+        self.send_response(200)
+        self.send_header("Content-Type", "text/event-stream")
+        self.send_header("Cache-Control", "no-cache")
+        self.send_header("Connection", "close")
+        self.end_headers()
+
+        def frame(result: dict):
+            # Data-only frames, as sse-starlette writes them for the live route.
+            payload = {"jsonrpc": "2.0", "id": body.get("id", 1), "result": result}
+            self.wfile.write(("data: " + json.dumps(payload, separators=(",", ":"))
+                              + "\n\n").encode())
+            self.wfile.flush()
+
+        def steps_at(active: int) -> list[dict]:
+            return [
+                {"id": rid,
+                 "label": label,
+                 "state": "DONE" if i < active else ("ACTIVE" if i == active else "PENDING")}
+                for i, (rid, label) in enumerate(rows)
+            ]
+
+        def status_update(state: str, text: str, steps: list[dict], stage: str):
+            frame({"statusUpdate": {
+                "taskId": task_id,
+                "contextId": context_id,
+                "status": {
+                    "state": state,
+                    "message": {
+                        "messageId": f"mock-{state.lower()}-{stage}",
+                        "role": "ROLE_AGENT",
+                        "parts": [{"text": text}],
+                    },
+                },
+                "metadata": {"title": title, "steps": steps, "stage": stage},
+            }})
+
+        frame({"task": {
+            "id": task_id,
+            "contextId": context_id,
+            "status": {"state": "TASK_STATE_SUBMITTED"},
+        }})
+
+        for index, (row_id, label) in enumerate(rows):
+            status_update("TASK_STATE_WORKING", label, steps_at(index), row_id)
+            time.sleep(self.BEAT)
+
+        for index, block in enumerate(blocks):
+            frame({"artifactUpdate": {
+                "taskId": task_id,
+                "contextId": context_id,
+                "artifact": {
+                    "artifactId": f"mock-block-{index}",
+                    "name": block["type"],
+                    "parts": [{"data": block, "mediaType": "application/json"}],
+                    "metadata": {"slot": block.get("slot", "FEED")},
+                },
+                "lastChunk": True,
+            }})
+            time.sleep(0.05)
+
+        status_update(
+            "TASK_STATE_COMPLETED",
+            "Your neighbourhood is ready.",
+            steps_at(len(rows)),
+            rows[-1][0],
+        )
 
     def _record(self, method: str, path: str, body: dict, query: dict | None = None):
         entry = {"method": method, "path": path, "at": round(time.time(), 3)}
@@ -389,7 +515,10 @@ class _Handler(BaseHTTPRequestHandler):
                     "protocolBinding": "JSONRPC",
                     "protocolVersion": "1.0",
                 }],
-                "capabilities": {"streaming": False, "pushNotifications": False},
+                # The live card advertises streaming, and the app only asks for
+                # a streamed turn when it does; a mock that said False tested the
+                # one-shot path the phone never uses.
+                "capabilities": {"streaming": True, "pushNotifications": False},
                 "securitySchemes": {
                     "bearer": {
                         "httpAuthSecurityScheme": {
@@ -775,20 +904,13 @@ class _Handler(BaseHTTPRequestHandler):
             return
 
         # A2A 1.0 JSON-RPC. Same deterministic blocks as the legacy route, plus
-        # the generic `content` strip the current Home states its area with.
+        # the area strip Home states its area with.
         if path == "/a2a/v1":
-            blocks = [
-                {
-                    "type": "content",
-                    "variant": "strip",
-                    "preset": "area",
-                    "title": "Bangalore · 3 km around you",
-                    "body": "8 copies within 3 km.",
-                    "slot": "TOP_STRIP",
-                    "artifactId": "mock-area",
-                },
-                *_blocks(),
-            ]
+            blocks = [_area_strip(), *_blocks()]
+            if body.get("method") == "SendStreamingMessage":
+                self._a2a_stream(body, blocks)
+                self.server.turn = int(getattr(self.server, "turn", 0)) + 1
+                return
             self._json({
                 "jsonrpc": "2.0",
                 "id": body.get("id", 1),
