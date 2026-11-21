@@ -242,8 +242,6 @@ _RAW: list[tuple[str, str, str, str, str, bool]] = [
      "—", "—", False),
     ("setup", "internal", "install the team's own prerequisites",
      "shell profile", "—", False),
-    ("mock-server", "internal", "serve a Supabase-shaped mock backend",
-     "localhost port", "—", False),
     ("emulators", "internal", "record/reset the emulator baseline",
      ".pipeline/emulators.baseline.json", "—", False),
 ]

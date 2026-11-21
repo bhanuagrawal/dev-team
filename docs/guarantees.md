@@ -27,15 +27,30 @@ refuses.
    journey only when the diff touched a file its surface declared,
    `CoarseLocation.kt` belonged to no surface, and search was not a declared
    journey, so four green walks from older builds vouched for a build none of
-   them had opened. The mock a walk runs against must answer in
-   production's shapes too — it served a WKT `location` while Postgres returns
-   hex EWKB, and a bare object where `/api/v1/profile` returns a one-row list,
-   so the app's profile read failed and its invented Bangalore fallback was what
-   every earlier walk actually searched with (both found on 2026-11-20). A mock
-   that answers in a spelling or a shape production never sends is a mock that
-   hides the bug. There is no excuse field —
+   them had opened. **The walk runs against the real backend the app ships
+   with** (owner, 2026-11-21: *"drop the mock server and use the real server and
+   the test accounts"*), signing in with the audit account in
+   `.pipeline/audit-account.json` (gitignored; `DEVTEAM_AUDIT_EMAIL` /
+   `DEVTEAM_AUDIT_PASSWORD` win when set) — never a frozen fixture. The fixture
+   is gone because it lied twice: a WKT `location` where Postgres returns hex
+   EWKB, and a bare object where `/api/v1/profile` returns a one-row list, so
+   the app's profile read failed and its invented Bangalore fallback was what
+   every earlier walk actually searched with (2026-11-20); and it answered a
+   one-shot completed task with no plan while production streams
+   `statusUpdate`s, which is why a walk "passed" the progress-card bug
+   (2026-11-21). A fixture in a spelling or a shape production never sends is a
+   fixture that hides the bug. There is no excuse field —
    `"flow_impact": "none"` was the loophole that let a release ship with unwalked
-   journeys, and it is gone. `devteam ux-flow` exits non-zero on a journey that
+   journeys, and it is gone. **A walk only counts if it SAW the change** (owner,
+   2026-11-21: *"it should verify the change somehow … that was broken last
+   time"*): the task spec declares `walk.observables` — words that can only be on
+   screen if this diff runs — and may pin the journey with `walk.flows`; the walk
+   records what every step displayed, straight from the accessibility tree, and
+   `verify` refuses when none of the declared words ever appeared. That is the
+   hole the progress card fell through: a green `search` walk was accepted as
+   evidence for a diff that only runs inside the feed's A2A turn, so a phone that
+   showed nothing until the feed landed was "tested" by a journey which never
+   draws the card. `devteam ux-flow` exits non-zero on a journey that
    did not reach its goal, and `doctor` warns about journeys whose last walk
    predates their screen — advisory, because the gate only needs the change
    walked. `ux-audit` stills, `ux-video` replays, storefront review and

@@ -53,12 +53,24 @@ missing kind/milestone) answers before anything executes.
    change is the evidence, and a journey last walked on an older build is
    information, not a refusal. A walk is not tied to a commit id (a rebase
    rewrites every sha without changing a pixel), but it is recorded with the
-   tree's `HEAD` so the handover names the build a person opened. The mock
-   that walk runs against must answer in production's shapes (PostGIS geometry as
-   hex EWKB, not the WKT the app writes) and behave as an oracle where it can: a
-   fixture in a spelling production never sends is a fixture that hides the bug.
+   tree's `HEAD` so the handover names the build a person opened. **The walk
+   runs against the real backend the app ships with** (owner, 2026-11-21: *"drop
+   the mock server and use the real server and the test accounts"*), signing in
+   with the audit account from `.pipeline/audit-account.json` (gitignored;
+   `DEVTEAM_AUDIT_EMAIL` / `DEVTEAM_AUDIT_PASSWORD` win) — never a frozen
+   fixture. A fixture in a spelling or a shape production never sends is a
+   fixture that hides the bug, and the progress card was "verified" against one
+   that answered a completed task with no plan.
    A diff that changes how the app searches, locates a reader, or reads its own
    profile is a diff that gets opened on a phone before it gets a version code.
+   **And the walk has to show the change**: the task names, in `walk.observables`,
+   words that can only be on screen if this diff runs (and may pin the journey in
+   `walk.flows`). The walk records every step's on-screen text from the
+   accessibility tree, so `verify` matches the claim against what the walk saw —
+   a green walk that never reached the change is refused, which is how "no
+   message visible on app until feed arrived" (2026-11-21) gets caught next time:
+   a `search` walk passed while the progress card was never on screen, because
+   search submits over REST and only the feed's turn goes through A2A.
    Full text: `docs/guarantees.md` item 8.
 6. **Commit every artefact, and say which ref holds it.** Code is not the only
    thing a run produces; the rent is paid per artefact, in the same turn:

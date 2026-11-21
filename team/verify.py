@@ -601,6 +601,66 @@ def _newest_walk(project: Path, flows: list[dict]) -> tuple[float, dict | None]:
     return walked, walked_flow
 
 
+def _walk_text(project: Path, walked_flow: dict) -> str:
+    """Every word the newest walk recorded on screen, in one lowercased string."""
+    from . import ux_flow
+
+    result = (ux_flow.run_dir(project) / ux_flow._slug(str(walked_flow["id"]))
+              / "result.json")
+    try:
+        data = json.loads(result.read_text())
+    except (OSError, ValueError):
+        return ""
+    words: list[str] = []
+    for step in data.get("steps") or []:
+        for text in step.get("texts") or []:
+            words.append(" ".join(str(text).split()).lower())
+    return "\n".join(words)
+
+
+def _walk_showed_problem(project: Path, spec: dict | None,
+                         walked_flow: dict) -> str | None:
+    """A green walk is evidence of THIS change only if it saw the change.
+
+    The 2026-11-21 phone report — "no message visible on app until feed arrived,
+    did you not test it" — was walked: a `search` walk ran on the emulator and
+    PASSED, while the thing that was broken (the agent's progress card) never
+    appeared in a single frame, because search submits over REST and only the
+    feed's own turn goes through A2A. The gate was satisfied by a walk that
+    proved a different thing, which is the same as no walk at all.
+
+    So the task says HOW the change is visible: `walk.observables` — words that
+    can only be on the screen if this diff runs (a row, a sentence, a heading).
+    The walk records the words it actually saw, from the accessibility tree, so
+    the check is deterministic and needs no judgement about a picture. The
+    strategy stays the agent's: any journey, any path, provided the walk shows
+    the thing the change made.
+    """
+    if not spec:
+        return None  # no task spec — nothing to bind a claim to (design_gate's rule)
+    walk = spec.get("walk") or {}
+    observables = [" ".join(str(o).split()).lower()
+                   for o in (walk.get("observables") or []) if str(o).strip()]
+    fid = str(walked_flow.get("id"))
+    if not observables:
+        return (
+            f"the newest walk ('{fid}') is not evidence about THIS change: the task "
+            "declares no observable it had to see, so any green walk passes. Add "
+            "`walk.observables` to the task spec — the words that can only be on "
+            "screen if this diff runs — and walk again "
+            f"(`devteam ux-flow {project.name} --worktree <tree> --flow {fid}`)")
+    seen = _walk_text(project, walked_flow)
+    missing = [o for o in observables if o not in seen]
+    if missing:
+        return (
+            f"the newest walk ('{fid}') never showed what this change does: "
+            + "; ".join(repr(m) for m in missing[:3])
+            + " appears on no screen it captured. The walk ran, but not over this "
+            "change — walk the journey that opens it, and photograph it while it "
+            "is on screen.")
+    return None
+
+
 def _change_walked_problem(project: Path, worktree: Path, files: list[str],
                            flows: list[dict]) -> str | None:
     """The change itself must have been opened on a device before release.
@@ -625,7 +685,7 @@ def _change_walked_problem(project: Path, worktree: Path, files: list[str],
     named = f" (the newest walk was '{walked_flow['id']}')" if walked_flow else ""
     return (f"the change in {which} has not been run on a device{named} — open it "
             "on an emulator before release (`devteam ux-flow <project> --worktree "
-            "<tree> --mock`)")
+            "<tree>`)")
 
 
 def flow_gate(project: Path, worktree: Path, spec: dict | None,
@@ -644,8 +704,8 @@ def flow_gate(project: Path, worktree: Path, spec: dict | None,
     re-walked separately — the walk that watched the change is the evidence.
 
     `devteam ux-flow` is how a journey is still walked (`--worktree` for a task
-    tree, `--mock` for the deterministic backend), and `.pipeline/ux_flows/*/
-    result.json` is where a walk is recorded. Nothing here boots a device: the
+    tree; it signs in to the real backend with the audit account), and
+    `.pipeline/ux_flows/*/result.json` is where a walk is recorded. Nothing here boots a device: the
     walking happens on the tree being released.
 
     Docs, the journey spec, store copy and images are not code a phone runs, so
@@ -656,6 +716,11 @@ def flow_gate(project: Path, worktree: Path, spec: dict | None,
         flows = ux_flow.declared(project, root=worktree) or ux_flow.declared(project)
     except Exception as exc:
         return True, f"flow gate could not read the journey spec ({exc})"
+    pinned = [str(f) for f in ((spec or {}).get("walk") or {}).get("flows") or []]
+    if pinned:
+        # The task named the journey that opens this change. It is the evidence,
+        # whatever else was walked more recently.
+        flows = [f for f in flows if str(f.get("id")) in pinned] or flows
     which, newest = _changed_code(project, worktree, files)
     if not newest:
         return True, "no code a device executes in this diff"
@@ -673,7 +738,10 @@ def flow_gate(project: Path, worktree: Path, spec: dict | None,
         return False, (
             f"the newest walk on this tree ('{fid}') does not show the change "
             f"working — {stop}. Fix what stopped it and walk again "
-            f"(`devteam ux-flow {project.name} --worktree <tree> --flow {fid} --mock`).")
+            f"(`devteam ux-flow {project.name} --worktree <tree> --flow {fid}`).")
+    unshown = _walk_showed_problem(project, spec, walked_flow)
+    if unshown:
+        return False, unshown
     return True, f"the change in {which} was run on a device (walk: '{fid}')"
 
 

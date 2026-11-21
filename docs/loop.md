@@ -204,9 +204,10 @@ still walks the app's own three journeys.
 
 ## Done means
 
-`verify` PASS (which includes the mandatory **ux-flow audit**: every declared
-journey walked on this diff and reaching its goal — no other audit gates a
-release, owner policy 2026-11-10) → `release` delivered (CI green, internal
+`verify` PASS (which includes the mandatory **ux-flow audit**: the change you
+made was walked on this diff, the walk reached its goal, and it showed the
+words the task declared — walks run against the real backend with the audit
+account in `.pipeline/audit-account.json`) → `release` delivered (CI green, internal
 testing updated) → `record` + `rc` + `alarm` printed → worktrees pruned → the report quotes the
 handover, the flags and the page URLs. Nothing sits uncommitted anywhere:
 `devteam doctor <project>` prints no `uncommitted: WARN` line, and `status`

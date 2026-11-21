@@ -31,13 +31,16 @@ A flow is declared in `docs/ux-flows.json` with a `goal` and NO `steps`:
      "goal": "install for the first time, get through whatever the app asks
               for, and reach the neighbourhood feed", "max_steps": 8}
 
-    {"id": "search", "surface": "Discovery", "reader": "aarav",
+    {"id": "search", "surface": "Discovery",
      "goal": "describe a book in your own words and get copies in YOUR area"}
 
-`reader` seats a seeded reader on a MOCK run only (the app's own
-`devteam_qa_reader` seam: a release build ignores it, and it refuses the
-production project). A journey that IS about signing in must not declare it —
-`first-run-new-user` walks the sign-up for real.
+Every walk runs against the REAL backend the app ships with and signs in with
+the audit account at `<project>/.pipeline/audit-account.json`
+(`DEVTEAM_AUDIT_EMAIL` / `DEVTEAM_AUDIT_PASSWORD` win when set). The frozen
+fixture is gone (owner, 2026-11-21: *"drop the mock server and use the real
+server and the test accounts"*): a fixture in a spelling production never sends
+is a fixture that hides the bug, and the progress card was "verified" against
+one that answered a shape production never sends.
 
 `ux-video` keeps owning flows that DO declare steps (a recording is evidence of a
 specific journey); this pass owns the ones that only declare what should be true.
@@ -407,52 +410,48 @@ def _screenshot(serial: str, dest: Path) -> bool:
     return False
 
 
-def _mock_token() -> str:
-    """The token the local mock issues, so the delivered callback is a real one."""
-    from .mock_server import MOCK_TOKEN
-    return MOCK_TOKEN
+def audit_account(project: Path) -> dict:
+    """The real-backend account every walk signs in with.
 
-
-def _launcher_component(serial: str, pkg: str) -> str:
-    r = _adb(serial, ["shell", "cmd", "package", "resolve-activity", "--brief", pkg], timeout=45)
-    text = r.stdout or ""
-    for line in text.splitlines():
-        line = line.strip()
-        if "/" in line and pkg in line:
-            return line
-    return ""
-
-
-def _launch(serial: str, pkg: str, base_url: str | None = None,
-            reader: str | None = None) -> None:
-    """Open the app; with a mock, say where the API lives and who to be.
-
-    `monkey` cannot carry extras, and the base-URL handoff has to be an intent
-    extra. The DEBUG build honours it (a release build ignores it), so this is the
-    one seam that lets an audit reach a local backend without any production code
-    path being different.
-
-    [reader] seats a SEEDED reader (`docs/ux-flows.json` -> `"reader": "aarav"`)
-    on a journey that is not about signing in. It is the app's own
-    `devteam_qa_reader` seam: a release build ignores it and it refuses the
-    production project. Without it a walk of `search` spends its one model call
-    trying to type an email into a screen whose fields the accessibility tree
-    does not expose, and reports "needs a credential" instead of walking the
-    search (2026-11-20).
+    Read from `<project>/.pipeline/audit-account.json` (gitignored: it is a
+    credential, not project state) or from `DEVTEAM_AUDIT_EMAIL` /
+    `DEVTEAM_AUDIT_PASSWORD`. No fallback account is compiled in, and there is no
+    fixture backend to fall back to: a walk that cannot sign in has not verified
+    the change, and it must say that rather than reach the goal through a door
+    production does not have.
     """
-    component = _launcher_component(serial, pkg) if base_url else ""
-    if component:
-        args = ["shell", "am", "start", "-n", component,
-                "--es", "devteam_mock_base_url", str(base_url)]
-        if reader:
-            args += ["--es", "devteam_qa_reader", str(reader)]
-        _adb(serial, args, timeout=45)
-        return
+    data: dict = {}
+    path = project / ".pipeline" / "audit-account.json"
+    try:
+        if path.is_file():
+            data = json.loads(path.read_text())
+    except Exception as exc:
+        raise SystemExit(f"ux-flow: {path} is not readable JSON ({exc})")
+    email = str(os.environ.get("DEVTEAM_AUDIT_EMAIL") or data.get("email") or "").strip()
+    password = str(os.environ.get("DEVTEAM_AUDIT_PASSWORD") or data.get("password") or "")
+    if not email or not password:
+        raise SystemExit(
+            "ux-flow: no audit account — walks run against the real backend and need "
+            "one. Put {\"email\": \"…\", \"password\": \"…\"} in "
+            f"{path} (gitignored), or export DEVTEAM_AUDIT_EMAIL and "
+            "DEVTEAM_AUDIT_PASSWORD. There is no mock backend any more.")
+    return {"email": email, "password": password,
+            "profile": dict(data.get("profile") or {})}
+
+
+def _launch(serial: str, pkg: str) -> None:
+    """Open the app the way a reader does — no base URL, no seated reader.
+
+    An audit runs against the backend the build ships with, so there is nothing
+    to point anywhere: the app's own origin answers. Signing in is the walk's
+    own work (the debug build's email/password door), using the audit account.
+    """
     _adb(serial, ["shell", "monkey", "-p", pkg, "-c",
                   "android.intent.category.LAUNCHER", "1"], timeout=45)
 
 
-def _settle(serial: str, pkg: str, timeout: float = 12.0) -> tuple[bool, float]:
+def _settle(serial: str, pkg: str, timeout: float = 12.0,
+            seen: list[str] | None = None) -> tuple[bool, float]:
     """Wait for the launch screen to become the app's own, tappable UI.
 
     A screenshot taken 1.6s after `am start` catches the splash on a slow boot and
@@ -460,6 +459,11 @@ def _settle(serial: str, pkg: str, timeout: float = 12.0) -> tuple[bool, float]:
     — a false P0 that hides the real one. "Settled" is: the focused window belongs
     to the app AND the accessibility tree exposes at least one label. A flow that
     never settles is a genuine finding, returned as settled=False with the wait.
+
+    [seen] collects every word that appeared while the app was opening. A screen a
+    reader sees for two seconds on the way in — the agent's progress card, a
+    "refreshing" line — is gone before the first step is judged, and a walk that
+    cannot record it cannot prove the change that draws it (2026-11-21).
     """
     from .ux_video import _ui_xml
     t0 = time.monotonic()
@@ -467,7 +471,12 @@ def _settle(serial: str, pkg: str, timeout: float = 12.0) -> tuple[bool, float]:
         time.sleep(0.7)
         if not _window_title(serial, pkg):
             continue
-        if tappables(_ui_xml(serial), pkg):
+        xml = _ui_xml(serial)
+        if seen is not None:
+            for text in _screen_texts(xml, pkg):
+                if text not in seen:
+                    seen.append(text)
+        if tappables(xml, pkg):
             return True, time.monotonic() - t0
     return False, time.monotonic() - t0
 
@@ -475,7 +484,8 @@ def _settle(serial: str, pkg: str, timeout: float = 12.0) -> tuple[bool, float]:
 _BUSY_WORDS = ("loading", "please wait", "searching", "just a moment",
                "sending your", "reading your library")
 
-def _wait_past_busy(serial: str, timeout: float = 10.0) -> None:
+def _wait_past_busy(serial: str, timeout: float = 10.0,
+                    seen: list[str] | None = None, pkg: str = "") -> None:
     """A spinner is a STATE, not a verdict — wait for it before judging.
 
     The walk screenshots at the top of every step, so a tap that starts a fetch was
@@ -483,12 +493,21 @@ def _wait_past_busy(serial: str, timeout: float = 10.0) -> None:
     found nothing to tap, and declared the screen a dead end while the detail
     actually renders in ~2s (confirmed by hand, 2026-11-10). Waiting for the app
     to stop saying it is busy is deterministic and costs nothing when it is not.
+
+    [seen] collects what passed while we waited. The agent's progress card is a
+    two-second screen *during* a fetch — the same class of evidence `_settle`
+    keeps on the way in — so a walk that only read the tree after the wait would
+    report a feed that was never bare (2026-11-21).
     """
     from .ux_video import _ui_xml
     t0 = time.monotonic()
     while time.monotonic() - t0 < timeout:
-        xml = (_ui_xml(serial) or "").lower()
-        if not any(w in xml for w in _BUSY_WORDS):
+        xml = _ui_xml(serial) or ""
+        if seen is not None:
+            for text in _screen_texts(xml, pkg):
+                if text not in seen:
+                    seen.append(text)
+        if not any(w in xml.lower() for w in _BUSY_WORDS):
             return
         time.sleep(0.8)
 
@@ -512,6 +531,26 @@ def _screen_size(serial: str) -> tuple[int, int]:
             _SCREEN_SIZE[serial] = size
             return size
     return (1080, 2400)
+
+
+def _screen_texts(xml: str, pkg: str = "") -> list[str]:
+    """Every word that was actually on screen, from the accessibility tree.
+
+    This is the walk's deterministic record of what it SAW: a screenshot needs a
+    model to read it, but the dump is the same text a screen reader gets. `verify`
+    matches a task's declared observable against this, so "the walk showed the
+    change" stops being a judgement call about a picture.
+    """
+    seen: list[str] = []
+    for m in re.finditer(r"<node\b[^>]*>", xml or ""):
+        attrs = dict(re.findall(r'([\w:-]+)="([^"]*)"', m.group(0)))
+        if pkg and attrs.get("package") and attrs["package"] != pkg:
+            continue
+        for key in ("text", "content-desc"):
+            value = " ".join((attrs.get(key) or "").split())
+            if value and value not in seen:
+                seen.append(value[:160])
+    return seen[:200]
 
 
 def _window_title(serial: str, pkg: str) -> str:
@@ -565,7 +604,6 @@ def _sheet(stills: list[Path], out: Path) -> Path | None:
 
 def audit_flow(project: Path, flow: dict, serial: str, log=None,
                max_steps: int | None = None, via: str = "api",
-               base_url: str | None = None, signed_in=None,
                commit: str = "") -> dict:
     """Drive one goal-declared journey and judge what a person would hit."""
     from . import ux_video, vision_layout
@@ -597,19 +635,9 @@ def audit_flow(project: Path, flow: dict, serial: str, log=None,
     # the app asks for it, or the audit meets a system dialog it cannot tap.
     for permission in ("android.permission.CAMERA",):
         _adb(serial, ["shell", "pm", "grant", pkg, permission], timeout=30)
-    seated = str(flow.get("reader") or "").strip() or None
-    _launch(serial, pkg, base_url=base_url, reader=seated)
-    if seated and signed_in is not None:
-        # A seated reader signs in DURING the cold start, so the first screen a
-        # walk sees is the auth screen on its way out. Judging that screen is how
-        # `search` spent its one model call typing an email (2026-11-20). Wait for
-        # the session the app itself asked for, then settle on what follows.
-        for _ in range(40):
-            if signed_in():
-                break
-            time.sleep(0.4)
-        time.sleep(1.2)
-    settled, waited = _settle(serial, pkg)
+    _launch(serial, pkg)
+    opening_texts: list[str] = []
+    settled, waited = _settle(serial, pkg, seen=opening_texts)
     if not settled:
         # ONE retry, with room. A cold start right after `pm clear` on a headless
         # emulator outlasts the 12s cap often enough that judging it produced a
@@ -617,8 +645,8 @@ def audit_flow(project: Path, flow: dict, serial: str, log=None,
         # second attempt is the same launch; only the patience changes.
         if log:
             log(f"~ ux-flow: '{fid}' did not settle in {waited:.1f}s — relaunching once")
-        _launch(serial, pkg, base_url=base_url, reader=seated)
-        settled, waited = _settle(serial, pkg, timeout=30.0)
+        _launch(serial, pkg)
+        settled, waited = _settle(serial, pkg, timeout=30.0, seen=opening_texts)
     if log:
         log(f"~ ux-flow: '{fid}' launch screen settled after {waited:.1f}s"
             + ("" if settled else " — THE APP NEVER LEFT ITS LAUNCH SCREEN"))
@@ -657,6 +685,7 @@ def audit_flow(project: Path, flow: dict, serial: str, log=None,
     frame_digests: list[str] = []
     model_calls = 0
     live_reactions: list[dict] = []
+    seen_texts: dict[int, list[str]] = {}
     typed = 0
     outcome = "budget"
     reason = ""
@@ -669,8 +698,10 @@ def audit_flow(project: Path, flow: dict, serial: str, log=None,
             outcome, reason = "timeout", f"the {int(flow.get('seconds') or DEFAULT_SECONDS)}s cap was reached"
             break
         if step > 1:
-            # Never photograph a spinner and call it the product.
-            _wait_past_busy(serial)
+            # Never photograph a spinner and call it the product. What passed while
+            # the app was busy still counts as seen — the progress card lives there.
+            seen_texts[step] = []
+            _wait_past_busy(serial, seen=seen_texts[step], pkg=pkg)
         still = out_dir / f"step-{step:02d}.png"
         if not _screenshot(serial, still):
             outcome, reason = "error", "could not capture the screen"
@@ -692,6 +723,17 @@ def audit_flow(project: Path, flow: dict, serial: str, log=None,
                 break
         xml = ux_video._ui_xml(serial)
         targets = tappables(xml, pkg)
+        # The screen's own words, deterministically — what `verify` matches a
+        # task's declared observable against.
+        for text in _screen_texts(xml, pkg):
+            if text not in seen_texts.setdefault(step, []):
+                seen_texts[step].append(text)
+        if step == 1 and opening_texts:
+            # What the app showed on the way in counts: the progress card lives
+            # for seconds, and a walk that only looks after the turn has ended
+            # would report a screen that was never bare.
+            seen_texts[step] = opening_texts + [t for t in seen_texts[step]
+                                                if t not in opening_texts]
         screen = _window_title(serial, pkg)
         if log and any(x.get("editable") for x in targets):
             log("~ ux-flow: fields on this screen: " + ", ".join(
@@ -912,34 +954,6 @@ def audit_flow(project: Path, flow: dict, serial: str, log=None,
         time.sleep(1.4)
         after = ux_video._screen_sig(serial)
         is_dead = bool(before and after and before == after) and not target.get("editable")
-        if base_url and (target.get("label") or "").lower().startswith("continue with"):
-            time.sleep(1.2)
-            _adb(serial, ["shell", "am", "start", "-a", "android.intent.action.VIEW",
-                          "-d", f"bookswap://auth-callback#access_token={_mock_token()}"
-                                f"&refresh_token=mock-refresh&expires_in=3600&token_type=bearer"],
-                 timeout=45)
-            # Completing a session is not instant (user fetch → profile fetch →
-            # navigation). A fixed sleep judged the previous screen; a screen-change
-            # poll broke on the Custom Tab closing, 1s before the feed. Wait for the
-            # ground truth instead: the mock has answered the feed's first call.
-            time.sleep(0.8)
-            if signed_in is not None:
-                for _ in range(30):
-                    time.sleep(0.4)
-                    if signed_in():
-                        break
-            else:
-                before_cb = ux_video._screen_sig(serial)
-                for _ in range(16):
-                    time.sleep(0.5)
-                    if ux_video._screen_sig(serial) != before_cb:
-                        break
-            time.sleep(1.2)
-            steps.append({"n": step, "did": f"tapped {target['label']}",
-                          "then": "the provider returned to bookswap://auth-callback "
-                                  "(delivered by the runner: a mock cannot drive a browser)",
-                          "screen": screen, "action": "tap", "label": target["label"]})
-            continue
 
         entry = {"n": step, "did": f"tapped {target['label'] or '(unlabelled)'}",
                  "then": ("nothing changed — DEAD CONTROL" if is_dead else
@@ -985,14 +999,18 @@ def audit_flow(project: Path, flow: dict, serial: str, log=None,
         except SystemExit as exc:      # a model failure is recorded, never faked
             verdict["error"] = str(exc)[:200]
 
+    # Each step carries the words that were on screen at it, so a walk is a record
+    # of what it SAW, not only of what it tapped.
+    for entry in steps:
+        entry.setdefault("texts", seen_texts.get(int(entry.get("n") or 0), []))
+
     result = {
         "flow": fid,
         # WHAT was walked. Without this a green walk from any earlier release
         # answered for every later one, which is how a search that never ran on
         # a device shipped on 2026-11-20 (the gate only re-walked when a diff
         # touched the flow's own screen files).
-        "commit": commit,
-        "surface": str(flow.get("surface") or ""),
+        "commit": commit,        "surface": str(flow.get("surface") or ""),
         "goal": goal,
         "outcome": outcome,
         "reason": reason,
@@ -1136,8 +1154,7 @@ def store(project: Path, result: dict, log=None) -> dict:
 # --------------------------------------------------------------------------- #
 def run(project: Path, only: str | None = None, log=None, avd: str | None = None,
         keep_emulator: bool = False, max_steps: int | None = None,
-        worktree: Path | None = None, mock: bool = False,
-        mock_port: int | None = None) -> dict:
+        worktree: Path | None = None) -> dict:
     """Audit every goal-declared flow (or one), on a device this pass owns."""
     from . import emulator
 
@@ -1152,17 +1169,10 @@ def run(project: Path, only: str | None = None, log=None, avd: str | None = None
     if not todo:
         return {"planned": 0, "run": [], "skipped": [], "failed": []}
 
-    server = None
-    base_url = None
-    if mock:
-        from . import mock_server
-        server = mock_server.MockServer(mock_port or mock_server.DEFAULT_PORT).start()
-        if not server.wait_ready():
-            raise SystemExit("ux-flow: the mock backend did not come up")
-        base_url = server.url
-        if log:
-            log(f"~ ux-flow: mock backend on {base_url} (deterministic fixtures) — "
-                f"the debug build is pointed at it, no production path changes")
+    account = audit_account(project)
+    if log:
+        log("~ ux-flow: real backend, signing in as the audit account "
+            f"({account['email']})")
 
     serial, started = emulator.require_device(avd=avd, log=log,
                                               purpose="ux-flow")
@@ -1178,27 +1188,20 @@ def run(project: Path, only: str | None = None, log=None, avd: str | None = None
         if log:
             log(f"~ ux-flow: auditing {build['source']}")
         for flow in todo:
-            if mock and not (flow.get("credentials") or {}).get("password"):
-                # The mock accepts these; a real backend would not, so they are
-                # injected only for an audited mock run and never live in the spec.
-                # A signup form also asks for a NAME before it will create the
-                # account, and a walk that stops there never reaches its goal — so
-                # the same audited-run-only treatment covers the profile values.
-                flow = {**flow,
-                        "credentials": {"email": "audit@bookswap.test",
-                                        "password": "audit-pass-123"},
-                        "profile": {"name": "Audit Reader",
-                                    "handle": "auditreader",
-                                    **(flow.get("profile") or {})}}
+            # The audit account is the one identity every walk signs in with. The
+            # spec may name a PROFILE override (a name/handle for an onboarding
+            # form), never a password: credentials in a committed journey spec
+            # would be a secret in the repo.
+            flow = {**flow,
+                    "credentials": {"email": account["email"],
+                                    "password": account["password"],
+                                    **(flow.get("credentials") or {})},
+                    "profile": {**account["profile"], **(flow.get("profile") or {})}}
             fid = str(flow["id"])
             try:
                 res = audit_flow(
                     project, flow, serial, log=log, max_steps=max_steps,
-                    base_url=base_url, commit=walked_commit,
-                    signed_in=(lambda: any(
-                        "/functions/v1/ui-composer" in r["path"]
-                        or r["path"] == "/api/v1/auth/login"
-                        for r in server.requests)) if server else None)
+                    commit=walked_commit)
             except SystemExit as exc:
                 failed.append({"id": fid, "reason": str(exc)[:300]})
                 continue
@@ -1219,17 +1222,9 @@ def run(project: Path, only: str | None = None, log=None, avd: str | None = None
                 })
                 continue
             res["build"] = build
-            res["mock"] = base_url or ""
             results.append(res)
             store(project, res, log=log)
     finally:
-        if server is not None:
-            res_requests = server.requests
-            if log:
-                log(f"~ ux-flow: mock backend answered {len(res_requests)} request(s)")
-            for r in results:
-                r["mock_requests"] = res_requests
-            server.stop()
         if started and not keep_emulator:
             stopped = emulator.stop(serial)
             if log:
@@ -1368,15 +1363,14 @@ def walk_problem(project: Path, flow: dict) -> str | None:
     if not data.get("goal_reached"):
         reason = str(data.get("reason") or data.get("verdict") or "").strip()
         hint = ""
-        # A journey that stops at sign-in was walked without the deterministic
-        # backend: a real provider needs a human's credentials, so the walk can
-        # never finish that way. The mock completes the same flow through the
-        # app's own auth seam — say so instead of leaving the reader stuck on a
-        # wall the audit built itself.
+        # A journey that stops at sign-in means the audit account did not get in —
+        # a wrong password, an unconfirmed address, or a provider door the walk
+        # cannot open. Say which, instead of leaving the reader with a wall.
         if re.search(r"credential|sign[ -]?in|oauth|password|log[ -]?in", reason, re.I):
-            hint = (" — walk it with `--mock`: the local backend completes sign-in "
-                    "through the app's own auth seam, which a real provider cannot do "
-                    "without a human's credentials")
+            hint = (" — the walk signs in with the audit account; check "
+                    "`.pipeline/audit-account.json` (or DEVTEAM_AUDIT_EMAIL / "
+                    "DEVTEAM_AUDIT_PASSWORD) and that the account can sign in "
+                    "against the real backend")
         return (f"last walk did not reach the goal ({data.get('outcome') or '?'})"
                 + (f": {reason[:160]}" if reason else "") + hint)
     return None

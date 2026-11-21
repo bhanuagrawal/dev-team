@@ -63,6 +63,16 @@ design tokens. Copy the project's idiom; do not introduce a second one.
 
 - `context.build.compile` runs green, in this tree.
 - Every journey in `context.journeys` can still be walked on this change.
+- **The task spec says what the walk had to SEE.** Fill `walk.observables` with
+  the words that can only be on screen if this change runs (a row's label, the
+  sentence it added, the heading it must draw) and, when one journey opens it,
+  `walk.flows` with that journey's id. `ux-flow` records every step's on-screen
+  text and `verify` refuses a walk that never showed them — a green walk over a
+  journey that does not touch this code is not evidence (2026-11-21: a `search`
+  walk passed while the progress card was never on screen). Walks run against
+  the real backend and sign in with the audit account in
+  `.pipeline/audit-account.json` (gitignored; `DEVTEAM_AUDIT_EMAIL` /
+  `DEVTEAM_AUDIT_PASSWORD` win); there is no fixture backend to walk against.
 - For a UI task: the change matches the exported screen in
   `docs/stitch/screens/<id>/` (layout, type, spacing, imagery), not a token
   description of it.

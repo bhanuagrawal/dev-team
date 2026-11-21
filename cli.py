@@ -1720,6 +1720,13 @@ def cmd_pick(args: argparse.Namespace) -> int:
     # question before writing UI, not at verify time after inventing the screen.
     from team.spec import attach as attach_spec_context
     task = attach_spec_context(project, task)
+    # The release gate asks the walk to SHOW the change (`verify` reads
+    # walk.flows / walk.observables). Putting the empty field on the spec is what
+    # makes the question visible at development time instead of at verify time,
+    # after a walk that proved a different thing passed: the progress card shipped
+    # unphotographed on 2026-11-21 because a green `search` walk was accepted as
+    # evidence about a change the search journey never touches.
+    task.setdefault("walk", {"flows": [], "observables": []})
     spec_path = pdir / f"{task['id']}.json"
     spec_path.write_text(json.dumps(task, indent=2) + "\n")
     run_info = task.get("run") or {"entries": 1,
@@ -2584,14 +2591,6 @@ def cmd_flow_peer(args: argparse.Namespace) -> int:
     return flow_peer.main(project, args)
 
 
-def cmd_mock_server(args: argparse.Namespace) -> int:
-    """Foreground mock backend: deterministic Supabase shapes, no real project."""
-    project = resolve_project(args.project)
-    from team import mock_server
-    return mock_server.serve(project.name, port=args.port or mock_server.DEFAULT_PORT,
-                             log=lambda m: print(f"[{project.name}] {m}"))
-
-
 def cmd_ux_flow(args: argparse.Namespace) -> int:
     """Goal-declared journeys, navigated by a vision model, judged as a person."""
     project = resolve_project(args.project)
@@ -2607,9 +2606,7 @@ def cmd_ux_flow(args: argparse.Namespace) -> int:
                       keep_emulator=getattr(args, "keep_emulator", False),
                       max_steps=getattr(args, "max_steps", None),
                       worktree=(Path(args.worktree).expanduser()
-                                if getattr(args, "worktree", None) else None),
-                      mock=getattr(args, "mock", False),
-                      mock_port=getattr(args, "mock_port", None))
+                                if getattr(args, "worktree", None) else None))
     if not res["planned"]:
         print(ux_flow.status_report(project))
         return 0
@@ -2641,9 +2638,6 @@ def cmd_ux_flow(args: argparse.Namespace) -> int:
             print(f"  · {d.get('severity', '')}{elem} {d.get('line', '')}")
         if r.get("verdict"):
             print(f"  verdict: {r['verdict']}")
-        if r.get("mock_requests"):
-            print("  mock backend: " + ", ".join(
-                f"{x['method']} {x['path'].split('/')[-1]}" for x in r["mock_requests"][:8]))
         if r.get("model_error"):
             print(f"  ~ the judge could not run: {r['model_error']}")
         if not r["goal_reached"] and r.get("reason"):
@@ -5926,11 +5920,6 @@ def main() -> None:
     uf.add_argument("--worktree", metavar="PATH",
                     help="audit THIS task worktree instead of origin/main — the point is "
                          "to walk a change before it is merged (and before CI)")
-    uf.add_argument("--mock", action="store_true",
-                    help="serve a local Supabase-shaped mock and point the DEBUG build at "
-                         "it, so a journey can be walked past sign-in to the end")
-    uf.add_argument("--mock-port", type=int, default=None,
-                    help="port for the mock (default 54399, or the next free one)")
     uf.add_argument("--via", choices=["api"], default="api",
                     help="the vision model that navigates (the API; browser Gemini is "
                          "the asset maker, not a navigator)")
@@ -5965,12 +5954,6 @@ def main() -> None:
     fp.add_argument("--anon-key", help="override the public anon key read from the app")
     fp.add_argument("--json", action="store_true")
     fp.set_defaults(fn=cmd_flow_peer)
-    ms = sub.add_parser("mock-server", help="serve a local Supabase-shaped mock backend "
-                                            "(deterministic fixtures) for a manual or audited "
-                                            "walk of a debug build")
-    ms.add_argument("project")
-    ms.add_argument("--port", type=int, default=None)
-    ms.set_defaults(fn=cmd_mock_server)
     tt = sub.add_parser("tree"); tt.add_argument("project")
     tt.add_argument("--html", action="store_true", help="write the html view and print its path")
     tt.add_argument("--open", action="store_true", help="open the html view in the browser")
