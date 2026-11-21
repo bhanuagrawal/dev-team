@@ -411,16 +411,56 @@ def _screenshot(serial: str, dest: Path) -> bool:
     return False
 
 
-def audit_account(project: Path) -> dict:
+def _declares_internet(root: Path) -> bool | None:
+    """Whether the app at `root` asks Android for network access.
+
+    `None` when there is no manifest to read (not an Android project, or a tree
+    this pass cannot see) — then the caller keeps its ordinary rule. `False` is
+    a positive statement: every manifest in the tree omits INTERNET, so the
+    build has no network capability at all and ships no backend to sign in to.
+    """
+    manifests: list[Path] = []
+    try:
+        for path in root.rglob("AndroidManifest.xml"):
+            rel = path.relative_to(root).as_posix()
+            if (rel.startswith(".") or "/." in rel or "/build/" in rel
+                    or rel.startswith("build/") or "/node_modules/" in rel):
+                continue
+            manifests.append(path)
+            if len(manifests) >= 40:
+                break
+    except OSError:
+        return None
+    if not manifests:
+        return None
+    for path in manifests:
+        try:
+            text = path.read_text(errors="ignore")
+        except OSError:
+            continue
+        if "android.permission.INTERNET" in text:
+            return True
+    return False
+
+
+def audit_account(project: Path, root: Path | None = None) -> dict:
     """The real-backend account every walk signs in with.
 
     Read from `<project>/.pipeline/audit-account.json` (gitignored: it is a
     credential, not project state) or from `DEVTEAM_AUDIT_EMAIL` /
     `DEVTEAM_AUDIT_PASSWORD`. No fallback account is compiled in, and there is no
     fixture backend to fall back to: a walk that cannot sign in has not verified
-    the change, and it must say that rather than reach the goal through a door
-    production does not have.
+    the change.
+
+    ONE APP HAS NOTHING TO SIGN IN TO. A build whose manifests declare no
+    INTERNET permission cannot reach a backend (FieldCert stores to Room and
+    exports a PDF on the device), so demanding an account there would be asking
+    for a door production does not have — the same error as a fixture backend,
+    pointing the other way. The walk then runs offline and says so; the app's
+    own code is still the thing on screen. A tree with no manifest at all is not
+    a claim about the network and keeps the ordinary refusal.
     """
+
     data: dict = {}
     path = project / ".pipeline" / "audit-account.json"
     try:
@@ -431,6 +471,9 @@ def audit_account(project: Path) -> dict:
     email = str(os.environ.get("DEVTEAM_AUDIT_EMAIL") or data.get("email") or "").strip()
     password = str(os.environ.get("DEVTEAM_AUDIT_PASSWORD") or data.get("password") or "")
     if not email or not password:
+        if _declares_internet(Path(root) if root else project) is False:
+            return {"email": "", "password": "", "profile": {},
+                    "offline": True}
         raise SystemExit(
             "ux-flow: no audit account — walks run against the real backend and need "
             "one. Put {\"email\": \"…\", \"password\": \"…\"} in "
@@ -1210,10 +1253,15 @@ def run(project: Path, only: str | None = None, log=None, avd: str | None = None
     if not todo:
         return {"planned": 0, "run": [], "skipped": [], "failed": []}
 
-    account = audit_account(project)
+    account = audit_account(project,
+                            root=(Path(worktree) if worktree else None))
     if log:
-        log("~ ux-flow: real backend, signing in as the audit account "
-            f"({account['email']})")
+        if account.get("offline"):
+            log("~ ux-flow: this app declares no INTERNET permission — it ships "
+                "with no backend, so the walk runs offline (nothing to sign in to)")
+        else:
+            log("~ ux-flow: real backend, signing in as the audit account "
+                f"({account['email']})")
 
     serial, started = emulator.require_device(avd=avd, log=log,
                                               purpose="ux-flow")
@@ -1232,12 +1280,19 @@ def run(project: Path, only: str | None = None, log=None, avd: str | None = None
             # The audit account is the one identity every walk signs in with. The
             # spec may name a PROFILE override (a name/handle for an onboarding
             # form), never a password: credentials in a committed journey spec
-            # would be a secret in the repo.
-            flow = {**flow,
-                    "credentials": {"email": account["email"],
-                                    "password": account["password"],
-                                    **(flow.get("credentials") or {})},
-                    "profile": {**account["profile"], **(flow.get("profile") or {})}}
+            # would be a secret in the repo. An offline build has no sign-in to
+            # fill, so no credential door is handed to the walker.
+            if account.get("offline"):
+                flow = {**flow,
+                        "profile": {**account["profile"],
+                                    **(flow.get("profile") or {})}}
+            else:
+                flow = {**flow,
+                        "credentials": {"email": account["email"],
+                                        "password": account["password"],
+                                        **(flow.get("credentials") or {})},
+                        "profile": {**account["profile"],
+                                    **(flow.get("profile") or {})}}
             fid = str(flow["id"])
             try:
                 res = audit_flow(

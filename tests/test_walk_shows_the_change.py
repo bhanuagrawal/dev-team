@@ -151,10 +151,43 @@ class AuditAccountTest(unittest.TestCase):
         self.assertEqual("env", got["password"])
 
     def test_no_account_refuses_instead_of_using_a_fixture(self):
+        # A tree that names no manifest is not a claim about the network, so the
+        # ordinary rule holds: an account is required.
+        manifest_dir = self.root / "app" / "src" / "main"
+        manifest_dir.mkdir(parents=True)
+        (manifest_dir / "AndroidManifest.xml").write_text(
+            '<manifest xmlns:android="http://schemas.android.com/apk/res/android">'
+            '<uses-permission android:name="android.permission.INTERNET" />'
+            "</manifest>")
         with self.assertRaises(SystemExit) as caught:
             ux_flow.audit_account(self.root)
         self.assertIn("audit-account.json", str(caught.exception))
         self.assertIn("no mock backend", str(caught.exception))
+
+    def test_an_app_that_cannot_reach_a_network_walks_offline(self):
+        # FieldCert ships no backend at all: its manifest (and every other one in
+        # the tree) omits INTERNET, so there is no sign-in to invent either way.
+        manifest_dir = self.root / "app" / "src" / "main"
+        manifest_dir.mkdir(parents=True)
+        (manifest_dir / "AndroidManifest.xml").write_text(
+            '<manifest xmlns:android="http://schemas.android.com/apk/res/android">'
+            '<uses-permission android:name="android.permission.CAMERA" />'
+            "</manifest>")
+        got = ux_flow.audit_account(self.root)
+        self.assertTrue(got.get("offline"))
+        self.assertEqual("", got["email"])
+
+    def test_one_manifest_with_internet_keeps_the_account_rule(self):
+        for rel in ("app/src/main/AndroidManifest.xml",
+                    "composeApp/src/androidMain/AndroidManifest.xml"):
+            path = self.root / rel
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(
+                '<manifest xmlns:android="http://schemas.android.com/apk/res/android">'
+                '<uses-permission android:name="android.permission.INTERNET" />'
+                "</manifest>")
+        with self.assertRaises(SystemExit):
+            ux_flow.audit_account(self.root)
 
 
 class WatcherTest(unittest.TestCase):
