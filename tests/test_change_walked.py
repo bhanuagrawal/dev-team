@@ -98,6 +98,20 @@ class ChangeWalkedTest(unittest.TestCase):
                 verify._change_walked_problem(self.root, self.root, [rel], self.flows), None,
                 rel)
 
+    def test_test_sources_inside_the_module_are_not_code_a_device_runs(self):
+        # Android and KMP keep tests in the same `src/` root as the screens, so a
+        # unit test or a preview harness must not demand a device walk of itself.
+        self._walk(age=600)
+        for rel in ("app/src/test/java/x/StorefrontPreviews.kt",
+                    "app/src/androidTest/java/x/AuditFlowTest.kt",
+                    "composeApp/src/commonTest/kotlin/PlaceTest.kt"):
+            path = self.root / rel
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text("// test\n")
+            self._touch(path, age=60)
+            self.assertIsNone(
+                verify._change_walked_problem(self.root, self.root, [rel], self.flows), rel)
+
 
 if __name__ == "__main__":
     unittest.main()

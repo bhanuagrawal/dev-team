@@ -566,13 +566,23 @@ _NOT_CODE = ("docs/", ".pipeline/", "distribution/", "tests/", "test/")
 
 def _changed_code(project: Path, worktree: Path,
                   files: list[str]) -> tuple[str, float]:
-    """The newest file this diff changed that a device would have to run."""
+    """The newest file this diff changed that a device would have to run.
+
+    Test sources are not run by the shipped app. Android and KMP keep unit and
+    instrumented tests inside the SAME `src/` root as the screens
+    (`app/src/test/...`, `composeApp/src/commonTest/...`), which the prefix list
+    above never matched — so a test-only edit demanded a device walk of a unit
+    test (observed 2026-11-22, a preview harness beside the screens it previews).
+    The test classifier is the team's own, the one the design and scope gates read.
+    """
+    from . import code_tests
+
     which, newest = "", 0.0
     for rel in files:
         posix = Path(rel).as_posix()
         if not posix.lower().endswith(_CODE_SUFFIXES):
             continue
-        if posix.startswith(_NOT_CODE):
+        if posix.startswith(_NOT_CODE) or code_tests.is_test_path(posix):
             continue
         for base in (worktree, project):
             try:
