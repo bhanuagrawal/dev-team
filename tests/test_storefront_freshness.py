@@ -162,5 +162,69 @@ class SourceProvenanceTests(unittest.TestCase):
         self.assertIn("moved since the frames were drawn", why)
 
 
+class WorktreeProvenanceTests(unittest.TestCase):
+    """A run that redraws its own screens is measured against its own tree.
+
+    `record_listing(tree=...)` writes `rendered_from_worktree` + the tree's
+    shipped-source sha, because the pixels are that tree's build — the delivery
+    ref cannot contain the change yet. Comparing the block to origin/main (as if
+    it were a delivery render) refused every run that fixed a screen and its
+    listing together; the block still names the tree, so publish keeps asking for
+    a delivery render after the merge.
+    """
+
+    def setUp(self):
+        self.repo = Path(tempfile.mkdtemp())
+        self.env = {
+            "GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@example.com",
+            "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@example.com",
+            "PATH": "/usr/bin:/bin:/usr/local/bin:/opt/homebrew/bin",
+        }
+        (self.repo / "composeApp/src/main/kotlin").mkdir(parents=True)
+        self._git("init", "-b", "main")
+        (self.repo / "composeApp/build.gradle.kts").write_text(
+            'android {\n    defaultConfig {\n        versionName = "1.0.0"\n    }\n}\n')
+        (self.repo / "composeApp/src/main/kotlin/Home.kt").write_text(
+            "@Composable fun Home() { Text(\"hi\") }\n")
+        shot = sfr.listing_dir(self.repo)
+        shot.mkdir(parents=True)
+        _png(shot / "01_hero.png", sfr.CANVAS_W, sfr.CANVAS_H)
+        self._commit()
+        self._git("update-ref", "refs/remotes/origin/main", "HEAD")
+        run_tree = Path(tempfile.mkdtemp()) / "run"
+        self._git("worktree", "add", str(run_tree), "HEAD")
+        sfr.record_listing(self.repo, tree=run_tree)
+
+    def _git(self, *args: str) -> str:
+        import os
+        import subprocess
+
+        out = subprocess.run(["git", "-C", str(self.repo), *args],
+                             capture_output=True, text=True,
+                             env={**os.environ, **self.env})
+        if out.returncode != 0:
+            raise AssertionError(f"git {' '.join(args)} failed: {out.stderr}")
+        return out.stdout.strip()
+
+    def _commit(self) -> None:
+        self._git("add", "-A")
+        self._git("commit", "-m", "snapshot", "-q")
+
+    def test_a_run_that_drew_its_own_screens_matches_its_own_tree(self):
+        ok, why = sfr.listing_freshness(self.repo)
+        self.assertTrue(ok, why)
+        self.assertIn("re-render from origin/main", why)
+
+    def test_a_newer_delivery_commit_stales_a_delivery_render(self):
+        sfr.record_listing(self.repo)
+        (self.repo / "composeApp/src/main/kotlin/Home.kt").write_text(
+            "@Composable fun Home() { Text(\"bye\") }\n")
+        self._commit()
+        self._git("update-ref", "refs/remotes/origin/main", "HEAD")
+        ok, why = sfr.listing_freshness(self.repo)
+        self.assertFalse(ok)
+        self.assertIn("moved since the frames were drawn", why)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -443,8 +443,20 @@ def listing_freshness(project: Path) -> tuple[bool, str]:
     source = str(block.get("ui_path") or ui_source(project))
     # The ref CI ships is origin/main (law 2): a checkout that lags must not make
     # a truthful render look stale, which is exactly what happened on 2026-11-13.
-    now_ui = (_ui_sha(project, source, "origin/main")
-              or _ui_sha(project, source))
+    if block.get("rendered_from_worktree"):
+        # A RUN CANNOT PHOTOGRAPH A BUILD THAT IS NOT ON MAIN YET. When this diff
+        # redraws the screens it changes, the pixels come from the task tree and
+        # `record_listing` stamped THAT tree's shipped source — so the honest
+        # comparison is that tree's own sha, not the delivery ref's. Comparing
+        # against origin/main here refused every run that fixed a screen and its
+        # listing together, which is the one case the gate is asking for. This is
+        # not delivery evidence: the block still says `worktree`, `store-publish`
+        # reads it and refuses until a render from origin/main replaces it, and
+        # the verdict below carries the same instruction.
+        now_ui = _ui_sha(project, source) or _ui_sha(project, source, "origin/main")
+    else:
+        now_ui = (_ui_sha(project, source, "origin/main")
+                  or _ui_sha(project, source))
     if now_ui and str(block.get("ui_sha") or "") != now_ui:
         problems.append(f"{source} moved since the frames were drawn "
                         f"({str(block.get('ui_sha') or 'unrecorded')[:12]} -> {now_ui[:12]}): "
