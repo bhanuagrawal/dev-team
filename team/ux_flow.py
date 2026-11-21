@@ -112,6 +112,12 @@ Choose the SINGLE next action that moves a real user closest to the goal:
             shows only the visible part of a screen; a request or continue control
             is often further down, and a screen is not a dead end until it has been
             scrolled.
+  wait    — "seconds": 2 to 15, when the screen is finishing something ON ITS OWN
+            and there is nothing to tap yet: a countdown, a breath, a spinner, a
+            line that says it is loading or finishing. Nothing is touched; you
+            look again when the time has passed and then decide. This is the right
+            action for a timer, never stuck — a screen that will advance itself is
+            not a wall.
   back    — leave a screen that cannot progress this journey
   done    — the goal is reached on this screen
   stuck   — the app blocks a person here (say what is missing), or the journey
@@ -136,6 +142,7 @@ Reply with JSON only, no prose, no code fences:
   {{"action": "submit", "why": "run the search"}}
   {{"action": "type", "index": 6, "field": "name", "why": "one short line"}}
   {{"action": "scroll", "direction": "down", "why": "one short line"}}
+  {{"action": "wait", "seconds": 7, "why": "the breath is still counting down"}}
   {{"action": "back", "why": "one short line"}}
   {{"action": "done", "why": "what proves the goal is reached"}}
   {{"action": "stuck", "why": "what a person would be unable to do here"}}
@@ -878,6 +885,27 @@ def audit_flow(project: Path, flow: dict, serial: str, log=None,
             steps.append({"n": step, "did": "stopped", "then": reason,
                           "screen": screen, "action": "stuck"})
             break
+        if action == "wait":
+            # A screen that advances ITSELF is not a wall. The first breath of a
+            # fresh install is seven seconds of countdown with nothing to touch,
+            # and the walker had no action for it, so it chose `stuck` and the
+            # journey was recorded as the app failing (2026-11-22, twice: once
+            # as a premature `done`, then as a stuck timer). Waiting is a step:
+            # look again afterwards and decide on what the screen became.
+            try:
+                seconds = float(decision.get("seconds") or 5)
+            except (TypeError, ValueError):
+                seconds = 5.0
+            seconds = max(1.0, min(seconds, 15.0))
+            if log:
+                log(f"~ ux-flow: '{fid}' step {step} — waiting {seconds:.0f}s for "
+                    f"the screen to finish on its own")
+            time.sleep(seconds)
+            steps.append({"n": step, "did": f"waited {seconds:.0f}s",
+                          "then": "let the screen finish on its own",
+                          "screen": screen, "action": "wait"})
+            continue
+
         if action == "scroll":
             direction = str(decision.get("direction") or "down").strip().lower()
             w, hh = _screen_size(serial)
