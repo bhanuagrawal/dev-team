@@ -58,6 +58,7 @@ import json
 import os
 import re
 import subprocess
+import threading
 import time
 from pathlib import Path
 
@@ -553,6 +554,29 @@ def _screen_texts(xml: str, pkg: str = "") -> list[str]:
     return seen[:200]
 
 
+def _watch_screen(serial: str, pkg: str, seen: list[str],
+                  stop: threading.Event) -> None:
+    """Keep the screen's words while the model is deciding.
+
+    The model call is the longest silence in a walk (~8s), and it is exactly when
+    a live turn draws its progress: the plan arrives, rows tick, the card
+    collapses into the finished feed. A recorder that only reads the tree at the
+    step boundary samples the before and after and misses the change (2026-11-21:
+    the progress card was on screen for seconds and never in a recorded step).
+    Sampling here is deterministic — same accessibility tree, no model — and
+    costs no wall-clock time because it runs beside the request.
+    """
+    from .ux_video import _ui_xml
+    while not stop.is_set():
+        try:
+            for text in _screen_texts(_ui_xml(serial), pkg):
+                if text not in seen:
+                    seen.append(text)
+        except Exception:
+            pass
+        stop.wait(0.8)
+
+
 def _window_title(serial: str, pkg: str) -> str:
     """The focused activity's short name — never a fragment of it.
 
@@ -748,7 +772,9 @@ def audit_flow(project: Path, flow: dict, serial: str, log=None,
         creds = flow.get("credentials") or {}
         profile = flow.get("profile") or {}
         credentials = ("CREDENTIALS for this journey: email and password are available — "
-                       "use action type with field=email/password.\n"
+                       "use action type with field=email/password, then the app's sign-in "
+                       "control. Do NOT create a new account: the audit account already "
+                       "exists, so sign in to it.\n"
                        if creds.get("email") and creds.get("password") else
                        "CREDENTIALS: none. You cannot sign in or create an account: a "
                        "text field is where a human takes over.\n")
@@ -765,7 +791,16 @@ def audit_flow(project: Path, flow: dict, serial: str, log=None,
             credentials=credentials,
             targets=_label_list(targets), dead=dead_line)
         model_calls += 1
-        decision = _ask(cfg, prompt, still)
+        stop = threading.Event()
+        watcher = threading.Thread(target=_watch_screen,
+                                   args=(serial, pkg, seen_texts[step], stop),
+                                   daemon=True)
+        watcher.start()
+        try:
+            decision = _ask(cfg, prompt, still)
+        finally:
+            stop.set()
+            watcher.join(timeout=6)
         live = decision.get("reaction")
         if isinstance(live, dict) and str(live.get("line") or "").strip():
             if log:
@@ -922,7 +957,13 @@ def audit_flow(project: Path, flow: dict, serial: str, log=None,
             _adb(serial, ["shell", "input", "keyevent", *(["67"] * 60)], timeout=60)
             _adb(serial, ["shell", "input", "text", value.replace(" ", "%s")], timeout=30)
             time.sleep(0.6)
-            typed = value[:4].lower() in (ux_video._ui_xml(serial) or "").lower()
+            # A password field masks what it took, by design: the dump shows dots,
+            # not the value, so "the text is not on screen" would report a working
+            # field as a DEAD CONTROL on every real sign-in (2026-11-21).
+            masked = (role == "password" or
+                      any(k in (target["label"] or "").lower()
+                          for k in ("pass", "secret")))
+            typed = masked or value[:4].lower() in (ux_video._ui_xml(serial) or "").lower()
             what = f"{value[:24]!r}" if literal else f"the {field}"
             steps.append({"n": step, "did": f"typed {what} into "
                                             f"{target['label'] or 'the field'}",

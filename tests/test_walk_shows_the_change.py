@@ -157,6 +157,27 @@ class AuditAccountTest(unittest.TestCase):
         self.assertIn("no mock backend", str(caught.exception))
 
 
+class WatcherTest(unittest.TestCase):
+    """The recorder keeps what passed while the model was deciding."""
+
+    def test_words_seen_during_the_model_call_are_kept(self):
+        import threading
+        from unittest import mock
+        stop = threading.Event()
+        seen: list[str] = []
+        xml = '<node text="Looking around your neighbourhood" package="app" bounds="[0,0][9,9]"/>'
+
+        def fake_dump(_serial):
+            stop.set()
+            return xml
+
+        with mock.patch.object(ux_flow, "_screen_texts",
+                               wraps=ux_flow._screen_texts), \
+             mock.patch("team.ux_video._ui_xml", side_effect=fake_dump):
+            ux_flow._watch_screen("device", "app", seen, stop)
+        self.assertEqual(["Looking around your neighbourhood"], seen)
+
+
 class WalkRecordsWhatItSawTest(unittest.TestCase):
     """The recorder itself: the screen's words, straight from the dump."""
 
