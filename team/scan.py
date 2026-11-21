@@ -327,15 +327,27 @@ def _delivered_slugs_from_runs(state: dict) -> set[str]:
     blind, so `pick` re-serves already-delivered work as the run's head (a queue
     entry outlived the release that delivered it this way, and the plan's "next
     task" was work that had already shipped). The runs ledger always carries the
-    task id, and that id is derived from the label, so the id is the identity."""
+    task id, and that id is derived from the label, so the id is the identity.
+
+    TWO id shapes reach this ledger and both are read. `pick` mints
+    `dt-<label-slug>-<seq>`, whose sequence suffix is not part of the identity.
+    A run recorded from an ADMITTED task ids itself with the queue label
+    unchanged (`bugfix-<words>-<date>` — no `dt-`, no sequence), and skipping
+    those was the same bug wearing a different spelling: the run carried no
+    spec, the entry stayed in the queue, and the next pick would have rebuilt
+    work that had already shipped."""
     out: set[str] = set()
     for r in state.get("runs") or []:
         if r.get("result") != "shipped":
             continue
         tid = str(r.get("task_id") or "")
-        if not tid.startswith("dt-"):
+        if not tid:
             continue
-        slug = re.sub(r"-\d+$", "", tid[3:]).strip("-")
+        if tid.startswith("dt-"):
+            base = re.sub(r"-\d+$", "", tid[3:]).strip("-")
+        else:
+            base = tid.strip("-")
+        slug = _label_task_slug(base)
         if slug:
             out.add(slug)
     return out
