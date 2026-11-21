@@ -166,6 +166,39 @@ def ui_source(project: Path) -> str:
     return f"{_module_of(project)}/src"
 
 
+# Android and KMP keep their tests inside the SAME `src/` root as the screens, so
+# a fingerprint taken over `composeApp/src` moves whenever a test file moves —
+# and the listing is then accused of showing screens an older commit drew when
+# not one pixel changed (observed 2026-11-21: `ui_sha` moved on a commit that
+# only touched `composeApp/src/androidUnitTest/...`). A screenshot is a picture
+# of shipped code, so the pathspec that measures it excludes every test set.
+_TEST_SOURCE_SETS = ("*Test", "test", "androidTest", "androidInstrumentedTest")
+
+
+def ui_pathspecs(project: Path, source: str | None = None) -> list[str]:
+    """The git pathspecs that mean "code a store screenshot is a picture of".
+
+    The module root plus one exclusion per test source set. Both the folder and
+    everything under it are excluded: git matches a wildcard pathspec against the
+    full path, so `src/*Test` alone does not reliably cover the files inside.
+    """
+    src = str(source or ui_source(project)).rstrip("/")
+    specs = [src]
+    for name in _TEST_SOURCE_SETS:
+        specs.append(f":(exclude){src}/{name}")
+        specs.append(f":(exclude){src}/{name}/**")
+    return specs
+
+
+def _ui_sha(tree: Path, source: str, ref: str | None = None) -> str:
+    """Last commit that touched SHIPPED source (never a test set) — see above."""
+    args = ["log", "-1", "--format=%H"]
+    if ref:
+        args.append(ref)
+    args += ["--", *ui_pathspecs(tree, source)]
+    return _git_out(tree, args)
+
+
 # versionName may be a literal or an env override with a literal default; the
 # literal is the version a plain build installs, which is what the frame shows.
 _VERSION_RE = re.compile(
@@ -289,12 +322,12 @@ def listing_record(project: Path, tree: Path | None = None) -> dict[str, Any]:
     if from_worktree:
         # The pixels describe THIS tree's HEAD, whatever it is. Never origin/main.
         ref_sha = _git_out(rendered, ["rev-parse", "HEAD"])
-        ui_sha = _git_out(rendered, ["log", "-1", "--format=%H", "--", source])
+        ui_sha = _ui_sha(rendered, source)
     else:
         # The delivery render draws origin/main, so the ref it describes is
         # origin/main even when the checkout itself lags (law: read the ref).
         ref_sha = _git_out(project, ["rev-parse", "origin/main"])
-        ui_sha = _git_out(project, ["log", "-1", "--format=%H", "origin/main", "--", source])
+        ui_sha = _ui_sha(project, source, "origin/main")
     return {
         "rendered_at": now_iso(),
         "ref": "worktree" if from_worktree else "origin/main",
@@ -410,8 +443,8 @@ def listing_freshness(project: Path) -> tuple[bool, str]:
     source = str(block.get("ui_path") or ui_source(project))
     # The ref CI ships is origin/main (law 2): a checkout that lags must not make
     # a truthful render look stale, which is exactly what happened on 2026-11-13.
-    now_ui = (_git_out(project, ["log", "-1", "--format=%H", "origin/main", "--", source])
-              or _git_out(project, ["log", "-1", "--format=%H", "--", source]))
+    now_ui = (_ui_sha(project, source, "origin/main")
+              or _ui_sha(project, source))
     if now_ui and str(block.get("ui_sha") or "") != now_ui:
         problems.append(f"{source} moved since the frames were drawn "
                         f"({str(block.get('ui_sha') or 'unrecorded')[:12]} -> {now_ui[:12]}): "

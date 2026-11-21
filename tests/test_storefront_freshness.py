@@ -97,5 +97,70 @@ class FreshnessTests(unittest.TestCase):
         self.assertIn(f"{sfr.CANVAS_W}x{sfr.CANVAS_H}", why)
 
 
+class SourceProvenanceTests(unittest.TestCase):
+    """A test file is not a screen: moving it must not stale the listing.
+
+    Android and KMP keep `androidUnitTest`/`commonTest` inside the same `src/`
+    root as the screens, so a fingerprint over `composeApp/src` moved on a commit
+    that drew nothing — and `store-readiness` then refused the listing as showing
+    "screens an older commit drew" (observed on Paddle, 2026-11-21).
+    """
+
+    def setUp(self):
+        self.repo = Path(tempfile.mkdtemp())
+        self.env = {
+            "GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@example.com",
+            "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@example.com",
+            "PATH": "/usr/bin:/bin:/usr/local/bin:/opt/homebrew/bin",
+        }
+        self._git("init", "-b", "main")
+        (self.repo / "composeApp/src/main/kotlin").mkdir(parents=True)
+        (self.repo / "composeApp/src/androidUnitTest/kotlin").mkdir(parents=True)
+        (self.repo / "composeApp/build.gradle.kts").write_text(
+            'android {\n    defaultConfig {\n        versionName = "1.0.0"\n    }\n}\n')
+        (self.repo / "composeApp/src/main/kotlin/Home.kt").write_text(
+            "@Composable fun Home() { Text(\"hi\") }\n")
+        (self.repo / "composeApp/src/androidUnitTest/kotlin/HomeTest.kt").write_text(
+            "class HomeTest { @Test fun x() {} }\n")
+        shot = sfr.listing_dir(self.repo)
+        shot.mkdir(parents=True)
+        _png(shot / "01_hero.png", sfr.CANVAS_W, sfr.CANVAS_H)
+        self._commit()
+        self._git("update-ref", "refs/remotes/origin/main", "HEAD")
+        sfr.record_listing(self.repo)
+
+    def _git(self, *args: str) -> str:
+        import os
+        import subprocess
+
+        out = subprocess.run(["git", "-C", str(self.repo), *args],
+                             capture_output=True, text=True,
+                             env={**os.environ, **self.env})
+        if out.returncode != 0:
+            raise AssertionError(f"git {' '.join(args)} failed: {out.stderr}")
+        return out.stdout.strip()
+
+    def _commit(self) -> None:
+        self._git("add", "-A")
+        self._git("commit", "-m", "snapshot", "-q")
+
+    def test_a_test_only_commit_does_not_stale_the_listing(self):
+        (self.repo / "composeApp/src/androidUnitTest/kotlin/HomeTest.kt").write_text(
+            "class HomeTest { @Test fun y() {} }\n")
+        self._commit()
+        self._git("update-ref", "refs/remotes/origin/main", "HEAD")
+        ok, why = sfr.listing_freshness(self.repo)
+        self.assertTrue(ok, why)
+
+    def test_a_shipped_source_commit_still_stales_the_listing(self):
+        (self.repo / "composeApp/src/main/kotlin/Home.kt").write_text(
+            "@Composable fun Home() { Text(\"bye\") }\n")
+        self._commit()
+        self._git("update-ref", "refs/remotes/origin/main", "HEAD")
+        ok, why = sfr.listing_freshness(self.repo)
+        self.assertFalse(ok)
+        self.assertIn("moved since the frames were drawn", why)
+
+
 if __name__ == "__main__":
     unittest.main()
