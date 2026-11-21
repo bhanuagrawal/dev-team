@@ -584,6 +584,23 @@ def _changed_code(project: Path, worktree: Path,
     return which, newest
 
 
+def _newest_walk(project: Path, flows: list[dict]) -> tuple[float, dict | None]:
+    """The most recently recorded walk among these journeys, and which journey."""
+    from . import ux_flow
+
+    walked, walked_flow = 0.0, None
+    for flow in flows:
+        result = (ux_flow.run_dir(project) / ux_flow._slug(str(flow["id"]))
+                  / "result.json")
+        try:
+            stamp = result.stat().st_mtime
+        except OSError:
+            continue
+        if stamp > walked:
+            walked, walked_flow = stamp, flow
+    return walked, walked_flow
+
+
 def _change_walked_problem(project: Path, worktree: Path, files: list[str],
                            flows: list[dict]) -> str | None:
     """The change itself must have been opened on a device before release.
@@ -599,24 +616,13 @@ def _change_walked_problem(project: Path, worktree: Path, files: list[str],
     declared journey, and four green walks from earlier builds vouched for a
     build none of them had opened.
     """
-    from . import ux_flow
-
     which, newest = _changed_code(project, worktree, files)
     if not newest:
         return None  # nothing a device executes in this diff
-    walked, walked_id = 0.0, ""
-    for flow in flows:
-        result = (ux_flow.run_dir(project) / ux_flow._slug(str(flow["id"]))
-                  / "result.json")
-        try:
-            stamp = result.stat().st_mtime
-        except OSError:
-            continue
-        if stamp > walked:
-            walked, walked_id = stamp, str(flow["id"])
+    walked, walked_flow = _newest_walk(project, flows)
     if walked >= newest:
         return None
-    named = f" (the newest walk was '{walked_id}')" if walked_id else ""
+    named = f" (the newest walk was '{walked_flow['id']}')" if walked_flow else ""
     return (f"the change in {which} has not been run on a device{named} — open it "
             "on an emulator before release (`devteam ux-flow <project> --worktree "
             "<tree> --mock`)")
@@ -624,98 +630,51 @@ def _change_walked_problem(project: Path, worktree: Path, files: list[str],
 
 def flow_gate(project: Path, worktree: Path, spec: dict | None,
               files: list[str]) -> tuple[bool, str]:
-    """THE release audit: every declared journey must have passed, on this diff.
+    """THE device test: the change you made has been run on an emulator.
 
-    Owner policy 2026-11-10 — "ux flow audit is mandatory for release, not any
-    other audit". Three things follow, and none of them is negotiable:
+    Owner rule 2026-11-20 — "jo banaya hai usko emulator pe test karo, fir
+    release" — narrowed on 2026-11-21: *"wo ux flow run wala rule hata do …
+    current change jo kiya hai wo emulator pe run karne wala laga do"*.
 
-      * a journey whose screen this diff touches must have been walked since;
-      * the walk must have REACHED ITS GOAL (a walk that stopped at a wall is a
-        finding, not a passing audit);
-      * there is no excuse field. `"flow_impact": "none"` was the loophole that
-        let releases ship with unwalked journeys — an emulator that never booted
-        got a reason recorded in the spec and the gate waved it through;
-      * the change must have been run. Owner rule 2026-11-20: "jo banaya hai
-        usko emulator pe test karo, fir release" — the newest walk must be newer
-        than the newest code file the diff touched ([_change_walked_problem]).
-        The walk is not tied to a commit id (owner, 2026-11-21: "wo ux flow run
-        wala rule hata do … current change jo kiya hai wo emulator pe run
-        karne wala laga do"): a rebase or a merge does not invalidate a walk
-        that already watched the change.
+    So the gate asks about THIS change, not about a schedule of journeys:
+    a diff that changes code a phone executes must have a walk recorded after
+    the newest file it touched, and that walk must have reached its goal. It is
+    no longer a refusal that another declared journey was last walked on an
+    older build, or that a journey whose screen this diff also touches was not
+    re-walked separately — the walk that watched the change is the evidence.
 
-    Deterministic and offline: it reads `docs/ux-flows.json` and the recorded
-    walks in `.pipeline/ux_flows/*/result.json`. It never boots a device — the
-    walking happens in `devteam ux-flow`, which the developer runs on its tree.
-    ux-audit stills, ux-video replays, storefront review and design drift are
-    advisory: they inform, they do not gate a release.
+    `devteam ux-flow` is how a journey is still walked (`--worktree` for a task
+    tree, `--mock` for the deterministic backend), and `.pipeline/ux_flows/*/
+    result.json` is where a walk is recorded. Nothing here boots a device: the
+    walking happens on the tree being released.
+
+    Docs, the journey spec, store copy and images are not code a phone runs, so
+    a docs-only diff needs no walk.
     """
-    from . import ux_audit, ux_flow
+    from . import ux_flow
     try:
-        # The tree being released declares its journeys, not the delivery ref:
-        # a branch that ADDS a journey is the branch that must walk it, and
-        # reading main here let a new journey ship unwatched. A worktree with no
-        # spec of its own falls back to the delivery ref rather than passing by
-        # declaring nothing.
         flows = ux_flow.declared(project, root=worktree) or ux_flow.declared(project)
     except Exception as exc:
         return True, f"flow gate could not read the journey spec ({exc})"
+    which, newest = _changed_code(project, worktree, files)
+    if not newest:
+        return True, "no code a device executes in this diff"
     if not flows:
-        return True, "no goal-declared journey — the ux-flow audit has nothing to walk"
-    surfaces = {s["label"].strip().lower(): s for s in ux_audit.surfaces(project)}
-    changed = {Path(f).as_posix() for f in files}
-    broken: list[str] = []
-    change_problem = _change_walked_problem(project, worktree, files, flows)
-    for flow in flows:
-        fid = str(flow["id"])
-        problem = ux_flow.walk_problem(project, flow)
-        if problem is None:
-            # It passed, but does the pass describe THIS diff? A walk older than
-            # the screen it walks is evidence about an older build.
-            surface = surfaces.get(str(flow.get("surface") or "").strip().lower())
-            touched = [rel for rel in
-                       (_repo_relative(project, p)
-                        for p in (surface or {}).get("paths") or [])
-                       if rel and (rel in changed
-                                   or any(Path(c).name == Path(rel).name
-                                          for c in changed))]
-            if touched:
-                result = ux_flow.run_dir(project) / ux_flow._slug(fid) / "result.json"
-                try:
-                    walked = result.stat().st_mtime
-                except OSError:
-                    walked = 0.0
-                newest = 0.0
-                for rel in touched:
-                    for base in (worktree, project):
-                        try:
-                            newest = max(newest, (base / rel).stat().st_mtime)
-                        except OSError:
-                            continue
-                if newest > walked:
-                    problem = "its screen changed after the last walk"
-        if problem:
-            broken.append(f"{fid} ({problem})")
-    if not broken:
-        if change_problem:
-            broken.append(change_problem)
-        else:
-            return True, f"{len(flows)} declared journey(s) passed on this diff"
-    blocked = ux_flow.active_block(project)
-    if blocked:
-        # Not the app: a human action unblocks this, so the gate says whose it is
-        # instead of handing the developer a defect it cannot fix in code.
+        return True, "no goal-declared journey — nothing records a walk for this change"
+    problem = _change_walked_problem(project, worktree, files, flows)
+    if problem:
+        return False, problem
+    walked, walked_flow = _newest_walk(project, flows)
+    if walked_flow is None:  # unreachable with the clock check, kept honest
+        return False, f"the change in {which} has not been run on a device"
+    fid = str(walked_flow["id"])
+    stop = ux_flow.walk_problem(project, walked_flow)
+    if stop:
         return False, (
-            "UX-FLOW AUDIT BLOCKED — this is NOT a product failure. "
-            f"{blocked['flow']}: {blocked['reason']} — the owner can unblock it: "
-            f"{blocked['ask']}. Nothing in the diff can fix this; say so in the "
-            "handover and ask. (`devteam ux-flow <project> --mock` avoids the "
-            "provider wall when the mock can complete the journey.)")
-    return False, (
-        "UX-FLOW AUDIT NOT PASSED — this is the release audit (owner policy "
-        "2026-11-10), so there is no excuse field to fill in: " + "; ".join(broken[:4]) +
-        ". Walk the journeys on this tree with `devteam ux-flow <project> --worktree "
-        "<tree> --flow <id>` and fix what stops them reaching their goal — an app that "
-        "compiles but cannot be used is not shippable.")
+            f"the newest walk on this tree ('{fid}') does not show the change "
+            f"working — {stop}. Fix what stopped it and walk again "
+            f"(`devteam ux-flow {project.name} --worktree <tree> --flow {fid} --mock`).")
+    return True, f"the change in {which} was run on a device (walk: '{fid}')"
 
 
 def design_gate(project: Path, worktree: Path, spec: dict | None,
@@ -1283,16 +1242,15 @@ def verify_all(project: Path, worktree: Path, base: str, log, gradle: bool = Tru
     except Exception as e:
         log(f"ux video: could not check (no flow signal): {e}")
 
-    # The JOURNEY half is the release audit itself — `flow_gate` above already ran
-    # it and refused if it did not pass, so there is no second, softer opinion
-    # here. What is printed is the evidence: which walks are current, which are
-    # older than the diff. (Owner policy 2026-11-10: the ux-flow audit is the
-    # audit that gates a release; every other audit informs.)
+    # The JOURNEY half is information. `flow_gate` above already refused when the
+    # change itself had no walk newer than it (owner rule 2026-11-20, narrowed
+    # 2026-11-21), so a journey whose last walk predates this diff is NOT a
+    # refusal — it is printed so the run says what it did not exercise.
     try:
         from . import ux_flow
         stale_journeys = ux_flow.stale_for_files(project, files)
         if stale_journeys:
-            log("ux flow: stale — " + "; ".join(
+            log("ux flow: not walked since this change — " + "; ".join(
                 f"{s['id']} ({s['why']})" for s in stale_journeys[:4]))
     except Exception as e:
         log(f"ux flow: could not check (no journey signal): {e}")

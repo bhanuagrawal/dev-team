@@ -47,12 +47,13 @@ missing kind/milestone) answers before anything executes.
    Owner rule 2026-11-20: *"jo banaya hai usko emulator pe test karo, fir
    release"*, narrowed on 2026-11-21: *"wo ux flow run wala rule hata do … current
    change jo kiya hai wo emulator pe run karne wala laga do"*. `verify` and
-   `release` refuse a journey that never passed, a walk that stopped at a wall,
-   or a code change with no walk newer than the file you changed. A walk is not
-   tied to a commit id (a rebase rewrites every sha without changing a pixel), but
-   it is recorded with the tree's `HEAD` so the handover names the build a person
-   opened. Every journey declared in `docs/ux-flows.json` — including `search`, so
-   location and query work can never ship unwatched again — must pass. The mock
+   `release` refuse a code change with no walk newer than the file you changed,
+   and a walk that stopped at a wall. They do **not** require every journey in
+   `docs/ux-flows.json` to be re-walked on every build: the walk that watched the
+   change is the evidence, and a journey last walked on an older build is
+   information, not a refusal. A walk is not tied to a commit id (a rebase
+   rewrites every sha without changing a pixel), but it is recorded with the
+   tree's `HEAD` so the handover names the build a person opened. The mock
    that walk runs against must answer in production's shapes (PostGIS geometry as
    hex EWKB, not the WKT the app writes) and behave as an oracle where it can: a
    fixture in a spelling production never sends is a fixture that hides the bug.

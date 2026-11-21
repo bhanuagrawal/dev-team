@@ -614,11 +614,12 @@ def run_doctor(project: Path, log) -> dict:
     report["tests"] = {"status": "ready", "blocked": [], "checks_passed": 1,
                        "note": "tests are retired — compile + the ux-flow audit are the gates"}
 
-    # THE RELEASE AUDIT (owner policy 2026-11-10): every declared journey must
-    # have reached its goal. `verify` and `release` refuse without it; doctor
-    # reports it as WARN (not "blocked", which the CLI relays to the owner as an
-    # ask), and a walk that stopped on something only a human can clear is named
-    # as the owner's in one line.
+    # DEVICE WALKS (owner rule 2026-11-20, narrowed 2026-11-21): the release gate
+    # needs the change you made walked on an emulator — not every declared journey
+    # re-walked on every build. doctor still names a journey whose last walk did
+    # not reach its goal, because that is evidence about the app, but it is a WARN
+    # and nothing here gates; a walk stopped on something only a human can clear is
+    # named as the owner's in one line.
     try:
         from . import ux_flow
         rows = ux_flow.declared(project)
@@ -631,10 +632,10 @@ def run_doctor(project: Path, log) -> dict:
                 report["ux-flow"] = {
                     "status": "warn", "blocked": [],
                     "checks_passed": len(rows) - len(problems),
-                    "note": ("this is THE release audit (no other audit gates a "
-                             f"release) — run `devteam ux-flow {project.name}` and fix "
-                             "what stops each journey; `verify` and `release` refuse "
-                             "until they all reach their goal"),
+                    "note": ("a journey's last walk did not reach its goal — walk it "
+                             f"with `devteam ux-flow {project.name}` and fix what "
+                             "stopped it; the release gate needs the change you made "
+                             "walked, not every journey re-walked every build"),
                 }
             else:
                 report["ux-flow"] = {"status": "ready", "blocked": [],

@@ -7,17 +7,19 @@ refuses.
 8. **No automatic guards beyond compile/tests — plus the one release audit.**
    Frozen paths, release-knob diffing and dependency declaration were retired by
    the owner (2026-10-31).
-   **The UX-FLOW AUDIT IS MANDATORY FOR RELEASE; NO OTHER AUDIT IS** (owner
-   policy 2026-11-10). `verify` and `release` both run it: every journey declared
-   in the project's `docs/ux-flows.json` must have been walked and must have
-   REACHED ITS GOAL (a walk that stopped at a wall is a finding, not a passing
-   audit), with no crash on the walk. **THE CHANGE YOU MADE MUST HAVE BEEN RUN**
-   (owner rule 2026-11-20: "jo banaya hai usko emulator pe test karo, fir
-   release"). The gate is a clock, not a commit id (owner, 2026-11-21: "wo ux
-   flow run wala rule hata do … current change jo kiya hai wo emulator pe run
-   karne wala laga do"): the newest walk must be newer than the newest code file
-   the diff touched, and a diff that changes no code a phone executes (docs, the
-   journey spec, store copy, images) needs no new walk. A walk is never tied to a
+   **THE CHANGE YOU MADE MUST HAVE BEEN RUN — walking every journey on every
+   build is not the rule** (owner rule 2026-11-20: "jo banaya hai usko emulator
+   pe test karo, fir release"; narrowed 2026-11-21: "wo ux flow run wala rule
+   hata do … current change jo kiya hai wo emulator pe run karne wala laga do").
+   `verify` and `release` both run this gate, and it asks about the diff: the
+   newest recorded walk must be newer than the newest code file the diff
+   touched, and that walk must have REACHED ITS GOAL with no crash (a walk that
+   stopped at a wall is a finding, not a passing audit). A journey whose screen
+   this diff touches is NOT required to be re-walked on its own, and a journey
+   last walked on an older build is no longer a refusal: the walk that watched
+   the change is the evidence. The gate is a clock, not a commit id (owner,
+   2026-11-21): a rebase or a merge rewrites every commit without changing a
+   pixel anyone watched. A walk is never tied to a
    sha — a rebase or a merge rewrites every commit without changing a pixel
    anyone watched — but it is still recorded with the tree's `HEAD`, so the
    handover can name the build a person actually opened. The rule exists because
@@ -34,8 +36,9 @@ refuses.
    hides the bug. There is no excuse field —
    `"flow_impact": "none"` was the loophole that let a release ship with unwalked
    journeys, and it is gone. `devteam ux-flow` exits non-zero on a journey that
-   did not reach its goal, and `doctor` reports the audit as BLOCKED until every
-   walk passes. `ux-audit` stills, `ux-video` replays, storefront review and
+   did not reach its goal, and `doctor` warns about journeys whose last walk
+   predates their screen — advisory, because the gate only needs the change
+   walked. `ux-audit` stills, `ux-video` replays, storefront review and
    design drift are **advisory**: they inform the run, they never gate a release.
    **No UI code without a design** (owner directive 2026-11-10): `verify` also
    refuses a UI diff whose task has no recorded design answer. Find it or get it

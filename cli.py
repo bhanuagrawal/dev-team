@@ -1352,13 +1352,14 @@ def cmd_release(args: argparse.Namespace) -> int:
         if _base:
             break
 
-    # THE UX-FLOW AUDIT IS THE RELEASE AUDIT (owner policy 2026-11-10), and
-    # release is the second, unavoidable answer for an agent that skipped
-    # `verify`. It reads the recorded walks, so it is cheap; it refuses BEFORE
-    # the bump so an unwalked or stuck journey never becomes a tag and a CI
-    # build. No other
-    # audit gates a release: ux-audit, ux-video, storefront review and design
-    # drift are advisory.
+    # THE CHANGE MUST HAVE BEEN RUN ON A DEVICE (owner rule 2026-11-20, narrowed
+    # 2026-11-21: "wo ux flow run wala rule hata do … current change jo kiya hai wo
+    # emulator pe run karne wala laga do"), and release is the second, unavoidable
+    # answer for an agent that skipped `verify`. It reads the recorded walks, so it
+    # is cheap; it refuses BEFORE the bump so a change nobody opened never becomes
+    # a tag and a CI build. Walking every declared journey per build is NOT the
+    # rule. No other audit gates a release: ux-audit, ux-video, storefront review
+    # and design drift are advisory.
     if _base:
         _ok_flow, _flow_msg = gates_mod.flow_gate(
             project, worktree, task, gates_mod.changed_files(worktree, _base))
