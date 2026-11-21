@@ -453,12 +453,12 @@ def audit_account(project: Path, root: Path | None = None) -> dict:
     the change.
 
     ONE APP HAS NOTHING TO SIGN IN TO. A build whose manifests declare no
-    INTERNET permission cannot reach a backend (FieldCert stores to Room and
-    exports a PDF on the device), so demanding an account there would be asking
-    for a door production does not have — the same error as a fixture backend,
-    pointing the other way. The walk then runs offline and says so; the app's
-    own code is still the thing on screen. A tree with no manifest at all is not
-    a claim about the network and keeps the ordinary refusal.
+    INTERNET permission cannot reach a backend (an app that stores to Room and
+    exports a PDF on the device is one), so demanding an account there would be
+    asking for a door production does not have — the same error as a fixture
+    backend, pointing the other way. The walk then runs offline and says so; the
+    app's own code is still the thing on screen. A tree with no manifest at all is
+    not a claim about the network and keeps the ordinary refusal.
     """
 
     data: dict = {}

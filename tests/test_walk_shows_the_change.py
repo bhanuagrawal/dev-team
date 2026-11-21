@@ -165,7 +165,7 @@ class AuditAccountTest(unittest.TestCase):
         self.assertIn("no mock backend", str(caught.exception))
 
     def test_an_app_that_cannot_reach_a_network_walks_offline(self):
-        # FieldCert ships no backend at all: its manifest (and every other one in
+        # An app that ships no backend at all: its manifest (and every other one in
         # the tree) omits INTERNET, so there is no sign-in to invent either way.
         manifest_dir = self.root / "app" / "src" / "main"
         manifest_dir.mkdir(parents=True)
