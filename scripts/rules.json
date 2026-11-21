@@ -209,7 +209,7 @@
       "doc": "docs/store.md",
       "kind": "enforcible",
       "proposal": "store-readiness/store-publish compare the source commit recorded for the painted frames (.pipeline/storefront_run.json + docs/storefront-frames.json composition) with the newest commit that touched each scene's bound composables in docs/storefront.json: a frame whose scene changed after the paint is reported as STALE and store-publish refuses it until `devteam storefront-build <project> --poster` repaints it.",
-      "note": "run-derived 2026-11-06 (Paddle v1.0.40): verify warned 'History changed (render), no audit since' while the listing's 03_summary/04_history posters still depicted the previous build, and every readiness check passed 25/25 because nothing compares the frames' source commit with the shipped screens."
+      "note": "run-derived 2026-11-06 (Paddle v1.0.40): verify warned 'History changed (render), no audit since' while the listing's 03_summary/04_history posters still depicted the previous build, and every readiness check passed 25/25 because nothing compares the frames' source commit with the shipped screens. | 2026-11-22: the live check (team/storefront_frames.listing_freshness) compares ONE ui_sha = the last commit touching all of app/src, not each scene's bound composables, so a commit that only changes motion, a theme or a test still reports LISTING FRAMES DESCRIBE AN OLDER BUILD - and the remedy re-renders PNGs whose only changed pixels are the clock the home screen prints. Narrow the comparison to the composables each scene binds (or compare rendered pixels), so the gate stops crying wolf on a commit no screenshot can see."
     },
     {
       "id": "launcher-icon-parity-for-vector-icons",

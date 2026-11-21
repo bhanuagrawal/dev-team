@@ -14,6 +14,7 @@ import argparse
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 import time
@@ -3333,6 +3334,33 @@ def _render_tree_is_delivery(tree: Path) -> bool:
     return bool(head) and head == remote and not dirty
 
 
+def _carry_rendered_scenes(project: Path, tree: Path) -> int:
+    """Copy this run's rendered scenes into the tree they were rendered FROM.
+
+    `--tree` renders a run's own worktree so the run can see its pixels, and those
+    pixels are NOT delivery evidence — they stay in that tree. Composing the
+    frames from the checkout anyway wrote a picture of unshipped code into the
+    owner's own listing and stamped its provenance in the checkout, while the tree
+    a release actually merges kept the old block: the run's own render made the
+    listing it shipped report "frames drawn from an older build" the moment the
+    work landed (observed 2026-11-22, a store-readiness blocker cleared and
+    re-created by the same command). Carrying the scenes across lets the frames
+    compose inside the tree, where the pixels and their provenance belong.
+    Returns how many files moved.
+    """
+    src = project / ".pipeline/storefront_scenes"
+    dst = tree / ".pipeline/storefront_scenes"
+    if not src.is_dir():
+        return 0
+    dst.mkdir(parents=True, exist_ok=True)
+    moved = 0
+    for f in src.iterdir():
+        if f.is_file():
+            shutil.copy2(f, dst / f.name)
+            moved += 1
+    return moved
+
+
 def cmd_storefront_scenes(args: argparse.Namespace) -> int:
     project = resolve_project(args.project)
     from team import storefront_preview as sp
@@ -3417,6 +3445,7 @@ def cmd_storefront_scenes(args: argparse.Namespace) -> int:
         print(f"  saved -> {path.relative_to(project)}")
 
     render_tree: Path | None = None
+    frame_root: Path = project
     if do_all or getattr(args, "render", False):
         print("~ rendering composables off-device (AGP layoutlib)")
         tree = None
@@ -3595,7 +3624,12 @@ def cmd_storefront_scenes(args: argparse.Namespace) -> int:
 
     if do_all or getattr(args, "frame", False):
         print("~ compositing marketing frames (1620x3200, 1080-wide opening)")
-        res = sp.compose_frames(project, log=print, force=getattr(args, "force", False),
+        if render_tree is not None and not _render_tree_is_delivery(render_tree):
+            moved = _carry_rendered_scenes(project, render_tree)
+            print(f"  = composing in {render_tree} ({moved} rendered scene(s) carried): "
+                  f"a run's own pixels stay in its own tree")
+            frame_root = render_tree
+        res = sp.compose_frames(frame_root, log=print, force=getattr(args, "force", False),
                                 tree=render_tree)
         if res.get("status") != "OK":
             print(f"  ✗ {res.get('error')}")
@@ -3603,7 +3637,7 @@ def cmd_storefront_scenes(args: argparse.Namespace) -> int:
         print(f"  {res.get('count', 0)} frame(s) -> distribution/listing/en-US/images/phoneScreenshots")
 
     if getattr(args, "status", False) or do_all:
-        st = sp.preview_status(project)
+        st = sp.preview_status(frame_root if (do_all or getattr(args, "frame", False)) else project)
         print(f"\nSTOREFRONT PREVIEW STATUS: {st.get('provenance') or 'not rendered'}")
         print(f"  scenes:   {', '.join(st.get('scenes') or []) or '(none)'}")
         print(f"  rendered: {st.get('rendered', 0)}")
