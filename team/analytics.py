@@ -17,10 +17,10 @@ CHECKED against two independent facts:
                           actually PASS that name to a send?
   * the GA4 property   — did a real user record it in the last 30 days?
 
-The second half of the first fact was added the day the audit ran: BookSwap
-declared `wish_created`/`offer_proposed` as constants and no screen ever sent
-them, so "the string is in the tree" certified two events the product never
-emitted — and the property's zeros read as "nobody uses the matchmaker".
+The second half of the first fact was added the day the audit ran: one app
+declared its two core events as constants and no screen ever sent them, so "the
+string is in the tree" certified two events the product never emitted — and the
+property's zeros read as "nobody uses that part of the product".
 
 A declared event that never lands is worse than an undeclared one: the plan
 reads its zero as "nobody does this" when the truth is "the app never said it".
@@ -231,11 +231,10 @@ def _quoted_lines(project: Path, names: list[str]) -> dict[str, list[tuple[str, 
 def emits(project: Path, names: list[str]) -> dict[str, bool]:
     """name -> does the delivered tree PASS it to a call, or only DECLARE it?
 
-    Why this exists (2026-11-22, found by the first audit): BookSwap's tracker
-    declared `wish_created`, `offer_proposed` and `book_added_manual` as
-    constants and no screen ever sent them, so `tree_contains` passed — "the
-    name is in the code" — while the product's two core acts recorded nothing
-    for 30 days. A constant is a name, not an event.
+    Why this exists (2026-11-22, found by the first audit): one app's tracker
+    declared three of its core events as constants and no screen ever sent them,
+    so `tree_contains` passed — "the name is in the code" — while those acts
+    recorded nothing for 30 days. A constant is a name, not an event.
 
     Only the shape that can be judged is judged: a constant assigned the literal
     (`const val WISH_CREATED = "wish_created"`) whose identifier is used nowhere
@@ -371,8 +370,9 @@ def audit(project: Path, profile: dict | None = None,
     # A `firebase` connection is two different facts: a property that would
     # receive events (with the SDK in the tree) or the App Distribution app the
     # release run uploads a build to (a delivery channel, never reader data).
-    # FieldCert 2026-11-22: `firebase` is the tester channel and the tree has no
-    # Firebase SDK, so treating it as telemetry asked the owner to break QA.
+    # 2026-11-22: a `firebase` entry with no SDK in the tree is the App
+    # Distribution app the release run uploads to; treating it as telemetry
+    # asked the owner to break QA.
     fb_property = bool(conns.get("firebase")) and bool(src.get("sdk"))
     ga_conn = bool(conns.get("ga4"))
     if m == "none":

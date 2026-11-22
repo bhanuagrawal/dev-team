@@ -392,10 +392,12 @@ def review(title: str, how: str = "", profile: dict | None = None,
     # events. The console rule is for creating/linking/granting the product; an
     # ask that names app code and an event to log is work in this repo.
     wants_code = (
-        re.search(r"\b(?:wire|instrument|emit|log|track|record)\b", text, re.I)
+        re.search(r"\b(?:wire|instrument|emit\w*|log\w*|track\w*|record\w*|send\w*)\b",
+                  text, re.I)
         and re.search(r"\b(?:events?|tracker|telemetry|lifecycle)\b", text, re.I)
         and re.search(r"\b(?:commonMain|androidMain|kotlin|viewmodel|composable|"
-                      r"source|module|app code|delegat\w*)\b", text, re.I)
+                      r"source|module|app code|delegat\w*|screen|repository|"
+                      r"call site)\b", text, re.I)
     )
     creates_resource = re.search(
         r"\b(?:create|enable|grant|link|register|add)\b.{0,40}"
