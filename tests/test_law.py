@@ -443,5 +443,49 @@ class LawWriteBlockTest(unittest.TestCase):
         self.assertEqual("", law.write_block(root, {"label": "x", "kind": "bugfix"}))
 
 
+class LawSurfaceTest(unittest.TestCase):
+    """Naming a surface is the undoable half of declaring the law.
+
+    WHY (2026-11-22): `--bind` first took multiple globs under ONE name, so a
+    clause bound to `app` failed on the second glob (`design/src/**` carried
+    nothing) — the fix is a distinct name per surface, and a wrong name had to be
+    removable without hand-editing profile.json. These pin the two pure helpers
+    the CLI prints and saves.
+    """
+
+    def test_bind_adds_each_glob_once_and_lowercases_the_name(self):
+        mapping, changed, problem = law.bind_surfaces(
+            {"site": ["docs/**"]}, [("App", "app/src/**"), ("app", "app/src/**")])
+        self.assertIsNone(problem)
+        self.assertEqual({"site": ["docs/**"], "app": ["app/src/**"]}, mapping)
+        self.assertEqual(["app ← app/src/**"], changed)
+
+    def test_bind_refuses_an_empty_pair(self):
+        _, _, problem = law.bind_surfaces({}, [("site", "  ")])
+        self.assertIn("--bind needs", problem)
+
+    def test_unbind_drops_one_glob_and_keeps_the_rest(self):
+        mapping, dropped, problem = law.unbind_surfaces(
+            {"app": ["composeApp/src/**", "design/src/**"]},
+            [["app", "design/src/**"]])
+        self.assertIsNone(problem)
+        self.assertEqual({"app": ["composeApp/src/**"]}, mapping)
+        self.assertEqual(["app ← design/src/**"], dropped)
+
+    def test_unbind_drops_the_whole_surface_when_no_glob_follows(self):
+        mapping, dropped, problem = law.unbind_surfaces(
+            {"app": ["app/src/**"], "site": ["docs/**"]}, [["app"]])
+        self.assertIsNone(problem)
+        self.assertEqual({"site": ["docs/**"]}, mapping)
+        self.assertEqual(["app (whole surface)"], dropped)
+
+    def test_unbind_refuses_an_unknown_name_or_glob(self):
+        _, _, problem = law.unbind_surfaces({"app": ["app/src/**"]}, [["web"]])
+        self.assertIn("no surface named", problem)
+        _, _, problem = law.unbind_surfaces({"app": ["app/src/**"]},
+                                            [["app", "docs/**"]])
+        self.assertIn("does not carry", problem)
+
+
 if __name__ == "__main__":
     unittest.main()

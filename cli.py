@@ -4321,25 +4321,32 @@ def cmd_law(args: argparse.Namespace) -> int:
         print("  next: cite the new sentence where it RENDERS, and change the "
               "code that relied on the old one — in this same branch")
 
+    # Naming a surface is part of declaring the law, and a wrong name must be
+    # undoable by the same verb that wrote it: `--unbind NAME [GLOB]` drops one
+    # glob, or the whole surface when no glob is given. Editing profile.json by
+    # hand is never how a project decides what it is.
+    if getattr(args, "unbind", None):
+        profile = profile_of(project)
+        mapping, dropped, problem = law_mod.unbind_surfaces(
+            profile.get("law_bindings") or {}, args.unbind)
+        if problem:
+            print(f"law: {problem}", file=sys.stderr)
+            return 2
+        profile["law_bindings"] = mapping
+        save_json(pipeline_dir(project) / "profile.json", profile)
+        print("law: unbound " + "; ".join(dropped))
+
     # A PUBLISHED PAGE TREE IS A LAW SURFACE, and naming it is part of declaring
     # the law (the project publishes pages no clause knows otherwise). One name
     # may map to several globs; `binds:` in a clause then points at the name.
     if getattr(args, "bind", None):
         profile = profile_of(project)
-        mapping = profile.setdefault("law_bindings", {})
-        changed = []
-        for name, glob in args.bind:
-            name = str(name).strip().lower()
-            glob = str(glob).strip()
-            if not name or not glob:
-                print("law: --bind needs a surface name and a glob: --bind site 'docs/**'",
-                      file=sys.stderr)
-                return 2
-            globs = list(mapping.get(name) or [])
-            if glob not in globs:
-                globs.append(glob)
-                mapping[name] = globs
-                changed.append(f"{name} ← {glob}")
+        mapping, changed, problem = law_mod.bind_surfaces(
+            profile.get("law_bindings") or {}, args.bind)
+        if problem:
+            print(f"law: {problem}", file=sys.stderr)
+            return 2
+        profile["law_bindings"] = mapping
         save_json(pipeline_dir(project) / "profile.json", profile)
         if changed:
             print("law: named surface(s) — " + "; ".join(changed))
@@ -6262,6 +6269,9 @@ def main() -> None:
                     help="name a law surface this project publishes, e.g. "
                          "--bind site 'docs/**' (required before a declared law can "
                          "pass with a page tree nobody named)")
+    lw.add_argument("--unbind", nargs="+", metavar="NAME [GLOB]", action="append",
+                    help="drop a glob from a named surface, or the whole surface "
+                         "when no glob follows (the undo of --bind)")
     lw.set_defaults(fn=cmd_law)
     from team.admit import KINDS as _ADMIT_KINDS
     rt = sub.add_parser("admit",

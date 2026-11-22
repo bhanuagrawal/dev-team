@@ -321,6 +321,55 @@ def page_trees(project: Path, extra: list[str] | None = None) -> list[tuple[str,
     return [(root, [p for p in paths if p.startswith(root + "/")]) for root in roots]
 
 
+def bind_surfaces(mapping: dict[str, list[str]],
+                  pairs: list[tuple[str, str]]) -> tuple[dict[str, list[str]], list[str], str | None]:
+    """Name law surfaces — `[(name, glob)]` into `{name: [glob, …]}`.
+
+    Mutating a project's `law_bindings` is how a project says what it publishes,
+    so the two verbs that do it (`--bind`, `--unbind`) share these pure helpers:
+    a wrong name must be undoable by the verb that wrote it, and the CLI only
+    prints and saves what this returns.
+    """
+    named = {str(k): list(v) for k, v in (mapping or {}).items()}
+    changed: list[str] = []
+    for raw_name, raw_glob in pairs:
+        name = str(raw_name).strip().lower()
+        glob = str(raw_glob).strip()
+        if not name or not glob:
+            return named, changed, "--bind needs a surface name and a glob: --bind site 'docs/**'"
+        globs = named.setdefault(name, [])
+        if glob not in globs:
+            globs.append(glob)
+            changed.append(f"{name} ← {glob}")
+    return named, changed, None
+
+
+def unbind_surfaces(mapping: dict[str, list[str]],
+                    items: list[list[str]]) -> tuple[dict[str, list[str]], list[str], str | None]:
+    """Drop one glob from a surface, or the whole surface when no glob follows."""
+    named = {str(k): list(v) for k, v in (mapping or {}).items()}
+    dropped: list[str] = []
+    for item in items:
+        parts = list(item)
+        name, glob = (parts + [None])[:2]
+        name = str(name).strip().lower()
+        if name not in named:
+            return named, dropped, f"no surface named '{name}' to unbind"
+        if glob:
+            glob = str(glob).strip()
+            globs = [g for g in named[name] if g != glob]
+            if len(globs) == len(named[name]):
+                return named, dropped, f"'{name}' does not carry {glob}"
+            if globs:
+                named[name] = globs
+            else:
+                named.pop(name, None)
+        else:
+            named.pop(name, None)
+        dropped.append(name + (f" ← {glob}" if glob else " (whole surface)"))
+    return named, dropped, None
+
+
 def amend(project: Path, clause_id: str, text: str, requested_by: str) -> tuple[bool, str]:
     """Rewrite ONE clause's sentence — the owner's act, never an agent's.
 
