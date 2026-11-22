@@ -196,6 +196,13 @@ class SendTest(MailTestBase):
         self.assertIn("connection refused", res["why"])
         self.assertEqual("", mail.inbox(self.project)["items"][0]["sent_at"])
 
+    def test_a_dry_run_does_not_mark_delivered(self):
+        self.configured()
+        res = mail.send_pending(self.project, dry_run=True)
+        self.assertEqual("dry-run", res["status"])
+        self.assertEqual(1, res["waiting"])
+        self.assertEqual("", mail.inbox(self.project)["items"][0]["sent_at"])
+
     def test_the_digest_names_the_change_and_the_command(self):
         self.configured()
         captured = {}

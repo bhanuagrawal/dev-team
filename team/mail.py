@@ -505,6 +505,11 @@ def send_pending(project: Path, *, force: bool = False, dry_run: bool = False,
             rec["last_attempt"] = now_iso()
         return finish({"status": "error", "waiting": len(pending), "sent": 0,
                        "to": st["to_masked"], "why": str(exc), "subject": subject})
+    if res.get("status") == "dry-run":
+        # A rehearsal must not mark a decision delivered — that would be the one
+        # way a real question silently never reaches the owner.
+        return finish({"status": "dry-run", "waiting": len(pending), "sent": 0,
+                       "to": st["to_masked"], "why": "", "subject": subject})
     stamp = now_iso()
     for rec in pending:
         rec["sent_at"] = stamp
@@ -513,7 +518,7 @@ def send_pending(project: Path, *, force: bool = False, dry_run: bool = False,
         rec.pop("last_error", None)
     state.setdefault("mail", {})["last_sent_at"] = stamp
     return finish({"status": res.get("status") or "sent", "waiting": 0,
-                   "sent": len(pending) if not dry_run else 0,
+                   "sent": len(pending),
                    "to": st["to_masked"], "why": "", "subject": subject})
 
 
