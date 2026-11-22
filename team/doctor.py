@@ -592,13 +592,16 @@ def run_doctor(project: Path, log) -> dict:
         if st["configured"]:
             note = (f"{len(waiting)} waiting to be delivered" if waiting
                     else "every open decision has been delivered")
-            log(f"doctor mail: ready — escalations go to {st['to_masked']} ({note})")
+            via = "Gmail API" if st.get("transport") == "gmail-api" else st.get("host", "")
+            log(f"doctor mail: ready — escalations go to {st['to_masked']} "
+                f"via {via} ({note})")
             report["mail"] = {"status": "ready", "blocked": [], "checks_passed": 1,
                               "note": note}
         else:
             note = f"{st['why']}" + (f" · {len(waiting)} waiting" if waiting else "")
-            log(f"doctor mail: WARN — {note} — set the channel with "
-                "`devteam mail set --to you@example.com`")
+            fix = ("`devteam mail connect`" if st.get("transport") == "gmail-api"
+                   else "`devteam mail set --to you@example.com`")
+            log(f"doctor mail: WARN — {note} — set the channel with {fix}")
             report["mail"] = {"status": "warn", "blocked": [], "checks_passed": 0,
                               "note": note}
     except Exception as e:  # the owner channel must never hide the report

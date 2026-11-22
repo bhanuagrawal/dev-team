@@ -2256,8 +2256,10 @@ def cmd_status(args: argparse.Namespace) -> None:
         data = mail_mod.inbox(project)
         waiting = [r for r in data["items"] if not r["sent_at"]]
         if not st["configured"] and waiting:
-            print(f"mail:       !! {len(waiting)} decision(s) need you and no owner "
-                  "email is set — `devteam mail set --to you@example.com`")
+            fix = ("`devteam mail connect`" if st.get("transport") == "gmail-api"
+                   else "`devteam mail set --to you@example.com`")
+            print(f"mail:       !! {len(waiting)} decision(s) need you and the channel "
+                  f"is not ready — {fix}")
         elif st["configured"]:
             print(f"mail:       {st['to_masked']} · {len(waiting)} unsent / "
                   f"{len(data['items'])} open")
@@ -3293,14 +3295,29 @@ def cmd_mail(args: argparse.Namespace) -> int:
     action = (getattr(args, "action", "") or "status").strip()
     project = resolve_project(args.project) if getattr(args, "project", None) else None
     # `devteam mail <app>` is the shape people reach for; it means "inbox <app>".
-    if action not in {"status", "set", "test", "inbox", "send", "ask", "resolve"}:
+    actions = {"status", "set", "connect", "test", "inbox", "send", "ask", "resolve"}
+    if action not in actions:
         if project is None:
             project = resolve_project(action)
             action = "inbox"
         else:
-            print(f"mail: unknown action {action!r} — use set/test/inbox/send/ask/resolve",
-                  file=sys.stderr)
+            print(f"mail: unknown action {action!r} — use "
+                  "set/connect/test/inbox/send/ask/resolve", file=sys.stderr)
             return 2
+
+    if action == "connect":
+        res = mail_mod.connect(port=getattr(args, "port", None)
+                               or mail_mod.DEFAULT_OAUTH_PORT)
+        if not res["ok"]:
+            print(f"mail connect: {res['why']}", file=sys.stderr)
+            return 1
+        print()
+        print(f"mail connect: authorised {res['account']} — scopes granted: "
+              f"{res['scopes']}")
+        print("  the refresh token is in the macOS Keychain; every run mints its "
+              "own access token")
+        print("  NEXT:     python3 cli.py mail test")
+        return 0
 
     if action == "set":
         password = ""
@@ -3322,6 +3339,8 @@ def cmd_mail(args: argparse.Namespace) -> int:
             password=password,
             enabled=enabled,
             note=getattr(args, "note", "") or "",
+            oauth_client_id=getattr(args, "oauth_client_id", "") or "",
+            oauth_client_secret=getattr(args, "oauth_client_secret", "") or "",
         )
         if not res["ok"]:
             print(f"mail: {res['why']}", file=sys.stderr)
@@ -3336,7 +3355,8 @@ def cmd_mail(args: argparse.Namespace) -> int:
             print("  password: stored in the local 0600 file — the Keychain was "
                   "unavailable; `DEVTEAM_SMTP_PASSWORD` overrides it")
         print()
-        print(f"  NEXT:     python3 cli.py mail test")
+        print(f"  NEXT:     python3 cli.py mail "
+              f"{'connect' if st['transport'] == 'gmail-api' else 'test'}")
         return 0
 
     if action == "test":
@@ -3360,7 +3380,9 @@ def cmd_mail(args: argparse.Namespace) -> int:
         except mail_mod.MailError as exc:
             print(f"mail: FAILED — {exc}", file=sys.stderr)
             return 1
-        print(f"mail: sent to {res['to']} via {res['host']}:{res['port']} — check the inbox")
+        via = ("the Gmail API (official OAuth)" if res.get("transport") == "gmail-api"
+               else f"{res['host']}:{res['port']}")
+        print(f"mail: sent to {res['to']} via {via} — check the inbox")
         return 0
 
     if action == "ask":
@@ -6173,10 +6195,10 @@ def main() -> None:
     rn.set_defaults(fn=cmd_runner)
     a = sub.add_parser("alarm");       a.add_argument("project"); a.set_defaults(fn=cmd_alarm)
     ml = sub.add_parser("mail", help="the OWNER's inbox: one email address that a decision "
-                                     "the pipeline hands back is delivered to (set/test/inbox/"
-                                     "send/ask/resolve)")
+                                     "the pipeline hands back is delivered to (set/connect/"
+                                     "test/inbox/send/ask/resolve)")
     ml.add_argument("action", nargs="?", default="status",
-                    help="status | set | test | inbox | send | ask | resolve "
+                    help="status | set | connect | test | inbox | send | ask | resolve "
                          "(a project name alone means `inbox <project>`)")
     ml.add_argument("project", nargs="?")
     ml.add_argument("--to", help="the owner's address that receives escalations")
@@ -6189,6 +6211,10 @@ def main() -> None:
     ml.add_argument("--user", help="SMTP login (defaults to --from/--to)")
     ml.add_argument("--password-stdin", action="store_true",
                     help="read the SMTP password from stdin; it goes to the Keychain")
+    ml.add_argument("--oauth-client-id",
+                    help="set: the Desktop-app OAuth client id (Google Cloud → Clients)")
+    ml.add_argument("--oauth-client-secret",
+                    help="set: the Desktop-app OAuth client secret (stored 0600)")
     ml.add_argument("--on", action="store_true", help="resume mail")
     ml.add_argument("--off", action="store_true", help="mute mail (asks still recorded)")
     ml.add_argument("--note", help="a line stored with the setup")

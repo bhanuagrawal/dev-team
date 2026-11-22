@@ -12,7 +12,7 @@ logs/
 # Nightly single-instance lock
 .nightly.lock/
 
-# The owner's email setup (recipient + relay; the password is in the Keychain)
+# The owner's email setup (recipient + OAuth client; the refresh token is in the Keychain)
 config/mail.local.json
 
 # Local editor / OS junk

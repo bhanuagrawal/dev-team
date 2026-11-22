@@ -241,10 +241,11 @@ _RAW: list[tuple[str, str, str, str, str, bool]] = [
     ("mail", "ops", "the OWNER's inbox: set one email address and every decision the "
                     "pipeline hands back (goal missing, request contradicts the law, a "
                     "data-driven proposal to change the product) is mailed once with the "
-                    "command that answers it — set/test/inbox/send/ask/resolve",
-     "config/mail.local.json (0600; the password also goes to the Keychain); project "
-     "state.mail (sent ledger + explicit proposals)",
-     "`send` without a recipient or relay (the ask is recorded, never lost); `ask` "
+                    "command that answers it — set/connect/test/inbox/send/ask/resolve",
+     "config/mail.local.json (0600; on Google the OAuth client only); the OAuth refresh "
+     "token in the Keychain `dev-team-mail-oauth` (or an SMTP password in "
+     "`dev-team-mail`); project state.mail (sent ledger + explicit proposals)",
+     "`send` without a recipient or an authorisation (the ask is recorded, never lost); `ask` "
      "without --title and --question; `resolve` of a derived ask (answer its source)",
      True),
     # ---- internal ---------------------------------------------------------- #

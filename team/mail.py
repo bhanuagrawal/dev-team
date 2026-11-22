@@ -11,15 +11,18 @@ decision; it is that the question is printed into a log the owner never opens.
 So an owner decision gets one address, one message, and one exact command that
 answers it. This module owns three things and nothing else:
 
-  * CONFIG — one recipient, one SMTP relay, a password that lives in the macOS
-    Keychain (or `DEVTEAM_SMTP_PASSWORD`), never in a tracked file.
+  * TRANSPORT — the official Gmail API with OAuth (`devteam mail connect`), or
+    any SMTP relay for a non-Google account. Nothing here asks the owner for an
+    app password: a Google app password is a weaker credential than an OAuth
+    refresh token and Google is retiring the flow. The consent is one browser
+    round-trip; the refresh token goes to the macOS Keychain, never a file.
   * COLLECT — every open escalation the pipeline can derive from the project's
     own ledgers (goal missing, admit flag, owner/mixed ask, explicit proposal).
   * SEND — ONE digest per project, deduplicated, marked sent in the ledger, so a
     nightly that finds the same open question seven nights running does not mail
     seven times. A send that fails leaves the ask UNSENT: never mark it delivered.
 
-Determinism: no model, no project names, no network except the SMTP send. Every
+Determinism: no model, no project names, no network except the one send. Every
 function that can fail returns a reason instead of raising, because the owner
 channel must never be the reason a run dies.
 
@@ -30,14 +33,21 @@ ends up doing an agent's job.
 """
 from __future__ import annotations
 
+import base64
 import hashlib
+import http.server
 import json
 import os
 import re
+import secrets
 import smtplib
 import ssl
 import subprocess
 import sys
+import threading
+import urllib.error
+import urllib.parse
+import urllib.request
 from email.message import EmailMessage
 from pathlib import Path
 from typing import Any
@@ -46,18 +56,34 @@ from .core import TEAM_ROOT, now_iso, profile_of, save_state, state_of
 
 CONFIG_NAME = "mail.local.json"
 KEYCHAIN_SERVICE = "dev-team-mail"
+OAUTH_KEYCHAIN_SERVICE = "dev-team-mail-oauth"
+
+# Google's official send path. `gmail.send` is the one scope that can compose and
+# send a message and read NOTHING: the pipeline cannot see the owner's inbox.
+GMAIL_SCOPES = ["https://www.googleapis.com/auth/gmail.send",
+                "https://www.googleapis.com/auth/userinfo.email",
+                "openid"]
+GMAIL_AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth"
+GMAIL_TOKEN_URL = "https://oauth2.googleapis.com/token"
+GMAIL_SEND_URL = "https://gmail.googleapis.com/gmail/v1/users/me/messages/send"
+DEFAULT_OAUTH_PORT = 8765
 
 # provider presets — a name is a shortcut for three fields, never a lock-in
 PROVIDERS: dict[str, dict[str, Any]] = {
-    "gmail": {"host": "smtp.gmail.com", "port": 587, "mode": "starttls",
-              "note": "needs an app password (Google account → Security → App passwords)"},
+    # Google is OAuth, not a password: `devteam mail connect` performs the
+    # consent and the transport is the Gmail API.
+    "gmail": {"host": "gmail.googleapis.com", "port": 443, "mode": "https",
+              "transport": "gmail-api", "note": "authorised once with `devteam mail connect`"},
     "icloud": {"host": "smtp.mail.me.com", "port": 587, "mode": "starttls",
+               "transport": "smtp",
                "note": "needs an app-specific password from appleid.apple.com"},
     "fastmail": {"host": "smtp.fastmail.com", "port": 465, "mode": "ssl",
+                 "transport": "smtp",
                  "note": "needs an app password from Fastmail → Settings → Privacy"},
     "outlook": {"host": "smtp-mail.outlook.com", "port": 587, "mode": "starttls",
-                "note": "may require OAuth; an app password works on most accounts"},
-    "custom": {"host": "", "port": 587, "mode": "starttls", "note": ""},
+                "transport": "smtp", "note": "may require an app password"},
+    "custom": {"host": "", "port": 587, "mode": "starttls", "transport": "smtp",
+               "note": ""},
 }
 
 _ENV = {
@@ -138,19 +164,27 @@ def _security(*args: str, stdin: str | None = None) -> tuple[int, str]:
     return proc.returncode, (proc.stdout or "").strip() or (proc.stderr or "").strip()
 
 
-def keychain_get(account: str) -> str:
+def _keychain_get(service: str, account: str) -> str:
     if not account:
         return ""
-    rc, out = _security("find-generic-password", "-s", KEYCHAIN_SERVICE, "-a", account, "-w")
+    rc, out = _security("find-generic-password", "-s", service, "-a", account, "-w")
     return out if rc == 0 else ""
 
 
-def keychain_set(account: str, password: str) -> bool:
+def _keychain_set(service: str, account: str, value: str) -> bool:
     if not account:
         return False
-    rc, _ = _security("add-generic-password", "-U", "-s", KEYCHAIN_SERVICE,
-                      "-a", account, "-w", password)
+    rc, _ = _security("add-generic-password", "-U", "-s", service,
+                      "-a", account, "-w", value)
     return rc == 0
+
+
+def keychain_get(account: str) -> str:
+    return _keychain_get(KEYCHAIN_SERVICE, account)
+
+
+def keychain_set(account: str, password: str) -> bool:
+    return _keychain_set(KEYCHAIN_SERVICE, account, password)
 
 
 def password_for(cfg: dict) -> str:
@@ -166,15 +200,235 @@ def password_for(cfg: dict) -> str:
     return str(cfg.get("password") or "")
 
 
+# --------------------------------------------------------------------------- #
+# the official Google path — OAuth consent once, refresh token in the Keychain
+# --------------------------------------------------------------------------- #
+def oauth_account(cfg: dict) -> str:
+    """Whose Google account is authorised: the From/user address."""
+    return str(cfg.get("user") or cfg.get("from") or cfg.get("to") or "").strip()
+
+
+def gmail_credential(cfg: dict) -> dict:
+    """The refresh token the one-time consent stored (Keychain, never a file)."""
+    raw = _keychain_get(OAUTH_KEYCHAIN_SERVICE, oauth_account(cfg))
+    if not raw:
+        return {}
+    # `security -w` hex-encodes a value with newlines in it, so a credential
+    # written with indentation comes back as hex — accept both spellings.
+    text = raw.strip()
+    if text and all(ch in "0123456789abcdef" for ch in text.lower()) and len(text) % 2 == 0:
+        try:
+            text = bytes.fromhex(text).decode("utf-8")
+        except (ValueError, UnicodeDecodeError):
+            text = raw
+    try:
+        cred = json.loads(text)
+    except Exception:
+        return {}
+    if not (cred.get("client_id") and cred.get("client_secret")
+            and cred.get("refresh_token")):
+        return {}
+    return cred
+
+
+def oauth_client(cfg: dict | None = None) -> tuple[str, str]:
+    """(client_id, client_secret) for the consent flow, from the local config."""
+    cfg = load_config() if cfg is None else cfg
+    block = cfg.get("oauth") or {}
+    if not isinstance(block, dict):
+        return "", ""
+    return str(block.get("client_id") or ""), str(block.get("client_secret") or "")
+
+
+def transport_for(cfg: dict) -> str:
+    """gmail-api when the setup says so, else SMTP. Never guessed from a host."""
+    explicit = str(cfg.get("transport") or "").strip().lower()
+    if explicit in ("gmail-api", "smtp"):
+        return explicit
+    preset = PROVIDERS.get(str(cfg.get("provider") or "").lower()) or {}
+    if preset.get("transport") == "gmail-api" and gmail_credential(cfg):
+        return "gmail-api"
+    return "smtp"
+
+
+def _post_form(url: str, fields: dict) -> dict:
+    body = urllib.parse.urlencode(fields).encode()
+    req = urllib.request.Request(url, data=body, headers={
+        "Content-Type": "application/x-www-form-urlencoded"})
+    with urllib.request.urlopen(req, timeout=30) as r:
+        return json.loads(r.read().decode("utf-8"))
+
+
+def gmail_access_token(cred: dict) -> str:
+    """Mint a short-lived access token from the refresh token; raises MailError."""
+    try:
+        tok = _post_form(GMAIL_TOKEN_URL, {
+            "client_id": cred["client_id"], "client_secret": cred["client_secret"],
+            "grant_type": "refresh_token", "refresh_token": cred["refresh_token"]})
+    except urllib.error.HTTPError as exc:
+        detail = exc.read().decode("utf-8", "replace")[:300]
+        exc.close()
+        if "invalid_grant" in detail:
+            raise MailError("the Gmail authorisation was revoked or expired — "
+                            "run `devteam mail connect` again") from exc
+        raise MailError(f"Gmail token exchange failed ({exc.code}): {detail}") from exc
+    except (urllib.error.URLError, OSError, ValueError) as exc:
+        raise MailError(f"cannot reach Google to renew the Gmail token: {exc}") from exc
+    token = str(tok.get("access_token") or "")
+    if not token:
+        raise MailError("Google returned no access token for the saved authorisation")
+    return token
+
+
+def _mime(to: str, sender: str, subject: str, body: str) -> EmailMessage:
+    msg = EmailMessage()
+    msg["To"] = to
+    msg["From"] = sender
+    msg["Subject"] = subject
+    msg["Auto-Submitted"] = "auto-generated"
+    msg.set_content(body)
+    return msg
+
+
+def send_gmail(cfg: dict, subject: str, body: str, to: str = "") -> dict:
+    """Send with the Gmail API — the same official API Claude/Gemini connectors use."""
+    cred = gmail_credential(cfg)
+    if not cred:
+        raise MailError("no Gmail authorisation is stored — run `devteam mail connect`")
+    recipient = (to or str(cfg.get("to") or "")).strip()
+    sender = str(cfg.get("from") or cred.get("account") or recipient).strip()
+    token = gmail_access_token(cred)
+    msg = _mime(recipient, sender, subject, body)
+    raw = base64.urlsafe_b64encode(msg.as_bytes()).decode("ascii")
+    payload = json.dumps({"raw": raw}).encode()
+    req = urllib.request.Request(GMAIL_SEND_URL, data=payload, headers={
+        "Authorization": f"Bearer {token}",
+        "Content-Type": "application/json"})
+    try:
+        with urllib.request.urlopen(req, timeout=45) as r:
+            got = json.loads(r.read().decode("utf-8") or "{}")
+    except urllib.error.HTTPError as exc:
+        detail = exc.read().decode("utf-8", "replace")[:300]
+        exc.close()
+        raise MailError(f"Gmail refused the message ({exc.code}): {detail}") from exc
+    except (urllib.error.URLError, OSError, ValueError) as exc:
+        raise MailError(f"cannot reach the Gmail API: {exc}") from exc
+    return {"status": "sent", "to": recipient, "subject": subject,
+            "message_id": str(got.get("id") or ""), "host": "gmail.googleapis.com",
+            "port": 443, "transport": "gmail-api"}
+
+
+def connect(*, port: int = DEFAULT_OAUTH_PORT, timeout: int = 600,
+            out=print) -> dict:
+    """One consent round-trip: print the URL, catch the loopback code, store it.
+
+    This is the ONLY step that needs a person (a Google consent screen). Everything
+    after it is unattended: the refresh token lives in the Keychain and every
+    nightly mints its own access token. No app password, no SMTP login.
+    """
+    cfg = load_config()
+    client_id, client_secret = oauth_client(cfg)
+    if not client_id or not client_secret:
+        return {"ok": False, "why": "no OAuth client is configured — run "
+                                    "`devteam mail set --oauth-client-id … "
+                                    "--oauth-client-secret …` (Google Cloud → "
+                                    "Google Auth Platform → Clients → Desktop app)"}
+    account = oauth_account(cfg)
+    if not account:
+        return {"ok": False, "why": "no account — run `devteam mail set --to …` first"}
+    holder: dict = {}
+    done = threading.Event()
+
+    class Handler(http.server.BaseHTTPRequestHandler):
+        def do_GET(self) -> None:      # noqa: N802 (http.server's own name)
+            qs = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
+            if "code" in qs:
+                holder["code"] = qs["code"][0]
+                body = b"dev-team: consent received - you can close this tab."
+                self.send_response(200)
+            elif "error" in qs:
+                holder["error"] = (qs.get("error_description") or qs["error"])[0]
+                body = b"dev-team: consent was not granted."
+                self.send_response(400)
+            else:
+                body = b"dev-team: waiting"
+                self.send_response(200)
+            self.send_header("Content-Type", "text/plain")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+            if "code" in qs or "error" in qs:
+                done.set()
+
+        def log_message(self, *a) -> None:
+            pass
+
+    redirect = f"http://127.0.0.1:{port}/"
+    url = GMAIL_AUTH_URL + "?" + urllib.parse.urlencode({
+        "client_id": client_id, "redirect_uri": redirect, "response_type": "code",
+        "scope": " ".join(GMAIL_SCOPES), "access_type": "offline",
+        "prompt": "consent", "login_hint": account})
+    try:
+        srv = http.server.HTTPServer(("127.0.0.1", port), Handler)
+    except OSError as exc:
+        return {"ok": False, "why": f"cannot listen on 127.0.0.1:{port} ({exc}) — "
+                                    f"try `--port 8766`"}
+    thread = threading.Thread(target=srv.serve_forever, daemon=True)
+    thread.start()
+    out("Open this URL, sign in as %s, and allow dev-team to send mail:" % account)
+    out("")
+    out(url)
+    out("")
+    out("Waiting for the consent…")
+    try:
+        if not done.wait(timeout):
+            return {"ok": False, "why": f"no consent within {timeout}s — run it again"}
+    finally:
+        srv.shutdown()
+    if holder.get("error"):
+        return {"ok": False, "why": f"consent was not granted: {holder['error']}"}
+    try:
+        tok = _post_form(GMAIL_TOKEN_URL, {
+            "client_id": client_id, "client_secret": client_secret,
+            "code": holder["code"], "grant_type": "authorization_code",
+            "redirect_uri": redirect})
+    except (urllib.error.URLError, OSError, ValueError) as exc:
+        return {"ok": False, "why": f"token exchange failed: {exc}"}
+    refresh = str(tok.get("refresh_token") or "")
+    if not refresh:
+        return {"ok": False, "why": "Google returned no refresh token (revoke the "
+                                    "app's access and retry the consent)"}
+    granted = str(tok.get("scope") or "")
+    missing = [s for s in GMAIL_SCOPES if s not in granted and s != "openid"]
+    cred = {"client_id": client_id, "client_secret": client_secret,
+            "refresh_token": refresh, "scope": granted, "account": account}
+    if not _keychain_set(OAUTH_KEYCHAIN_SERVICE, account, json.dumps(cred)):
+        return {"ok": False, "why": "the Keychain refused the credential"}
+    cfg["transport"] = "gmail-api"
+    cfg.setdefault("provider", "gmail")
+    _save_config(cfg)
+    if missing:                        # the consent screen can silently drop a scope
+        return {"ok": False, "why": "consent did not include " + ", ".join(missing)
+                                    + " — retry and tick every scope"}
+    try:
+        gmail_access_token(cred)
+    except MailError as exc:
+        return {"ok": False, "why": str(exc)}
+    return {"ok": True, "why": "", "scopes": granted, "account": account}
+
+
 def set_config(*, to: str = "", from_: str = "", provider: str = "",
                host: str = "", port: int | None = None, mode: str = "",
                user: str = "", password: str = "", enabled: bool | None = None,
-               note: str = "") -> dict:
+               note: str = "", transport: str = "", oauth_client_id: str = "",
+               oauth_client_secret: str = "") -> dict:
     """Write the local setup. Returns {ok, why, cfg, path, password_stored}.
 
     A password is stored in the Keychain under the relay account; when there is
     no usable Keychain it is written to the 0600 file and the result SAYS so, so
-    "where is my password?" is answerable without guessing.
+    "where is my password?" is answerable without guessing. The Google path
+    stores an OAuth *client* here (an installed-app identifier, 0600) and the
+    refresh token in the Keychain — see `connect()`.
     """
     cfg = load_config()
     prov = (provider or cfg.get("provider") or ("gmail" if not cfg.get("host") else "custom")).lower()
@@ -204,6 +458,17 @@ def set_config(*, to: str = "", from_: str = "", provider: str = "",
     elif not cfg.get("user"):
         cfg["user"] = cfg.get("from") or cfg.get("to") or ""
     cfg.setdefault("from", cfg.get("user") or cfg.get("to") or "")
+    if transport:
+        cfg["transport"] = transport.strip().lower()
+    elif not cfg.get("transport"):
+        cfg["transport"] = preset.get("transport") or "smtp"
+    if oauth_client_id or oauth_client_secret:
+        block = cfg.get("oauth") if isinstance(cfg.get("oauth"), dict) else {}
+        if oauth_client_id:
+            block["client_id"] = oauth_client_id.strip()
+        if oauth_client_secret:
+            block["client_secret"] = oauth_client_secret.strip()
+        cfg["oauth"] = block
     if note:
         cfg["note"] = note
     if enabled is not None:
@@ -238,11 +503,19 @@ def masked(address: str) -> str:
 def status(cfg: dict | None = None) -> dict:
     """Ready or the one thing missing, never a secret."""
     cfg = load_config() if cfg is None else cfg
+    transport = transport_for(cfg)
     why = ""
     if not cfg.get("enabled", True):
         why = "muted (owner mail is switched off)"
     elif not cfg.get("to"):
         why = "no recipient is set"
+    elif transport == "gmail-api":
+        cred = gmail_credential(cfg)
+        if not cred:
+            why = ("Google is not authorised yet — run `devteam mail connect` "
+                   "(one consent screen, no app password)")
+        elif not str(cfg.get("from") or "").strip():
+            cfg["from"] = str(cred.get("account") or cfg.get("to") or "")
     elif not cfg.get("host"):
         why = "no SMTP relay is set"
     elif cfg.get("user") and not password_for(cfg):
@@ -257,6 +530,7 @@ def status(cfg: dict | None = None) -> dict:
         "port": cfg.get("port") or 587,
         "mode": str(cfg.get("mode") or "starttls"),
         "provider": str(cfg.get("provider") or ""),
+        "transport": transport,
         "enabled": bool(cfg.get("enabled", True)),
     }
 
@@ -266,21 +540,22 @@ def status(cfg: dict | None = None) -> dict:
 # --------------------------------------------------------------------------- #
 def send(cfg: dict, subject: str, body: str, to: str = "",
          dry_run: bool = False) -> dict:
-    """Send ONE message. Raises MailError with what to fix; never retries."""
+    """Send ONE message. Raises MailError with what to fix; never retries.
+
+    Google goes through the Gmail API with a refreshed OAuth token; anything else
+    is SMTP. `dry_run` returns before either, so a rehearsal never sends mail.
+    """
     st = status(cfg)
     if not st["configured"]:
         raise MailError(st["why"])
     recipient = (to or cfg.get("to") or "").strip()
-    sender = (cfg.get("from") or cfg.get("user") or recipient).strip()
-    msg = EmailMessage()
-    msg["To"] = recipient
-    msg["From"] = sender
-    msg["Subject"] = subject
-    msg["Auto-Submitted"] = "auto-generated"
-    msg.set_content(body)
     if dry_run:
         return {"status": "dry-run", "to": recipient, "subject": subject}
+    if st["transport"] == "gmail-api":
+        return send_gmail(cfg, subject, body, to=recipient)
 
+    sender = (cfg.get("from") or cfg.get("user") or recipient).strip()
+    msg = _mime(recipient, sender, subject, body)
     host = str(cfg["host"])
     port = int(cfg.get("port") or 587)
     mode = str(cfg.get("mode") or "starttls").lower()
@@ -301,7 +576,8 @@ def send(cfg: dict, subject: str, body: str, to: str = "",
     except (OSError, smtplib.SMTPException) as exc:
         raise MailError(f"{host}:{port} — {exc}") from exc
     return {"status": "sent", "to": recipient, "subject": subject,
-            "message_id": str(msg.get("Message-ID") or ""), "host": host, "port": port}
+            "message_id": str(msg.get("Message-ID") or ""), "host": host,
+            "port": port, "transport": "smtp"}
 
 
 # --------------------------------------------------------------------------- #
@@ -585,12 +861,17 @@ def format_status(st: dict) -> str:
     lines = ["OWNER MAIL — where a decision that needs you is delivered", ""]
     if st["configured"]:
         lines.append(f"  status:   ready → {st['to_masked']}")
-        lines.append(f"  relay:    {st['host']}:{st['port']} ({st['mode']})")
+        if st["transport"] == "gmail-api":
+            lines.append("  relay:    Gmail API — official OAuth, authorised in the "
+                         "Keychain (no app password)")
+        else:
+            lines.append(f"  relay:    {st['host']}:{st['port']} ({st['mode']})")
         lines.append(f"  from:     {st['from'] or '(same as recipient)'}")
     else:
         lines.append("  status:   NOT SET — escalations are recorded, not delivered")
         lines.append(f"  missing:  {st['why']}")
-        lines.append("  set it:   devteam mail set --to you@example.com --provider gmail")
+        lines.append("  set it:   devteam mail set --to you@example.com --provider gmail"
+                     " → devteam mail connect")
     lines.append("  env:      DEVTEAM_MAIL_TO / DEVTEAM_SMTP_HOST / DEVTEAM_SMTP_USER"
                  " / DEVTEAM_SMTP_PASSWORD")
     lines.append("  guide:    docs/mail.md — what gets mailed, and how to stop it")
@@ -637,4 +918,6 @@ def selftest() -> list[str]:
         out.append("a complete config did not read as configured")
     if masked("a@b.co") != "a***@b.co":
         out.append("mask leaks the local part")
+    if transport_for({"provider": "gmail", "to": "a@b.co", "user": "a@b.co"}) != "smtp":
+        out.append("gmail transport chosen without an authorisation")
     return out

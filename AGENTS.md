@@ -124,7 +124,7 @@ page or a dead link, so the map above cannot rot.
 | run logs · handover copy | `<project>/.pipeline/runs/` · `<date>-handover-v<version>.md` |
 | store scene spec | `<project>/docs/storefront.json` |
 | rendered scenes | `<project>/.pipeline/storefront_scenes/` |
-| owner email (recipient + relay) | `config/mail.local.json` (0600, gitignored; password in the Keychain) |
+| owner email (recipient + OAuth client) | `config/mail.local.json` (0600, gitignored; the OAuth refresh token in the Keychain) |
 | report page (all apps) | `~/dev-team/site/` — `devteam site` builds, `--serve` serves |
 
 ## Done means

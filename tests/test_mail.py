@@ -12,6 +12,7 @@ The behaviour pinned here:
   * an unconfigured machine records the ask and says so, and never fails a run.
 """
 
+import base64
 import json
 import os
 import sys
@@ -230,6 +231,122 @@ class SendTest(MailTestBase):
         self.assertIn("decision needs", captured["subject"])
         self.assertIn("devteam goal sample set --vision", captured["body"])
         self.assertIn("devteam mail inbox sample", captured["body"])
+
+
+class GmailApiTest(MailTestBase):
+    """The official Google path: OAuth consent once, then the Gmail API.
+
+    Pinned here because it replaced the app-password plan (owner, 2026-11-22:
+    "use official way to connect to Gmail"): no SMTP password exists at all, the
+    refresh token lives in the Keychain, and a revoked authorisation must say
+    `devteam mail connect` instead of dying with a bare 400.
+    """
+
+    CRED = {"client_id": "cid", "client_secret": "csecret", "refresh_token": "rtok",
+            "scope": " ".join(mail.GMAIL_SCOPES)}
+
+    def setUp(self):
+        super().setUp()
+        mail.set_config(to="owner@example.com", provider="gmail",
+                        oauth_client_id="cid", oauth_client_secret="csecret")
+
+    def with_credential(self):
+        return mock.patch.object(mail, "gmail_credential",
+                                 return_value=dict(self.CRED))
+
+    def test_the_google_setup_is_ready_with_no_password_at_all(self):
+        with self.with_credential():
+            st = mail.status()
+            text = mail.format_status(st)
+        self.assertTrue(st["configured"], st["why"])
+        self.assertEqual("gmail-api", st["transport"])
+        self.assertIn("Gmail API", text)
+        self.assertIn("no app password", text)
+        self.assertNotIn("missing:", text)
+
+    def test_an_unauthorised_google_setup_points_at_connect(self):
+        with mock.patch.object(mail, "gmail_credential", return_value={}):
+            st = mail.status()
+        self.assertFalse(st["configured"])
+        self.assertIn("devteam mail connect", st["why"])
+        self.assertEqual("gmail-api", st["transport"])
+
+    def test_the_send_uses_a_bearer_token_and_a_base64url_message(self):
+        sent = {}
+
+        class FakeResp:
+            def __init__(self, payload):
+                self._payload = payload
+            def read(self):
+                return json.dumps(self._payload).encode()
+            def __enter__(self):
+                return self
+            def __exit__(self, *exc):
+                return False
+
+        def fake_urlopen(req, timeout=None):
+            if req.full_url == mail.GMAIL_SEND_URL:
+                sent["auth"] = req.get_header("Authorization")
+                sent["body"] = json.loads(req.data.decode())
+                return FakeResp({"id": "m1"})
+            raise AssertionError(f"unexpected url {req.full_url}")
+
+        with self.with_credential(), \
+                mock.patch.object(mail, "_post_form",
+                                  return_value={"access_token": "at"}) as mint, \
+                mock.patch.object(mail.urllib.request, "urlopen", fake_urlopen):
+            res = mail.send(mail.load_config(), "subject line", "body line")
+        self.assertEqual("sent", res["status"])
+        self.assertEqual("m1", res["message_id"])
+        self.assertEqual("gmail-api", res["transport"])
+        mint.assert_called_once()
+        self.assertEqual("Bearer at", sent["auth"])
+        raw = base64.urlsafe_b64decode(sent["body"]["raw"] + "===")
+        self.assertIn(b"Subject: subject line", raw)
+        self.assertIn(b"To: owner@example.com", raw)
+
+    def test_a_revoked_authorisation_names_the_fix(self):
+        class ErrBody:
+            def read(self):
+                return b'{"error":"invalid_grant"}'
+            def close(self):
+                pass
+
+        def revoked(*a, **kw):
+            raise mail.urllib.error.HTTPError(
+                mail.GMAIL_TOKEN_URL, 400, "Bad Request", {}, ErrBody())
+
+        with self.with_credential(), \
+                mock.patch.object(mail, "_post_form", side_effect=revoked), \
+                self.assertRaises(mail.MailError) as caught:
+            mail.send(mail.load_config(), "s", "b")
+        self.assertIn("devteam mail connect", str(caught.exception))
+
+    def test_a_hex_encoded_keychain_blob_still_reads(self):
+        blob = json.dumps(self.CRED, indent=2).encode().hex()   # what `security -w` returns
+        with mock.patch.object(mail, "_keychain_get", return_value=blob):
+            self.assertEqual("rtok", mail.gmail_credential(mail.load_config())["refresh_token"])
+
+    def test_connect_without_a_client_refuses_before_any_browser(self):
+        cfg = mail.load_config()
+        cfg.pop("oauth", None)
+        with mock.patch.object(mail, "load_config", return_value=cfg):
+            res = mail.connect(out=lambda *_: None)
+        self.assertFalse(res["ok"])
+        self.assertIn("OAuth client", res["why"])
+
+    def test_connect_says_so_when_the_loopback_port_is_taken(self):
+        import socket
+        sock = socket.socket()
+        sock.bind(("127.0.0.1", 0))
+        sock.listen(1)
+        port = sock.getsockname()[1]
+        try:
+            res = mail.connect(port=port, timeout=1, out=lambda *_: None)
+        finally:
+            sock.close()
+        self.assertFalse(res["ok"])
+        self.assertIn("127.0.0.1", res["why"])
 
 
 if __name__ == "__main__":
