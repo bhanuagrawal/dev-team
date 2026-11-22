@@ -87,13 +87,19 @@ def _split_binds(text: str) -> tuple[list[str], str]:
 
     The marker is law, not prose: it leaves the sentence so `devteam law` prints
     one readable line per clause, and it names the platforms the clause is
-    checked against (see `audit`).
+    checked against (see `audit`). `(binds: none)` is a declaration too: the
+    clause is law, and no surface is charged with it yet — the shape a clause
+    takes when the owner declares it before the task that builds its screen
+    (owner decision 2026-11-22: "clear p15"; clearing the binding is the owner's
+    act, and the clause keeps its sentence and detail).
     """
     match = _BINDS.search(text)
     if match is None:
         return [], text
     binds = [part.strip().lower() for part in re.split(r"[,\s]+", match.group(1))
              if part.strip()]
+    if binds == ["none"]:
+        binds = []
     return binds, (text[:match.start()] + text[match.end():]).strip()
 
 
@@ -443,6 +449,8 @@ def amend(project: Path, clause_id: str, text: str, requested_by: str,
     what the owner said. The clause id and any `binds:` marker it already
     carried are preserved unless the new sentence declares its own — a
     tightening of the wording must not silently drop a platform from the gate.
+    `(binds: none)` is how the owner clears a binding a surface cannot carry yet
+    (a clause declared before the task that builds its screen).
 
     `detail=None` keeps the block under the clause exactly as the owner wrote it;
     passing a string replaces it. A new sentence that describes behaviour no one
@@ -469,7 +477,11 @@ def amend(project: Path, clause_id: str, text: str, requested_by: str,
             continue
         old_binds, _ = _split_binds(match.group(2).rstrip("|").strip())
         new_binds, spoken = _split_binds(new_text)
-        binds = new_binds or old_binds
+        # A sentence that declares its own marker is taken at its word — including
+        # `(binds: none)`, which CLEARS the binding. Without one, the old bindings
+        # survive: tightening the wording must not silently drop a platform from
+        # the gate.
+        binds = new_binds if _BINDS.search(new_text) else old_binds
         marker = (" (binds: " + ", ".join(binds) + ")") if binds else ""
         old_detail = _detail_text(lines, index)
         body = old_detail if detail is None else str(detail).strip()

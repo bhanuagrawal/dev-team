@@ -241,6 +241,22 @@ class LawAmendTest(unittest.TestCase):
         self.assertTrue(ok)
         self.assertEqual(["app"], {c["id"]: c for c in law.clauses(root)}["P1"]["binds"])
 
+    def test_binds_none_clears_a_binding_the_owner_cannot_stand_by_yet(self):
+        """`clear p15`: a clause declared before its screen exists binds nobody.
+
+        BookSwap's P15 (delete your account in Passport) was declared while the
+        task that builds Passport's control was still queued, and every app diff
+        in between failed the law gate for a surface it never opened.
+        """
+        root = self._project()
+        ok, _ = law.amend(root, "P2", "a place is the device's geocoder (binds: none)",
+                          "clear p15")
+        self.assertTrue(ok)
+        clause = {c["id"]: c for c in law.clauses(root)}["P2"]
+        self.assertEqual([], clause["binds"])
+        self.assertEqual("a place is the device's geocoder", clause["text"])
+        self.assertNotIn("binds:", (root / "PRODUCT.md").read_text())
+
     def test_no_owner_words_no_amendment(self):
         root = self._project()
         ok, message = law.amend(root, "P1", "something else", "")

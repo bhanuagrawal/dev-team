@@ -231,6 +231,16 @@ backend)`. The project maps each name to the paths that own it, in
 }
 ```
 
+**A clause whose screen is not built yet binds nobody.** `--amend Pn --text "…
+(binds: none)"` clears the marker: the sentence and its detail stay law, and no
+surface is charged with a citation until the task that builds the screen names
+its binding. The owner used it on BookSwap's P15 (delete your account in
+Passport): the clause was declared while the task that builds the Passport
+control was still queued, and charging it to every app diff refused work that
+never opened that screen. Clearing is the owner's act like any amendment, and the
+amendment log carries their words; a clause left at `none` for good is the same
+dead law `doctor` reports — the deletion task re-binds it when it lands.
+
 `devteam law` then refuses a declared binding that nothing under its own globs
 cites, and `doctor` reports it. One citation from one client is not coverage:
 without `binds:`, "cited" meant only "somebody mentioned it" — BookSwap's
