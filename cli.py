@@ -4524,6 +4524,27 @@ def cmd_tools(args: argparse.Namespace) -> int:
     return 0
 
 
+def _detail_from(args: argparse.Namespace) -> str | None:
+    """The clause detail the owner supplied: `--detail` text or `--detail-file`.
+
+    Returns None when neither was given (an amendment keeps the block it had),
+    and "" when the owner explicitly emptied it (`--detail ""`).
+    """
+    inline = getattr(args, "detail", None)
+    path = getattr(args, "detail_file", "") or ""
+    if inline is not None and path:
+        print("law: give the detail once — --detail \"…\" or --detail-file <path>",
+              file=sys.stderr)
+        raise SystemExit(2)
+    if path:
+        try:
+            return Path(path).read_text(encoding="utf-8")
+        except OSError as exc:
+            print(f"law: cannot read --detail-file {path}: {exc}", file=sys.stderr)
+            raise SystemExit(2)
+    return inline
+
+
 def cmd_law(args: argparse.Namespace) -> int:
     """LAW — the product's clauses, their citations, and the two owner acts.
 
@@ -4561,9 +4582,31 @@ def cmd_law(args: argparse.Namespace) -> int:
             save_json(pipeline_dir(project) / "profile.json", profile)
             print(f'law: waiver recorded — "{who[:120]}"')
 
+    if args.add:
+        detail = _detail_from(args)
+        binds = [part.strip().lower() for part in str(getattr(args, "binds", "") or "").split(",")
+                 if part.strip()]
+        ok, message = law_mod.add(project, args.add, args.text,
+                                  args.requested_by, detail or "", binds)
+        if not ok:
+            print(f"law: {message}", file=sys.stderr)
+            return 2
+        state = state_of(project)
+        state.setdefault("law_amendments", []).append({
+            "at": now_iso(), "clause": str(args.add).upper(),
+            "to": message, "requested_by": str(args.requested_by or ""),
+            "effect": "declared",
+        })
+        save_state(project, state)
+        print(f"law: declared {message}")
+        print(f"  file: {law_mod.path_of(project)}")
+        print(f"  next: cite {str(args.add).upper()} from the surface that renders "
+              "it, then admit the work it justifies")
+
     if args.amend:
+        detail = _detail_from(args)
         ok, message = law_mod.amend(project, args.amend, args.text,
-                                    args.requested_by)
+                                    args.requested_by, detail)
         if not ok:
             print(f"law: {message}", file=sys.stderr)
             return 2
@@ -4579,6 +4622,13 @@ def cmd_law(args: argparse.Namespace) -> int:
             print(f"  file: {path}")
         print("  next: cite the new sentence where it RENDERS, and change the "
               "code that relied on the old one — in this same branch")
+
+    if getattr(args, "show", ""):
+        ok, message = law_mod.show(project, args.show)
+        print(message, file=sys.stdout if ok else sys.stderr)
+        if not ok:
+            return 2
+        return 0
 
     # Naming a surface is part of declaring the law, and a wrong name must be
     # undoable by the same verb that wrote it: `--unbind NAME [GLOB]` drops one
@@ -6551,7 +6601,20 @@ def main() -> None:
     lw.add_argument("--amend", metavar="Pn",
                     help="change one clause's sentence (owner's act; requires "
                          "--text and --requested-by)")
-    lw.add_argument("--text", default="", help="with --amend: the new sentence")
+    lw.add_argument("--add", metavar="Pn", default="",
+                    help="declare one NEW clause, sentence plus its detail "
+                         "(owner's act; requires --text and --requested-by)")
+    lw.add_argument("--show", metavar="Pn", default="",
+                    help="print one clause as written — sentence and detail — and "
+                         "what cites it")
+    lw.add_argument("--text", default="", help="with --amend/--add: the one sentence")
+    lw.add_argument("--detail", default=None,
+                    help="with --amend/--add: the written spec under the sentence "
+                         '(multi-line; --detail "" clears it)')
+    lw.add_argument("--detail-file", default="",
+                    help="with --amend/--add: read the detail from a file")
+    lw.add_argument("--binds", default="",
+                    help="with --add: the platforms it binds, e.g. app,web,backend")
     lw.add_argument("--requested-by", default="",
                     help="the owner's own words that justify a waiver or amendment")
     lw.add_argument("--cite", metavar="LABEL", default="",

@@ -149,7 +149,12 @@ and still contradict the product (2026-11-15: three docs, a prompt and a tool
 catalogue each described a "match" the backend had already deleted).
 
 So every managed project declares its law in **`PRODUCT.md`** — one clause per
-line with a stable id (`P1`…`P12`), one sentence each. Declaring it is not
+line with a stable id (`P1`…`P12`), one sentence each. The sentence is the
+quotable half; a clause may carry an **indented detail block** under it, which
+says what the sentence means on a screen (owner decision 2026-11-22: *"this
+needs more detailed writeup in product, not just your small point"*). The detail
+is binding on whoever implements the clause, and `devteam law <project> --show
+P16` prints it. Declaring it is not
 optional (owner decision 2026-11-22: *"I want to have this for all the apps
 managed by dev team and any new app"*); the only other legal state is the owner
 waiving it in their own words, and that waiver is written into
@@ -204,10 +209,15 @@ an alignment question about the plan, it is a product decision, and the only
 person who may make it is the owner.
 
 **An amendment is the owner's act, never an agent's.** `devteam law <project>
---amend P8 --text "<new sentence>" --requested-by "<owner words>"` rewrites one
-clause in place (keeping its `binds:` marker unless the new sentence declares
-its own) and logs the amendment in `state.json → law_amendments`. The sentence
-must land in the same branch as the code that relied on the old one.
+--amend P8 --text "<new sentence>" --detail "<the written spec>" --requested-by
+"<owner words>"` rewrites one clause in place (keeping its `binds:` marker
+unless the new sentence declares its own) and logs the amendment in
+`state.json → law_amendments`. `--detail` is optional: omitted, the block the
+owner already wrote stays; `--detail ""` clears it deliberately. A NEW clause is
+declared the same way with `--add P16 --text "…" --binds app,web,backend
+--detail-file spec.md --requested-by "…"`, which refuses an id that already
+exists. The sentence and its detail must land in the same branch as the code
+that relied on the old one.
 
 **A clause that spans platforms says so.** `- **P11** — … (binds: app, web,
 backend)`. The project maps each name to the paths that own it, in

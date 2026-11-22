@@ -487,5 +487,117 @@ class LawSurfaceTest(unittest.TestCase):
         self.assertIn("does not carry", problem)
 
 
+class LawDetailTest(unittest.TestCase):
+    """A clause carries a WRITTEN SPEC, not only a sentence (owner, 2026-11-22).
+
+    "this needs more detailed writeup in product, not just your small point" —
+    the sentence stays the quotable law; the indented block under it says what
+    the sentence means on a screen. The parser must keep them apart, an
+    amendment must not silently drop the detail, and a clause with no detail
+    must keep working exactly as before.
+    """
+
+    def _project(self, body: str) -> Path:
+        root = Path(tempfile.mkdtemp())
+        (root / "PRODUCT.md").write_text(body, encoding="utf-8")
+        return root
+
+    def test_the_detail_block_belongs_to_its_clause(self):
+        root = self._project(
+            "# Product\n"
+            "- **P1** — a deal has no clock (binds: app, web)\n"
+            "\n"
+            "  A deal moves only when a reader acts.\n"
+            "\n"
+            "  - *Handed over* and *Book is back* are the only actions.\n"
+            "- **P2** — one copy each way\n"
+        )
+        clause = {c["id"]: c for c in law.clauses(root)}["P1"]
+        self.assertEqual("a deal has no clock", clause["text"])
+        self.assertEqual(["app", "web"], clause["binds"])
+        self.assertIn("A deal moves only when a reader acts.", clause["detail"])
+        self.assertIn("*Book is back*", clause["detail"])
+
+    def test_detail_lines_are_not_clauses(self):
+        root = self._project(
+            "- **P1** — a deal has no clock\n"
+            "  P2 is discussed below, but this line is detail.\n"
+            "- **P2** — one copy each way\n"
+        )
+        self.assertEqual(["P1", "P2"], [c["id"] for c in law.clauses(root)])
+
+    def test_a_clause_without_detail_is_unchanged(self):
+        root = self._project("- **P1** — a wish is an ad\n")
+        self.assertEqual("", law.clauses(root)[0]["detail"])
+
+    def test_a_reword_keeps_the_detail_the_owner_wrote(self):
+        root = self._project(
+            "- **P1** — a deal has no clock\n"
+            "\n"
+            "  The reader decides; no timer closes a deal.\n"
+        )
+        ok, _ = law.amend(root, "P1", "a deal is never closed by a clock",
+                          "clearer words")
+        self.assertTrue(ok)
+        clause = law.clauses(root)[0]
+        self.assertEqual("a deal is never closed by a clock", clause["text"])
+        self.assertIn("The reader decides", clause["detail"])
+
+    def test_an_amendment_can_rewrite_the_detail(self):
+        root = self._project(
+            "- **P1** — a deal has no clock\n\n  Old spec.\n")
+        ok, _ = law.amend(root, "P1", "a deal has no clock",
+                          "same rule, new spec", "New spec, with the score table.")
+        self.assertTrue(ok)
+        self.assertEqual("New spec, with the score table.",
+                         law.clauses(root)[0]["detail"])
+
+    def test_an_empty_detail_clears_it_deliberately(self):
+        root = self._project(
+            "- **P1** — a deal has no clock\n\n  Old spec.\n")
+        ok, _ = law.amend(root, "P1", "a deal has no clock", "drop the spec", "")
+        self.assertTrue(ok)
+        self.assertEqual("", law.clauses(root)[0]["detail"])
+
+    def test_add_declares_a_clause_with_its_detail_and_refuses_a_duplicate(self):
+        root = self._project("# Product\n- **P15** — a reader can leave\n")
+        ok, message = law.add(root, "P16", "a deal has no clock",
+                              "owner words", "The reader decides.", ["app", "web"])
+        self.assertTrue(ok)
+        self.assertIn("P16", message)
+        clause = {c["id"]: c for c in law.clauses(root)}["P16"]
+        self.assertEqual("a deal has no clock", clause["text"])
+        self.assertEqual(["app", "web"], clause["binds"])
+        self.assertEqual("The reader decides.", clause["detail"])
+        ok, message = law.add(root, "P16", "invented again", "owner words")
+        self.assertFalse(ok)
+        self.assertIn("already declared", message)
+
+    def test_add_needs_the_owner_words_and_a_clause_id(self):
+        root = self._project("# Product\n")
+        ok, message = law.add(root, "P16", "a rule", "")
+        self.assertFalse(ok)
+        self.assertIn("--requested-by", message)
+        ok, message = law.add(root, "P0", "a rule", "owner words")
+        self.assertFalse(ok)
+        self.assertIn("--add P16", message)
+
+    def test_show_prints_the_sentence_the_detail_and_the_citation(self):
+        root = self._project(
+            "- **P1** — a deal has no clock\n\n  The reader decides.\n")
+        (root / "app.kt").write_text("// Law: P1\n", encoding="utf-8")
+        ok, text = law.show(root, "P1")
+        self.assertTrue(ok)
+        self.assertIn("a deal has no clock", text)
+        self.assertIn("The reader decides.", text)
+        self.assertIn("app.kt", text)
+
+    def test_show_names_what_is_known_when_the_clause_is_missing(self):
+        root = self._project("- **P1** — a wish is an ad\n")
+        ok, text = law.show(root, "P9")
+        self.assertFalse(ok)
+        self.assertIn("P1", text)
+
+
 if __name__ == "__main__":
     unittest.main()

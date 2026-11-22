@@ -155,8 +155,10 @@ def readiness(project: Path, profile: dict | None = None) -> tuple[str, str]:
                          + (f" on {at}" if at else ""))
     return "blocked", (
         "no PRODUCT.md — the product law is not declared. Write it with the "
-        "owner (one clause per line, ids P1…), or record their decision to run "
-        'without one: devteam law <project> --waive --requested-by "<owner words>"'
+        "owner (one clause per line, ids P1…, each with an indented detail "
+        "block when the sentence needs a screen-level spec), or record their "
+        'decision to run without one: devteam law <project> --waive '
+        '--requested-by "<owner words>"'
     )
 
 
@@ -211,14 +213,75 @@ def write_block(project: Path, entry: dict, profile: dict | None = None) -> str:
     return entry_block(project, entry, profile)
 
 
+def _indent_of(raw: str) -> int:
+    return len(raw) - len(raw.lstrip(" \t"))
+
+
+def _detail_span(lines: list[str], index: int) -> tuple[int, int]:
+    """Where a clause's DETAIL block lives: `(start, end)` half-open, after `index`.
+
+    The detail is the indented prose under a clause — the part that says what the
+    sentence MEANS on a screen (owner decision 2026-11-22: "this needs more
+    detailed writeup in product, not just your small point"). Indentation is the
+    only marker: the sentence stays quotable and citable, and the block under it
+    is read by `devteam law --show` and by anyone implementing the clause.
+    """
+    indent = _indent_of(lines[index])
+    start = index + 1
+    end = start
+    while end < len(lines):
+        raw = lines[end]
+        if not raw.strip():
+            end += 1
+            continue
+        if _indent_of(raw) <= indent:
+            break
+        if _CLAUSE_BULLET.match(raw) or _CLAUSE_TABLE.match(raw):
+            break
+        end += 1
+    return start, end
+
+
+def _detail_text(lines: list[str], index: int) -> str:
+    """The detail block as written, with its shared indentation removed."""
+    start, end = _detail_span(lines, index)
+    block = lines[start:end]
+    while block and not block[-1].strip():
+        block.pop()
+    while block and not block[0].strip():
+        block.pop(0)
+    if not block:
+        return ""
+    indents = [_indent_of(line) for line in block if line.strip()]
+    cut = min(indents) if indents else 0
+    return "\n".join(
+        line[cut:].rstrip() if line.strip() else "" for line in block
+    ).strip()
+
+
+def _detail_lines(text: str, indent: int) -> list[str]:
+    """A detail block rendered under a clause: a blank line, then indented prose."""
+    body = str(text or "").strip()
+    if not body:
+        return []
+    pad = " " * (indent + 2)
+    return [""] + [pad + line if line.strip() else "" for line in body.splitlines()]
+
+
 def clauses(project: Path) -> list[dict[str, Any]]:
-    """Every clause, in file order. `[{id, text, binds}]` — empty means no law."""
+    """Every clause, in file order. `[{id, text, binds, detail}]` — empty = no law.
+
+    `text` is the one-sentence law (the quotable, citable half). `detail` is the
+    indented block under it, or `""` — the sentence is what a report quotes, the
+    detail is what an implementation follows.
+    """
     path = path_of(project)
     if path is None:
         return []
     out: list[dict[str, Any]] = []
     seen: set[str] = set()
-    for raw in path.read_text(encoding="utf-8", errors="ignore").splitlines():
+    lines = path.read_text(encoding="utf-8", errors="ignore").splitlines()
+    for index, raw in enumerate(lines):
         match = _CLAUSE_TABLE.match(raw) or _CLAUSE_BULLET.match(raw)
         if not match:
             continue
@@ -227,7 +290,8 @@ def clauses(project: Path) -> list[dict[str, Any]]:
             continue
         seen.add(clause_id)
         binds, spoken = _split_binds(text.rstrip("|").strip())
-        out.append({"id": clause_id, "text": spoken, "binds": binds})
+        out.append({"id": clause_id, "text": spoken, "binds": binds,
+                    "detail": _detail_text(lines, index)})
     return out
 
 
@@ -370,14 +434,20 @@ def unbind_surfaces(mapping: dict[str, list[str]],
     return named, dropped, None
 
 
-def amend(project: Path, clause_id: str, text: str, requested_by: str) -> tuple[bool, str]:
-    """Rewrite ONE clause's sentence — the owner's act, never an agent's.
+def amend(project: Path, clause_id: str, text: str, requested_by: str,
+          detail: str | None = None) -> tuple[bool, str]:
+    """Rewrite ONE clause's sentence (and optionally its detail) — the owner's act.
 
     An amendment needs the owner's own words on the record (the same rule
     `promote` follows): code cannot invent a new product, it can only write down
     what the owner said. The clause id and any `binds:` marker it already
     carried are preserved unless the new sentence declares its own — a
     tightening of the wording must not silently drop a platform from the gate.
+
+    `detail=None` keeps the block under the clause exactly as the owner wrote it;
+    passing a string replaces it. A new sentence that describes behaviour no one
+    has written down yet is a half-amendment, so the caller is expected to pass
+    one — `--detail ""` clears it deliberately.
     """
     cid = str(clause_id or "").strip().upper()
     new_text = " ".join(str(text or "").split())
@@ -401,10 +471,83 @@ def amend(project: Path, clause_id: str, text: str, requested_by: str) -> tuple[
         new_binds, spoken = _split_binds(new_text)
         binds = new_binds or old_binds
         marker = (" (binds: " + ", ".join(binds) + ")") if binds else ""
+        old_detail = _detail_text(lines, index)
+        body = old_detail if detail is None else str(detail).strip()
         lines[index] = f"- **{cid}** — {spoken}{marker}"
+        start, end = _detail_span(lines, index)
+        block = _detail_lines(body, 0)
+        lines[start:end] = block + ([""] if block else [])
         path.write_text("\n".join(lines) + "\n", encoding="utf-8")
-        return True, f"{cid} — {spoken}{marker}"
+        changed = "sentence" if detail is None else "sentence and detail"
+        return True, f"{cid} — {spoken}{marker} ({changed})"
     return False, f"{cid} is not a clause in {path.name} (nothing was changed)"
+
+
+def add(project: Path, clause_id: str, text: str, requested_by: str,
+        detail: str = "", binds: list[str] | None = None) -> tuple[bool, str]:
+    """DECLARE one new clause, with its detail — the owner's act.
+
+    Why a verb and not an editor (2026-11-22): a clause is what every later run is
+    judged against, and hand-editing the file was the way a clause got added
+    without its owner's words anywhere on the record. `--add` writes the same
+    shape `--amend` preserves — one sentence, then an indented detail block — so
+    the law can be as precise as the screen it must produce.
+    """
+    cid = str(clause_id or "").strip().upper()
+    new_text = " ".join(str(text or "").split())
+    who = " ".join(str(requested_by or "").split())
+    if not re.fullmatch(r"P[1-9]\d{0,2}", cid):
+        return False, 'say the clause id: --add P16 (P1, P2, … — P0 is a priority word)'
+    if not new_text:
+        return False, f'say the one sentence for {cid}: --text "<one clause>"'
+    if not who:
+        return False, ('declaring a clause is the owner\'s act — quote them: '
+                       '--requested-by "<the owner\'s words>"')
+    path = path_of(Path(project))
+    if path is None:
+        path = Path(project) / "PRODUCT.md"
+        path.write_text("# PRODUCT — the law this app renders\n\n", encoding="utf-8")
+    lines = path.read_text(encoding="utf-8").splitlines()
+    declared = {clause["id"]: clause for clause in clauses(Path(project))}
+    if cid in declared:
+        return False, (f"{cid} is already declared — change it with --amend {cid} "
+                       "--text \"…\" --detail \"…\" (nothing was changed)")
+    spoken, marker = new_text, ""
+    if binds:
+        marker = " (binds: " + ", ".join(b.strip().lower() for b in binds if b.strip()) + ")"
+    # Place it after the last clause and its detail, so the file stays one list.
+    insert_at = len(lines)
+    for index, raw in enumerate(lines):
+        match = _CLAUSE_TABLE.match(raw) or _CLAUSE_BULLET.match(raw)
+        if match:
+            insert_at = _detail_span(lines, index)[1]
+    while insert_at > 0 and not lines[insert_at - 1].strip():
+        insert_at -= 1
+    block = [f"- **{cid}** — {spoken}{marker}"] + _detail_lines(detail, 0)
+    lines[insert_at:insert_at] = ([""] if insert_at else []) + block
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    tail = " + detail" if str(detail or "").strip() else ""
+    return True, f"{cid} — {spoken}{marker}{tail} (declared)"
+
+
+def show(project: Path, clause_id: str) -> tuple[bool, str]:
+    """One clause as written: the sentence, its detail, and who cites it."""
+    cid = str(clause_id or "").strip().upper()
+    for clause in clauses(Path(project)):
+        if clause["id"] != cid:
+            continue
+        binds = ("  (binds " + ", ".join(clause["binds"]) + ")") if clause.get("binds") else ""
+        lines = [f"{clause['id']} — {clause['text']}{binds}"]
+        if clause.get("detail"):
+            lines.append("")
+            lines += ["  " + line if line.strip() else "" for line in clause["detail"].splitlines()]
+        where = citations(Path(project)).get(cid) or []
+        lines.append("")
+        lines.append(f"cited: {where[0]}" if where else
+                     "cited: nothing yet — a clause nothing cites is dead law")
+        return True, "\n".join(lines)
+    known = ", ".join(c["id"] for c in clauses(Path(project))) or "none"
+    return False, f"{cid or '?'} is not in PRODUCT.md (known: {known})"
 
 
 def prompt_block(project: Path, profile: dict | None = None) -> str:
@@ -430,8 +573,14 @@ def prompt_block(project: Path, profile: dict | None = None) -> str:
              "what it may never become:"]
     for clause in declared:
         binds = ("  (binds " + ", ".join(clause["binds"]) + ")") if clause.get("binds") else ""
-        lines.append(f"  {clause['id']} — {clause['text']}{binds}")
+        detail = "  +detail" if clause.get("detail") else ""
+        lines.append(f"  {clause['id']} — {clause['text']}{binds}{detail}")
     lines.append("")
+    lines.append("- the line above is the quotable law; a clause marked `+detail` "
+                 'carries a written spec under it in PRODUCT.md — read it with '
+                 f"`devteam law <project> --show {declared[0]['id']}` before you "
+                 "plan work that touches it. The detail is binding: it says what "
+                 "the sentence means on a screen.")
     lines.append('- every queue entry carries "law": ["<Pn>", …] — the clause(s) '
                  "it SERVES. An entry with no clause, or with an id not in the "
                  "list above, is rejected.")
@@ -724,7 +873,8 @@ def format_audit(result: dict[str, Any]) -> str:
         binds = ""
         if clause.get("binds"):
             binds = "  (binds " + ", ".join(clause["binds"]) + ")"
-        lines.append(f"  {mark}{clause['id']}  {clause['text'][:80]}{binds}")
+        detail = "  +detail" if clause.get("detail") else ""
+        lines.append(f"  {mark}{clause['id']}  {clause['text'][:80]}{binds}{detail}")
         lines.append(f"        {first}" + (f"  (+{len(where) - 1})" if len(where) > 1 else ""))
     for gap in result.get("unbound") or []:
         reason = {

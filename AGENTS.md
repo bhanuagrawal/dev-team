@@ -22,9 +22,13 @@ python3 cli.py admit <project> --query "<the owner's words>" \
 **The product law is declared, not remembered.** Every managed app has a
 `PRODUCT.md` (mandatory unless the owner waives it in their words); `devteam law
 <project>` shows it, `doctor` blocks without it, and `pick` refuses a queued task
-that names no clause. Never build work you cannot tie to a clause — and never
-change a clause yourself: `devteam law <project> --amend Pn --text "…"
---requested-by "<owner words>"` is the owner's act.
+that names no clause. A clause is one sentence plus, where the sentence needs it,
+an indented **detail block** that spells out what it means on a screen — the
+sentence is what a report quotes, the detail is what an implementation follows
+(`devteam law <project> --show P16`). Never build work you cannot tie to a
+clause — and never change a clause yourself: `devteam law <project> --amend Pn
+--text "…" --detail "…" --requested-by "<owner words>"` is the owner's act, and
+`--add Pn --text "…" --detail-file spec.md --requested-by "…"` declares a new one.
 
 **The team is a toolbox; you are the resolver.** Read `tools` once, then decide
 the sequence yourself — there is no route table to look for. `devteam admit` is
