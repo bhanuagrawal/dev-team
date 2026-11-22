@@ -234,6 +234,7 @@ def intake(project: Path, feedback: str, log=None) -> dict[str, Any]:
 
     from . import queue as qmod
     from .core import save_state, state_of, today
+    from . import law as law_mod
 
     st = state_of(project)
     label = f"icon-refresh-{today()}"
@@ -267,6 +268,14 @@ def intake(project: Path, feedback: str, log=None) -> dict[str, Any]:
     }
     if res:
         entry["advances"] = (state_of(project).get("last_run") or {}).get("advances") or ""
+    # The law is the door for a re-skin too: an app that has not decided what it
+    # is does not get a new face. The icon task itself is exempt from naming a
+    # clause (see law._exempt_entry) — it re-skins product that already exists.
+    block = law_mod.write_block(project, entry)
+    if block:
+        return {"status": "BLOCKED", "error": block,
+                "hint": (f"devteam law {project.name} --waive --requested-by \"…\"   |   "
+                         "declare PRODUCT.md, then re-run brand")}
     block = qmod.add_task(st, entry, source="owner-feedback", position="head")
     save_state(project, st)
     data = seed(project, text, label)

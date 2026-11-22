@@ -172,7 +172,7 @@ def entry_block(project: Path, entry: dict, profile: dict | None = None) -> str:
     status, _ = readiness(project, profile)
     if status != "ready" or path_of(project) is None:
         return ""
-    if str(entry.get("kind") or entry.get("type") or "") in ("release", "store"):
+    if _exempt_entry(entry):
         return ""
     if str(entry.get("law") or "").strip():
         return ""
@@ -181,6 +181,34 @@ def entry_block(project: Path, entry: dict, profile: dict | None = None) -> str:
             f"(`devteam law {Path(project).name} --cite '{label}' --law <Pn> "
             '--why "<why it serves it>"`), re-admit it, or drop it; a run may not '
             "build work the product cannot justify")
+
+
+def _exempt_entry(entry: dict) -> bool:
+    """Entries that deliver or re-skin work already admitted under a clause.
+
+    `release`/`store` were admitted as the delivery half of a task; an
+    `icon-refresh` task is the owner's own sentence about the app's mark, born
+    from `brand` with its provenance in the commit. None of them introduces a
+    new product behaviour, which is what a clause decides.
+    """
+    kind = str(entry.get("kind") or entry.get("type") or "").strip().lower()
+    if kind in ("release", "store"):
+        return True
+    return str(entry.get("label") or "").startswith("icon-refresh")
+
+
+def write_block(project: Path, entry: dict, profile: dict | None = None) -> str:
+    """Why this entry may not ENTER the queue — `""` when it may.
+
+    Stronger than `entry_block`, and the reason it exists (owner delegation
+    2026-11-22: no new development without a product law): an app that has not
+    DECIDED what it is accepts no new queued work at all, not even work with a
+    plausible clause. The law is the door, not a coat check.
+    """
+    status, note = readiness(project, _profile_or_empty(project) if profile is None else profile)
+    if status != "ready":
+        return note
+    return entry_block(project, entry, profile)
 
 
 def clauses(project: Path) -> list[dict[str, Any]]:

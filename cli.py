@@ -1078,6 +1078,17 @@ def cmd_queue(args: argparse.Namespace) -> None:
                 raise SystemExit(f"--supersedes names not in the queue: {unknown} "
                                  "— judge only tasks that are actually queued")
             entry["supersedes"] = list(entry.get("supersedes") or []) + list(args.supersedes)
+        # THE DOOR: no new queue entry in an app that has not decided its law.
+        # `queue add` is the orchestrator's own hand — the one writer that could
+        # bypass `admit`, `plan` and `brand` — so it is held to the same law.
+        from team import law as law_mod
+        block = law_mod.write_block(project, entry, profile_of(project))
+        if block:
+            raise SystemExit(
+                f"queue add refused — {block}\n"
+                f"  write PRODUCT.md with the owner (or record their waiver: "
+                f'devteam law {project.name} --waive --requested-by "<their words>"), '
+                "then re-read the request against a clause")
         block = qmod.add_task(state, entry, source="orchestrator",
                               position=args.position)
         save_state(project, state)
@@ -4310,6 +4321,31 @@ def cmd_law(args: argparse.Namespace) -> int:
         print("  next: cite the new sentence where it RENDERS, and change the "
               "code that relied on the old one — in this same branch")
 
+    # A PUBLISHED PAGE TREE IS A LAW SURFACE, and naming it is part of declaring
+    # the law (the project publishes pages no clause knows otherwise). One name
+    # may map to several globs; `binds:` in a clause then points at the name.
+    if getattr(args, "bind", None):
+        profile = profile_of(project)
+        mapping = profile.setdefault("law_bindings", {})
+        changed = []
+        for name, glob in args.bind:
+            name = str(name).strip().lower()
+            glob = str(glob).strip()
+            if not name or not glob:
+                print("law: --bind needs a surface name and a glob: --bind site 'docs/**'",
+                      file=sys.stderr)
+                return 2
+            globs = list(mapping.get(name) or [])
+            if glob not in globs:
+                globs.append(glob)
+                mapping[name] = globs
+                changed.append(f"{name} ← {glob}")
+        save_json(pipeline_dir(project) / "profile.json", profile)
+        if changed:
+            print("law: named surface(s) — " + "; ".join(changed))
+        else:
+            print("law: those surface(s) were already named (nothing changed)")
+
     if getattr(args, "cite", ""):
         ok, message = law_mod.cite(project, args.cite, getattr(args, "law", ""),
                                    getattr(args, "why", ""))
@@ -6222,6 +6258,10 @@ def main() -> None:
                          "clause is a new request: use admit)")
     lw.add_argument("--law", default="", help="with --cite: the clause(s) it serves (Pn[,Pn])")
     lw.add_argument("--why", default="", help="with --cite: why the entry serves that clause")
+    lw.add_argument("--bind", nargs=2, metavar=("NAME", "GLOB"), action="append",
+                    help="name a law surface this project publishes, e.g. "
+                         "--bind site 'docs/**' (required before a declared law can "
+                         "pass with a page tree nobody named)")
     lw.set_defaults(fn=cmd_law)
     from team.admit import KINDS as _ADMIT_KINDS
     rt = sub.add_parser("admit",

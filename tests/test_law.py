@@ -401,5 +401,47 @@ class LawCiteTest(unittest.TestCase):
         self.assertIn("bugfix-offer-two", message)
 
 
+class LawWriteBlockTest(unittest.TestCase):
+    """No new queue entry in an app that has not decided what it is."""
+
+    def _project(self, law_body: str | None, waived: bool = False) -> Path:
+        root = Path(tempfile.mkdtemp())
+        if law_body is not None:
+            (root / "PRODUCT.md").write_text(law_body, encoding="utf-8")
+        (root / ".pipeline").mkdir()
+        profile = {"name": "sample"}
+        if waived:
+            profile[law.WAIVER_KEY] = {"waived": True, "requested_by": "later"}
+        (root / ".pipeline" / "profile.json").write_text(
+            json.dumps(profile), encoding="utf-8")
+        return root
+
+    def test_an_undeclared_law_refuses_new_work_even_with_a_clause(self):
+        root = self._project(None)
+        reason = law.write_block(root, {"label": "x", "kind": "bugfix", "law": "P1"})
+        self.assertIn("PRODUCT.md", reason)
+
+    def test_a_declared_law_refuses_a_clause_less_entry(self):
+        root = self._project("- **P1** — one copy each way\n")
+        reason = law.write_block(root, {"label": "x", "kind": "bugfix"})
+        self.assertIn("--cite", reason)
+
+    def test_a_cited_entry_enters(self):
+        root = self._project("- **P1** — one copy each way\n")
+        self.assertEqual("", law.write_block(
+            root, {"label": "x", "kind": "bugfix", "law": "P1"}))
+
+    def test_delivery_and_icon_tasks_are_exempt(self):
+        root = self._project("- **P1** — one copy each way\n")
+        self.assertEqual("", law.write_block(
+            root, {"label": "release-1.2", "kind": "release"}))
+        self.assertEqual("", law.write_block(
+            root, {"label": "icon-refresh-2026-11-22", "type": "feature"}))
+
+    def test_a_waiver_is_a_decision(self):
+        root = self._project(None, waived=True)
+        self.assertEqual("", law.write_block(root, {"label": "x", "kind": "bugfix"}))
+
+
 if __name__ == "__main__":
     unittest.main()
