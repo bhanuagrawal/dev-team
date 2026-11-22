@@ -1642,6 +1642,25 @@ def cmd_record(args: argparse.Namespace) -> None:
         print(f"worktrees: prune skipped ({e})")
 
 
+def _mail_owner_quietly(project: Path) -> None:
+    """Deliver any NEW owner decision for this project; never raise, stdout stays
+    machine-readable (`pick` prints JSON there)."""
+    try:
+        from team import mail as mail_mod
+        sent = mail_mod.send_pending(project, quiet=True)
+        if sent["status"] == "sent":
+            print(f"mail: sent to {sent['to']} — the decision and its command",
+                  file=sys.stderr)
+        elif sent["status"] == "unconfigured" and sent["waiting"]:
+            print(f"mail: NOT sent — {sent['waiting']} decision(s) waiting; {sent['why']}",
+                  file=sys.stderr)
+        elif sent["status"] == "error":
+            print(f"mail: delivery failed — {sent['why']} (stays queued)",
+                  file=sys.stderr)
+    except Exception as exc:
+        print(f"mail: skipped ({exc})", file=sys.stderr)
+
+
 def cmd_pick(args: argparse.Namespace) -> int:
     project = resolve_project(args.project)
     profile = profile_of(project)
@@ -1689,6 +1708,7 @@ def cmd_pick(args: argparse.Namespace) -> int:
                          indent=2))
         print_owner_asks(project)
         print_page(project, "this project's plan (no goal yet)")
+        _mail_owner_quietly(project)
         return 4
     # THE PRODUCT LAW — a run may not start against a product nobody has said
     # what it is (owner decision 2026-11-22: the law is mandatory, and the only
@@ -1707,6 +1727,7 @@ def cmd_pick(args: argparse.Namespace) -> int:
         }, indent=2))
         print_owner_asks(project)
         print_page(project, "this project declares no product law")
+        _mail_owner_quietly(project)
         return 5
     from team import scan
     from team.scan import next_task, scan_surfaces
@@ -2227,6 +2248,21 @@ def cmd_status(args: argparse.Namespace) -> None:
         print(f"admit:      {len(flags)} request(s) FLAGGED — nothing queued; last: "
               f"\"{str(last_flag.get('question') or '')[:90]}\" "
               f"({last_flag.get('who')} decides)")
+    # A decision the nightly hands back is worthless in a log nobody opens. Say
+    # whether it has somewhere to go — and how many are waiting — on every status.
+    try:
+        from team import mail as mail_mod
+        st = mail_mod.status()
+        data = mail_mod.inbox(project)
+        waiting = [r for r in data["items"] if not r["sent_at"]]
+        if not st["configured"] and waiting:
+            print(f"mail:       !! {len(waiting)} decision(s) need you and no owner "
+                  "email is set — `devteam mail set --to you@example.com`")
+        elif st["configured"]:
+            print(f"mail:       {st['to_masked']} · {len(waiting)} unsent / "
+                  f"{len(data['items'])} open")
+    except Exception:
+        pass
     # THE PRODUCT LAW — cheap on purpose (clauses + readiness only; the full
     # citation audit is `devteam law`): status is read every run, and a gate
     # nobody can see is a gate nobody fixes.
@@ -3240,6 +3276,189 @@ def cmd_doctor(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_mail(args: argparse.Namespace) -> int:
+    """THE OWNER'S INBOX — one email address, one message per decision, once.
+
+    The nightly runs unwatched. This verb is how "the product itself should
+    change" reaches the owner instead of a log: `set` once, then every gate that
+    hands a call back is collected (`goal`, `admit`, owner-only `ask`, explicit
+    `ask` proposal) and mailed as ONE digest, deduplicated in the ledger.
+
+    A send that fails leaves the decision UNSENT — never "delivered" — so the
+    next run retries it. `test` proves the relay before a real decision depends
+    on it.
+    """
+    from team import mail as mail_mod
+
+    action = (getattr(args, "action", "") or "status").strip()
+    project = resolve_project(args.project) if getattr(args, "project", None) else None
+    # `devteam mail <app>` is the shape people reach for; it means "inbox <app>".
+    if action not in {"status", "set", "test", "inbox", "send", "ask", "resolve"}:
+        if project is None:
+            project = resolve_project(action)
+            action = "inbox"
+        else:
+            print(f"mail: unknown action {action!r} — use set/test/inbox/send/ask/resolve",
+                  file=sys.stderr)
+            return 2
+
+    if action == "set":
+        password = ""
+        if getattr(args, "password_stdin", False):
+            password = sys.stdin.readline().strip()
+        enabled = None
+        if getattr(args, "off", False):
+            enabled = False
+        elif getattr(args, "on", False):
+            enabled = True
+        res = mail_mod.set_config(
+            to=getattr(args, "to", "") or "",
+            from_=getattr(args, "sender", "") or "",
+            provider=getattr(args, "provider", "") or "",
+            host=getattr(args, "host", "") or "",
+            port=getattr(args, "port", None),
+            mode=getattr(args, "mode", "") or "",
+            user=getattr(args, "user", "") or "",
+            password=password,
+            enabled=enabled,
+            note=getattr(args, "note", "") or "",
+        )
+        if not res["ok"]:
+            print(f"mail: {res['why']}", file=sys.stderr)
+            return 2
+        st = mail_mod.status(res["cfg"])
+        print(mail_mod.format_status(st))
+        print()
+        print(f"  saved:    {res['path']} (0600)")
+        if res["password_stored"] == "keychain":
+            print("  password: stored in the macOS Keychain — not in any file")
+        elif res["password_stored"] == "file":
+            print("  password: stored in the local 0600 file — the Keychain was "
+                  "unavailable; `DEVTEAM_SMTP_PASSWORD` overrides it")
+        print()
+        print(f"  NEXT:     python3 cli.py mail test")
+        return 0
+
+    if action == "test":
+        st = mail_mod.status()
+        if not st["configured"]:
+            print(mail_mod.format_status(st), file=sys.stderr)
+            print("\nmail: nothing sent — set it up first", file=sys.stderr)
+            return 1
+        try:
+            res = mail_mod.send(
+                mail_mod.load_config(),
+                "[dev-team] mail is configured",
+                "This is the dev-team owner channel.\n\n"
+                "From now on a decision that needs you — a missing goal, a request "
+                "that contradicts the product law, or a data-driven proposal to "
+                "change the product itself — arrives here once, with the command "
+                "that answers it.\n\n"
+                f"See what is open: devteam mail inbox <app>\n"
+                "Mute it: devteam mail set --off\n",
+            )
+        except mail_mod.MailError as exc:
+            print(f"mail: FAILED — {exc}", file=sys.stderr)
+            return 1
+        print(f"mail: sent to {res['to']} via {res['host']}:{res['port']} — check the inbox")
+        return 0
+
+    if action == "ask":
+        if project is None:
+            print("mail ask: <project> is required", file=sys.stderr)
+            return 2
+        res = mail_mod.add_proposal(
+            project,
+            title=getattr(args, "title", "") or "",
+            question=getattr(args, "question", "") or "",
+            why=getattr(args, "why", "") or "",
+            command=getattr(args, "command", "") or "",
+            law=getattr(args, "law", "") or "",
+        )
+        if not res["ok"]:
+            print(f"mail ask: {res['why']}", file=sys.stderr)
+            return 2
+        item = res["item"]
+        print(f"mail ask: recorded {item['id']} — {item['title']}")
+        if not getattr(args, "no_send", False):
+            sent = mail_mod.send_pending(project)
+            if sent["status"] == "sent":
+                print(f"mail ask: delivered to {sent['to']}")
+            elif sent["status"] == "unconfigured":
+                print(f"mail ask: not delivered — {sent['why']}")
+            elif sent["status"] == "error":
+                print(f"mail ask: delivery FAILED — {sent['why']}", file=sys.stderr)
+                return 1
+        return 0
+
+    if action == "resolve":
+        if project is None or not getattr(args, "id", ""):
+            print("mail resolve: <project> and --id are required", file=sys.stderr)
+            return 2
+        res = mail_mod.resolve(project, args.id)
+        if not res["ok"]:
+            print(f"mail resolve: {res['why']}", file=sys.stderr)
+            return 2
+        print(f"mail resolve: closed \"{res['title']}\"")
+        return 0
+
+    if action == "send":
+        if project is not None:
+            projects = [project]
+        elif getattr(args, "all", False):
+            from team.report import projects as all_projects
+            projects = all_projects()
+        else:
+            print("mail send: name a <project>, or pass --all", file=sys.stderr)
+            return 2
+        rows, failed = [], 0
+        for p in projects:
+            res = mail_mod.send_pending(p, force=getattr(args, "force", False),
+                                        dry_run=getattr(args, "dry_run", False))
+            rows.append((p.name, res))
+            if res["status"] == "error":
+                failed += 1
+        if getattr(args, "json", False):
+            print(json.dumps({n: r for n, r in rows}, indent=2))
+        else:
+            for name, r in rows:
+                if r["status"] == "sent":
+                    print(f"mail: {name} — {r['sent']} decision(s) sent to {r['to']}")
+                elif r["status"] == "nothing-new":
+                    print(f"mail: {name} — nothing new")
+                elif r["status"] == "dry-run":
+                    print(f"mail: {name} — would send: {r.get('subject') or ''}")
+                elif r["status"] == "unconfigured":
+                    print(f"mail: {name} — {r['waiting']} decision(s) recorded, NOT sent "
+                          f"({r['why']})")
+                else:
+                    print(f"mail: {name} — FAILED: {r['why']}", file=sys.stderr)
+        return 1 if failed else 0
+
+    # inbox / status
+    if project is None:
+        st = mail_mod.status()
+        print(mail_mod.format_status(st))
+        if getattr(args, "all", False):
+            from team.report import projects as all_projects
+            total = 0
+            for p in all_projects():
+                data = mail_mod.inbox(p)
+                waiting = [r for r in data["items"] if not r["sent_at"]]
+                total += len(waiting)
+                if data["items"]:
+                    print(f"  {p.name:<24} {len(waiting)} waiting · {len(data['items'])} open")
+            if not total:
+                print("  no open decisions")
+        return 0
+    data = mail_mod.inbox(project)
+    if getattr(args, "json", False):
+        print(json.dumps(data, indent=2))
+    else:
+        print(mail_mod.format_inbox(data))
+    return 0
+
+
 def cmd_alarm(args: argparse.Namespace) -> int:
     project = resolve_project(args.project)
     log = RunLog(project, "alarm-" + today())
@@ -4189,6 +4408,24 @@ def cmd_admit(args: argparse.Namespace) -> int:
         if res.get("impact"):
             print()
             print(res["impact"])
+    if res.get("verdict") == "flag":
+        # A flag the OWNER decides is the one case a nightly must not leave in a
+        # log: mail it once, through the recorded inbox (never raise, never mark
+        # undelivered work as sent).
+        try:
+            from team import mail as mail_mod
+            sent = mail_mod.send_pending(project, quiet=True)
+            if sent["status"] == "sent":
+                print(f"mail: sent to {sent['to']} — one message, with the command "
+                      "that answers it", file=sys.stderr)
+            elif sent["status"] == "unconfigured" and sent["waiting"]:
+                print(f"mail: NOT sent — {sent['waiting']} decision(s) waiting; "
+                      f"{sent['why']}", file=sys.stderr)
+            elif sent["status"] == "error":
+                print(f"mail: delivery failed — {sent['why']} (the ask stays "
+                      "queued for the next run)", file=sys.stderr)
+        except Exception as exc:      # the owner channel never breaks the gate
+            print(f"mail: skipped ({exc})", file=sys.stderr)
     return 0 if (res.get("ok") or res.get("verdict") == "precheck") else 2
 
 
@@ -5935,6 +6172,38 @@ def main() -> None:
     rn.add_argument("--clear", action="store_true", help="undeclare the machine")
     rn.set_defaults(fn=cmd_runner)
     a = sub.add_parser("alarm");       a.add_argument("project"); a.set_defaults(fn=cmd_alarm)
+    ml = sub.add_parser("mail", help="the OWNER's inbox: one email address that a decision "
+                                     "the pipeline hands back is delivered to (set/test/inbox/"
+                                     "send/ask/resolve)")
+    ml.add_argument("action", nargs="?", default="status",
+                    help="status | set | test | inbox | send | ask | resolve "
+                         "(a project name alone means `inbox <project>`)")
+    ml.add_argument("project", nargs="?")
+    ml.add_argument("--to", help="the owner's address that receives escalations")
+    ml.add_argument("--from", dest="sender", help="From: (defaults to the SMTP user)")
+    ml.add_argument("--provider", choices=sorted(("gmail", "icloud", "fastmail",
+                                                 "outlook", "custom")),
+                    help="preset for host/port/mode")
+    ml.add_argument("--host"); ml.add_argument("--port", type=int)
+    ml.add_argument("--mode", choices=["starttls", "ssl", "plain"])
+    ml.add_argument("--user", help="SMTP login (defaults to --from/--to)")
+    ml.add_argument("--password-stdin", action="store_true",
+                    help="read the SMTP password from stdin; it goes to the Keychain")
+    ml.add_argument("--on", action="store_true", help="resume mail")
+    ml.add_argument("--off", action="store_true", help="mute mail (asks still recorded)")
+    ml.add_argument("--note", help="a line stored with the setup")
+    ml.add_argument("--title", help="ask: the one-line subject of the proposal")
+    ml.add_argument("--question", help="ask: what must be decided, in plain words")
+    ml.add_argument("--why", help="ask: the evidence (analytics, reviews, a walk)")
+    ml.add_argument("--command", help="ask: the command that records the owner's answer")
+    ml.add_argument("--law", help="ask: the clause the proposal serves or amends")
+    ml.add_argument("--id", help="resolve: the proposal id")
+    ml.add_argument("--all", action="store_true", help="send/inbox: every onboarded app")
+    ml.add_argument("--force", action="store_true", help="send: re-send even if already sent")
+    ml.add_argument("--no-send", action="store_true", help="ask: record without mailing")
+    ml.add_argument("--dry-run", action="store_true")
+    ml.add_argument("--json", action="store_true")
+    ml.set_defaults(fn=cmd_mail)
     rs = sub.add_parser("research");   rs.add_argument("project"); rs.add_argument("--no-llm", action="store_true")
     rs.add_argument("--apply-result", help="synthesis JSON produced by the host tool's native agent; applies through the same validation + goal gate")
     rs.add_argument("--focus", help="the owner's scoped review request for this cycle (e.g. 'review the existing UX'); injected into the prompt as a labelled block")

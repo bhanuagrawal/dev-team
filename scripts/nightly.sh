@@ -106,4 +106,10 @@ python3 "$TEAM/cli.py" autopromote "$PROJECT" --run --yes >> "$TEAM/logs/launchd
 
 # staleness + CI reconciliation + issue filing (deterministic)
 python3 "$TEAM/cli.py" alarm "$PROJECT" >> "$TEAM/logs/launchd.log" 2>&1
+
+# The owner's inbox (owner ask 2026-11-22). A nightly that hands a decision back
+# mails it from inside the run; this is the second net for asks recorded while the
+# relay was down or unconfigured. Deduplicated in the project ledger: an open
+# question already delivered is not mailed again.
+python3 "$TEAM/cli.py" mail send "$PROJECT" >> "$TEAM/logs/launchd.log" 2>&1
 echo "=== nightly done $(date '+%F %T') ===" >> "$TEAM/logs/launchd.log"

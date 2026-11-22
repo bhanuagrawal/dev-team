@@ -318,6 +318,34 @@ commands, in order, with the reasoning and the failure branches.
     told whether the build is a release candidate, never asked to guess it.
     Details below.
 
+## When the data says the PRODUCT ITSELF should change
+
+Analytics, reviews, a market signal or a walk can point at something no clause
+already decides — the pause is too long, the paid tier sells the wrong thing, a
+surface nobody uses. That is a **product call, not a task**. Do not smuggle it into
+the queue as a bugfix; propose it:
+
+```
+python3 <team>/cli.py mail ask <project> \
+  --title "<one line: what the data says>" \
+  --question "<the decision in the owner's terms>" \
+  --why "<the numbers / the walk / the review>" \
+  --law <Pn> \
+  --command "<the admit/law/goal command that would record their answer>"
+```
+
+It is recorded in the project ledger and mailed to the owner once (the `mail:`
+line in `status` and `doctor` shows whether delivery is set up). Nothing queues
+from it. The same is already automatic for a request the gate refuses because
+the owner decides (`admit` FLAG) and for a missing goal (`pick` rc 4/5) — those
+mails go out without an agent remembering to send them.
+
+**Never read silence as consent.** If the owner has not answered, the next run
+sees the same open proposal (it is not re-mailed), and work continues on what the
+law already decides. An explicit proposal is closed with
+`devteam mail resolve <project> --id <id>`; a derived ask is answered at its
+source, and the inbox prints that command.
+
 ## Self-healing delivery loop (owner decision 2026-10-16)
 When a run's release could not deliver (red delivery workflow — a store
 upload/policy rejection, e.g. Play target-API level increases), the pipeline

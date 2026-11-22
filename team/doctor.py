@@ -581,6 +581,29 @@ def run_doctor(project: Path, log) -> dict:
     except Exception as e:  # a review must never hide the report
         log(f"doctor asks: could not review ({e})")
 
+    # A decision handed back to the owner is only useful if it can REACH them.
+    # WARN, never block: an unset address does not break the product, but the next
+    # nightly that refuses on a product question must not disappear into a log.
+    # (owner ask 2026-11-22: "I might lose the fact that you need my input")
+    try:
+        from . import mail as mail_mod
+        st = mail_mod.status()
+        waiting = [r for r in mail_mod.inbox(project)["items"] if not r["sent_at"]]
+        if st["configured"]:
+            note = (f"{len(waiting)} waiting to be delivered" if waiting
+                    else "every open decision has been delivered")
+            log(f"doctor mail: ready — escalations go to {st['to_masked']} ({note})")
+            report["mail"] = {"status": "ready", "blocked": [], "checks_passed": 1,
+                              "note": note}
+        else:
+            note = f"{st['why']}" + (f" · {len(waiting)} waiting" if waiting else "")
+            log(f"doctor mail: WARN — {note} — set the channel with "
+                "`devteam mail set --to you@example.com`")
+            report["mail"] = {"status": "warn", "blocked": [], "checks_passed": 0,
+                              "note": note}
+    except Exception as e:  # the owner channel must never hide the report
+        log(f"doctor mail: could not check ({e})")
+
     # Capability parity: a feature the team ships but this project cannot use is
     # invisible without this. The polish audit landed as a command, `adapt` could
     # not see it (its test is data shape, and this added no key), and this check is

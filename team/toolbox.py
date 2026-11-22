@@ -238,6 +238,15 @@ _RAW: list[tuple[str, str, str, str, str, bool]] = [
      ".pipeline/profile.json", "unknown layout", True),
     ("keystore-backup", "ops", "back up the release keystore off-repo and verify it",
      "Google Drive + ~/.config/devteam/keystores", "no backup destination", True),
+    ("mail", "ops", "the OWNER's inbox: set one email address and every decision the "
+                    "pipeline hands back (goal missing, request contradicts the law, a "
+                    "data-driven proposal to change the product) is mailed once with the "
+                    "command that answers it — set/test/inbox/send/ask/resolve",
+     "config/mail.local.json (0600; the password also goes to the Keychain); project "
+     "state.mail (sent ledger + explicit proposals)",
+     "`send` without a recipient or relay (the ask is recorded, never lost); `ask` "
+     "without --title and --question; `resolve` of a derived ask (answer its source)",
+     True),
     # ---- internal ---------------------------------------------------------- #
     ("run-orchestrator", "internal", "spawn a host agent with a prompt",
      "—", "—", False),
@@ -271,6 +280,7 @@ PAGES: list[tuple[str, str]] = [
     ("docs/store.md", "anything the Play listing shows"),
     ("docs/guarantees.md", "a gate refused, or you are fixing the team itself"),
     ("docs/new-app.md", "starting an app from an idea"),
+    ("docs/mail.md", "a decision needs the owner, or setting up their email"),
 ]
 
 TEAM_ROOT = CLI_PY.parent

@@ -108,6 +108,7 @@ missing kind/milestone) answers before anything executes.
 | `docs/store.md` | anything the Play listing shows | `storefront-build` / `store-publish` refusal |
 | `docs/guarantees.md` | a gate refused, or you are fixing the team itself | `devteam verify` refusal / `doctor` |
 | `docs/new-app.md` | starting an app from an idea | `devteam onboard` / `skills/new-project` |
+| `docs/mail.md` | a decision needs the owner, or setting up their email | `devteam mail` / `doctor mail: WARN` |
 
 A page no command names is a page nobody reads: `devteam doctor` blocks an orphan
 page or a dead link, so the map above cannot rot.
@@ -123,6 +124,7 @@ page or a dead link, so the map above cannot rot.
 | run logs · handover copy | `<project>/.pipeline/runs/` · `<date>-handover-v<version>.md` |
 | store scene spec | `<project>/docs/storefront.json` |
 | rendered scenes | `<project>/.pipeline/storefront_scenes/` |
+| owner email (recipient + relay) | `config/mail.local.json` (0600, gitignored; password in the Keychain) |
 | report page (all apps) | `~/dev-team/site/` — `devteam site` builds, `--serve` serves |
 
 ## Done means
