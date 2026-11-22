@@ -2634,6 +2634,14 @@ def cmd_analytics(args: argparse.Namespace) -> int:
         print(f"   python3 cli.py analytics {project.name} --declare {dest}")
         return 0
 
+    if args.forget_ga4:
+        pf, note = analytics_mod.forget_ga4(project)
+        print(f"analytics: {note}")
+        if pf is None:
+            return 2
+        print(f"   wrote {pf} — commit it; the profile is what `doctor` reads.")
+        profile = profile_of(project)
+
     if args.declare:
         try:
             decl = json.loads(Path(args.declare).read_text())
@@ -6509,6 +6517,9 @@ def main() -> None:
                     help="write profile.analytics from a JSON file (the agent/owner confirms)")
     an.add_argument("--no-live", action="store_true",
                     help="check the declaration against the tree only (no GA4 read)")
+    an.add_argument("--forget-ga4", action="store_true",
+                    help="drop connections.ga4 for an app that must send nothing "
+                         "(mode 'none' only) — a silent app must not declare a property")
     an.set_defaults(fn=cmd_analytics)
     cv = sub.add_parser("coverage", help="unit and UI test coverage over the shipped tree "
                                          "(the numbers the planner gates on)")

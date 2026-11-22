@@ -368,7 +368,13 @@ def audit(project: Path, profile: dict | None = None,
 
     # 2 — the tree obeys the declared mode ---------------------------------- #
     conns = profile.get("connections") or {}
-    ga_conn = bool(conns.get("ga4") or conns.get("firebase"))
+    # A `firebase` connection is two different facts: a property that would
+    # receive events (with the SDK in the tree) or the App Distribution app the
+    # release run uploads a build to (a delivery channel, never reader data).
+    # FieldCert 2026-11-22: `firebase` is the tester channel and the tree has no
+    # Firebase SDK, so treating it as telemetry asked the owner to break QA.
+    fb_property = bool(conns.get("firebase")) and bool(src.get("sdk"))
+    ga_conn = bool(conns.get("ga4"))
     if m == "none":
         if src.get("sdk") or src.get("tracker"):
             checks.append(_check(
@@ -376,13 +382,18 @@ def audit(project: Path, profile: dict | None = None,
                 f"mode 'none' ({law or 'no clause named'}) but {DELIVERY_REF} "
                 f"carries the analytics SDK/tracker",
                 "remove the SDK and the tracker — or amend the clause, which is the owner's act"))
-        elif ga_conn:
+        elif ga_conn or fb_property:
+            named = ([f"connections.ga4 (property {conns['ga4'].get('property') or '?'})"]
+                     if ga_conn else [])
+            if fb_property:
+                named.append("connections.firebase (the tree ships the SDK)")
             checks.append(_check(
                 "analytics.obeys", "blocked",
                 f"mode 'none' ({law or 'no clause named'}) but the profile declares "
-                f"connections {', '.join(k for k in ('ga4', 'firebase') if conns.get(k))} "
-                "— a connected property for an app that must send nothing",
-                "drop the connections (`profile.connections`) — or amend the clause"))
+                f"{' and '.join(named)} — a property to read for an app that must send nothing",
+                "drop connections.ga4 (`devteam analytics <project> --forget-ga4`) — or "
+                "amend the clause, which is the owner's act. A `firebase` entry with no "
+                "SDK in the tree is App Distribution and may stay"))
         else:
             checks.append(_check("analytics.obeys", "ok",
                                  f"nothing is sent: no SDK, no tracker, no property ({law or 'no clause'})"))
@@ -708,3 +719,26 @@ def write_declaration(project: Path, decl: dict) -> Path:
     profile["analytics"] = decl
     save_json(pf, profile)
     return pf
+
+
+def forget_ga4(project: Path) -> tuple[Path | None, str]:
+    """Drop connections.ga4 for an app that must send nothing.
+
+    A property left wired for a silent app is a claim the planner can read as
+    "no events yet" instead of "no events, by law". Only legal on mode 'none':
+    on a measured app this would delete the contract's own evidence.
+    """
+    from .core import load_json, save_json
+    pf = project / ".pipeline" / "profile.json"
+    profile = load_json(pf, {}) or {}
+    if mode(profile) != "none":
+        return None, ("refused: the app is mode 'measured' — dropping its property "
+                      "would delete the evidence the contract is checked against")
+    conns = profile.get("connections") or {}
+    if not conns.get("ga4"):
+        return None, "nothing to drop: connections.ga4 is not declared"
+    gone = conns.pop("ga4")
+    save_json(pf, profile)
+    kept = [k for k in ("firebase", "play_vitals", "play_listing") if conns.get(k)]
+    return pf, (f"dropped connections.ga4 (property {gone.get('property') or '?'})"
+                + (f" — kept {', '.join(kept)} (delivery, not telemetry)" if kept else ""))

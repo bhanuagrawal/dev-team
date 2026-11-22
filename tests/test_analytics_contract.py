@@ -97,6 +97,16 @@ class AuditTest(unittest.TestCase):
                                    "connections": {"ga4": {"property": "1"}}}, {})
         self.assertEqual(len(dirty["blocked"]), 1)
         self.assertIn("ga4", dirty["blocked"][0]["detail"])
+        self.assertIn("forget-ga4", dirty["blocked"][0]["fix"])
+
+    def test_mode_none_keeps_app_distribution_as_a_delivery_channel(self):
+        # FieldCert 2026-11-22: `connections.firebase` is the App Distribution app
+        # the release run uploads a build to. With no Firebase SDK in the tree it
+        # is delivery, not telemetry — asking the owner to drop it would break QA.
+        root = _repo({"app/src/Main.kt": "class Nothing { fun f() = 1 }"})
+        res = self._audit(root, {"analytics": {"mode": "none", "law": "P2"},
+                                 "connections": {"firebase": {"app_id": "1:2:android:3"}}}, {})
+        self.assertEqual(res["blocked"], [], res["blocked"])
 
     def test_a_measured_contract_passes_when_it_is_named_and_lands(self):
         root = _repo({"app/src/Main.kt": KOTLIN,
@@ -226,6 +236,12 @@ class AuditTest(unittest.TestCase):
 
 
 class UpgradeTest(unittest.TestCase):
+    def test_forget_ga4_refuses_an_app_that_is_not_declared_silent(self):
+        root = _repo({"app/src/Main.kt": KOTLIN})
+        pf, note = analytics.forget_ga4(root)
+        self.assertIsNone(pf)
+        self.assertIn("refused", note)
+
     def test_every_blocker_becomes_one_queueable_upgrade(self):
         root = _repo({"app/src/Main.kt": KOTLIN})
         res = analytics.audit(root, {"connections": {"ga4": {"property": "1"}}},
