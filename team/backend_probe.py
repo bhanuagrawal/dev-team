@@ -70,16 +70,30 @@ def missing_keys(payload: Any, item_keys: list[str]) -> list[str]:
     """Keys the response does not carry — on the row, or on its first item.
 
     The app's projection is a list for `/offers` and an object for one deal, and
-    a declared key may sit on either. An empty list is not evidence either way
-    (there may be no deal yet), so only a non-empty answer is judged.
+    a declared key may sit on either. FastAPI also ENVELOPES: BookSwap's
+    `GET /api/v1/offers` answers `{"offers": [...], "next_cursor": null}`, so a
+    bare-list reader called the live service old-shape while it was new — the
+    gate refused a correct deploy. So a dict that lacks the keys itself is
+    searched for the list its rows live under.
+
+    An empty list is not evidence either way (there may be no deal yet), so only
+    a non-empty answer is judged.
     """
     if not item_keys:
         return []
     row: Any = payload
-    if isinstance(payload, list):
-        if not payload:
+    if isinstance(payload, dict) and not any(k in payload for k in item_keys):
+        for value in payload.values():
+            if isinstance(value, list) and value:
+                row = value[0]
+                break
+        else:
+            if any(isinstance(v, list) for v in payload.values()):
+                return []
+    if isinstance(row, list):
+        if not row:
             return []
-        row = payload[0]
+        row = row[0]
     if not isinstance(row, dict):
         return [str(k) for k in item_keys]
     return [str(k) for k in item_keys if k not in row]

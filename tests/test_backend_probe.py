@@ -57,6 +57,18 @@ class MissingKeysTest(unittest.TestCase):
         self.assertEqual(["feedback"],
                          backend_probe.missing_keys({"timeline": []}, ["timeline", "feedback"]))
 
+    def test_an_envelope_is_opened_to_find_its_rows(self):
+        # BookSwap answers {"offers": [...], "next_cursor": null}; a bare-list
+        # reader called that old-shape after a correct deploy.
+        live = {"offers": [{"timeline": [], "feedback": {}, "agreed_at": None}],
+                "next_cursor": None}
+        self.assertEqual([], backend_probe.missing_keys(
+            live, ["timeline", "feedback", "agreed_at"]))
+
+    def test_an_empty_envelope_is_not_evidence_either_way(self):
+        self.assertEqual([], backend_probe.missing_keys({"offers": [], "next_cursor": None},
+                                                        ["timeline"]))
+
 
 class ContractTest(unittest.TestCase):
     def setUp(self):
