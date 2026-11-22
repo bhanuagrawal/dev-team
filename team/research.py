@@ -24,6 +24,7 @@ from . import coverage as coverage_mod
 from .core import (RunLog, git, is_plan_mirror, now_iso, pipeline_dir, profile_of,
                    run, save_json, save_state, state_of, target_looks_like_paths)
 from . import goals
+from . import law as law_mod
 from . import queue as queue_mod
 
 MAX_QUEUE = 6
@@ -964,6 +965,8 @@ PROMPT_TMPL = """You are the research/product agent for app "{project}".
 
 {goals}
 
+{law}
+
 You are given research collected by deterministic code:
 {research}
 
@@ -984,6 +987,8 @@ Decide what to BUILD NEXT. Output STRICT JSON only (no prose, no code fence):
       "user_sees": "<optional: what the user notices after>",
       "not_in_scope": "<optional: what this task must not change>",
       "advances": "<milestone id this task serves, or 'none'>",
+      "law": ["<Pn>", "..."],
+      "law_effect": "obeys",
       "supersedes": ["<exact label of an already-queued task this makes irrelevant>"],
       "clubs": ["<exact label of another queued entry THIS SAME RUN also builds>"]}}
   ],
@@ -999,6 +1004,7 @@ Decide what to BUILD NEXT. Output STRICT JSON only (no prose, no code fence):
       "status": "active|pending|parked|done",
       "outcome": "<add: what will be true when this is done>",
       "measures": [{{"text": "..."}}],
+      "law": ["<Pn>", "..."],
       "why": "why the plan had to move — the owner reads exactly this"}}
   ],
   "milestone_verdict": {{"id": "<milestone id>", "met": true|false, "evidence": "grounded in the numbers/measures, and for a TEXT measure name the artifact you actually inspected (file/pattern) — this verdict decides the direction of every future release, so the owner (and the orchestrator) must be able to re-run your check"}},
@@ -1641,9 +1647,30 @@ def _llm(prompt: str, log: RunLog, timeout: int = 900) -> str:
     return r.stdout
 
 
+def _inherit_law(profile: dict, entries: list[dict]) -> None:
+    """Give each planned entry the clause(s) it cannot name for itself.
+
+    A planned entry may name its own clauses; when it does not, it inherits the
+    clause(s) of the milestone it advances (`goal_changes … law`). Without this,
+    the main path into the queue skipped the law entirely — two live entries in
+    a law-declaring project sat with kind/law/why all empty while `admit` was
+    the only gate that ever asked.
+    """
+    for entry in entries:
+        served = _clause_ids(entry.get("law"))
+        if not served:
+            raw, _ = goals.raw_node(profile, str(entry.get("advances") or ""))
+            served = _clause_ids((raw or {}).get("law"))
+        entry["law"] = ",".join(served)
+        entry["law_effect"] = str(entry.get("law_effect") or "obeys").strip().lower()
+
+
 def research_apply(project: Path, result: dict, log: RunLog) -> None:
     state = state_of(project)
-    new_queue = result.get("queue", [])[:MAX_QUEUE]
+    profile = profile_of(project)
+    new_queue = [dict(q) for q in result.get("queue", [])[:MAX_QUEUE]]
+    # THE CLAUSE TRAVELS WITH THE WORK — see `_inherit_law`.
+    _inherit_law(profile, new_queue)
     # Not a silent overwrite: judge what the new plan makes irrelevant, record
     # every verdict, and print the impact block for the run banner.
     block = queue_mod.apply_plan(state, new_queue, source="research",
@@ -1658,7 +1685,6 @@ def research_apply(project: Path, result: dict, log: RunLog) -> None:
     # synthesis's verdict is only recorded for measures code cannot check, and
     # code's FAIL always wins over an LLM "met". Retiring a milestone advances
     # the active pointer deterministically (goals.status_of).
-    profile = profile_of(project)
     act = goals.active_milestone(profile, state)
     verdict = result.get("milestone_verdict") or {}
     if act:
@@ -2015,6 +2041,7 @@ def render_prompt(project: Path, research: dict, log: RunLog | None = None,
     research["max_effort"] = eff_max
     prompt = PROMPT_TMPL.format(project=research["project"],
                                 goals=goals.prompt_block(profile, state),
+                                law=law_mod.prompt_block(project, profile),
                                 research=json.dumps(research, indent=2),
                                 sources=sources_line(research),
                                 target_effort=eff_target,
@@ -2073,6 +2100,79 @@ def _alias_advances(result: dict, added: list) -> None:
             q["advances"] = alias[v.lower()]
 
 
+def _clause_ids(value: Any) -> list[str]:
+    """`["P1","P4"]` / `"P1,P4"` / `None` → upper-case ids, never a crash."""
+    if value is None:
+        return []
+    if isinstance(value, str):
+        value = [part for part in value.split(",")]
+    if not isinstance(value, (list, tuple)):
+        return []
+    out: list[str] = []
+    for part in value:
+        cid = str(part or "").strip().upper()
+        if cid and cid not in out:
+            out.append(cid)
+    return out
+
+
+def _validate_law(project: Path, result: dict) -> str | None:
+    """The plan may not be born outside the product law.
+
+    The plan prompt now carries PRODUCT.md, but a prompt is a request, not a
+    gate: this is the gate. Owner decision 2026-11-22 — "what gets built always
+    aligns with the product rule" — and the three answers are held apart:
+
+      * `obeys`      → the entry names the clause(s) it serves (required once a
+                       law is declared; an id the file does not carry is fiction);
+      * `amends`     → REFUSED here: changing a clause is the owner's act, so it
+                       belongs in `issues_to_file`, not in the queue;
+      * `contradicts`→ REFUSED for the same reason: out of bounds is an owner
+                       decision, never a planner's choice.
+    """
+    declared = law_mod.clauses(Path(project))
+    ids = {clause["id"] for clause in declared}
+    try:
+        profile = profile_of(Path(project))
+    except (Exception, SystemExit):
+        profile = {}
+    waived = bool(law_mod.waiver(profile))
+    required = bool(declared) and not waived
+    for entry in (result.get("queue") or [])[:MAX_QUEUE]:
+        if not isinstance(entry, dict):
+            continue
+        label = str(entry.get("label") or entry.get("type") or "?")
+        effect = str(entry.get("law_effect") or "obeys").strip().lower()
+        if effect in ("amends", "contradicts"):
+            return (f"queue entry '{label}' sets law_effect={effect} — a plan "
+                    "cannot change or defy the product law. Put it in "
+                    "issues_to_file naming the clause and the sentence you "
+                    "propose; the owner amends the law, then work is queued "
+                    "inside it")
+        if effect != "obeys":
+            return (f"queue entry '{label}' has law_effect={effect!r} — use "
+                    '"obeys" (the only value a run may carry)')
+        served = _clause_ids(entry.get("law"))
+        if required and not served:
+            return (f"queue entry '{label}' names no 'law' clause — every entry "
+                    f"serves the product ({', '.join(sorted(ids))}); say which "
+                    "clause(s) this work is for, or file an owner ask if it "
+                    "needs the law to change")
+        missing = [cid for cid in served if cid not in ids]
+        if missing:
+            return (f"queue entry '{label}' cites {', '.join(missing)}, which "
+                    f"PRODUCT.md does not declare (known: "
+                    f"{', '.join(sorted(ids)) or 'none'})")
+    for change in result.get("goal_changes") or []:
+        if not isinstance(change, dict) or change.get("law") is None:
+            continue
+        missing = [cid for cid in _clause_ids(change.get("law")) if cid not in ids]
+        if missing:
+            return (f"goal_changes entry '{change.get('id') or change.get('title')}' "
+                    f"cites {', '.join(missing)}, which PRODUCT.md does not declare")
+    return None
+
+
 def validate_plan(project: Path, result: dict, research: dict | None) -> str | None:
     """The whole deterministic gate on a planner result: output schema, tree-change
     schema, the tree changes themselves (on a copy), reference repair, then the
@@ -2081,6 +2181,8 @@ def validate_plan(project: Path, result: dict, research: dict | None) -> str | N
     agent said it."""
     profile, state = profile_of(project), state_of(project)
     err = _validate(result, research)
+    if not err:
+        err = _validate_law(project, result)
     if not err:
         err = goals.validate_changes(result)
     trial = profile

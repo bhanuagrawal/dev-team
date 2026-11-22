@@ -12,10 +12,19 @@ cd ~/dev-team
 python3 cli.py tools                 # ONE PASS: every verb, what it writes, what it refuses
 python3 cli.py status <project>      # delivery ref, plan, queue — where things stand
 python3 cli.py admit <project> --query "<the owner's words>" \
-        --kind <kind> --advances <milestone> --why "<one line>" --verdict aligned
+        --kind <kind> --advances <milestone> --why "<one line>" --verdict aligned \
+        --law <Pn> --effect obeys      # or amends | contradicts
 #   OK    → pinned at the HEAD of the queue; execute it now, it is top priority
 #   FLAG  → nothing queued; reply to whoever the block names and STOP
+#   `--effect contradicts` is an owner decision, never a run: nothing queues.
 ```
+
+**The product law is declared, not remembered.** Every managed app has a
+`PRODUCT.md` (mandatory unless the owner waives it in their words); `devteam law
+<project>` shows it, `doctor` blocks without it, and `pick` refuses a queued task
+that names no clause. Never build work you cannot tie to a clause — and never
+change a clause yourself: `devteam law <project> --amend Pn --text "…"
+--requested-by "<owner words>"` is the owner's act.
 
 **The team is a toolbox; you are the resolver.** Read `tools` once, then decide
 the sequence yourself — there is no route table to look for. `devteam admit` is

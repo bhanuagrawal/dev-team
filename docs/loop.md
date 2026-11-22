@@ -35,9 +35,13 @@ python3 cli.py tools                  # ONE PASS: every verb, what it writes, wh
 python3 cli.py status  <project>      # queue, delivery state, goal
 python3 cli.py adapt   <project>     # make the project match the current team
 python3 cli.py admit   <project> --query "<the owner's words>" \
-        --kind <kind> --advances <milestone> --why "<one line>" --verdict aligned
+        --kind <kind> --advances <milestone> --why "<one line>" --verdict aligned \
+        --law <Pn> --effect obeys
 #   → OK: pinned at the HEAD of the queue (execute it now — it is top priority).
 #   → FLAG: nothing queued — reply to whoever the block names and STOP.
+#     An app with no `PRODUCT.md` (and no owner waiver) flags here, and so does
+#     `--effect contradicts`: the owner reads the clause and decides. `amends` is
+#     recorded, never queued. `pick` re-checks the clause and exits 5 without it.
 python3 cli.py asks    <project>     # review every open ask/flag: can a machine do it?
 python3 cli.py plan    <project>     # planner maintains the queue (runs every cycle)
 python3 cli.py pick    <project>     # the queue head → task spec + worktree command
@@ -213,5 +217,5 @@ handover, the flags and the page URLs. Nothing sits uncommitted anywhere:
 `devteam doctor <project>` prints no `uncommitted: WARN` line, and `status`
 shows no `⏸ parked` attempt the report failed to mention.
 
-NEXT: `devteam admit <project> --query "<the owner's words>" ...` — a request becomes
-work only there. Refused? `docs/planning.md`.
+NEXT: `devteam admit <project> --query "<the owner's words>" ... --law <Pn> --effect obeys`
+— a request becomes work only there, tied to a clause. Refused? `docs/planning.md`.

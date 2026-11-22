@@ -788,19 +788,30 @@ def run_doctor(project: Path, log) -> dict:
     except Exception as e:  # an inventory check must never hide the report
         log(f"doctor platforms: could not check ({e})")
 
-    # THE LAW — is the declared product law alive, cited, and obeyed? A project
-    # with no PRODUCT.md is not blocked; declaring the law is a choice, and once
-    # declared the team holds you to it. Three failures: a clause nothing cites
-    # (dead law), a citation of a clause that does not exist (fiction), a queued
-    # task with no clause (work with no reason in the product).
+    # THE LAW — is the product law DECIDED, alive, cited and obeyed? Declaring
+    # the law is mandatory (owner decision 2026-11-22): a managed app with no
+    # PRODUCT.md is BLOCKED, and the only other legal state is an owner waiver in
+    # their own words (`devteam law <p> --waive --requested-by "…"`). Once
+    # declared, three failures: a clause nothing cites (dead law), a citation of
+    # a clause that does not exist (fiction), a queued task with no clause (work
+    # with no reason in the product).
     try:
         from . import law as law_mod
         ledger = law_mod.audit(project)
         if not ledger["present"]:
-            report["law"] = {"status": "ready", "blocked": [], "checks_passed": 0,
-                             "note": "no PRODUCT.md — the product law is not declared "
-                                     "for this project"}
-            log("doctor law: ready (no PRODUCT.md — the law is not declared)")
+            if ledger.get("waived"):
+                report["law"] = {"status": "ready", "blocked": [], "checks_passed": 0,
+                                 "note": ledger.get("note") or "law waived by the owner"}
+                log("doctor law: ready — " + (ledger.get("note") or "waived"))
+            else:
+                fix = ledger.get("note") or "write PRODUCT.md with the owner"
+                report["law"] = {
+                    "status": "blocked", "checks_passed": 0,
+                    "blocked": [{"requirement": "the product law is declared "
+                                                "(PRODUCT.md, ids P1…)", "fix": fix}],
+                    "note": fix,
+                }
+                log("doctor law: BLOCKED — " + fix)
         else:
             problems = []
             if ledger["orphans"]:

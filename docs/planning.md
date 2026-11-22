@@ -148,17 +148,61 @@ Priority is one axis; truth is the other. A task can advance the right milestone
 and still contradict the product (2026-11-15: three docs, a prompt and a tool
 catalogue each described a "match" the backend had already deleted).
 
-So a project may declare its law in **`PRODUCT.md`** — one clause per line with a
-stable id (`P1`…`P12`), one sentence each. Everything else cites it: a migration
-header (`-- Law: P1`), a test name, a source file's header comment. Then:
+So every managed project declares its law in **`PRODUCT.md`** — one clause per
+line with a stable id (`P1`…`P12`), one sentence each. Declaring it is not
+optional (owner decision 2026-11-22: *"I want to have this for all the apps
+managed by dev team and any new app"*); the only other legal state is the owner
+waiving it in their own words, and that waiver is written into
+`profile.json → law_waiver` where `doctor` and `status` can read it back:
+
+```
+devteam law <project> --waive --requested-by "<the owner's words>"
+```
+
+Everything else cites the law: a migration header (`-- Law: P1`), a test name, a
+source file's header comment. Then:
 
 - `devteam law <project>` prints every clause and the first file that cites it;
-- `devteam admit … --law P1` records **which clause** the request serves or
-  amends — required once `PRODUCT.md` exists (not required for `release`, which
-  delivers work that already named its clause);
-- `devteam doctor` refuses three things: a clause nothing cites (*dead law*), a
-  citation of a clause that does not exist (*fiction*), and a queued task with no
-  clause (*work with no reason in the product*).
+  it exits 1 while the law is undeclared and unwaived;
+- `devteam admit … --law P1 --effect obeys` records **which clause** the request
+  serves **and what it does to it** — required once the law is declared (not for
+  `release`, which delivers work that already named its clause);
+- `devteam pick` refuses (rc 5) to hand a run a task whose queue entry names no
+  clause — the warn `doctor` used to print becomes the refusal at the moment
+  code would be written;
+- `devteam doctor` **blocks** an app with no declared law and no waiver, and
+  still refuses three things once it is declared: a clause nothing cites (*dead
+  law*), a citation of a clause that does not exist (*fiction*), and a queued
+  task with no clause (*work with no reason in the product*).
+
+**The plan itself reads the law.** `PRODUCT.md` is a block in the planner's
+prompt, every planned queue entry must carry `"law": ["P4", "P13"]`, and a new
+milestone may carry the clauses it exists to render — entries queued under it
+inherit them. `validate_plan` refuses a plan whose entry names no clause, cites
+an unknown id, or claims `law_effect: "amends"`/`"contradicts"`: those are not a
+planner's call.
+
+**Goal and law are different kinds of thing, and that is why they collide.** A
+goal is where the product goes; it moves. The law is what the product *is* while
+it goes there; it does not move except by an amendment. So the order is
+**owner intent → law constrains → goals → features → tasks**, and one request
+gets exactly one of three answers:
+
+| `--effect` | what happens |
+|---|---|
+| `obeys` | the clause is cited in the branch; the run proceeds |
+| `amends` | allowed, recorded, and the clause's new sentence must land with the code that cites it |
+| `contradicts` | **nothing is queued**: the owner is asked with the clause in front of them — amend, drop, or park |
+
+The contradiction flag is the point: a request that would break a clause is not
+an alignment question about the plan, it is a product decision, and the only
+person who may make it is the owner.
+
+**An amendment is the owner's act, never an agent's.** `devteam law <project>
+--amend P8 --text "<new sentence>" --requested-by "<owner words>"` rewrites one
+clause in place (keeping its `binds:` marker unless the new sentence declares
+its own) and logs the amendment in `state.json → law_amendments`. The sentence
+must land in the same branch as the code that relied on the old one.
 
 **A clause that spans platforms says so.** `- **P11** — … (binds: app, web,
 backend)`. The project maps each name to the paths that own it, in
@@ -200,6 +244,8 @@ checks. `verify` refuses a diff that writes such a tree — the moment to name i
 the change that publishes it — and refuses a diff that changes a named surface
 without the clauses bound to it being cited there.
 
-A project with no `PRODUCT.md` is not blocked — declaring the law is a choice,
-and once declared the team holds you to it. An amendment must touch the clause,
-the code that cites it, and a test in one commit.
+A project that has neither a declared law nor a recorded waiver is **blocked**,
+not merely warned: `doctor` exits 1 and `pick` refuses to start a run. An
+amendment must touch the clause, the code that cites it, and a test in one
+commit — `devteam law --amend` writes the clause half of that, the branch owes
+the rest.

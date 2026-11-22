@@ -1679,6 +1679,24 @@ def cmd_pick(args: argparse.Namespace) -> int:
         print_owner_asks(project)
         print_page(project, "this project's plan (no goal yet)")
         return 4
+    # THE PRODUCT LAW — a run may not start against a product nobody has said
+    # what it is (owner decision 2026-11-22: the law is mandatory, and the only
+    # other legal state is the owner's written waiver). rc=5 so the orchestrator
+    # can tell this apart from "no goal" (4) and "nothing to do" (2): the fix is
+    # one owner sentence, not a plan.
+    from team import law as law_mod
+    law_status, law_note = law_mod.readiness(project, profile)
+    if law_status == "blocked":
+        print(json.dumps({
+            "pick": None, "law_required": True,
+            "question": "what is this product, in clauses that must always stay true?",
+            "next": f'devteam law {project.name} --waive --requested-by "<owner words>"'
+                    "  |  write PRODUCT.md with the owner",
+            "note": law_note,
+        }, indent=2))
+        print_owner_asks(project)
+        print_page(project, "this project declares no product law")
+        return 5
     from team import scan
     from team.scan import next_task, scan_surfaces
     surfaces = scan_surfaces(project)
@@ -1711,6 +1729,21 @@ def cmd_pick(args: argparse.Namespace) -> int:
     # declare, and the spec is what the gate reads. Without this copy the
     # declaration could never reach it and every dependency change would fail.
     label = (task.get("surface") or {}).get("label")
+    # A QUEUED ENTRY MUST NAME ITS CLAUSE. `law.audit` reported this as a WARN;
+    # here it is the refusal, at the only moment that costs anything — a run
+    # about to write code. `release`/`store` are exempt (they deliver work that
+    # named its clause at admission).
+    picked = next((q for q in (state_of(project).get("queue") or [])
+                   if q.get("label") == label), {})
+    law_gap = law_mod.entry_block(project, picked, profile)
+    if law_gap:
+        print(json.dumps({
+            "pick": None, "law_required": True, "would_be": task.get("id"),
+            "label": label, "note": law_gap,
+            "next": "re-admit the task with --law <Pn> --effect obeys, or drop it",
+        }, indent=2))
+        print_page(project, "the queue head names no product clause")
+        return 5
     for entry in (state_of(project).get("queue") or []):
         if entry.get("label") == label and entry.get("dependencies_added"):
             task["dependencies_added"] = entry["dependencies_added"]
@@ -2182,6 +2215,28 @@ def cmd_status(args: argparse.Namespace) -> None:
         print(f"admit:      {len(flags)} request(s) FLAGGED — nothing queued; last: "
               f"\"{str(last_flag.get('question') or '')[:90]}\" "
               f"({last_flag.get('who')} decides)")
+    # THE PRODUCT LAW — cheap on purpose (clauses + readiness only; the full
+    # citation audit is `devteam law`): status is read every run, and a gate
+    # nobody can see is a gate nobody fixes.
+    try:
+        from team import law as law_mod
+        declared = law_mod.clauses(project)
+        law_status, law_note = law_mod.readiness(project, profile)
+        if law_status == "blocked":
+            print("law:        !! not declared — write PRODUCT.md with the owner, "
+                  "or waive it (`devteam law <p> --waive --requested-by \"…\"`)")
+        elif not declared:
+            print("law:        not declared — waived by the owner")
+        else:
+            bare = [q for q in (state.get("queue") or [])
+                    if not str(q.get("law") or "").strip()
+                    and str(q.get("kind") or "") not in ("release", "store")]
+            line = f"{len(declared)} clause(s)"
+            line += (f" · !! {len(bare)} queued with no clause (pick refuses them)"
+                     if bare else " · every queued task names one")
+            print("law:        " + line)
+    except Exception:
+        pass
     # A branch can look finished because its list is empty. Say which ones, so the
     # next task is the gap rather than the next feature (team/closure.py).
     try:
@@ -4113,7 +4168,8 @@ def cmd_admit(args: argparse.Namespace) -> int:
     res = admit_mod.admit(project, args.query, args.kind, args.advances,
                           args.why, args.verdict, dry_run=args.dry_run,
                           law=getattr(args, "law", "") or "",
-                          whatsnew=getattr(args, "whatsnew", "") or "")
+                          whatsnew=getattr(args, "whatsnew", "") or "",
+                          effect=getattr(args, "effect", "") or "")
     if args.json:
         print(json.dumps(res, indent=2))
     else:
@@ -4198,14 +4254,60 @@ def cmd_tools(args: argparse.Namespace) -> int:
 
 
 def cmd_law(args: argparse.Namespace) -> int:
-    """LAW — the product's clauses and the files that cite them.
+    """LAW — the product's clauses, their citations, and the two owner acts.
 
-    The law is one file per project (`PRODUCT.md`), with stable ids. Everything
-    else cites it: migration headers, tests, and `admit --law`. This command
-    prints the audit; `doctor` is the gate that refuses a dead clause.
+    Declaring the law is mandatory (owner decision 2026-11-22); the only other
+    legal state is an owner waiver in their own words. An amendment changes one
+    clause's sentence and is likewise the owner's act — code writes down what
+    they said, it never invents a clause. The audit itself is printed by every
+    form, so the next command is always in front of the reader.
     """
     project = resolve_project(args.project)
     from team import law as law_mod
+    from team.core import now_iso, pipeline_dir, profile_of, save_json, save_state, state_of
+
+    if args.waive or args.unwaive:
+        who = " ".join(str(args.requested_by or "").split())
+        if args.waive and law_mod.path_of(project) is not None:
+            print("law: this project DECLARES a law — a waiver is for running "
+                  "without one. Amend the clause instead: devteam law <project> "
+                  "--amend <Pn> --text \"…\" --requested-by \"…\"", file=sys.stderr)
+            return 2
+        if args.waive and not who:
+            print('law: --waive needs the owner\'s own words: '
+                  '--requested-by "<why they chose to run without a written law>"',
+                  file=sys.stderr)
+            return 2
+        profile = profile_of(project)
+        if args.unwaive:
+            profile.pop(law_mod.WAIVER_KEY, None)
+            save_json(pipeline_dir(project) / "profile.json", profile)
+            print("law: waiver withdrawn — write PRODUCT.md before the next run")
+        else:
+            profile[law_mod.WAIVER_KEY] = {
+                "waived": True, "requested_by": who, "at": now_iso(),
+            }
+            save_json(pipeline_dir(project) / "profile.json", profile)
+            print(f'law: waiver recorded — "{who[:120]}"')
+
+    if args.amend:
+        ok, message = law_mod.amend(project, args.amend, args.text,
+                                    args.requested_by)
+        if not ok:
+            print(f"law: {message}", file=sys.stderr)
+            return 2
+        state = state_of(project)
+        state.setdefault("law_amendments", []).append({
+            "at": now_iso(), "clause": str(args.amend).upper(),
+            "to": message, "requested_by": str(args.requested_by or ""),
+        })
+        save_state(project, state)
+        path = law_mod.path_of(project)
+        print(f"law: amended {message}")
+        if path is not None:
+            print(f"  file: {path}")
+        print("  next: cite the new sentence where it RENDERS, and change the "
+              "code that relied on the old one — in this same branch")
 
     result = law_mod.audit(project)
     print(law_mod.format_audit(result))
@@ -4213,6 +4315,8 @@ def cmd_law(args: argparse.Namespace) -> int:
                                   or result["tasks_without_law"]
                                   or result.get("unbound")
                                   or result.get("uncovered")):
+        return 1
+    if not result.get("present") and result.get("status") == "blocked":
         return 1
     return 0
 
@@ -6087,8 +6191,20 @@ def main() -> None:
 
     lw = sub.add_parser("law",
                         help="the product's own clauses (PRODUCT.md) and who cites "
-                             "them; `doctor` refuses a clause nothing cites")
+                             "them; declaring one is mandatory unless the owner "
+                             "waives it (`--waive --requested-by \"…\"`)")
     lw.add_argument("project")
+    lw.add_argument("--waive", action="store_true",
+                    help="record the owner's decision to run without a written law "
+                         "(requires --requested-by, their own words)")
+    lw.add_argument("--unwaive", action="store_true",
+                    help="withdraw a recorded waiver (the law must be declared again)")
+    lw.add_argument("--amend", metavar="Pn",
+                    help="change one clause's sentence (owner's act; requires "
+                         "--text and --requested-by)")
+    lw.add_argument("--text", default="", help="with --amend: the new sentence")
+    lw.add_argument("--requested-by", default="",
+                    help="the owner's own words that justify a waiver or amendment")
     lw.set_defaults(fn=cmd_law)
     from team.admit import KINDS as _ADMIT_KINDS
     rt = sub.add_parser("admit",
@@ -6107,6 +6223,11 @@ def main() -> None:
         "--law", default="",
         help="the product clause(s) this serves or amends (PRODUCT.md ids, e.g. "
              "P1,P4); required once a project declares a law")
+    rt.add_argument(
+        "--effect", choices=("obeys", "amends", "contradicts"),
+        help="what this request does to the clause: serve it (obeys), change its "
+             "words (amends), or go against it (contradicts — the owner decides; "
+             "nothing is queued)")
     rt.add_argument(
         "--whatsnew", default="",
         help="public consumer-facing release note (Play Store What's New; no technical jargon)")

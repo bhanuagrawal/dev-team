@@ -977,6 +977,15 @@ def apply_one(profile: dict, change: dict, by: str = "agent") -> tuple[str, str,
             new["outcome"] = str(change["outcome"])
         if isinstance(change.get("phase"), int):
             new["phase"] = change["phase"]
+        # The clauses this branch exists to render. A queue entry that names no
+        # clause of its own inherits these (`research_apply`), so a planned
+        # feature can never be born with no reason in the product.
+        law_ids = change.get("law") or []
+        if isinstance(law_ids, str):
+            law_ids = [part.strip() for part in law_ids.split(",") if part.strip()]
+        law_ids = [str(cid).strip().upper() for cid in law_ids if str(cid).strip()]
+        if law_ids:
+            new["law"] = law_ids
         meas = list(change.get("measures") or [])
         if change.get("measure"):
             meas.append({"text": change["measure"]})

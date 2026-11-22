@@ -96,7 +96,8 @@ def _targets(profile: dict, kind: str) -> list[str]:
 
 
 def entry_for(profile: dict, query: str, kind: str, advances: str,
-              why: str, law: str = "", whatsnew: str = "") -> dict[str, Any]:
+              why: str, law: str = "", whatsnew: str = "",
+              effect: str = "") -> dict[str, Any]:
     """The queue entry an admitted request becomes. One shape, always."""
     from . import goals
 
@@ -125,6 +126,10 @@ def entry_for(profile: dict, query: str, kind: str, advances: str,
         "law": ",".join(
             part.strip().upper() for part in (law or "").split(",") if part.strip()
         ),
+        # What the clause is TO this request: served, amended, or contradicted.
+        # `obeys` is the only value that queues silently; the other two stop and
+        # put the call to the owner (see `check`).
+        "law_effect": (effect or "obeys").strip().lower(),
     }
     if whatsnew and whatsnew.strip():
         entry["whatsnew"] = whatsnew.strip()
@@ -151,7 +156,8 @@ def entry_for(profile: dict, query: str, kind: str, advances: str,
 
 
 def check(project: Path, query: str, kind: str | None, advances: str,
-          why: str, verdict: str | None, law: str = "", whatsnew: str = "") -> dict[str, Any]:
+          why: str, verdict: str | None, law: str = "", whatsnew: str = "",
+          effect: str = "") -> dict[str, Any]:
     """Deterministic findings + the agent's verdict → one decision.
 
     Returns {ok, verdict, who, findings, question, next, milestone, title}.
@@ -225,6 +231,24 @@ def check(project: Path, query: str, kind: str | None, advances: str,
                              "decision is recorded with the task",
                     "re-run admit with --why \"<one line>\"")
 
+    # 5b. the product law must be DECIDED before a request is judged at all.
+    #     Owner decision 2026-11-22 ("I want this for all the apps managed by
+    #     dev team and any new app"): declaring the law is mandatory, and the
+    #     only other legal state is the owner waiving it in their own words.
+    #     Without this, "which clause does this serve?" was a question with no
+    #     possible answer, and the team built apps with no written product.
+    from . import law as law_mod
+
+    law_status, law_note = law_mod.readiness(project, profile)
+    if law_status == "blocked":
+        findings.append(law_note)
+        return flag("owner",
+                    "what is this product, in clauses that must always stay true? "
+                    "(write PRODUCT.md with the owner, one sentence each; the team "
+                    "then holds every run to them — or you may waive a written law)",
+                    f'devteam law {project.name} --waive --requested-by "<owner words>"'
+                    "   |   write PRODUCT.md with the owner, then re-run admit")
+
     # 6. the agent's own verdict. It is the only judgment here — and it is on
     #    the record. Code cannot make it, so code refuses to proceed without it.
     if verdict is None:
@@ -247,18 +271,24 @@ def check(project: Path, query: str, kind: str | None, advances: str,
 
     findings.append("verdict: aligned")
 
-    # 7. the product law: a task names the clause it implements or amends. Only
-    #    enforced once a project DECLARES a law (`PRODUCT.md`); a project that has
-    #    not written one is not blocked, it is simply not held to one. `release`
-    #    delivers work that already named its clause at admission.
-    from . import law as law_mod
-
+    # 7. the product law: a task names the clause it SERVES, AMENDS or
+    #    CONTRADICTS — and only one of those three may queue itself.
+    #
+    #    A clause id on the task was a label, not a test: `--law P8` ("money does
+    #    not exist") accepted a request that added a price field, because the gate
+    #    checked that the id existed and never asked what the request did to it.
+    #    So the agent must state the EFFECT, code holds the three answers apart,
+    #    and a contradiction goes to the owner with the clause in front of them —
+    #    the conflict is a product decision, not something a run may resolve.
+    #
+    #    `release`/`store` deliver work that already named its clause at
+    #    admission, so they are not asked again.
     ledger = law_mod.audit(project, state=state)
-    # A task may implement more than one clause (it usually does). The gate
-    # records them all and refuses any one it cannot find.
     law_ids = [part.strip().upper() for part in (law or "").split(",") if part.strip()]
+    effect = str(effect or "").strip().lower()
     if ledger["present"] and kind != "release":
         known = {c["id"] for c in ledger["clauses"]}
+        texts = {c["id"]: c["text"] for c in ledger["clauses"]}
         if not law_ids:
             findings.append("no --law")
             return flag("agent",
@@ -272,9 +302,34 @@ def check(project: Path, query: str, kind: str | None, advances: str,
                         f"{', '.join(missing)} is not in PRODUCT.md "
                         f"(known: {', '.join(sorted(known)) or 'none'})",
                         "re-run admit with declared clause ids")
+        if not effect:
+            findings.append("no --effect")
+            return flag("agent",
+                        "what does this request do to "
+                        f"{', '.join(law_ids)}: serve it (obeys), change its words "
+                        "(amends), or go against it (contradicts)?",
+                        "re-run admit with --effect obeys|amends|contradicts")
+        if effect not in ("obeys", "amends", "contradicts"):
+            findings.append(f"unknown effect {effect!r}")
+            return flag("agent", "effect must be obeys, amends or contradicts",
+                        "re-run admit with --effect obeys|amends|contradicts")
         for cid in law_ids:
-            text = next(c["text"] for c in ledger["clauses"] if c["id"] == cid)
-            findings.append(f"law {cid}: {text[:90]}")
+            findings.append(f"law {cid}: {texts[cid][:90]}")
+        if effect == "contradicts":
+            findings.append(f"verdict: CONTRADICTS {', '.join(law_ids)}")
+            quoted = " ".join(f'{cid} — "{texts[cid]}"' for cid in law_ids)
+            return flag("owner",
+                        f'you asked for "{query}" and it contradicts the product: '
+                        f"{quoted}. Three ways forward: amend the clause, drop the "
+                        "request, or park it — which one?",
+                        f'devteam law {project.name} --amend {law_ids[0]} '
+                        '--text "<the new sentence>" --requested-by "<owner words>"'
+                        "   |   reply to drop or park it")
+        if effect == "amends":
+            findings.append(f"verdict: AMENDS {', '.join(law_ids)} — the clause text "
+                            "changes in this branch, with the code that cites it")
+    elif ledger.get("waived"):
+        findings.append("law: " + str(ledger.get("note") or "waived by the owner"))
 
     return {"ok": True, "verdict": "ok", "who": "agent", "findings": findings,
             "question": "", "next": f"devteam plan {project.name}",
@@ -283,17 +338,19 @@ def check(project: Path, query: str, kind: str | None, advances: str,
 
 def admit(project: Path, query: str, kind: str | None, advances: str, why: str,
           verdict: str | None, dry_run: bool = False,
-          law: str = "", whatsnew: str = "") -> dict[str, Any]:
+          law: str = "", whatsnew: str = "", effect: str = "") -> dict[str, Any]:
     """Run the gate; on OK pin the task at the head of the queue (once)."""
     from . import queue as qmod
 
     profile, state = profile_of(project), state_of(project)
-    res = check(project, query, kind, advances, why, verdict, law=law, whatsnew=whatsnew)
+    res = check(project, query, kind, advances, why, verdict, law=law,
+                whatsnew=whatsnew, effect=effect)
     res["query"] = query
     res["kind"] = kind or ""
     res["law"] = ",".join(
         part.strip().upper() for part in (law or "").split(",") if part.strip()
     )
+    res["effect"] = (effect or "obeys").strip().lower()
 
     if res["verdict"] == "precheck":
         return res
@@ -310,7 +367,8 @@ def admit(project: Path, query: str, kind: str | None, advances: str, why: str,
             save_state(project, state)
         return res
 
-    entry = entry_for(profile, query, kind or "", advances, why, law=law, whatsnew=whatsnew)
+    entry = entry_for(profile, query, kind or "", advances, why, law=law,
+                      whatsnew=whatsnew, effect=effect)
     if dry_run:
         res["entry"] = entry
         res["dry_run"] = True
@@ -321,7 +379,8 @@ def admit(project: Path, query: str, kind: str | None, advances: str, why: str,
     # the storefront regeneration is queued WITH it, at the next slot — the same
     # rule the release gates enforce, stated once, here.
     if kind in ("visual", "revamp"):
-        store_entry = entry_for(profile, query, "store", advances, why)
+        store_entry = entry_for(profile, query, "store", advances, why, law=law,
+                                effect="obeys")
         store_entry["label"] = f"storefront-regenerate-assets-{today()}"
         store_entry["reason"] = f"Regenerate the Play listing art to match: {query}"
         queue = state.get("queue") or []
@@ -344,7 +403,8 @@ def format_admit(res: dict[str, Any]) -> str:
         lines.append(f"  advances:   {res['milestone']}" +
                      (f"  ({res['title']})" if res.get("title") else ""))
     if res.get("law"):
-        lines.append(f"  law:        {res['law']}")
+        lines.append(f"  law:        {res['law']}"
+                     + (f"  ({res['effect']})" if res.get("effect") else ""))
     lines.append("  findings:")
     for f in res.get("findings") or ["  (none)"]:
         lines.append(f"    - {f}")

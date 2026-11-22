@@ -96,6 +96,23 @@ refuses.
    citations of a clause the fourth surface contradicted in public. `devteam law`
    exits 1 on an unnamed page tree or a prose-only binding, and `doctor` warns
    about both before a run reaches them.
+   **THE LAW IS DECLARED, AND A CONFLICT STOPS THE RUN** (owner decision
+   2026-11-22: *"I want to have this for all the apps managed by dev team and any
+   new app"*). Declaring `PRODUCT.md` is mandatory; the only other legal state is
+   the owner's waiver, recorded in `profile.json → law_waiver` with their words
+   (`devteam law <p> --waive --requested-by "…"`). `doctor` BLOCKS an app with
+   neither. `admit --law Pn --effect obeys|amends|contradicts` requires the agent
+   to say what the request does to the clause, not just name one: a contradiction
+   queues **nothing** and asks the owner with the clause text in front of them,
+   because breaking a clause is a product decision, not a plan-alignment call.
+   The planner reads the law and may not queue an `amends`/`contradicts` entry —
+   an amendment is the owner's act (`devteam law --amend Pn --text … --requested-by
+   …`) and lands with the code that cites the new sentence. `pick` refuses (rc 5)
+   a queue entry that names no clause, so the bypass that let planned work skip
+   the law is closed at the last gate before code is written. Why: the whole
+   apparatus above was optional and after-the-fact — only one of six managed apps
+   declared a law, the plan prompt never mentioned it, and the queue could enter
+   from a path (`plan`) that no law gate watched.
    **A revamp is counted in the stack it ships.** The revamp gate asks a
    ground-up rebuild to rewrite application source, and "application source"
    follows the project's own platforms: Kotlin/Java for the app, and `web/src`'s

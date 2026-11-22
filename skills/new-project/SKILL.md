@@ -112,6 +112,15 @@ off-machine (you generate; they never generate).
    see what users do" (instrumentation), the third a retention/traction number.
    The pipeline then orders every release against these — see the dev-team
    skill's GOAL MODE section.
+   **Also write `PRODUCT.md` — the law, before the first milestone** (owner
+   decision 2026-11-22: every app the team manages declares one). One clause
+   per line, stable ids `P1…`, one sentence each, in the owner's words: the
+   facts that must stay true no matter what the roadmap does (what the product
+   IS, what it never becomes). Declaring it is mandatory — `doctor` blocks and
+   `pick` refuses without it — so the only alternative is the owner's recorded
+   waiver (`devteam law <p> --waive --requested-by "<their words>"`). Every
+   planned task then cites the clause it serves, and a request that would break
+   one stops and goes back to the owner instead of shipping.
    **Design every screen in Stitch and export it (the only design source):**
    Design is never done in the dark or by guessing. The design flow is two-phase:
    1. *Research First:* Run market & UX research (`devteam market <project>` / Tavily) to establish

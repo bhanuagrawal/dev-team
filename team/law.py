@@ -32,8 +32,14 @@ that contradicted it were generated output no gate ever opened. So:
   * a `binds:` surface is the files that RENDER the law, and a diff that opens
     one must leave it citing the clauses it binds (`diff_gate`).
 
-The file is optional. A project with no `PRODUCT.md` is not blocked; declaring
-the law is a choice, and once declared the team holds you to it.
+DECLARING the law is mandatory (owner decision 2026-11-22), and it is enforced
+at the door rather than in a comment: `admit` refuses a request for a project
+that has neither a `PRODUCT.md` nor a recorded owner waiver, `pick` refuses to
+hand a clause-less task to a run, and the planner may not queue work that amends
+or contradicts a clause — an amendment is the owner's act (`devteam law
+<project> --amend`). The one exception is written down, not assumed: an owner
+may waive the law in their own words (`--waive --requested-by "<owner words>"`),
+and the waiver lives in `profile.json` where `doctor` can read it back.
 """
 from __future__ import annotations
 
@@ -98,6 +104,82 @@ def path_of(project: Path) -> Path | None:
         if candidate.is_file():
             return candidate
     return None
+
+
+#: The profile key that records the owner's decision to run without a law.
+WAIVER_KEY = "law_waiver"
+
+
+def waiver(profile: dict | None) -> dict[str, Any]:
+    """The owner's recorded decision not to declare a law — `{}` when none.
+
+    A waiver is not silence: it carries the owner's own words and the date, so
+    `doctor` and `status` can say WHO decided the product has no written law
+    instead of pretending the file was forgotten.
+    """
+    block = (profile or {}).get(WAIVER_KEY) or {}
+    if not isinstance(block, dict) or not block.get("waived"):
+        return {}
+    return block
+
+
+def _profile_or_empty(project: Path) -> dict:
+    """The project profile when there is one — `{}` for a bare directory.
+
+    `law` is used on plain folders by tests and by `doctor` on a project whose
+    profile is still unreadable; neither may raise here.
+    """
+    try:
+        from .core import profile_of
+
+        return profile_of(Path(project)) or {}
+    except (Exception, SystemExit):
+        return {}
+
+
+def readiness(project: Path, profile: dict | None = None) -> tuple[str, str]:
+    """Is the product law DECIDED? `("ready"|"blocked", one actionable line)`.
+
+    Declaring the law is mandatory (owner decision 2026-11-22); the only other
+    legal state is an owner waiver in their own words. Anything else is a gap
+    the next run must not paper over, so the message names both fixes.
+    """
+    if path_of(project) is not None:
+        return "ready", ""
+    block = waiver(profile)
+    if block:
+        who = str(block.get("requested_by") or "").strip()
+        at = str(block.get("at") or "")[:10]
+        return "ready", ("law not declared — the owner waived it"
+                         + (f' ("{who[:80]}")' if who else "")
+                         + (f" on {at}" if at else ""))
+    return "blocked", (
+        "no PRODUCT.md — the product law is not declared. Write it with the "
+        "owner (one clause per line, ids P1…), or record their decision to run "
+        'without one: devteam law <project> --waive --requested-by "<owner words>"'
+    )
+
+
+def entry_block(project: Path, entry: dict, profile: dict | None = None) -> str:
+    """Why a queued ENTRY may not be built — `""` when it may.
+
+    `doctor` already reported a clause-less queue as a warning. It is a refusal
+    at the moment that matters (owner decision 2026-11-22: "what gets built
+    always aligns with the product rule"): a run that picks work nobody can tie
+    to a clause is a run with no reason in the product. `release`/`store` are
+    exempt — they deliver work that named its clause when it was admitted.
+    """
+    status, _ = readiness(project, profile)
+    if status != "ready" or path_of(project) is None:
+        return ""
+    if str(entry.get("kind") or entry.get("type") or "") in ("release", "store"):
+        return ""
+    if str(entry.get("law") or "").strip():
+        return ""
+    label = str(entry.get("label") or entry.get("id") or "?")
+    return (f"'{label}' names no product clause — re-admit it with "
+            "`devteam admit … --law <Pn> --effect obeys`, or amend/drop it; a "
+            "run may not build work the product cannot justify")
 
 
 def clauses(project: Path) -> list[dict[str, Any]]:
@@ -210,6 +292,81 @@ def page_trees(project: Path, extra: list[str] | None = None) -> list[tuple[str,
     return [(root, [p for p in paths if p.startswith(root + "/")]) for root in roots]
 
 
+def amend(project: Path, clause_id: str, text: str, requested_by: str) -> tuple[bool, str]:
+    """Rewrite ONE clause's sentence — the owner's act, never an agent's.
+
+    An amendment needs the owner's own words on the record (the same rule
+    `promote` follows): code cannot invent a new product, it can only write down
+    what the owner said. The clause id and any `binds:` marker it already
+    carried are preserved unless the new sentence declares its own — a
+    tightening of the wording must not silently drop a platform from the gate.
+    """
+    cid = str(clause_id or "").strip().upper()
+    new_text = " ".join(str(text or "").split())
+    who = " ".join(str(requested_by or "").split())
+    if not cid:
+        return False, "say which clause: --amend P7"
+    if not new_text:
+        return False, f'say the new sentence for {cid}: --text "<one clause>"'
+    if not who:
+        return False, ('an amendment is the owner\'s act — quote them: '
+                       '--requested-by "<the owner\'s words>"')
+    path = path_of(Path(project))
+    if path is None:
+        return False, "no PRODUCT.md — there is no clause to amend (declare the law first)"
+    lines = path.read_text(encoding="utf-8").splitlines()
+    for index, raw in enumerate(lines):
+        match = _CLAUSE_TABLE.match(raw) or _CLAUSE_BULLET.match(raw)
+        if not match or match.group(1).upper() != cid:
+            continue
+        old_binds, _ = _split_binds(match.group(2).rstrip("|").strip())
+        new_binds, spoken = _split_binds(new_text)
+        binds = new_binds or old_binds
+        marker = (" (binds: " + ", ".join(binds) + ")") if binds else ""
+        lines[index] = f"- **{cid}** — {spoken}{marker}"
+        path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+        return True, f"{cid} — {spoken}{marker}"
+    return False, f"{cid} is not a clause in {path.name} (nothing was changed)"
+
+
+def prompt_block(project: Path, profile: dict | None = None) -> str:
+    """THE LAW, as the planner reads it — a constraint, not a suggestion.
+
+    The plan prompt used to carry the vision, the goals and the queue and say
+    nothing about what the product IS, so a feature could be born contradicting
+    a clause and no gate saw it (the plan's queue had no `law` field at all).
+    This block is what `_validate_law` holds the answer to.
+    """
+    declared = clauses(Path(project))
+    if not declared:
+        status, _note = readiness(Path(project), profile)
+        if status == "ready":
+            return ("THE PRODUCT LAW: this project declares no PRODUCT.md (the "
+                    "owner waived it). Queue entries need no clause; do not "
+                    "invent one, and keep every entry consistent with the vision.")
+        return ("THE PRODUCT LAW: this project has not declared one. Do not "
+                "invent clauses as if they were law — if a clause is needed, "
+                "propose it in issues_to_file and let the owner declare it.")
+    lines = ["THE PRODUCT LAW (PRODUCT.md) — WHAT the product is. A plan may not "
+             "contradict it; the goal decides how far it goes, the law decides "
+             "what it may never become:"]
+    for clause in declared:
+        binds = ("  (binds " + ", ".join(clause["binds"]) + ")") if clause.get("binds") else ""
+        lines.append(f"  {clause['id']} — {clause['text']}{binds}")
+    lines.append("")
+    lines.append('- every queue entry carries "law": ["<Pn>", …] — the clause(s) '
+                 "it SERVES. An entry with no clause, or with an id not in the "
+                 "list above, is rejected.")
+    lines.append('- every queue entry carries "law_effect": "obeys". If the right '
+                 "fix needs a clause to change, do NOT queue it: file it in "
+                 "issues_to_file naming the clause and the sentence you propose. "
+                 "Changing the law is the owner's act (`devteam law <project> "
+                 "--amend`), never the planner's.")
+    lines.append('- a new milestone may carry "law": [ids] — the clauses it exists '
+                 "to render, inherited by the entries queued under it.")
+    return "\n".join(lines)
+
+
 def audit(project: Path, state: dict | None = None) -> dict[str, Any]:
     """One checkable answer: is the declared law alive, cited, and obeyed?
 
@@ -284,11 +441,13 @@ def audit(project: Path, state: dict | None = None) -> dict[str, Any]:
                 continue
             # `release`/`store` deliver work that was already admitted under a
             # clause; they do not need to name one again.
-            if str(task.get("kind") or "") in ("release", "store"):
+            if str(task.get("kind") or task.get("type") or "") in ("release", "store"):
                 continue
             if not str(task.get("law") or "").strip():
                 tasks_without_law.append(str(task.get("label") or task.get("id") or "?"))
 
+    profile = _profile_or_empty(project)
+    status, note = readiness(project, profile)
     return {
         "present": present,
         "path": str(path_of(project)) if present else "",
@@ -299,6 +458,11 @@ def audit(project: Path, state: dict | None = None) -> dict[str, Any]:
         "unbound": unbound,
         "uncovered": uncovered,
         "tasks_without_law": tasks_without_law,
+        # The law is mandatory: `doctor` reads these to say whether the product
+        # has DECIDED what it is, or the owner waived the decision.
+        "waived": bool(waiver(profile)),
+        "status": status,
+        "note": note,
     }
 
 
@@ -396,7 +560,14 @@ def diff_gate(project: Path, worktree: Path, files: list[str]) -> tuple[bool, st
 def format_audit(result: dict[str, Any]) -> str:
     lines = ["LAW — the product's clauses and their citations", "=" * 66]
     if not result.get("present"):
-        lines.append("  no PRODUCT.md — the law is not declared for this project.")
+        if result.get("waived"):
+            lines.append("  no PRODUCT.md — "
+                         + str(result.get("note") or "").replace(
+                             "law not declared — ", ""))
+        else:
+            lines.append("  !! NO PRODUCT.md — the product law is not declared.")
+            lines.append("     " + str(result.get("note") or
+                                        "declare it, or record the owner's waiver"))
         return "\n".join(lines)
     lines.append(f"  file: {result['path']}")
     for clause in result["clauses"]:
