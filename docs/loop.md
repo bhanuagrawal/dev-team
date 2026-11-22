@@ -64,6 +64,9 @@ python3 cli.py worktree-start <project> --task-id <id>
 python3 cli.py verify  <project> --worktree <wt> --task-spec .pipeline/tasks/<id>.json
 python3 cli.py release <project> --worktree <wt> --task-spec .pipeline/tasks/<id>.json
 python3 cli.py record  <project> --result shipped --task-spec <spec> --version <v> --commit <sha> --note "<one line>"
+#   --commit is the ref the run finished on (usually the version bump). Each
+#   ledger row names the commit that actually carried its target, so
+#   `doctor shipped-evidence` can see the work under the path it claims.
 python3 cli.py rc      <project> --version <v> --yes|--no --note "<one line>"
 python3 cli.py alarm   <project>
 ```

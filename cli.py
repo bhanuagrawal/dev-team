@@ -1518,14 +1518,26 @@ def cmd_record(args: argparse.Namespace) -> None:
             rows.append({"label": str(c.get("label") or label),
                          "targets": [t for t in (c.get("targets") or []) if t],
                          "advances": c_adv})
+        from team import evidence as evidence_mod
         for row in rows:
             for t in row["targets"]:
+                # A RELEASE'S COMMIT IS USUALLY THE BUMP, and a bump touches one
+                # file: name the commit that actually carried this target, or the
+                # evidence check calls the delivery a rumour (2026-11-22).
+                row_commit = evidence_mod.commit_for_target(project, args.commit or "", t)
                 if (t, version_key) in already:
-                    continue  # concurrent runs may both ship; keep one row per target per release
+                    # A retried record may repair the commit a previous run
+                    # stored; it never appends a second row for the release.
+                    for s in state.get("shipped", []):
+                        if s.get("target") == t and str(s.get("version") or "") == version_key:
+                            if row_commit and not evidence_mod.touched(
+                                    evidence_mod.commit_files(project, s.get("commit") or ""), t):
+                                s["commit"] = row_commit
+                    continue
                 state.setdefault("shipped", []).append({
                     "target": t, "label": row["label"], "version": args.version or "?",
                     "version_code": state.get("last_version_code"),
-                    "commit": args.commit or "", "date": today(),
+                    "commit": row_commit, "date": today(),
                     "task_id": args.task or task.get("id", ""),
                     "advances": row["advances"]})
         state["last_success_date"] = today()
