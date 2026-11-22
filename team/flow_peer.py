@@ -73,19 +73,19 @@ def next_action(offer: dict, me: str, phone: str) -> dict | None:
 # --------------------------------------------------------------------------- #
 # app constants + HTTP
 # --------------------------------------------------------------------------- #
-def app_constants(project: Path) -> tuple[str, str, str]:
-    """API base, Supabase base and the production anon key, read from the app.
+def app_api(project: Path) -> str:
+    """The backend the app itself names — read, never retyped.
 
-    Read, never retyped: a peer with its own copy of the URL keeps acting after
-    the app has moved.
+    A peer with its own copy of the URL keeps acting after the app has moved.
+    The client names ONE origin for both data and identity (2026-11-19): there
+    is no Supabase base and no anon key in the app any more, so there is nothing
+    else to read, and sign-in goes through `/api/v1/auth/login` like the app's.
     """
     src = (project / CLIENT_REL).read_text()
     api = re.search(r'"(https://[\w.-]+\.run\.app)"', src)
-    supabase = re.search(r'"(https://[\w.-]+\.supabase\.co)"', src)
-    keys = re.findall(r'"(eyJ[\w-]+\.[\w-]+\.[\w-]+)"', src)
-    if not (api and supabase and keys):
-        raise SystemExit(f"flow-peer: cannot read the API/Supabase/anon constants from {CLIENT_REL}")
-    return api.group(1), supabase.group(1), keys[-1]
+    if not api:
+        raise SystemExit(f"flow-peer: cannot read the backend URL from {CLIENT_REL}")
+    return api.group(1)
 
 
 def request(method: str, url: str, token: str | None = None,
@@ -116,11 +116,11 @@ def request(method: str, url: str, token: str | None = None,
         return 0, {"detail": str(e)}
 
 
-def sign_in(supabase: str, anon: str, email: str, password: str) -> tuple[str, str]:
+def sign_in(api: str, email: str, password: str) -> tuple[str, str]:
+    """The app's own door: `POST /api/v1/auth/login`, no project key anywhere."""
     status, body = request(
-        "POST", f"{supabase}/auth/v1/token?grant_type=password",
-        token=anon, payload={"email": email, "password": password},
-        headers={"apikey": anon},
+        "POST", f"{api.rstrip('/')}/api/v1/auth/login",
+        payload={"email": email, "password": password},
     )
     if status not in (200, 201) or not isinstance(body, dict):
         raise SystemExit(f"flow-peer: sign-in failed ({status}): {body}")
@@ -245,12 +245,9 @@ def run(project: Path, *, email: str = "", password: str = "", token: str = "",
         create_offer: bool = False, exchange_mode: str = "TEMPORARY",
         duration_days: int = 21, interval: float = 3.0, timeout: int = 300,
         max_actions: int = 10, expect_completed: bool = False, once: bool = False,
-        api_url: str = "", supabase_url: str = "", anon_key: str = "",
+        api_url: str = "",
         log: Callable[[str], None] = print) -> dict:
-    api, supabase, anon = app_constants(project)
-    api = api_url or api
-    supabase = supabase_url or supabase
-    anon = anon_key or anon
+    api = api_url or app_api(project)
 
     if not token and not email:
         import os
@@ -262,13 +259,14 @@ def run(project: Path, *, email: str = "", password: str = "", token: str = "",
                 "flow-peer: give --peer-email/--peer-password (or --peer-token), or export "
                 "BOOKSWAP_PEER_EMAIL and BOOKSWAP_PEER_PASSWORD"
             )
-        token, me = sign_in(supabase, anon, email, password)
+        token, me = sign_in(api, email, password)
     else:
-        status, body = request("GET", f"{supabase}/auth/v1/user", token=token,
-                               headers={"apikey": anon})
-        if status != 200 or not isinstance(body, dict) or not body.get("id"):
+        status, body = request("GET", f"{api.rstrip('/')}/api/v1/auth/me", token=token)
+        if status != 200 or not isinstance(body, dict):
             raise SystemExit(f"flow-peer: the peer token is not usable ({status})")
-        me = str(body["id"])
+        me = str(body.get("id") or (body.get("user") or {}).get("id") or "")
+        if not me:
+            raise SystemExit("flow-peer: the peer token answered without a user id")
 
     if not with_reader and not create_offer:
         raise SystemExit(
@@ -335,8 +333,6 @@ def main(project: Path, args) -> int:
         expect_completed=getattr(args, "expect_completed", False),
         once=getattr(args, "once", False),
         api_url=getattr(args, "api_url", "") or "",
-        supabase_url=getattr(args, "supabase_url", "") or "",
-        anon_key=getattr(args, "anon_key", "") or "",
         log=log,
     )
     if getattr(args, "json", False):

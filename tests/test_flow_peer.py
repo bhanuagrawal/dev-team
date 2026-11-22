@@ -84,3 +84,49 @@ class FlowPeerTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class AppConstantsTest(unittest.TestCase):
+    """The peer reads WHERE the backend is — one origin, no project key.
+
+    2026-11-19 the client stopped shipping a Supabase base and an anon key: one
+    origin answers data and identity. The peer kept demanding the two constants
+    that no longer exist and refused to run at all (found 2026-11-22, when a
+    two-reader walk could not even create its opening offer).
+    """
+
+    def _client(self, tmp, body: str):
+        from pathlib import Path
+        from team import flow_peer
+
+        target = Path(tmp) / flow_peer.CLIENT_REL
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(body)
+        return Path(tmp)
+
+    def test_reads_the_backend_url_from_the_client(self):
+        import tempfile
+        from team.flow_peer import app_api
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = self._client(tmp, 'val u = "https://bookswap-backend-1.run.app"\n')
+            self.assertEqual("https://bookswap-backend-1.run.app", app_api(root))
+
+    def test_refuses_a_client_with_no_backend_url(self):
+        import tempfile
+        from team.flow_peer import app_api
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = self._client(tmp, 'val u = "https://example.test/"\n')
+            with self.assertRaises(SystemExit):
+                app_api(root)
+
+    def test_a_client_with_no_supabase_project_is_fine(self):
+        import tempfile
+        from team.flow_peer import app_api
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = self._client(tmp, '"https://bookswap-backend-3.run.app"\n')
+            api = app_api(root)
+            self.assertTrue(api.endswith(".run.app"))
+            self.assertNotIn("supabase", api)

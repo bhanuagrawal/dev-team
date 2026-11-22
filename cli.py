@@ -6487,8 +6487,6 @@ def main() -> None:
                     help="exit 0 only when a swap reaches COMPLETED")
     fp.add_argument("--once", action="store_true", help="one pass, then report")
     fp.add_argument("--api-url", help="override the API base read from the app")
-    fp.add_argument("--supabase-url", help="override the Supabase base read from the app")
-    fp.add_argument("--anon-key", help="override the public anon key read from the app")
     fp.add_argument("--json", action="store_true")
     fp.set_defaults(fn=cmd_flow_peer)
     tt = sub.add_parser("tree"); tt.add_argument("project")
