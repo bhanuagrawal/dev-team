@@ -2,6 +2,9 @@
 __pycache__/
 *.py[cod]
 
+# Machine-local worktrees, ledgers and drafting copies (never source)
+.pipeline/
+
 # Run logs (machine-local, may contain local paths)
 logs/
 *.log
