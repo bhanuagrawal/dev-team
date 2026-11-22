@@ -228,6 +228,16 @@ location clause passed on a Kotlin citation while the browser client shipped a
 hand-copy of the old rule on the same disk. A binding the project never mapped
 is a finding too, so the marker can never silently pass.
 
+The map is written by the verb that uses it, never by hand:
+`devteam law <project> --bind app 'composeApp/src/**'` names a surface, and
+`--unbind app` (or `--unbind app 'docs/**'` for one glob) is its undo. Prefer one
+name per surface — `app`, `shared`, `design` — over one name wearing two globs:
+coverage is per glob, so a clause cited only under the first glob leaves an
+honest finding under the second, and the fix is a distinct name, not a second
+citation. Why the undo exists: declaring Paddle's law bound `app` to both
+`composeApp/src/**` and `design/src/**`, and the only way out of the false
+finding was editing `profile.json`, the file the team is told never to touch.
+
 **A citation in prose covers nothing but prose, and each glob is its own
 surface.** Two refinements from 2026-11-20, when BookSwap's public site shipped
 copy that contradicted two clauses for two days with every gate green:
