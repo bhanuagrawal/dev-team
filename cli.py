@@ -1740,7 +1740,8 @@ def cmd_pick(args: argparse.Namespace) -> int:
         print(json.dumps({
             "pick": None, "law_required": True, "would_be": task.get("id"),
             "label": label, "note": law_gap,
-            "next": "re-admit the task with --law <Pn> --effect obeys, or drop it",
+            "next": (f"devteam law {project.name} --cite '{label}' --law <Pn> "
+                     '--why "<why it serves it>"   |   drop it'),
         }, indent=2))
         print_page(project, "the queue head names no product clause")
         return 5
@@ -4309,6 +4310,16 @@ def cmd_law(args: argparse.Namespace) -> int:
         print("  next: cite the new sentence where it RENDERS, and change the "
               "code that relied on the old one — in this same branch")
 
+    if getattr(args, "cite", ""):
+        ok, message = law_mod.cite(project, args.cite, getattr(args, "law", ""),
+                                   getattr(args, "why", ""))
+        if not ok:
+            print(f"law: {message}", file=sys.stderr)
+            return 2
+        print(f"law: cited {message}")
+        print("  next: `devteam pick <project>` can hand it to a run; the entry "
+              "keeps the clause it now names")
+
     result = law_mod.audit(project)
     print(law_mod.format_audit(result))
     if result.get("present") and (result["orphans"] or result["unknown"]
@@ -6205,6 +6216,12 @@ def main() -> None:
     lw.add_argument("--text", default="", help="with --amend: the new sentence")
     lw.add_argument("--requested-by", default="",
                     help="the owner's own words that justify a waiver or amendment")
+    lw.add_argument("--cite", metavar="LABEL", default="",
+                    help="tie an already-queued entry to the clause it serves "
+                         "(needs --law and --why; only 'obeys' — a change to a "
+                         "clause is a new request: use admit)")
+    lw.add_argument("--law", default="", help="with --cite: the clause(s) it serves (Pn[,Pn])")
+    lw.add_argument("--why", default="", help="with --cite: why the entry serves that clause")
     lw.set_defaults(fn=cmd_law)
     from team.admit import KINDS as _ADMIT_KINDS
     rt = sub.add_parser("admit",

@@ -334,5 +334,72 @@ class LawPromptTest(unittest.TestCase):
         self.assertIn("do not invent", block.lower())
 
 
+class LawCiteTest(unittest.TestCase):
+    """A queued entry the planner wrote before the law got its clause."""
+
+    def _project(self, queue: list[dict]) -> Path:
+        root = Path(tempfile.mkdtemp())
+        (root / "PRODUCT.md").write_text(
+            "- **P1** — a wish is an ad\n- **P4** — an offer names two copies\n",
+            encoding="utf-8")
+        (root / ".pipeline").mkdir()
+        (root / ".pipeline" / "profile.json").write_text(
+            json.dumps({"name": "sample"}), encoding="utf-8")
+        (root / ".pipeline" / "state.json").write_text(
+            json.dumps({"queue": queue}), encoding="utf-8")
+        return root
+
+    def _entry(self, root: Path, label: str) -> dict:
+        state = json.loads((root / ".pipeline" / "state.json").read_text())
+        return next(e for e in state["queue"] if e["label"] == label)
+
+    def test_the_clause_and_the_reason_land_on_the_entry(self):
+        root = self._project([{"label": "bugfix-offer", "kind": "bugfix"}])
+        ok, message = law.cite(root, "bugfix-offer", "P4", "the offer names both copies")
+        self.assertTrue(ok, message)
+        entry = self._entry(root, "bugfix-offer")
+        self.assertEqual("P4", entry["law"])
+        self.assertEqual("obeys", entry["law_effect"])
+        self.assertEqual("the offer names both copies", entry["why"])
+        self.assertEqual("", law.entry_block(root, entry))
+        audit = json.loads((root / ".pipeline" / "state.json").read_text())
+        self.assertEqual("bugfix-offer", audit["law_citations"][0]["label"])
+
+    def test_an_unknown_label_changes_nothing(self):
+        root = self._project([{"label": "bugfix-offer", "kind": "bugfix"}])
+        ok, message = law.cite(root, "bugfix-nope", "P4", "why")
+        self.assertFalse(ok)
+        self.assertIn("not queued", message)
+        self.assertNotIn("law", self._entry(root, "bugfix-offer"))
+
+    def test_no_reason_no_citation(self):
+        root = self._project([{"label": "bugfix-offer", "kind": "bugfix"}])
+        ok, message = law.cite(root, "bugfix-offer", "P4", "  ")
+        self.assertFalse(ok)
+        self.assertIn("--why", message)
+
+    def test_an_amendment_is_not_a_citation(self):
+        root = self._project([{"label": "bugfix-offer", "kind": "bugfix"}])
+        ok, message = law.cite(root, "bugfix-offer", "P4", "why", effect="amends")
+        self.assertFalse(ok)
+        self.assertIn("admit", message)
+
+    def test_a_missing_clause_is_refused(self):
+        root = self._project([{"label": "bugfix-offer", "kind": "bugfix"}])
+        ok, message = law.cite(root, "bugfix-offer", "P9", "why")
+        self.assertFalse(ok)
+        self.assertIn("P9", message)
+
+    def test_an_ambiguous_label_names_the_choices(self):
+        root = self._project([
+            {"label": "bugfix-offer-one", "kind": "bugfix"},
+            {"label": "bugfix-offer-two", "kind": "bugfix"},
+        ])
+        ok, message = law.cite(root, "offer", "P4", "why")
+        self.assertFalse(ok)
+        self.assertIn("bugfix-offer-one", message)
+        self.assertIn("bugfix-offer-two", message)
+
+
 if __name__ == "__main__":
     unittest.main()

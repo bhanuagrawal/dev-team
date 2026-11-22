@@ -177,9 +177,10 @@ def entry_block(project: Path, entry: dict, profile: dict | None = None) -> str:
     if str(entry.get("law") or "").strip():
         return ""
     label = str(entry.get("label") or entry.get("id") or "?")
-    return (f"'{label}' names no product clause — re-admit it with "
-            "`devteam admit … --law <Pn> --effect obeys`, or amend/drop it; a "
-            "run may not build work the product cannot justify")
+    return (f"'{label}' names no product clause — tie it to the one it serves "
+            f"(`devteam law {Path(project).name} --cite '{label}' --law <Pn> "
+            '--why "<why it serves it>"`), re-admit it, or drop it; a run may not '
+            "build work the product cannot justify")
 
 
 def clauses(project: Path) -> list[dict[str, Any]]:
@@ -555,6 +556,75 @@ def diff_gate(project: Path, worktree: Path, files: list[str]) -> tuple[bool, st
         "actually obey the clause, fix the surface: that is what the gate is for."
     )
     return False, "\n".join(lines)
+
+
+def cite(project: Path, label: str, law: str, why: str,
+         effect: str = "obeys") -> tuple[bool, str]:
+    """Tie an ALREADY-QUEUED entry to the clause it serves — the agent's act.
+
+    WHY THIS EXISTS (2026-11-22). The planner used to queue work before the law
+    existed on disk, so a project could inherit clause-less entries the moment the
+    gate turned on. The refusal named "re-admit it", and `admit` builds a NEW
+    entry from the owner's sentence — which left the old planner entry in the
+    queue, still clause-less, still refusing `pick` when its turn came. So the
+    classification of work that is already queued gets its own verb, and it is
+    deliberately narrow: it changes no work and adds no work, it refuses a label
+    that is not in the queue, it needs a reason, and it accepts only `obeys` —
+    an amendment or a contradiction is a new request, which must go through
+    `admit` so the owner sees the clause before anything is built.
+    """
+    from .core import now_iso, save_state, state_of
+
+    label = " ".join(str(label or "").split())
+    ids = [part.strip().upper() for part in (law or "").split(",") if part.strip()]
+    why = " ".join(str(why or "").split())
+    effect = str(effect or "obeys").strip().lower()
+    if not label:
+        return False, "say which queued entry: --cite <label>"
+    if not ids:
+        return False, "say which clause it serves: --cite <label> --law P4"
+    if not why:
+        return False, ('say why it serves that clause: --why "<one line>" — the '
+                       "citation is recorded with the task")
+    if effect != "obeys":
+        return False, ("--cite only records work that SERVES a clause. An "
+                       f"{effect} is a new request: run `devteam admit … --law "
+                       f"{ids[0]} --effect {effect}` so the owner sees the clause "
+                       "before anything is built")
+    known = {clause["id"]: clause["text"] for clause in clauses(Path(project))}
+    if not known:
+        return False, "no PRODUCT.md — there is no clause to cite (declare the law first)"
+    unknown = [cid for cid in ids if cid not in known]
+    if unknown:
+        return False, (f"{', '.join(unknown)} is not in PRODUCT.md (known: "
+                       f"{', '.join(sorted(known))})")
+
+    state = state_of(Path(project))
+    queue = [e for e in (state.get("queue") or []) if isinstance(e, dict)]
+    exact = [e for e in queue
+             if str(e.get("label") or e.get("id") or "") == label]
+    matches = exact or [e for e in queue
+                        if label.lower() in str(e.get("label") or e.get("id") or "").lower()]
+    if not matches:
+        return False, (f"'{label}' is not queued (nothing was changed). Queued: "
+                       + (", ".join(str(e.get("label") or "?") for e in queue) or "none"))
+    if len(matches) > 1:
+        return False, (f"'{label}' matches {len(matches)} entries — name one: "
+                       + ", ".join(str(e.get("label") or "?") for e in matches))
+    entry = matches[0]
+    was = str(entry.get("law") or "").strip()
+    if was and [part.strip().upper() for part in was.split(",")] == ids:
+        return False, f"'{label}' already cites {', '.join(ids)} (nothing was changed)"
+    entry["law"] = ",".join(ids)
+    entry["law_effect"] = "obeys"
+    entry["why"] = why
+    entry["decided_by"] = "agent"
+    state.setdefault("law_citations", []).append({
+        "at": now_iso(), "label": str(entry.get("label") or label),
+        "law": ",".join(ids), "effect": "obeys", "why": why, "was": was,
+    })
+    save_state(Path(project), state)
+    return True, f"{entry.get('label') or label} → {', '.join(ids)} (obeys)"
 
 
 def format_audit(result: dict[str, Any]) -> str:

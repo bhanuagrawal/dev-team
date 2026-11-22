@@ -170,6 +170,11 @@ source file's header comment. Then:
 - `devteam pick` refuses (rc 5) to hand a run a task whose queue entry names no
   clause — the warn `doctor` used to print becomes the refusal at the moment
   code would be written;
+- `devteam law <project> --cite <label> --law P4 --why "<why it serves it>"`
+  classifies work that is ALREADY queued and predates the law (the planner used
+  to queue clause-less entries). It neither adds nor changes work, needs a
+  reason, and accepts only `obeys` — an amendment or a contradiction is a new
+  request, so it goes through `admit`;
 - `devteam doctor` **blocks** an app with no declared law and no waiver, and
   still refuses three things once it is declared: a clause nothing cites (*dead
   law*), a citation of a clause that does not exist (*fiction*), and a queued
