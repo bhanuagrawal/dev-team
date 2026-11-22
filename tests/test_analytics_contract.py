@@ -171,6 +171,43 @@ class AuditTest(unittest.TestCase):
         res = self._audit(root, profile, {"wish_created": {"users": 4}})
         self.assertFalse([c for c in res["blocked"] if "declared" in c["id"]], res["blocked"])
 
+    def test_a_measured_app_under_a_clause_that_forbids_sending_is_a_question(self):
+        # 2026-11-22: a launcher declared "no telemetry ... nothing about the
+        # reader leaves the device" and shipped Firebase Analytics; the gate said
+        # nothing, so a run would happily add another event under that clause.
+        root = _repo({"PRODUCT.md": "- **P1** — The app holds no account and sends nothing: "
+                                    "no analytics, telemetry or identifier leaves the device. "
+                                    "(binds: app)\n",
+                      "app/src/Main.kt": KOTLIN,
+                      "app/build.gradle.kts": "implementation 'com.google.firebase:firebase-analytics:21'"})
+        profile = {"connections": {"ga4": {"property": "1"}},
+                   "analytics": {"mode": "measured", "classes": {
+                       "activation": ["match_started"],
+                       "completion": ["match_finished"],
+                       "features": ["match_started", "match_finished"]}}}
+        res = self._audit(root, profile,
+                          {"match_started": {"users": 9}, "match_finished": {"users": 8}})
+        ids = [c["id"] for c in res["blocked"]]
+        self.assertIn("analytics.obeys.law", ids)
+        row = next(c for c in res["blocked"] if c["id"] == "analytics.obeys.law")
+        self.assertIn("P1", row["detail"])
+        self.assertIn("owner", row["fix"])
+
+    def test_an_app_whose_clause_permits_analytics_is_not_flagged(self):
+        root = _repo({"PRODUCT.md": "- **P2** — A document never leaves the device: no upload, "
+                                    "no server. The only network use is anonymous usage "
+                                    "analytics. (binds: app)\n",
+                      "app/src/Main.kt": KOTLIN,
+                      "app/build.gradle.kts": "implementation 'com.google.firebase:firebase-analytics:21'"})
+        profile = {"connections": {"ga4": {"property": "1"}},
+                   "analytics": {"mode": "measured", "classes": {
+                       "activation": ["match_started"],
+                       "completion": ["match_finished"],
+                       "features": ["match_started", "match_finished"]}}}
+        res = self._audit(root, profile,
+                          {"match_started": {"users": 9}, "match_finished": {"users": 8}})
+        self.assertNotIn("analytics.obeys.law", [c["id"] for c in res["blocked"]])
+
     def test_a_declared_event_with_zero_users_is_not_a_quiet_zero(self):
         root = _repo({"app/src/Main.kt": KOTLIN,
                       "app/build.gradle.kts": "implementation 'com.google.firebase:firebase-analytics:21'"})

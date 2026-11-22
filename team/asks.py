@@ -166,6 +166,10 @@ AUDIT_VERBS: set[str] = {
     "doctor", "status", "tools", "takeover", "tree", "asks", "alarm", "coverage",
     "capabilities", "closure", "poll", "ux-plan", "storefront-status",
     "store-readiness",
+    # `devteam law <project>` shows the clauses; its write path (--amend/--add)
+    # needs the owner's own words in --requested-by, so an ask whose fix is
+    # "amend the clause" is the owner's call, not a chore the agent can finish.
+    "law",
 }
 
 # --------------------------------------------------------------------------- #

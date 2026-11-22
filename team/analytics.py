@@ -75,6 +75,14 @@ _TRACKER_RE = re.compile(r"logEvent|AnalyticsTracker|AnalyticsEvent|FirebaseAnal
 _BILLING_RE = re.compile(r"BillingClient|BillingRepository|AndroidBillingProvider|"
                          r"in_app_purchase|revenuecat|StoreKit|Paywall|paywall")
 
+# A clause that says nothing may leave the phone is a clause a `measured` app
+# cannot be checked against — the two facts would contradict before the first
+# report is read. Kept to the phrases an app actually declares (not "trackers",
+# not "analytics" on its own: an app may PERMIT anonymous usage analytics).
+_SILENT_LAW_RE = re.compile(
+    r"\bno\s+telemetry\b|\bsends\s+nothing\b|\bno\s+analytics\b|"
+    r"\bnothing\b[^.]{0,80}\bleaves\s+the\s+device\b", re.I)
+
 
 # --------------------------------------------------------------------------- #
 # the declaration
@@ -415,6 +423,25 @@ def audit(project: Path, profile: dict | None = None,
         checks.append(_check("analytics.obeys", "ok",
                              "the SDK, the tracker seam and the property are all present"))
 
+    # 2b — a measured app may not be run under a clause that forbids sending -- #
+    #     Found 2026-11-22: a launcher declared "no telemetry ... nothing about
+    #     the reader leaves the device" and shipped Firebase Analytics with the
+    #     package names of the apps its reader opens, and the gate said nothing
+    #     because it only ever compared the declaration to the tree and never to
+    #     the law the project declares. The contradiction is the owner's to
+    #     settle; a run may not settle it by quietly adding another event.
+    conflict = silent_clause(project)
+    if conflict:
+        cid, text = conflict
+        checks.append(_check(
+            "analytics.obeys.law", "blocked",
+            f"mode 'measured' but {cid} says \"{text[:120]}\" — the shipped tree "
+            "sends product events under a clause that forbids sending them",
+            f"one of the two is wrong, and only the owner can pick: amend {cid} to "
+            "permit anonymous product events (never reader text or the apps they "
+            f"open) — `devteam law {project.name} --amend {cid} --text \"…\" "
+            "--requested-by \"<owner words>\"` — or drop the tracker"))
+
     # 3 — every required class is named, and named in the shipped code ------ #
     all_declared = [n for names_ in names.values() for n in names_]
     in_tree = tree_contains(project, all_declared) if all_declared else set()
@@ -630,6 +657,22 @@ def audit(project: Path, profile: dict | None = None,
 
 def has_ga4(profile: dict) -> bool:
     return bool(((profile.get("connections") or {}).get("ga4") or {}).get("property"))
+
+
+def silent_clause(project: Path) -> tuple[str, str] | None:
+    """(clause id, text) of a declared clause that forbids sending, if any."""
+    try:
+        from . import law as law_mod
+        ledger = law_mod.audit(project)
+    except Exception:
+        return None
+    if not ledger.get("present"):
+        return None
+    for clause in ledger.get("clauses") or []:
+        text = str(clause.get("text") or "")
+        if _SILENT_LAW_RE.search(text):
+            return str(clause.get("id") or "?"), text
+    return None
 
 
 def _class_fix(project: Path, cid: str, users: dict[str, int], src: dict) -> str:

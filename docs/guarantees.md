@@ -212,7 +212,11 @@ refuses.
    names but never emits, a declared event with 0 users beside declared events
    that have them, and a billing path with no purchase funnel are each BLOCKED —
    because a 0 the app never recorded and a 0 that means "nobody does this" are
-   different facts, and only the app can tell them apart. `mode: none` is a
+   different facts, and only the app can tell them apart. The declaration is also
+   held against the app's **own law**: a project that ships a tracker under a
+   clause saying "no telemetry … nothing leaves the device" is BLOCKED for the
+   owner to settle (amend the clause, or drop the tracker) — a run may not add
+   another event under a promise that forbids it. `mode: none` is a
    first-class answer: an app whose product law forbids analytics (FieldCert P2)
    declares the clause, and the gate then checks the ABSENCE — no SDK, no
    tracker, no connected property. `devteam analytics --draft` proposes a
