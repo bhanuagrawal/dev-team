@@ -58,6 +58,19 @@ refuses.
    predates their screen — advisory, because the gate only needs the change
    walked. `ux-audit` stills, `ux-video` replays, storefront review and
    design drift are **advisory**: they inform the run, they never gate a release.
+   **THE SCREEN IS NOT THE SERVER** (2026-11-22). A walk proves what the app drew,
+   and an app draws what the deployed backend sent: 1.0.89-rc.2 shipped a deal
+   panel whose feedback routes did not exist on the live service and whose offer
+   POST died on a dropped column, because the deal page renders Waiting/Agreed/
+   Done from fields the OLD server already sent — every declared observable
+   appeared without one new endpoint being touched. So a task may declare
+   `backend.requires` (`routes` and signed-in `calls` with required keys) in its
+   spec, and `verify` probes the deployed service: its own OpenAPI document for a
+   route, one real authenticated response for a key. A missing route, an old
+   shape or an unreachable service refuses, and the refusal names the remedy
+   (`merge the backend to main, apply its migrations, deploy`). The walk still
+   proves the screen; the probe proves the server behind it. No backend block, no
+   probe — a change that needs nothing from a server is not asked about one.
    **No UI code without a design** (owner directive 2026-11-10): `verify` also
    refuses a UI diff whose task has no recorded design answer. Find it or get it
    created — a surface already in `docs/stitch/manifest.json` with an exported

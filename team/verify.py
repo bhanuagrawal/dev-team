@@ -1438,6 +1438,19 @@ def verify_all(project: Path, worktree: Path, base: str, log, gradle: bool = Tru
         failures.append(msg)
         return False, failures
 
+    # THE DEPLOYED BACKEND MUST CARRY THE CHANGE (2026-11-22). rc.2 shipped a
+    # deal panel whose feedback routes did not exist on the live service: the
+    # walk passed because the screen renders Waiting/Agreed/Done from fields the
+    # OLD server already sent. A task that declares what its change needs from
+    # the server is now probed against the deployed service — its own OpenAPI
+    # document, plus one signed-in read of a real response (`team/backend_probe`).
+    from . import backend_probe
+    ok, msg = backend_probe.contract(project, spec, worktree)
+    log("backend: ok — " + msg if ok else "backend: FAIL — " + msg)
+    if not ok:
+        failures.append(msg)
+        return False, failures
+
     if not gradle:
         # --skip-gradle still answers the file-level gates it just ran: a refusal
         # collected above is a refusal, not "nothing to report".
