@@ -196,6 +196,29 @@ refuses.
    worktree, an unpushed commit, or "I'll commit later": the next session may be
    a different tool that never saw this one. Work you did not write — the
    owner's WIP — is reported, never committed on their behalf.
+11. **A number the plan runs on is DECLARED and then MEASURED** (`devteam
+   analytics <project>`, 2026-11-22). The planner decides what the product
+   becomes from the events the app records, so an app must declare
+   `profile.analytics` — which event is its activation, its completion, the
+   optional surfaces whose usage share argues for re-prioritising one over
+   another, and (when the tree carries a billing path) the paywall-shown and
+   purchase-completed halves of the money funnel. The gate checks the
+   declaration against two independent facts: the **delivery ref** (does the
+   shipped code name the event at all?) and the **property's own 30-day event
+   table** (did a real user record it?). A declared event the tree no longer
+   sends, a declared event with 0 users beside declared events that have them,
+   and a billing path with no purchase funnel are each BLOCKED — because a 0
+   the app never recorded and a 0 that means "nobody does this" are different
+   facts, and only the app can tell them apart. `mode: none` is a first-class
+   answer: an app whose product law forbids analytics (FieldCert P2) declares
+   the clause, and the gate then checks the ABSENCE — no SDK, no tracker, no
+   connected property. `devteam analytics --draft` proposes a declaration from
+   the events the property already records; `research` turns every blocker into
+   one queue upgrade, so the gap is planned rather than remembered. Notes that
+   are never blockers but always printed: the activation→completion drop-off
+   with its numbers, declared events that are silent while their siblings land,
+   the usage share across declared features, and a renamed event whose old
+   spelling still carries more users than the declared one.
 
 ## Self-improvement & Code-Based Invariants (standing duty)
 

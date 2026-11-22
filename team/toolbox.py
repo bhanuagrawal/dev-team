@@ -53,6 +53,12 @@ _RAW: list[tuple[str, str, str, str, str, bool]] = [
      ".pipeline/runs/ log", "never — it reports", True),
     ("capabilities", "orient", "each team capability, checked against this project",
      ".pipeline/targets-draft.json (owner approves)", "nothing", True),
+    ("analytics", "orient", "does the app record what the PLANNER needs — the declared "
+     "contract (activation / completion / features / money) checked against the delivered "
+     "tree and the property's own 30-day event table; `--draft` proposes one, `--declare` writes it",
+     "profile.analytics (--declare); .pipeline/analytics-draft.json (--draft)",
+     "an undeclared contract (blocked); a declared event absent from the delivery ref; a "
+     "declared event with 0 users while the app has traffic", True),
     ("adapt", "orient", "bring the project up to the current team (shape, tree, CI)",
      "profile/state shape, .pipeline/*", "a project it cannot read", True),
     ("coverage", "orient", "unit + UI coverage against the 100% floor",

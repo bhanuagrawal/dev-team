@@ -156,6 +156,57 @@ def probe(project: Path | None, conf: dict) -> dict:
             "credential": credential}
 
 
+def event_users(project: Path | None, conf: dict, days: int = 30) -> tuple[dict | None, str]:
+    """{eventName: {events, users}} over `days`, or (None, why-not).
+
+    The audit needs per-event PEOPLE, not totals: "the paywall converted" is a
+    user count, and a total of 40 events from one tester is not adoption. One
+    grouped runReport answers every declared event at once.
+    """
+    prop = str((conf or {}).get("property") or "").strip()
+    if not prop:
+        return None, "connections.ga4.property is not declared"
+    key = key_path((conf or {}).get("key_file"))
+    token, why_not = mint(project, key)
+    if not token:
+        return None, why_not
+    body = {
+        "dateRanges": [{"startDate": f"{days}daysAgo", "endDate": "today"}],
+        "dimensions": [{"name": "eventName"}],
+        "metrics": [{"name": "eventCount"}, {"name": "totalUsers"}],
+        "limit": 300,
+    }
+    excludes = (conf or {}).get("exclude_device_models") or []
+    if excludes:
+        body["dimensionFilter"] = {"andGroup": {"expressions": [
+            {"notExpression": {"filter": {"fieldName": "deviceModel",
+             "inListFilter": {"values": excludes}}}}]}}
+    r = run(["curl", "-s", "-X", "POST",
+             "-H", f"Authorization: Bearer {token}",
+             "-H", "Content-Type: application/json",
+             REPORT_URL.format(prop=prop), "-d", json.dumps(body)],
+            project, timeout=120)
+    if r.returncode != 0:
+        return None, f"curl failed: {_tail(r)}"
+    try:
+        payload = json.loads(r.stdout or "{}")
+    except json.JSONDecodeError:
+        return None, "non-JSON response (network/proxy?)"
+    if "error" in payload:
+        return None, f"GA4 property {prop}: {payload['error'].get('message', '?')[:160]}"
+    out: dict = {}
+    for row in payload.get("rows") or []:
+        name = ((row.get("dimensionValues") or [{}])[0] or {}).get("value") or ""
+        if not name:
+            continue
+        vals = [m.get("value") for m in row.get("metricValues") or []]
+        out[name] = {
+            "events": int(vals[0] or 0) if vals else 0,
+            "users": int(vals[1] or 0) if len(vals) > 1 else 0,
+        }
+    return out, ""
+
+
 def fix_for(project_name: str, conf: dict, result: dict) -> str:
     """The owner/agent ask for a failed probe — precise, and not impossible.
 

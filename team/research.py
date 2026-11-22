@@ -1759,65 +1759,25 @@ def capability_upgrades(signals: dict, profile: dict, project: Path | None = Non
                    "one time, all projects); `devteam doctor` verifies",
         })
     elif project is not None:
-        # connected but reading flat zero — first suspect is no instrumentation,
-        # i.e. the app ships no Firebase Analytics SDK at all
-        import re as _re
-        gradle_text = ""
-        for cand in ("composeApp/build.gradle.kts", "app/build.gradle",
-                     "app/build.gradle.kts", "gradle/libs.versions.toml"):
-            f = project / cand
-            if f.exists():
-                gradle_text += f.read_text(errors="ignore")
-        instrumented = bool(_re.search(
-            r"firebase-analytics|FirebaseAnalytics|play.services.analytics|analytics-ktx",
-            gradle_text))
-        flat = not any((ga4.get(k) or 0) for k in ("new_users_7d", "active_users_7d"))
-        if not instrumented and flat:
-            up.append({
-                "id": "analytics-instrumentation",
-                "title": "Instrument the app with the Firebase Analytics SDK",
-                "benefit": "the GA4 connection is live but the app emits no events "
-                           "(no SDK) — numbers stay zeros; priorities stay vibes",
-                "how": "owner: create/link the app in the Firebase console and "
-                       "download google-services.json; dev-team feature task wires "
-                       "firebase-analytics into androidMain (owner approves in next intake)",
-            })
-        else:
-            code_tracked = False
-            for sdir in (project / "composeApp/src", project / "app/src", project / "src", project / "lib"):
-                if sdir.is_dir():
-                    for ext in ("*.kt", "*.java", "*.dart"):
-                        for p in sdir.rglob(ext):
-                            try:
-                                txt = p.read_text(errors="ignore")
-                                if "logEvent" in txt or "AnalyticsTracker" in txt:
-                                    code_tracked = True
-                                    break
-                            except Exception:
-                                pass
-                        if code_tracked:
-                            break
-                if code_tracked:
-                    break
-
+        # CONTRACT, not SDK presence (2026-11-22). This used to file "instrument
+        # the SDK" when the gradle text was dark and "instrument the funnel" when
+        # the app had no event literally named job_started — so an app that
+        # recorded a paywall-free, completion-free half a product read as done.
+        # The audit in team/analytics.py checks the declaration against the
+        # shipped tree and the property's own event table, one upgrade per gap.
+        try:
+            from . import analytics as analytics_mod
             ev_30d = ga4.get("events_30d") or {}
-            installs = (ev_30d.get("first_open") or {}).get("users") or (ga4.get("new_users_7d") or 0)
-            started = (ev_30d.get("job_started") or {}).get("users") or 0
-            # The upgrade is for a product that records NOTHING. An app whose own
-            # events are landing is already instrumented — it just does not use
-            # this team's conventional name, and filing "instrument events" at it
-            # is a chore aimed at a hole that is not there.
-            domain = ga4.get("domain_events_30d") or _domain_events(ev_30d)
-
-            if (not domain) and (not code_tracked or (installs > 0 and started == 0)):
-                up.append({
-                    "id": "funnel-instrumentation",
-                    "title": "Instrument core job lifecycle events (job_started, job_completed, job_failed)",
-                    "benefit": f"GA4 is connected ({installs} installs in 30d), but job_start_rate is 0.0 "
-                               f"— the planner cannot tell where users drop off without lifecycle events",
-                    "how": "wire an AnalyticsTracker (commonMain) delegating to FirebaseAnalytics (androidMain), "
-                           "logging job_started / job_completed / job_failed around primary user actions",
-                })
+            res = analytics_mod.audit(project, profile, events=ev_30d, live=False)
+            up.extend(analytics_mod.upgrades(res, project.name))
+        except Exception as e:  # an audit crash must not kill the research pass
+            up.append({
+                "id": "analytics-audit",
+                "title": "The analytics audit crashed",
+                "benefit": "without it the planner cannot tell a product that "
+                           "records nothing from one that records the wrong thing",
+                "how": f"fix team/analytics.py — {e}",
+            })
     if signals.get("vitals", {}).get("status") != "ok":
         up.append({
             "id": "vitals",

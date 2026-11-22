@@ -72,27 +72,22 @@ def agent_requirements(profile: dict, project: Path) -> dict[str, list[tuple[str
 
         # Code-level tracking: verify the app actually calls analytics,
         # not just bundling the SDK in Gradle while remaining dark (2026-11-18).
-        code_tracked = False
-        for sdir in (project / "composeApp/src", project / "app/src", project / "src", project / "lib"):
-            if sdir.is_dir():
-                for ext in ("*.kt", "*.java", "*.dart"):
-                    for p in sdir.rglob(ext):
-                        try:
-                            txt = p.read_text(errors="ignore")
-                            if "logEvent" in txt or "AnalyticsTracker" in txt:
-                                code_tracked = True
-                                break
-                        except Exception:
-                            pass
-                    if code_tracked:
-                        break
-            if code_tracked:
-                break
-        ga4_checks.append((
-            "analytics tracked in source code (AnalyticsTracker / logEvent)",
-            code_tracked,
-            "declare an AnalyticsTracker seam and log job lifecycle events (job_started, job_completed, job_failed)",
-        ))
+        # SUPERSEDED 2026-11-22: "a source file contains logEvent" was satisfied
+        # by a single no-op call, so every app passed while the planner read
+        # installs instead of the product (one app: 715 first opens and a single
+        # completed job; another: a paywall and no purchase event).
+        # The contract in team/analytics.py checks a DECLARATION against the
+        # delivered tree and the property's own event table.
+        try:
+            from . import analytics as analytics_mod
+            events = None
+            if probe.get("ok"):
+                events, _why = analytics_mod.live_events(project, profile)
+            res = analytics_mod.audit(project, profile, events=events, live=False)
+            ga4_checks += analytics_mod.doctor_checks(res)
+        except Exception as e:  # a broken audit must be visible, never fatal
+            ga4_checks.append((f"analytics contract readable: {e}", False,
+                               "fix team/analytics.py — the audit crashed"))
 
     # Play Console connections (vitals + reviews): declared per project, and the
     # COLLECTOR is what silences the upgrade ask — so verify the key file and the

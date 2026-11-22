@@ -2607,6 +2607,74 @@ def cmd_capabilities(args: argparse.Namespace) -> int:
     return 0 if all(r["status"] in ("ok", "n/a") for r in rows) else 1
 
 
+def cmd_analytics(args: argparse.Namespace) -> int:
+    """Does the app record what the PLANNER needs to decide where it goes?
+
+    The gate `doctor` runs, on demand and in full: the declared contract, the
+    delivered tree, and the property's own 30-day event table, side by side. A
+    missing number is never reported as a zero — it is reported as a declaration
+    gap, a code gap, or a live gap, because the fix for each is different.
+    """
+    project = resolve_project(args.project)
+    from team import analytics as analytics_mod
+
+    profile = profile_of(project)
+
+    if args.draft:
+        events, why = analytics_mod.live_events(project, profile)
+        if events is None:
+            print(f"analytics: cannot draft — {why}")
+            return 1
+        proposal = analytics_mod.draft(profile, events)
+        dest = pipeline_dir(project) / "analytics-draft.json"
+        save_json(dest, proposal)
+        print(json.dumps(proposal, indent=2))
+        print(f"\n== drafted from {len(events)} event names → {dest}")
+        print("   confirm the words, then write it:")
+        print(f"   python3 cli.py analytics {project.name} --declare {dest}")
+        return 0
+
+    if args.declare:
+        try:
+            decl = json.loads(Path(args.declare).read_text())
+        except (OSError, json.JSONDecodeError) as exc:
+            print(f"analytics: cannot read {args.declare}: {exc}", file=sys.stderr)
+            return 2
+        if not isinstance(decl, dict) or decl.get("mode") not in ("measured", "none"):
+            print("analytics: the declaration needs {\"mode\": \"measured\"|\"none\", …}",
+                  file=sys.stderr)
+            return 2
+        pf = analytics_mod.write_declaration(project, decl)
+        print(f"analytics: declared in {pf}")
+        print("   commit it — the declaration is what `doctor` and the planner read.")
+
+    result = analytics_mod.audit(project, profile, live=not args.no_live)
+    if args.json:
+        print(json.dumps(result, indent=2, default=list))
+        return 0 if not result["blocked"] else 1
+
+    print(f"== {project.name} — analytics contract ==")
+    print(f"   delivery: {result['delivery_ref']}  ·  mode: {result['mode'] or 'UNDECLARED'}")
+    tree = result["tree"]
+    print(f"   tree: SDK {'✓' if tree.get('sdk') else '·'}  tracker "
+          f"{'✓' if tree.get('tracker') else '·'}  billing "
+          f"{'✓' if tree.get('billing') else '·'}")
+    for c in result["checks"]:
+        mark = {"ok": "✓", "blocked": "✗", "warn": "!", "unknown": "?"}[c["status"]]
+        print(f"   {mark} {c['id']} — {c['detail']}")
+        if c["status"] in ("blocked", "warn") and c.get("fix"):
+            print(f"       fix: {c['fix']}")
+    for line in result["findings"]:
+        print(f"   · {line}")
+    if result["blocked"]:
+        tail = ("nothing may leave the device" if result["mode"] == "none"
+                else "the planner would read a zero the app never recorded")
+        print(f"\n   BLOCKED: {len(result['blocked'])} gap(s) — {tail}")
+        return 1
+    print("\n   the contract holds")
+    return 0
+
+
 def cmd_coverage(args: argparse.Namespace) -> int:
     """Unit and UI test coverage over the SHIPPED tree — the numbers the planner gates on.
 
@@ -3281,9 +3349,16 @@ def cmd_doctor(args: argparse.Namespace) -> int:
         pass
     blocked = {a: r for a, r in report.items() if r["status"] == "blocked"}
     if blocked:
+        # The verdict, not the addressee, decides who acts: an instrumented app's
+        # analytics gap is app code, and printing "ASK OWNER" at it would relay a
+        # chore the agent must do itself (guarantees 9).
+        from team import asks as asks_mod
+        prof = profile_of(project)
         for agent, r in blocked.items():
             for b in r["blocked"]:
-                print(f"ASK OWNER ({agent}): {b['requirement']} → {b['fix']}")
+                verdict = asks_mod.review(b["requirement"], b.get("fix", ""), prof)
+                label = "DO IT (agent)" if verdict["verdict"] == "agent" else "ASK OWNER"
+                print(f"{label} ({agent}): {b['requirement']} → {b['fix']}")
         print_page(project)
         return 1
     print_page(project)
@@ -6420,6 +6495,21 @@ def main() -> None:
     cp.add_argument("project")
     cp.add_argument("--json", action="store_true")
     cp.set_defaults(fn=cmd_capabilities)
+    an = sub.add_parser(
+        "analytics",
+        help="the declared analytics contract, checked against the delivered tree and "
+             "the property's own 30-day event table — the gate that says whether the "
+             "planner is reading the product or only its installs")
+    an.add_argument("project")
+    an.add_argument("--json", action="store_true")
+    an.add_argument("--draft", action="store_true",
+                    help="propose a declaration from the events the property already "
+                         "records (.pipeline/analytics-draft.json — not written to profile)")
+    an.add_argument("--declare", metavar="FILE",
+                    help="write profile.analytics from a JSON file (the agent/owner confirms)")
+    an.add_argument("--no-live", action="store_true",
+                    help="check the declaration against the tree only (no GA4 read)")
+    an.set_defaults(fn=cmd_analytics)
     cv = sub.add_parser("coverage", help="unit and UI test coverage over the shipped tree "
                                          "(the numbers the planner gates on)")
     cv.add_argument("project")
