@@ -13,8 +13,14 @@ taken blind.
 So the contract is DECLARED per project (`profile['analytics']`) and then
 CHECKED against two independent facts:
 
-  * the delivery tree  — does the code name the event at all?
+  * the delivery tree  — does the code name the event at all, and does something
+                          actually PASS that name to a send?
   * the GA4 property   — did a real user record it in the last 30 days?
+
+The second half of the first fact was added the day the audit ran: BookSwap
+declared `wish_created`/`offer_proposed` as constants and no screen ever sent
+them, so "the string is in the tree" certified two events the product never
+emitted — and the property's zeros read as "nobody uses the matchmaker".
 
 A declared event that never lands is worse than an undeclared one: the plan
 reads its zero as "nobody does this" when the truth is "the app never said it".
@@ -194,6 +200,82 @@ def tree_contains(project: Path, names: list[str]) -> set[str]:
     return found & set(names)
 
 
+_DECL_RE = re.compile(r'\b([A-Z][A-Za-z0-9_]{2,})\s*(?::[^=]*)?=\s*"[^"]*"')
+_TEST_PATH_RE = re.compile(r"(?:^|/)(?:androidTest|test|androidUnitTest|commonTest|"
+                           r"iosTest)/|Test\.kt$|Tests\.kt$", re.I)
+
+
+def _quoted_lines(project: Path, names: list[str]) -> dict[str, list[tuple[str, str]]]:
+    """name -> [(file, line)] for every delivered line that quotes it."""
+    names = [n for n in dict.fromkeys(names) if n]
+    if not names:
+        return {}
+    pat = "|".join(re.escape(n) for n in names)
+    r = git(["grep", "-n", "-E", f'"({pat})"', DELIVERY_REF, "--",
+             "*.kt", "*.java", "*.dart", "*.swift"], cwd=project, timeout=90)
+    if r.returncode not in (0, 1):
+        return {}
+    out: dict[str, list[tuple[str, str]]] = {n: [] for n in names}
+    for ln in (r.stdout or "").splitlines():
+        # `git grep <tree-ish>` prints ref:path:line:text
+        parts = ln.split(":", 3)
+        if len(parts) < 4:
+            continue
+        rel, content = parts[1], parts[3]
+        for n in names:
+            if f'"{n}"' in content:
+                out[n].append((rel, content))
+    return out
+
+
+def emits(project: Path, names: list[str]) -> dict[str, bool]:
+    """name -> does the delivered tree PASS it to a call, or only DECLARE it?
+
+    Why this exists (2026-11-22, found by the first audit): BookSwap's tracker
+    declared `wish_created`, `offer_proposed` and `book_added_manual` as
+    constants and no screen ever sent them, so `tree_contains` passed — "the
+    name is in the code" — while the product's two core acts recorded nothing
+    for 30 days. A constant is a name, not an event.
+
+    Only the shape that can be judged is judged: a constant assigned the literal
+    (`const val WISH_CREATED = "wish_created"`) whose identifier is used nowhere
+    outside tests. Anything else (a `when` branch mapping a data class, a raw
+    `logEvent("x")`) returns True — the check may not guess, and an event it
+    cannot judge must not be called dead.
+    """
+    lines = _quoted_lines(project, names)
+    out: dict[str, bool] = {}
+    for name, hits in lines.items():
+        if not hits:
+            out[name] = True
+            continue
+        ident = ""
+        for _, content in hits:
+            m = _DECL_RE.search(content)
+            if m:
+                ident = m.group(1)
+                break
+        if not ident:
+            out[name] = True          # a shape this check does not judge
+            continue
+        r = git(["grep", "-n", "-w", ident, DELIVERY_REF, "--",
+                 "*.kt", "*.java", "*.dart", "*.swift"], cwd=project, timeout=90)
+        if r.returncode not in (0, 1):
+            out[name] = True
+            continue
+        uses = 0
+        for ln in (r.stdout or "").splitlines():
+            parts = ln.split(":", 3)
+            rel = parts[1] if len(parts) >= 4 else ""
+            if _TEST_PATH_RE.search(rel):
+                continue
+            uses += 1
+        # the declaration line itself is one of those hits
+        declared = sum(1 for _, content in hits if _DECL_RE.search(content))
+        out[name] = (uses - declared) > 0
+    return out
+
+
 def source_scan(project: Path) -> dict:
     """What the SHIPPED tree says: SDK, tracker seam, billing path, event names.
 
@@ -325,6 +407,7 @@ def audit(project: Path, profile: dict | None = None,
     # 3 — every required class is named, and named in the shipped code ------ #
     all_declared = [n for names_ in names.values() for n in names_]
     in_tree = tree_contains(project, all_declared) if all_declared else set()
+    sent = emits(project, [n for n in all_declared if n in in_tree])
     for cid in REQUIRED:
         if cid == "money" and not src.get("billing"):
             continue
@@ -346,7 +429,18 @@ def audit(project: Path, profile: dict | None = None,
                 "the declaration; an event only in the plan is an event nobody sends "
                 "(a name GA4 still shows may be an old build, not the product)"))
         else:
-            checks.append(_check(f"analytics.{cid}.declared", "ok", ", ".join(got)))
+            dead = [n for n in got if sent.get(n) is False]
+            if dead:
+                checks.append(_check(
+                    f"analytics.{cid}.declared", "blocked",
+                    f"declared for '{cid}' but nothing emits it in {DELIVERY_REF}: "
+                    + ", ".join(dead)
+                    + " — the name exists as a constant with no call site",
+                    "send the event from the screen or repository that performs the act "
+                    "(a declared constant is not an event: GA4 reads its absence as "
+                    "'nobody does this')"))
+            else:
+                checks.append(_check(f"analytics.{cid}.declared", "ok", ", ".join(got)))
 
     # 4 — the money funnel, when the app sells something -------------------- #
     if src.get("billing"):
@@ -371,9 +465,20 @@ def audit(project: Path, profile: dict | None = None,
                     "code: paywall_shown when the sheet opens and purchase_completed "
                     "on the confirmed purchase (the declaration names them)"))
             else:
-                checks.append(_check("analytics.money.declared", "ok",
-                                     "shown: " + ", ".join(halves["shown"])
-                                     + " · success: " + ", ".join(halves["success"])))
+                dead = [n for n in halves["shown"] + halves["success"]
+                        if sent.get(n) is False]
+                if dead:
+                    checks.append(_check(
+                        "analytics.money.declared", "blocked",
+                        f"the purchase funnel is declared but nothing emits it in "
+                        f"{DELIVERY_REF}: " + ", ".join(dead)
+                        + " — the name exists as a constant with no call site",
+                        "send the events from the billing path: paywall_shown when the "
+                        "sheet opens, purchase_completed when Play confirms the purchase"))
+                else:
+                    checks.append(_check("analytics.money.declared", "ok",
+                                         "shown: " + ", ".join(halves["shown"])
+                                         + " · success: " + ", ".join(halves["success"])))
 
     # 5 — did a real user record it? --------------------------------------- #
     if events is None or (not has_traffic and not users):
@@ -390,6 +495,11 @@ def audit(project: Path, profile: dict | None = None,
                 continue
             got = names.get(cid) or []
             if not got:
+                continue
+            # one gap, one row: if the class is not sent at all, the zero is a
+            # consequence of that, not a second finding
+            if any(c.get("id") == f"analytics.{cid}.declared" and c["status"] == "blocked"
+                   for c in checks):
                 continue
             landed = {n: users.get(n, 0) for n in got}
             if not any(landed.values()):

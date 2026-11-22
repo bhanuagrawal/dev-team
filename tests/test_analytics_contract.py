@@ -126,6 +126,41 @@ class AuditTest(unittest.TestCase):
         self.assertIn("analytics.completion.declared", blocked)
         self.assertIn("offer_accepted", blocked["analytics.completion.declared"])
 
+    def test_a_declared_constant_nothing_sends_is_not_an_event(self):
+        # BookSwap 2026-11-22: the tracker declared wish_created/offer_proposed as
+        # constants and no screen ever sent them, so "the name is in the tree"
+        # passed while the product's two core acts read as zeros for 30 days.
+        root = _repo({"app/src/Analytics.kt":
+                      'object Names { const val WISH_CREATED = "wish_created" }',
+                      "app/src/Main.kt": KOTLIN,
+                      "app/build.gradle.kts": "implementation 'com.google.firebase:firebase-analytics:21'"})
+        profile = {"connections": {"ga4": {"property": "1"}},
+                   "analytics": {"mode": "measured", "classes": {
+                       "activation": ["match_started"],
+                       "completion": ["wish_created"],
+                       "features": ["match_started", "match_finished"]}}}
+        res = self._audit(root, profile,
+                          {"match_started": {"users": 9}, "wish_created": {"users": 0}})
+        blocked = {c["id"]: c["detail"] for c in res["blocked"]}
+        self.assertIn("analytics.completion.declared", blocked)
+        self.assertIn("nothing emits it", blocked["analytics.completion.declared"])
+        # one gap, one row: the zero is a consequence, not a second finding
+        self.assertNotIn("analytics.completion.lands", blocked)
+
+    def test_a_declared_constant_its_screen_sends_is_an_event(self):
+        root = _repo({"app/src/Analytics.kt":
+                      'object Names { const val WISH_CREATED = "wish_created" }',
+                      "app/src/Main.kt":
+                      'class T { fun f() { logEvent(Names.WISH_CREATED) } }',
+                      "app/build.gradle.kts": "implementation 'com.google.firebase:firebase-analytics:21'"})
+        profile = {"connections": {"ga4": {"property": "1"}},
+                   "analytics": {"mode": "measured", "classes": {
+                       "activation": ["wish_created"],
+                       "completion": ["wish_created"],
+                       "features": ["wish_created", "wish_created"]}}}
+        res = self._audit(root, profile, {"wish_created": {"users": 4}})
+        self.assertFalse([c for c in res["blocked"] if "declared" in c["id"]], res["blocked"])
+
     def test_a_declared_event_with_zero_users_is_not_a_quiet_zero(self):
         root = _repo({"app/src/Main.kt": KOTLIN,
                       "app/build.gradle.kts": "implementation 'com.google.firebase:firebase-analytics:21'"})
