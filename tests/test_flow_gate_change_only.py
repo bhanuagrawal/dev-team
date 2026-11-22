@@ -96,6 +96,44 @@ class FlowGateChangeOnlyTest(unittest.TestCase):
         self.assertTrue(ok, msg)
         self.assertIn("no code a device executes", msg)
 
+    def _declare_paperwork(self) -> None:
+        (self.root / ".pipeline").mkdir(exist_ok=True)
+        (self.root / ".pipeline" / "profile.json").write_text(json.dumps({
+            "version_file": "composeApp/build.gradle.kts",
+            "whatsnew_file": "distribution/whatsnew/whatsnew-en-US",
+        }))
+
+    def test_the_release_version_bump_is_not_a_change_to_walk(self):
+        """`release` bumps its own version file; that is paperwork, not a screen.
+
+        Observed 2026-11-22: after 1.0.89-rc.2 shipped, re-releasing rc.3 was
+        refused with "the change in composeApp/build.gradle.kts has not been run
+        on a device" — the entire change was `versionName = "1.0.89-rc.3"`, written
+        by `release` itself after the walk it already had.
+        """
+        self._declare_paperwork()
+        version_file = self.root / "composeApp" / "build.gradle.kts"
+        version_file.write_text('versionName = "1.0.89-rc.3"\n')
+        note = self.root / "distribution" / "whatsnew" / "whatsnew-en-US"
+        note.parent.mkdir(parents=True, exist_ok=True)
+        note.write_text("a deal reads Waiting, Agreed, Done or Ended\n")
+        self._touch(age=600)
+        self._walk("search", age=60)
+        ok, msg = self._gate(["composeApp/build.gradle.kts",
+                              "distribution/whatsnew/whatsnew-en-US", CODE])
+        self.assertTrue(ok, msg)
+        self.assertIn("search", msg)
+
+    def test_a_real_build_script_change_still_needs_a_walk(self):
+        self._declare_paperwork()
+        settings = self.root / "settings.gradle.kts"
+        settings.write_text("include(\":composeApp\")\n")
+        self._touch(age=600)
+        self._walk("search", age=60)
+        ok, msg = self._gate(["settings.gradle.kts"])
+        self.assertFalse(ok, msg)
+        self.assertIn("settings.gradle.kts", msg)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -19,9 +19,12 @@ refuses.
    last walked on an older build is no longer a refusal: the walk that watched
    the change is the evidence. The gate is a clock, not a commit id (owner,
    2026-11-21): a rebase or a merge rewrites every commit without changing a
-   pixel anyone watched. A walk is never tied to a
-   sha — a rebase or a merge rewrites every commit without changing a pixel
-   anyone watched — but it is still recorded with the tree's `HEAD`, so the
+   pixel anyone watched. **Paperwork is not a screen**: the declared
+   `version_file` and `whatsnew_file` are excluded from "code" — `release` bumps
+   and rewrites them itself after the walk it already has, so re-releasing is not
+   refused for a version string nobody could have watched (2026-11-22: rc.3 was
+   refused because its own `versionName` was newer than the walk). A walk is
+   still recorded with the tree's `HEAD`, so the
    handover can name the build a person actually opened. The rule exists because
    BookSwap shipped a search that no device had ever run: the gate re-walked a
    journey only when the diff touched a file its surface declared,

@@ -574,8 +574,24 @@ def _changed_code(project: Path, worktree: Path,
     above never matched — so a test-only edit demanded a device walk of a unit
     test (observed 2026-11-22, a preview harness beside the screens it previews).
     The test classifier is the team's own, the one the design and scope gates read.
+
+    PAPERWORK IS NOT CODE (2026-11-22). `release` bumps `version_file` itself
+    before it tags, so after any re-release the newest "code" in the tree was the
+    team's own version number — and verify demanded a device walk of a commit
+    whose entire change was `versionName = "1.0.89-rc.3"`. A version string and
+    the store note are not screens; they are the paperwork of a ship. Excluding
+    them keeps the gate asking the owner's question ("did the change run on a
+    device?") instead of punishing the release for existing.
     """
     from . import code_tests
+
+    try:
+        profile = profile_of(project) or {}
+    except (Exception, SystemExit):  # noqa: BLE001 - a missing profile is not this gate's refusal
+        profile = {}
+    paperwork = {str(profile.get(key) or "").strip()
+                 for key in ("version_file", "whatsnew_file")}
+    paperwork.discard("")
 
     which, newest = "", 0.0
     for rel in files:
@@ -583,6 +599,8 @@ def _changed_code(project: Path, worktree: Path,
         if not posix.lower().endswith(_CODE_SUFFIXES):
             continue
         if posix.startswith(_NOT_CODE) or code_tests.is_test_path(posix):
+            continue
+        if posix in paperwork:
             continue
         for base in (worktree, project):
             try:
