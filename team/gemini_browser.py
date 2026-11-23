@@ -237,19 +237,22 @@ def execute(script: str, timeout: int = 900,
     `provider` names whose session the script drives. Only Gemini has a persistent
     headless profile (the one `gemini-auth` writes); ChatGPT is signed in in the
     owner's own Chrome, so its scripts go straight to the relay instead of taking
-    a headless turn that can only answer "signed out" (owner directive 2026-11-17:
-    ChatGPT first).
+    a headless turn that can only answer "signed out". Gemini takes the same path
+    when that profile is signed out — the owner's Chrome is the session that is
+    actually signed in, and a paint there is a success, not a fallback failure.
     """
     if provider == "chatgpt":
-        ready, reason = False, "ChatGPT is driven in the owner's Chrome"
+        ready, reason = False, "ChatGPT runs in the owner's Chrome"
     else:
         ready, reason = is_headless_ready()
         if ready:
             signed, why = headless_signed_in(log)
             if not signed:
-                if log:
-                    log(f"  gemini: headless profile unusable — {why}")
-                ready, reason = False, why
+                # The owner's own Chrome is signed in; this separate profile is
+                # not. Say that ONCE, in plain words: two lines quoting the same
+                # diagnostic read as a failure the owner has to fix (observed
+                # 2026-11-23: "mere browser main signed in to hai gemini").
+                ready, reason = False, "the headless profile is signed out"
     if ready:
         release_stale_profile_lock(gemini_profile_dir(), log)
         chrome = _find_chrome_executable()
@@ -307,7 +310,12 @@ def execute(script: str, timeout: int = 900,
 
     # Fallback to browser-control
     if log and not ready:
-        log(f"  {provider}: headless Playwright not active ({reason}) — using browser-control")
+        if provider == "gemini" and reason == "the headless profile is signed out":
+            log("  gemini: using your signed-in Chrome (browser-control) — the separate "
+                "headless profile is signed out; `devteam gemini-auth --force` makes it "
+                "headless, it is not needed for a paint")
+        else:
+            log(f"  {provider}: using browser-control ({reason})")
 
     res = subprocess.run(
         ["browser-control", "execute", "--json", script],
