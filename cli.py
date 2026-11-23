@@ -4166,13 +4166,33 @@ def cmd_gemini_auth(args: argparse.Namespace) -> int:
     ready, reason = gemini_browser.is_headless_ready()
     profile = gemini_browser.gemini_profile_dir()
     if getattr(args, "status", False):
+        # Two different questions, and they used to be answered as one: a profile
+        # DIRECTORY plus a Chrome binary is not a session. Reporting "ready" from
+        # those let the owner read "signed in" while every run said SIGNED OUT
+        # (observed 2026-11-23). Probe the session itself.
         print(f"GEMINI PLAYWRIGHT PROFILE: {profile}")
-        print(f"  ready:  {'YES' if ready else 'NO'} ({reason})")
-        return 0 if ready else 1
+        print(f"  profile:    {'YES' if ready else 'NO'} ({reason})")
+        if not ready:
+            print("  signed in:  unknown — no profile to probe yet")
+            print("  → initialize it once: devteam gemini-auth --force")
+            return 1
+        signed, why = gemini_browser.headless_signed_in(log=print)
+        print(f"  signed in:  {'YES' if signed else 'NO'} ({why})")
+        if not signed:
+            print("  note: a paint run does not stop here — it uses browser-control in your own")
+            print("        signed-in Chrome. Signing this profile in makes the run headless and")
+            print("        leaves your tabs alone; it is not required for a paint to succeed.")
+        return 0 if signed else 1
     if ready and not getattr(args, "force", False):
-        print(f"Gemini Playwright profile is already authenticated at {profile}.")
-        print("  pass --force to re-authenticate or re-open the browser.")
-        return 0
+        signed, why = gemini_browser.headless_signed_in(log=print)
+        if signed:
+            print(f"Gemini Playwright profile is already authenticated at {profile}.")
+            print("  pass --force to re-authenticate or re-open the browser.")
+            return 0
+        print(f"Gemini Playwright profile exists at {profile} but is SIGNED OUT.")
+        print(f"  {why}")
+        print("  → run `devteam gemini-auth --force` to open the sign-in window.")
+        return 1
     print(f"Starting Gemini authentication flow for profile at {profile}...")
     ok = gemini_browser.auth_flow(log=print)
     return 0 if ok else 1
