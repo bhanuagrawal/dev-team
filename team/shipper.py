@@ -526,24 +526,56 @@ def whatsnew_preview(project: Path, task, root: Path | None = None) -> str:
     return _whatsnew_text(_normalize_task(task), whatsnew_max_chars(profile))
 
 
+def _ledger_rows_by_version(state: dict) -> list[tuple[str, list[dict]]]:
+    """(version, its ledger rows) in the order the ledger first names them.
+
+    A release appends ONE ROW PER TOUCHED PATH, and each row carries the commit
+    that PATH's change landed on — the rows of one version are not all the bump
+    (a code file can be recorded at the task commit, the note at the bump commit).
+    """
+    rows: dict[str, list[dict]] = {}
+    order: list[str] = []
+    for entry in state.get("shipped") or []:
+        if not isinstance(entry, dict):
+            continue
+        version = str(entry.get("version") or "")
+        if not version:
+            continue
+        if version not in rows:
+            rows[version] = []
+            order.append(version)
+        rows[version].append(entry)
+    return [(v, rows[v]) for v in order]
+
+
 def shipped_notes(project: Path, rel: str, limit: int = 2) -> list[tuple[str, str]]:
     """(version, committed note) for the most recent distinct SHIPPED versions,
     newest first. The ledger, not tags: a tag is pushed before CI runs, so a
     tag whose upload failed never reached a user and must not count as "the
-    store's current text"."""
+    store's current text".
+
+    The note is read from the row that COVERS it (`rel` itself, or the glob the
+    release recorded for it), not from whatever row was written last: the note
+    lands with the bump, while a code row can name the task commit that predates
+    it. Reading the newest row reported a fresh note as a repeat — on
+    2026-11-24 v1.0.91-rc.1's own note was compared against v1.0.90's because
+    the last row for the version named `a0d8979` (the task commit) while the
+    note landed in `13ca10f` (the bump), so `store-readiness` called a correct
+    release note a BLOCKER.
+    """
     state = state_of(project)
-    seen: set[str] = set()
     out: list[tuple[str, str]] = []
-    for entry in reversed(state.get("shipped") or []):
-        version = str(entry.get("version") or "")
-        commit = str(entry.get("commit") or "")
-        if not version or version in seen or not commit:
-            continue
-        r = git(["show", f"{commit}:{rel}"], cwd=project, timeout=60)
-        if r.returncode != 0 or not r.stdout.strip():
-            continue
-        seen.add(version)
-        out.append((version, r.stdout))
+    for version, rows in reversed(_ledger_rows_by_version(state)):
+        covering = [r for r in rows if target_matches(rel, [r.get("target")])]
+        for entry in reversed(covering or rows):
+            commit = str(entry.get("commit") or "")
+            if not commit:
+                continue
+            r = git(["show", f"{commit}:{rel}"], cwd=project, timeout=60)
+            if r.returncode != 0 or not r.stdout.strip():
+                continue
+            out.append((version, r.stdout))
+            break
         if len(out) >= limit:
             break
     return out
