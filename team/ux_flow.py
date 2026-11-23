@@ -54,6 +54,7 @@ Nothing here is committed: `.pipeline/` is machine-local, by contract.
 from __future__ import annotations
 
 import hashlib
+import html
 import json
 import os
 import re
@@ -275,6 +276,19 @@ def read_record(project: Path) -> dict:
 _BOUNDS = re.compile(r"\[(\d+),(\d+)\]\[(\d+),(\d+)\]")
 
 
+def _node_text(attrs: dict, key: str) -> str:
+    """One node's label, XML-unescaped and whitespace-collapsed.
+
+    A uiautomator dump is XML, so a screen that reads "EVAPORATOR & REFRIGERATION"
+    arrives as "EVAPORATOR &amp; REFRIGERATION". Escaping at the source meant an
+    observable containing `&` or a quote could never match what the walk recorded
+    (2026-11-24: the checklist walk recorded the category band escaped and the
+    change read as unwalked). Unescape where the attribute is read, so the model's
+    prompt, the step record and `verify` all see the words a person sees.
+    """
+    return " ".join(html.unescape(attrs.get(key) or "").split())
+
+
 def tappables(xml: str, pkg: str = "") -> list[dict]:
     """Every node a person could plausibly touch, with the point to touch.
 
@@ -287,7 +301,7 @@ def tappables(xml: str, pkg: str = "") -> list[dict]:
         attrs = dict(re.findall(r'([\w:-]+)="([^"]*)"', m.group(0)))
         if pkg and attrs.get("package") and attrs["package"] != pkg:
             continue
-        label = (attrs.get("text") or "").strip() or (attrs.get("content-desc") or "").strip()
+        label = _node_text(attrs, "text") or _node_text(attrs, "content-desc")
         clickable = attrs.get("clickable") == "true"
         if not label and not clickable:
             continue
@@ -598,7 +612,7 @@ def _screen_texts(xml: str, pkg: str = "") -> list[str]:
         if pkg and attrs.get("package") and attrs["package"] != pkg:
             continue
         for key in ("text", "content-desc"):
-            value = " ".join((attrs.get(key) or "").split())
+            value = _node_text(attrs, key)
             if value and value not in seen:
                 seen.append(value[:160])
     return seen[:200]
