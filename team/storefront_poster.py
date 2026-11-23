@@ -564,6 +564,7 @@ def paint_batch(jobs: list[dict[str, str]], timeout: int = 900,
                          "gemini,chatgpt and there is no fallback"}
 
     attempts: list[str] = []
+    last_value: dict[str, Any] = {}
     for provider in providers:
         script = _batch_script(jobs, provider=provider)
         bad = _script_syntax_error(script)
@@ -612,9 +613,12 @@ def paint_batch(jobs: list[dict[str, str]], timeout: int = 900,
             if log:
                 log(f"  {provider}: image limit reached — falling back")
             continue
+        last_value = value
+        bad = next((r for r in (value.get("results") or []) if not r.get("ok")), {})
+        reason = str(bad.get("error") or "").strip()
         return {"ok": False, "value": value, "provider": provider, "attempts": attempts,
-                "error": "one or more assets were not generated"}
-    return {"ok": False, "value": {}, "provider": None, "attempts": attempts,
+                "error": reason or "one or more assets were not generated"}
+    return {"ok": False, "value": last_value, "provider": None, "attempts": attempts,
             "error": "no image model produced the assets"}
 
 
@@ -637,7 +641,7 @@ def escalate_unpainted(project: Path, what: str, outcome: dict[str, Any],
 
     tried = "; ".join(str(a) for a in (outcome.get("attempts") or [])) or "no attempt recorded"
     detail = str(outcome.get("error") or outcome.get("script_invalid") or "no image produced")
-    subject = f"{project.name}: Gemini and ChatGPT both failed — {what} not generated"
+    subject = f"{project.name}: no image model painted — {what} not generated"
     body = (
         f"The Play listing needs {what}, and neither signed-in image model painted it.\n\n"
         f"  result: {detail}\n"
