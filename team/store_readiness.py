@@ -861,12 +861,15 @@ def run_store_readiness_audit(project: Path, tree: Path | None = None) -> list[R
         from . import storefront_brand as sbf
         brand_issues = sbf.gate(src)
         passed_brand = len(brand_issues) == 0
+        brand_record = sbf.load(src).get("assets") or {}
+        icon_src = str((brand_record.get("icon") or {}).get("source") or "?")
+        feature_src = str((brand_record.get("feature") or {}).get("source") or "?")
         checks.append(ReadinessCheck(
             category="Storefront Graphic Assets",
             name="Brand Asset Provenance Gate",
             passed=passed_brand,
             severity="BLOCKER" if not passed_brand else "INFO",
-            detail="Brand assets verified (icon=Stitch, featureGraphic=owner-supplied)" if passed_brand else "; ".join(brand_issues),
+            detail=f"Brand assets verified (icon={icon_src}, featureGraphic={feature_src})" if passed_brand else "; ".join(brand_issues),
             fix="Adopt the Stitch icon (`devteam storefront-brand <project> --stitch-prompt` → `--adopt-stitch`) and record the owner's banner (`--adopt feature=<png>`)",
         ))
 
