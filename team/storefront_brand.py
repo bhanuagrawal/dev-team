@@ -353,10 +353,15 @@ def generate(project: Path, kinds: tuple[str, ...] = GEMINI_KINDS,
             log(f"  brand: painting {len(jobs)} asset(s)")
         outcome = spt.paint_batch(jobs, timeout=900, log=log)
         if not outcome.get("ok"):
+            escalation = spt.escalate_unpainted(
+                project,
+                "the Play brand asset (" + ", ".join(str(j["kind"]) for j in jobs) + ")",
+                outcome, log=log)
             return {"status": "BLOCKED",
                     "error": (outcome.get("script_invalid") or outcome.get("error")
                               or "no image model produced the brand asset"),
-                    "detail": "; ".join(outcome.get("attempts") or [])[:300]}
+                    "detail": "; ".join(outcome.get("attempts") or [])[:300],
+                    "escalation": escalation}
         value = outcome.get("value") or {}
         chat = value.get("chat")
         provider = str(outcome.get("provider") or "")

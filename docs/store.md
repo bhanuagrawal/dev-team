@@ -8,9 +8,11 @@ Loaded by: `devteam storefront-build` / `store-publish` (their refusal prints it
    the consumer's constraints and an owner who can overwrite it. The real render is
    the **input** to the marketing image: `storefront-build --poster` attaches the
    scene's rendered screen and has **the owner's signed-in image model paint the
-   whole asset in the browser, one prompt per scene** (ChatGPT first — owner
-   directive 2026-11-17 — with Gemini as the fallback when its image quota is
-   reached), then strips its watermark and upscales to a size Play accepts. The
+   whole asset in the browser, one prompt per scene** (Gemini first, then ChatGPT
+   — owner directive 2026-11-23, superseding 2026-11-17's ChatGPT-first order —
+   and **no fallback**: when neither paints, the step stops, the attempt is
+   recorded in `.pipeline/image-escalation.json`, and the owner is emailed), then
+   strips its watermark and upscales to a size Play accepts. The
    **frame recipe is the app's own**: `docs/storefront-direction.json` carries a
    required `composition` (where the device sits, where the copy goes, what fills
    the rest), and the prompt quotes it instead of a team-wide layout — a shared

@@ -10,9 +10,11 @@ and it is not the only one the owner wants.
 This module is the other shape, on purpose: the real scene render is handed to a
 signed-in image model (browser, the owner's Chrome) as an INPUT IMAGE, and the
 model returns the finished marketing image — phone, background, headline, all of
-it — which is what gets uploaded to Play. ChatGPT is asked first (owner directive
-2026-11-17: "give first priority to chatgpt"); Gemini is the fallback when
-ChatGPT's image quota is reached.
+it — which is what gets uploaded to Play. Gemini is asked first, then ChatGPT
+(owner directive 2026-11-23: "gemini first , then chatgpt , no fallback"), which
+supersedes 2026-11-17's "give first priority to chatgpt". There is no third
+painter and no silent substitution: when neither signed-in model paints, the run
+stops and tells the owner by mail instead of shipping a stand-in asset.
 
 What it can and cannot promise
 ------------------------------
@@ -239,24 +241,31 @@ def _script_syntax_error(script: str) -> str:
         return lines[0][:200] if lines else "node --check failed"
 
 
-def _batch_script(jobs: list[dict[str, str]], provider: str = "chatgpt") -> str:
+def _batch_script(jobs: list[dict[str, str]], provider: str = "gemini") -> str:
     """Build the painter script for one provider.
 
     The transport is identical (the browser-control relay); only the site's
-    selectors and the definition of "the model finished" differ. ChatGPT is asked
-    first (owner directive 2026-11-17: "give first priority to chatgpt"); Gemini is
-    the fallback when ChatGPT's image quota is reached.
-    """
+    selectors and the definition of "the model finished" differ. Gemini is asked
+    first, then ChatGPT (owner directive 2026-11-23: "gemini first , then
+    chatgpt , no fallback" — supersedes 2026-11-17's ChatGPT-first order)."""
     if provider == "chatgpt":
         return _chatgpt_batch_script(jobs)
     return _gemini_batch_script(jobs)
 
 
 def _providers() -> list[str]:
-    """Painter order. ChatGPT first; `DEVTEAM_IMAGE_PROVIDERS` overrides (e.g. 'gemini')."""
-    raw = (os.environ.get("DEVTEAM_IMAGE_PROVIDERS") or "chatgpt,gemini").strip()
+    """Painter order — Gemini then ChatGPT, and nothing else.
+
+    Owner directive 2026-11-23: "gemini first , then chatgpt , no fallback".
+    `DEVTEAM_IMAGE_PROVIDERS` may still reorder or narrow the pair (e.g. 'gemini'),
+    but a name outside the two is dropped rather than honoured, and an order that
+    keeps nothing is an EMPTY list — never a quiet default to ChatGPT. The caller
+    turns that empty list into a refusal plus a mail to the owner, because a
+    substitution nobody asked for is exactly the fallback this rule forbids.
+    """
+    raw = (os.environ.get("DEVTEAM_IMAGE_PROVIDERS") or "gemini,chatgpt").strip()
     order = [p.strip().lower() for p in raw.split(",") if p.strip()]
-    return [p for p in order if p in ("gemini", "chatgpt")] or ["chatgpt"]
+    return [p for p in order if p in ("gemini", "chatgpt")]
 
 
 def _chatgpt_batch_script(jobs: list[dict[str, str]]) -> str:
@@ -539,18 +548,23 @@ def paint_batch(jobs: list[dict[str, str]], timeout: int = 900,
                 log=None) -> dict[str, Any]:
     """Paint a batch of assets, walking the signed-in image models in order.
 
-    ChatGPT first (owner directive 2026-11-17: "give first priority to chatgpt").
-    When it reports its image limit, the SAME jobs go to Gemini in the owner's
-    signed-in Chrome (owner directive 2026-11-07: "use logged-in chatgpt session
-    like gemini if limit of gemini reaches" — the same rule, in the other
-    direction). Only a LIMIT or a signed-out session moves to the next model — a
-    composition failure is a prompt problem and would burn the second model's
-    quota for nothing.
+    Gemini first, then ChatGPT (owner directive 2026-11-23: "gemini first , then
+    chatgpt , no fallback" — supersedes 2026-11-17's ChatGPT-first order). Only a
+    LIMIT or a signed-out session moves to the next model — a composition failure
+    is a prompt problem and would burn the second model's quota for nothing. When
+    the pair is exhausted the batch fails; the callers escalate by mail
+    (`escalate_unpainted`) instead of painting with anything else.
     """
     from . import gemini_browser
 
+    providers = _providers()
+    if not providers:
+        return {"ok": False, "value": {}, "provider": None, "attempts": [],
+                "error": "DEVTEAM_IMAGE_PROVIDERS names no painter — the order is "
+                         "gemini,chatgpt and there is no fallback"}
+
     attempts: list[str] = []
-    for provider in _providers():
+    for provider in providers:
         script = _batch_script(jobs, provider=provider)
         bad = _script_syntax_error(script)
         if bad:
@@ -602,6 +616,60 @@ def paint_batch(jobs: list[dict[str, str]], timeout: int = 900,
                 "error": "one or more assets were not generated"}
     return {"ok": False, "value": {}, "provider": None, "attempts": attempts,
             "error": "no image model produced the assets"}
+
+
+def escalate_unpainted(project: Path, what: str, outcome: dict[str, Any],
+                       log=None) -> dict[str, Any]:
+    """Neither signed-in model painted: tell the owner by mail. No stand-in asset.
+
+    Owner directive 2026-11-23: "gemini first , then chatgpt , no fallback else
+    raise to me on mail". A listing asset that no model painted is a BLOCKED
+    asset — the one thing not allowed is quietly shipping something else, so the
+    failed attempt leaves a record in `.pipeline/` and an email in the owner's
+    inbox, and the caller returns BLOCKED with the mail's outcome attached.
+
+    Never raises: a mail problem must not hide the paint failure. The return is
+    `{"sent": bool, "why": str, "record": str}` and is safe to embed in an error.
+    """
+    from datetime import datetime, timezone
+
+    from . import mail
+
+    tried = "; ".join(str(a) for a in (outcome.get("attempts") or [])) or "no attempt recorded"
+    detail = str(outcome.get("error") or outcome.get("script_invalid") or "no image produced")
+    subject = f"{project.name}: Gemini and ChatGPT both failed — {what} not generated"
+    body = (
+        f"The Play listing needs {what}, and neither signed-in image model painted it.\n\n"
+        f"  result: {detail}\n"
+        f"  tried:  {tried}\n\n"
+        "Nothing was generated and no substitute was used — the owner's rule of "
+        "2026-11-23 is Gemini first, then ChatGPT, and no fallback.\n\n"
+        "What to do:\n"
+        f"  - sign the browser in: devteam gemini-auth {project.name}\n"
+        f"  - then re-run the asset step: devteam storefront-brand {project.name}\n"
+        "  (frames: devteam storefront-scenes "
+        f"{project.name} --render --frame)\n"
+    )
+    record = {"at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+              "what": what, "detail": detail, "tried": tried}
+    try:
+        cfg = mail.load_config()
+        res = mail.send(cfg, subject, body)
+        record.update({"mail": str(res.get("status") or "sent"),
+                       "to": str(res.get("to") or "")})
+        if log:
+            log(f"  escalated by mail: {what} — {record['mail']} to {record['to'] or 'the owner'}")
+    except Exception as exc:  # a mail problem must not hide the paint failure
+        record.update({"mail": "failed", "why": str(exc)})
+        if log:
+            log(f"  escalation mail FAILED ({exc}) — {what} is still unpainted")
+    try:
+        out = project / ".pipeline" / "image-escalation.json"
+        out.write_text(json.dumps(record, indent=2) + "\n")
+        record["record"] = str(out.relative_to(project))
+    except Exception:
+        pass
+    return {"sent": record.get("mail") not in (None, "failed"), **record}
 
 
 def _painter_of(sidecar: dict[str, Any]) -> str:
@@ -762,9 +830,13 @@ def generate_all(project: Path, scenes: list[dict[str, Any]], direction: dict[st
         got = value.get("results") or []
         if not outcome.get("ok"):
             if outcome.get("provider") is None:
+                escalation = escalate_unpainted(
+                    project, f"the {len(chunk)} listing frame(s) in {chunk[0].get('out')}",
+                    outcome, log=log)
                 return {"status": "BLOCKED",
                         "error": outcome.get("error") or "no image model produced the frames",
-                        "detail": "; ".join(attempts)[:400]}
+                        "detail": "; ".join(attempts)[:400],
+                        "escalation": escalation}
             bad = next((r for r in got if not r.get("ok")), {})
             return {"status": "BLOCKED",
                     "error": str(bad.get("error") or outcome.get("error") or "no image produced"),
