@@ -754,7 +754,7 @@ def run_store_readiness_audit(project: Path, tree: Path | None = None) -> list[R
             passed=has_1024,
             severity="BLOCKER" if not has_1024 else "INFO",
             detail=f"1024x500 feature graphic present ({fg_dims[0]}x{fg_dims[1]})" if has_1024 else ("Missing images/featureGraphic.png" if not fg_dims else f"Feature graphic dimensions are {fg_dims[0]}x{fg_dims[1]}, expected 1024x500"),
-            fix="Provide 1024x500 PNG/JPEG in images/featureGraphic.png via `devteam storefront-brand <project> --generate` (Gemini painted)",
+            fix="Provide 1024x500 PNG/JPEG in images/featureGraphic.png via `devteam storefront-brand <project> --adopt feature=<png>` (the owner supplies the banner; the team does not generate it)",
         ))
 
         shots_dir = img_dir / "phoneScreenshots" if (img_dir / "phoneScreenshots").is_dir() else img_dir / "phone-screenshots"
@@ -857,7 +857,7 @@ def run_store_readiness_audit(project: Path, tree: Path | None = None) -> list[R
                  "listing frames are drawn from the build a user installs"),
         ))
 
-        # Brand Asset Provenance Gate (Rule 5: Stitch icon + Gemini banner)
+        # Brand Asset Provenance Gate (Rule 5: Stitch icon + the owner's banner file)
         from . import storefront_brand as sbf
         brand_issues = sbf.gate(src)
         passed_brand = len(brand_issues) == 0
@@ -866,8 +866,8 @@ def run_store_readiness_audit(project: Path, tree: Path | None = None) -> list[R
             name="Brand Asset Provenance Gate",
             passed=passed_brand,
             severity="BLOCKER" if not passed_brand else "INFO",
-            detail="Brand assets verified (icon=Stitch, featureGraphic=Gemini)" if passed_brand else "; ".join(brand_issues),
-            fix="Run `devteam storefront-brand <project>` to generate Stitch icon and Gemini feature graphic",
+            detail="Brand assets verified (icon=Stitch, featureGraphic=owner-supplied)" if passed_brand else "; ".join(brand_issues),
+            fix="Adopt the Stitch icon (`devteam storefront-brand <project> --stitch-prompt` → `--adopt-stitch`) and record the owner's banner (`--adopt feature=<png>`)",
         ))
 
         # The icon a user taps must BE the icon the listing shows. Play rejected
@@ -1725,15 +1725,15 @@ def generate_store_readiness_pack(project: Path, log: RunLog | None = None) -> d
                 log(f"  warning: marketing storefront asset generation failed: {e}")
 
     # Note: Brand assets (icon and feature graphic) are strictly required to have
-    # authentic provenance per Rule 5 (Stitch for icon, Gemini for feature graphic).
-    # Never fabricate solid flat placeholders.
+    # authentic provenance per Rule 5 (Stitch for icon, the owner's file for the
+    # feature graphic). Never fabricate solid flat placeholders.
     icon_file = img_dir / "icon.png"
     if not icon_file.is_file() and log:
         log("  notice: Play icon missing — generate via `devteam storefront-brand <project> --stitch-prompt` and adopt")
 
     fg_file = img_dir / "featureGraphic.png"
     if not fg_file.is_file() and log:
-        log("  notice: Feature graphic missing — generate via `devteam storefront-brand <project> --generate` (Gemini)")
+        log("  notice: Feature graphic missing — supply it with `devteam storefront-brand <project> --adopt feature=<png>`")
 
     return {
         "generated": generated,

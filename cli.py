@@ -4263,12 +4263,12 @@ def cmd_storefront_build(args: argparse.Namespace) -> int:
     # pass (rule 10). Committed here, after the critic gate, so only a listing that
     # actually passed the gate can land on main.
     # docs/storefront-assets.json is the PROVENANCE of the brand files this commit
-    # carries. A pass that REUSES a banner an earlier `storefront-brand` run painted
-    # must still publish that record: the baseline marks it "not written by this
-    # command", so the listing image landed on origin without the provenance that
-    # makes it shippable, and store-readiness reported source: none for an approved
-    # asset (observed 2026-11-06). This pass certifies the brand gate, so it always
-    # commits the record it certified.
+    # carries. A pass that REUSES a banner adopted earlier (`--adopt feature=`) or a
+    # Stitch icon must still publish that record: the baseline marks it "not written
+    # by this command", so the listing image landed on origin without the provenance
+    # that makes it shippable, and store-readiness reported source: none for an
+    # approved asset (observed 2026-11-06). This pass certifies the brand gate, so it
+    # always commits the record it certified.
     certified = {k: v for k, v in baseline.items() if k != sbf.BRAND_REL}
     landed = commit_paths(
         project,
@@ -4366,7 +4366,7 @@ def cmd_store_assets(args: argparse.Namespace) -> int:
 
 
 def cmd_storefront_brand(args: argparse.Namespace) -> int:
-    """The listing's brand assets — icon and feature graphic — painted, not templated."""
+    """The listing's brand assets — icon and feature graphic — adopted, never generated."""
     project = resolve_project(args.project)
     from team.core import delivery_notice
     from team import storefront_brand as sbf
@@ -4462,17 +4462,6 @@ def cmd_storefront_brand(args: argparse.Namespace) -> int:
                 print(f"  → {res['hint']}")
             return 1
         print(f"  + recorded the owner's {res['kind']} ({res['file']})")
-
-    elif getattr(args, "generate", False):
-        res = sbf.generate(project, force=getattr(args, "force", False), log=print)
-        if res.get("status") != "OK":
-            print(f"STOREFRONT BRAND: {res.get('status')}")
-            print(f"  ✗ {res.get('error')}")
-            if res.get("hint"):
-                print(f"  → {res['hint']}")
-            return 1
-        print(f"  generated: {', '.join(res.get('generated') or []) or '(none)'}"
-              + (f"  reused: {', '.join(res.get('reused') or [])}" if res.get("reused") else ""))
 
     print(sbf.format_status(project))
     issues = sbf.gate(project)
@@ -6650,11 +6639,9 @@ def main() -> None:
     sa.add_argument("--render-only", action="store_true", help="render existing HTML templates to PNGs without regenerating templates")
     sa.set_defaults(fn=cmd_store_assets)
     sbr = sub.add_parser("storefront-brand",
-                         help="the listing's brand assets: the Play icon and the feature graphic, "
-                              "painted by the image model from the app's own icon and hero screen")
+                         help="the listing's brand assets: the Play icon (a Stitch design, "
+                              "adopted) and the feature graphic (the owner's file, adopted)")
     sbr.add_argument("project")
-    sbr.add_argument("--generate", action="store_true",
-                     help="paint icon + feature graphic in Gemini (browser) and record provenance")
     sbr.add_argument("--stitch-prompt", action="store_true",
                      help="print the icon prompt for Stitch and save it (the icon is a Stitch "
                           "design, never an image-model painting)")
@@ -6674,7 +6661,6 @@ def main() -> None:
     sbr.add_argument("--launcher-background", default="",
                      help="with --launcher: the adaptive background colour (default: the "
                           "icon art's own corner pixel)")
-    sbr.add_argument("--force", action="store_true", help="repaint even if an approved asset exists")
     sbr.set_defaults(fn=cmd_storefront_brand)
     br = sub.add_parser("brand", help="OWNER brand feedback → Stitch artboard (from code) → app "
                                      "launcher icon → Play icon → release → publish, in one "

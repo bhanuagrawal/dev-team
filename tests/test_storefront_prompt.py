@@ -1,10 +1,10 @@
-"""The asset prompt must be per app, and the painter order must be ChatGPT-first.
+"""The asset prompt must be per app, and the painter order is the owner's word.
 
 Pinned because both were team-wide constants: one hardcoded composition meant
 every app's listing was the same poster with different words (owner, 2026-11-17),
-and the provider list asked Gemini first even after the owner asked for ChatGPT
-as the first priority. Neither is a matter of taste — one is a brand decision
-that belongs to the project's direction file, the other is the owner's word.
+and the provider list used to be a fixed order. Neither is a matter of taste —
+one is a brand decision that belongs to the project's direction file, the other
+is the owner's word: Gemini first, then ChatGPT, and no fallback (2026-11-23).
 """
 
 import os
@@ -29,10 +29,10 @@ def _project(title: str = "App One") -> Path:
 
 
 class ProviderOrderTests(unittest.TestCase):
-    def test_chatgpt_is_asked_first(self):
+    def test_gemini_is_asked_first(self):
         with mock.patch.dict(os.environ, {}, clear=False):
             os.environ.pop("DEVTEAM_IMAGE_PROVIDERS", None)
-            self.assertEqual(sp._providers(), ["chatgpt", "gemini"])
+            self.assertEqual(sp._providers(), ["gemini", "chatgpt"])
 
     def test_env_override_is_honoured(self):
         with mock.patch.dict(os.environ, {"DEVTEAM_IMAGE_PROVIDERS": "gemini"}):
@@ -41,6 +41,11 @@ class ProviderOrderTests(unittest.TestCase):
     def test_unknown_providers_are_dropped_not_guessed(self):
         with mock.patch.dict(os.environ, {"DEVTEAM_IMAGE_PROVIDERS": "midjourney,gemini"}):
             self.assertEqual(sp._providers(), ["gemini"])
+
+    def test_an_order_with_no_known_painter_is_empty_never_chatgpt(self):
+        # No silent fallback: a bad override must not quietly become ChatGPT.
+        with mock.patch.dict(os.environ, {"DEVTEAM_IMAGE_PROVIDERS": "midjourney"}):
+            self.assertEqual(sp._providers(), [])
 
 
 class DeviceCaptureTests(unittest.TestCase):

@@ -36,9 +36,10 @@ Loaded by: `devteam storefront-build` / `store-publish` (their refusal prints it
    interrupted run outright. Never take an agent's word that a long command
    finished: read that record. The two other brand assets follow the same rule with
    different makers: the **icon is a Stitch design**, adopted from the artboard it
-   returns (`storefront-brand --stitch-prompt` → `--adopt-stitch`), and the feature
-   graphic is painted by the same signed-in image model (ChatGPT first) from the
-   hero screen. A listing whose icon or banner
+   returns (`storefront-brand --stitch-prompt` → `--adopt-stitch`), and the **feature
+   graphic is the owner's own file** (`--adopt feature=<png>`) — the team does not
+   paint or render a banner (owner, 2026-11-23: "sirf feature graphics banner nahi
+   banwana … ye dev team ke code se hi hatado"). A listing whose icon or banner
    has no recorded provenance is refused, not graded. The code-rendered poster stays for work whose type must be
    pixel-crisp: Stitch (`--design-frame`/`--adopt-frame`), the vision model
    (`--vision-frame`), or a Gemini backdrop plate (`--gemini`/`--backdrop`) with
@@ -62,8 +63,8 @@ Loaded by: `devteam storefront-build` / `store-publish` (their refusal prints it
 
 5. **Storefront Brand & Marketing Posters (Rule 5):**
    - App Icon (512x512): Created by Stitch MCP (`storefront-brand --stitch-prompt` → adopt).
-   - Feature Graphic (1024x500): Painted by the signed-in image model (ChatGPT first, Gemini fallback) from the hero render (`storefront-brand --generate`).
-   - Phone Screenshots (minimum 4): Rendered from real app composables via `storefront-scenes` → painted posters by the owner's signed-in image model, ChatGPT first (`storefront-build`).
+   - Feature Graphic (1024x500): Supplied by the owner and recorded with `storefront-brand --adopt feature=<png>`. The team does not generate it (owner, 2026-11-23).
+   - Phone Screenshots (minimum 4): Rendered from real app composables via `storefront-scenes` → painted posters by the owner's signed-in image model, Gemini first (`storefront-build`).
    - Zero procedural HTML mocks or cross-app template leakage. Critic score ≥ 90/100 [Grade A].
 
 NEXT: `devteam storefront-direction <project>` before anything is drawn; `--plan`

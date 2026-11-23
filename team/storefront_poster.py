@@ -650,9 +650,8 @@ def escalate_unpainted(project: Path, what: str, outcome: dict[str, Any],
         "2026-11-23 is Gemini first, then ChatGPT, and no fallback.\n\n"
         "What to do:\n"
         f"  - sign the browser in: devteam gemini-auth {project.name}\n"
-        f"  - then re-run the asset step: devteam storefront-brand {project.name}\n"
-        "  (frames: devteam storefront-scenes "
-        f"{project.name} --render --frame)\n"
+        "  - then re-run the frames: devteam storefront-scenes "
+        f"{project.name} --render --frame\n"
     )
     record = {"at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
               "what": what, "detail": detail, "tried": tried}

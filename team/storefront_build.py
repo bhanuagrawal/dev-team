@@ -596,8 +596,9 @@ def build(project: Path, *, frame: str = "auto", plate: str | None = None,
             log(f"  = listing provenance recorded ({len(recorded.get('files') or [])} "
                 f"frame(s), {recorded.get('app_version') or 'version?'} @ "
                 f"{str(recorded.get('ref_sha') or '')[:7]})")
-        # The icon and the banner are brand assets too: the image model paints them from
-        # the app's own icon and hero screen, and the gate refuses anything else.
+        # The icon and the banner are brand assets too: the icon is an adopted
+        # Stitch design and the banner is the owner's file — the team generates
+        # neither (owner, 2026-11-23), and the gate refuses anything else.
         brand = sbf.ensure(project, log=log)
         if brand.get("status") != "OK":
             return _fail(brand.get("status", "ERROR"), brand.get("error", "brand assets failed"),

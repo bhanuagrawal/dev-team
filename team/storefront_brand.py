@@ -9,16 +9,15 @@ shipped a soft 512 icon and a banner carrying invented numbers ("-88% SAVINGS")
 that the app's own code contradicts. Nothing refused either one, because nothing
 measured WHERE a brand asset came from.
 
-The owner's rule is the same as for screenshots: the image model paints the
-listing's art from the app's real material, and code enforces that it did. So:
+Where the art comes from (owner, 2026-11-23: "sirf feature graphics banner nahi
+banwana … ye dev team ke code se hi hatado"):
 
-  * the icon is painted by Gemini WITH the app's real launcher icon attached as
-    the reference, then the vendor watermark is healed and the result is set to
-    Play's exact 512x512;
-  * the feature graphic is painted WITH the app's real hero screen attached, and
-    may print only the copy the scene spec already approves;
-  * every generated file is recorded in `docs/storefront-assets.json` (committed
-    beside the assets, unlike `.pipeline/`), with its source, chat and sha256;
+  * the team GENERATES neither brand asset. The icon is a Stitch design adopted
+    from its artboard (`adopt_stitch_icon`), and the feature graphic is a file
+    the owner supplies (`adopt`); nothing in this repo paints a banner any more;
+  * code still owns what it can check: Play's exact dimensions, the vendor-mark
+    heal, and the provenance record in `docs/storefront-assets.json` (committed
+    beside the assets, unlike `.pipeline/`), with source and sha256;
   * `gate()` refuses a listing whose icon or banner has no approved provenance,
     and both the critic and the upload path call it.
 
@@ -37,15 +36,11 @@ from typing import Any
 BRAND_REL = "docs/storefront-assets.json"
 IMAGES_REL = "distribution/listing/en-US/images"
 SPECS: dict[str, tuple[int, int]] = {"icon": (512, 512), "feature": (1024, 500)}
-# The icon comes from Stitch (a designed, adopted artefact); the banner and every
-# screenshot are painted by Gemini. One owner-supplied file is the only other
-# legitimate source. Anything else — an HTML template nobody adopted, an upscale of
-# the launcher bitmap — is refused by `gate()`.
-# Who may have made a listing's brand asset. A model-painted asset names the
-# signed-in model that painted it (ChatGPT first, Gemini fallback), plus Stitch
-# designs and the owner's own files — nothing else reaches Play.
+# Who may have made a listing's brand asset: a Stitch design or the owner's own
+# file — the team paints neither any more (owner, 2026-11-23). `chatgpt`/`gemini`
+# stay approved only so listings painted before that directive keep the provenance
+# they were honest about; nothing in the repo records those sources now.
 APPROVED = ("chatgpt", "gemini", "stitch", "owner")
-GEMINI_KINDS: tuple[str, ...] = ("feature",)
 ICON_HTML_REL = "docs/storefront-icon.html"
 FILES = {"icon": "icon.png", "feature": "featureGraphic.png"}
 VERSION = 1
@@ -119,9 +114,9 @@ def gate(project: Path) -> list[str]:
             else:
                 issues.append(
                     f"{FILES[kind]} has no approved provenance (source: {source or 'none'}) — "
-                    f"the image model paints it from the app's own screen "
-                    f"(`devteam storefront-brand <project> --generate`), or the owner supplies "
-                    f"the file (`--adopt feature=<png>`)")
+                    f"the owner supplies the feature graphic "
+                    f"(`devteam storefront-brand <project> --adopt feature=<png>`, Play's exact "
+                    f"1024x500); the team does not generate a banner")
         elif record.get("sha256") and record["sha256"] != _sha(target):
             issues.append(
                 f"{FILES[kind]} changed after it was recorded — the file on the listing is "
@@ -165,34 +160,6 @@ def format_status(project: Path) -> str:
 # --------------------------------------------------------------------------- #
 # prompts — grounded in the app's own material, never in a template
 # --------------------------------------------------------------------------- #
-def _hero_scene(project: Path) -> dict[str, Any] | None:
-    from . import storefront_preview as sp
-
-    spec = sp.load_spec(project, create=False)
-    scenes = spec.get("scenes") or []
-    return scenes[0] if scenes else None
-
-
-def icon_prompt(project: Path) -> str:
-    """Paint the Play icon from the app's real launcher icon.
-
-    Deliberately says nothing about style: the model's job is the art. What it
-    pins is what must stay true — the mark is the app's existing one, the canvas
-    is Play's, and the corner the watermark heals must stay plain.
-    """
-    return "\n".join([
-        f"The attached image is the real launcher icon of my Android app {_app_name(project)}.",
-        "Repaint it as the Google Play store icon: a square 1:1 composition of the SAME mark.",
-        "Keep the subject, its silhouette and its colour relationships — this icon must be "
-        "recognisable as the same app at 48 pixels.",
-        "Fill the square edge to edge; the store shows it as a square tile and does not mask it "
-        "for you. Keep the motif centred with generous padding.",
-        "No text, no letters the mark does not already contain, no device frame, no badge, "
-        "no price, no rating, no other product's logo.",
-        "Keep the bottom-right corner free of detail: leave it plain background.",
-    ])
-
-
 def icon_stitch_prompt(project: Path) -> str:
     """The prompt handed to STITCH for the Play icon.
 
@@ -226,209 +193,9 @@ def icon_stitch_prompt(project: Path) -> str:
     ])
 
 
-def feature_prompt(project: Path) -> str:
-    """Paint the 1024x500 banner, printing only approved copy.
-
-    The banner is the one asset a store visitor sees beside the title, so it may
-    carry the hero frame's words — and nothing else. Numbers, percentages and
-    claims are the app's to make in its own UI, never the poster's.
-    """
-    scene = _hero_scene(project) or {}
-    words = [
-        f"label: {scene.get('badge') or ''}",
-        f"headline: {scene.get('headline') or ''}",
-        f"subtext: {scene.get('sub') or ''}",
-    ]
-    return "\n".join([
-        f"Create a wide Google Play feature graphic (banner) for my Android app {_app_name(project)}.",
-        "The attached image is the app's real screen: you may show it inside the banner, but do "
-        "not invent or replace the app's interface, and do not invent any other UI.",
-        "Print exactly these words, and no other text:",
-        *words,
-        "Put the phone in the left two thirds; the RIGHT third must be plain background with "
-        "no phone, no text and no bright detail — the vendor mark is healed there.",
-        "Keep every word inside the central 80% of the frame — the banner is cropped top and "
-        "bottom when the store resizes it.",
-        "No watermark, no logos, no price, no rating badges, no invented numbers or claims.",
-        "Keep the bottom-right corner free of text and of the phone: leave it plain background.",
-    ])
-
-
 # --------------------------------------------------------------------------- #
-# generation
+# adoption — the file exists; code records where it came from
 # --------------------------------------------------------------------------- #
-def _reference(project: Path, kind: str, log=None) -> Path | None:
-    """The real material the model is shown: the launcher icon, the hero screen."""
-    if kind == "icon":
-        candidates = sorted((project / "composeApp/src/androidMain/res").glob(
-            "mipmap-*/ic_launcher.png"), key=lambda p: p.stat().st_size, reverse=True)
-        candidates = [p for p in candidates if "_round" not in p.name]
-        if candidates:
-            return candidates[0]
-        current = project / IMAGES_REL / FILES["icon"]
-        return current if current.is_file() else None
-    scene = _hero_scene(project)
-    if scene:
-        render = project / ".pipeline/storefront_scenes" / f"{scene.get('id')}.png"
-        if render.is_file():
-            return render
-    if log:
-        log("  brand: no hero render for the banner reference — run storefront-scenes --render first")
-    return None
-
-
-def generate(project: Path, kinds: tuple[str, ...] = GEMINI_KINDS,
-             force: bool = False, log=None) -> dict[str, Any]:
-    """Paint the GEMINI-painted brand assets (the feature graphic), or finish one.
-
-    The icon is deliberately NOT here: it is a Stitch design, adopted through
-    `adopt_stitch_icon`. Asking Gemini for it would produce a second, competing
-    rendition of the app's mark — the exact drift this split exists to prevent.
-
-    Three states per asset, and they must not be confused:
-      * nothing painted        -> ask Gemini, with the real launcher icon / hero screen;
-      * painted, not recorded  -> CLEAN AND RECORD it (a model output that failed the
-                                  watermark gate is not a reason to burn another
-                                  generation — the cleaner is ours to fix);
-      * painted and recorded   -> reuse, deterministic.
-    """
-    from . import storefront_poster as spt
-
-    kinds = tuple(k for k in kinds if k in GEMINI_KINDS)
-    if not kinds:
-        return {"status": "BLOCKED",
-                "error": "the icon is not painted by the image model",
-                "hint": "run `devteam storefront-brand <project> --stitch-prompt`, generate the "
-                        "icon in Stitch, then `--adopt-stitch <file.html>`"}
-    existing = load(project)
-    raw_dir = project / ".pipeline/storefront_brand"
-    raw_dir.mkdir(parents=True, exist_ok=True)
-    jobs: list[dict[str, str]] = []
-    reused: list[str] = []
-
-    for kind in kinds:
-        raw = raw_dir / f"raw-{kind}.png"
-        record = (existing.get("assets") or {}).get(kind) or {}
-        current = project / IMAGES_REL / FILES[kind]
-        approved = (record.get("source") in APPROVED and current.is_file()
-                    and (not record.get("sha256") or record["sha256"] == _sha(current)))
-        # A raw the record has not accounted for wins over a "recorded" asset: the
-        # listing must describe the paint that is on disk, not an older one.
-        stale_raw = raw.is_file() and record.get("raw_sha256") != _sha(raw)
-        if not force and approved and not stale_raw:
-            if log:
-                log(f"  brand: reusing {kind} ({record.get('source')}, "
-                    f"{record.get('generated_at') or 'unknown date'})")
-            reused.append(kind)
-            continue
-        if not force and raw.is_file() and not stale_raw:
-            if log:
-                log(f"  brand: {kind} raw is recorded but the listing is not — re-deriving it")
-        elif not force and raw.is_file():
-            if log:
-                log(f"  brand: {kind} is painted but not recorded — cleaning it")
-        else:
-            ref = _reference(project, kind, log=log)
-            if not ref:
-                return {"status": "BLOCKED", "error": f"no reference image for the {kind}",
-                        "hint": "run `devteam storefront-scenes <project> --render` first"}
-            prompt = icon_prompt(project) if kind == "icon" else feature_prompt(project)
-            # The shared browser script proves delivery by the SENT message's
-            # attachment SHAPE (see storefront_poster._batch_script): the model
-            # re-encodes the thumbnail, but its width/height ratio is the
-            # reference's own and cannot be faked. A job without `ar` made that
-            # proof impossible — every brand paint failed with "the render is not
-            # in the sent message" while the upload had actually worked
-            # (observed 2026-11-06). Carry the reference's measured shape.
-            size = _png_size(ref)
-            aspect = round(size[0] / size[1], 3) if size and size[1] else 0
-            jobs.append({"kind": kind, "out": str(raw), "src": str(ref),
-                         "prompt": prompt, "ar": aspect})
-
-    chat = None
-    provider = ""
-    painted: dict[str, list[int] | None] = {}
-    if jobs:
-        if log:
-            log(f"  brand: painting {len(jobs)} asset(s)")
-        outcome = spt.paint_batch(jobs, timeout=900, log=log)
-        if not outcome.get("ok"):
-            # Only an EXHAUSTED pair is the owner's decision: nothing painted, so
-            # a mail is the next step (2026-11-23 "no fallback else raise to main
-            # on mail"). A composition failure at a named model is a prompt
-            # problem — the asset's own reason is the useful answer, and mailing
-            # it would report "both modelers failed" when only one was asked.
-            escalation = None
-            if outcome.get("provider") is None:
-                escalation = spt.escalate_unpainted(
-                    project,
-                    "the Play brand asset (" + ", ".join(str(j["kind"]) for j in jobs) + ")",
-                    outcome, log=log)
-            return {"status": "BLOCKED",
-                    "error": (outcome.get("script_invalid") or outcome.get("error")
-                              or "no image model produced the brand asset"),
-                    "detail": "; ".join(outcome.get("attempts") or [])[:300],
-                    "provider": outcome.get("provider"),
-                    "escalation": escalation}
-        value = outcome.get("value") or {}
-        chat = value.get("chat")
-        provider = str(outcome.get("provider") or "")
-        results = value.get("results") or []
-        for job, result in zip(jobs, results):
-            if not result.get("ok"):
-                return {"status": "BLOCKED",
-                        "error": str(result.get("error") or "no image produced"), "chat": chat}
-            painted[job["kind"]] = [result.get("w"), result.get("h")]
-            (project / ".pipeline" / f"gemini-brand-{job['kind']}.txt").write_text(job["prompt"])
-
-    if not jobs and len(reused) == len(kinds):
-        # Every asset asked for is approved and its paint is accounted for.
-        if log:
-            log("  brand: nothing to do — everything asked for is already recorded")
-        return {"status": "OK", "generated": [], "reused": reused}
-
-    data = load(project)
-    made: list[str] = []
-    for kind in kinds:
-        if kind in reused:
-            continue
-        raw = raw_dir / f"raw-{kind}.png"
-        if not raw.is_file():
-            continue
-        record = (data.get("assets") or {}).get(kind) or {}
-        # Brand assets are strict: a vendor mark on the icon or the banner is never
-        # acceptable, so an unprovable heal refuses instead of shipping.
-        cleaned = spt.clean_poster(raw, strict=True, half_ratio=0.075)
-        if cleaned.get("status") != "OK":
-            return {"status": cleaned.get("status", "ERROR"),
-                    "error": cleaned.get("error", "the vendor watermark could not be removed"),
-                    "hint": "a model mark must not ship on the listing"}
-        width, height = SPECS[kind]
-        target = project / IMAGES_REL / FILES[kind]
-        sized = spt.to_play_size(Path(cleaned.get("file") or raw), target, width, height)
-        if sized.get("status") != "OK":
-            return {"status": "ERROR", "error": sized.get("error", "resize failed")}
-        data.setdefault("assets", {})[kind] = {
-            "source": provider or record.get("source") or "gemini",
-            "generated_at": _now(),
-            "chat": chat or record.get("chat"),
-            "prompt_file": f".pipeline/gemini-brand-{kind}.txt",
-            "raw": str(raw.relative_to(project)),
-            "raw_sha256": _sha(raw),
-            "raw_dimensions": painted.get(kind) or record.get("raw_dimensions"),
-            "watermark": {"box": cleaned.get("box"), "residual": cleaned.get("residual"),
-                          "verified": cleaned.get("verified", True)},
-            "size": [width, height],
-            "sha256": _sha(target),
-        }
-        made.append(kind)
-        if log:
-            log(f"  brand: ✓ {FILES[kind]} (-> {width}x{height}, mark healed"
-                + (f" at {cleaned.get('box')}" if cleaned.get("box") else "") + ")")
-    save(project, data)
-    return {"status": "OK", "generated": made, "reused": reused, "chat": chat}
-
-
 def _render_html(html: Path, out: Path, width: int, height: int) -> dict[str, Any]:
     """Render an adopted HTML document at an exact pixel size."""
     import subprocess
@@ -549,34 +316,28 @@ def adopt(project: Path, kind: str, path: Path, note: str = "") -> dict[str, Any
     return {"status": "OK", "kind": kind, "file": str(target.relative_to(project))}
 
 
-def ensure(project: Path, force: bool = False, log=None) -> dict[str, Any]:
+def ensure(project: Path, log=None) -> dict[str, Any]:
     """The gate-driven step the build calls.
 
-    Only the feature graphic can be generated here: the icon is a Stitch design, and
-    a run that finds it missing must STOP with that instruction instead of quietly
-    producing a second rendition of the app's mark.
+    Nothing is generated here (owner, 2026-11-23): the icon is a Stitch design and
+    the banner is the owner's file. A run that finds either missing must STOP with
+    the instruction that produces it, never paint a substitute.
     """
-    data = load(project)
     issues = gate(project)
-    icon_ok = not any("icon.png" in i for i in issues) and \
-        ((data.get("assets") or {}).get("icon") or {}).get("source") in APPROVED
-    if not icon_ok:
-        hint = ("run `devteam storefront-brand <project> --stitch-prompt`, generate the icon in "
-                "Stitch, then `--adopt-stitch <file.html>` (the owner may pass a finished PNG "
-                "with `--adopt icon=<png>`)")
-        return {"status": "BLOCKED", "error": "the Play icon has no approved Stitch design",
-                "hint": hint}
-    if not issues and not force:
+    if not issues:
         if log:
             log("  brand: icon and feature graphic are approved")
         return {"status": "OK", "generated": [], "reused": ["icon", "feature"]}
-    needs = tuple(kind for kind in GEMINI_KINDS
-                  if force
-                  or not (project / IMAGES_REL / FILES[kind]).is_file()
-                  or ((data.get("assets") or {}).get(kind) or {}).get("source") not in APPROVED)
-    if not needs:
-        return {"status": "OK", "generated": [], "reused": ["icon", "feature"]}
-    return generate(project, kinds=needs, force=force, log=log)
+    hints: list[str] = []
+    if any(FILES["icon"] in i for i in issues):
+        hints.append("`devteam storefront-brand <project> --stitch-prompt`, generate the icon in "
+                     "Stitch, then `--adopt-stitch <file.html>` (or `--adopt icon=<png>`)")
+    if any(FILES["feature"] in i for i in issues):
+        hints.append("supply the 1024x500 feature graphic with "
+                     "`devteam storefront-brand <project> --adopt feature=<png>`")
+    return {"status": "BLOCKED",
+            "error": "brand asset(s) not approved: " + "; ".join(issues[:2]),
+            "hint": "; ".join(hints) or "re-adopt the asset the record names"}
 
 
 def _png_size(path: Path) -> list[int] | None:

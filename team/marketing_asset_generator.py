@@ -377,159 +377,6 @@ def build_icon_html(project_name: str, colors: dict[str, str]) -> str:
 </html>"""
 
 
-def build_feature_graphic_html(project_name: str, vision: str, colors: dict[str, str]) -> str:
-    """Build a standalone 1024x500 marketing feature graphic banner."""
-    acc = colors["primary"]
-    sec = colors.get("secondary", "#7C4DFF")
-    p_low = project_name.lower()
-    is_court = any(k in p_low or k in vision.lower() for k in ("pickle", "score", "court", "racket"))
-
-    left_html = f"""
-    <div class="badge"><div class="badge-dot"></div>100% PRIVATE • ON-DEVICE</div>
-    <div class="title">Desktop-Class PDF Tools In Your Pocket</div>
-    <div class="subtitle">Merge, split, compress, and convert documents instantly with zero cloud uploads or subscriptions.</div>
-    <div class="features-row">
-      <div class="pill">⚡ FAST LOSSLESS</div>
-      <div class="pill">🔒 100% OFFLINE</div>
-      <div class="pill">📄 PRO QUALITY</div>
-    </div>
-        """
-    right_html = f"""
-    <div class="preview-card">
-      <div class="card-label">SMART COMPRESS</div>
-      <div class="card-metric">-88% SAVINGS</div>
-      <div class="card-hint">18.4 MB → 2.1 MB • Vector Preserved</div>
-    </div>
-        """
-
-    return f"""<!DOCTYPE html>
-<html>
-<head>
-  <meta charset="utf-8">
-  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@600;700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@700&display=swap" rel="stylesheet">
-  <style>
-    * {{ box-sizing: border-box; margin: 0; padding: 0; }}
-    body {{
-      width: 1024px;
-      height: 500px;
-      background: radial-gradient(circle at 75% 40%, #16263B 0%, {colors['canvas']} 70%);
-      color: #FFFFFF;
-      font-family: 'Inter', sans-serif;
-      overflow: hidden;
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      padding: 60px 80px;
-      position: relative;
-    }}
-    .ambient-glow {{
-      position: absolute;
-      top: -100px;
-      right: -100px;
-      width: 600px;
-      height: 600px;
-      background: radial-gradient(circle, {acc}33 0%, {sec}26 50%, transparent 70%);
-      filter: blur(80px);
-      z-index: 0;
-    }}
-    .left-content {{
-      z-index: 1;
-      max-width: 500px;
-    }}
-    .badge {{
-      display: inline-flex;
-      align-items: center;
-      gap: 8px;
-      font-family: 'JetBrains Mono', monospace;
-      font-size: 14px;
-      font-weight: 700;
-      color: {acc};
-      background: {acc}1a;
-      border: 1px solid {acc}66;
-      padding: 6px 14px;
-      border-radius: 999px;
-      letter-spacing: 1px;
-      margin-bottom: 20px;
-    }}
-    .badge-dot {{
-      width: 8px;
-      height: 8px;
-      background: {colors.get('accent_success', '#00E676')};
-      border-radius: 50%;
-      box-shadow: 0 0 8px {colors.get('accent_success', '#00E676')};
-    }}
-    .title {{
-      font-family: 'Space Grotesk', sans-serif;
-      font-size: 46px;
-      font-weight: 700;
-      line-height: 1.1;
-      margin-bottom: 16px;
-      letter-spacing: -1px;
-    }}
-    .subtitle {{
-      font-size: 18px;
-      color: {colors['text_muted']};
-      line-height: 1.4;
-      margin-bottom: 28px;
-    }}
-    .features-row {{
-      display: flex;
-      gap: 12px;
-    }}
-    .pill {{
-      font-family: 'JetBrains Mono', monospace;
-      font-size: 12px;
-      color: #FFFFFF;
-      background: {colors['surface']};
-      border: 1px solid #2B3A50;
-      padding: 8px 14px;
-      border-radius: 8px;
-    }}
-    .right-preview {{
-      z-index: 1;
-      position: relative;
-    }}
-    .preview-card {{
-      width: 320px;
-      background: linear-gradient(135deg, {colors['surface']} 0%, {colors['surface_alt']} 100%);
-      border: 2px solid {acc}88;
-      border-radius: 24px;
-      padding: 26px;
-      box-shadow: 0 20px 50px rgba(0,0,0,0.8), 0 0 50px {acc}33;
-      transform: rotate(3deg);
-    }}
-    .card-label {{
-      font-family: 'JetBrains Mono', monospace;
-      font-size: 13px;
-      color: {acc};
-      font-weight: 700;
-      margin-bottom: 8px;
-    }}
-    .card-metric {{
-      font-family: 'Space Grotesk', sans-serif;
-      font-size: 38px;
-      font-weight: 700;
-      color: {colors.get('accent_success', '#00E676')};
-      margin-bottom: 6px;
-    }}
-    .card-hint {{
-      font-size: 13px;
-      color: {colors['text_muted']};
-    }}
-  </style>
-</head>
-<body>
-  <div class="ambient-glow"></div>
-  <div class="left-content">
-    {left_html}
-  </div>
-  <div class="right-preview">
-    {right_html}
-  </div>
-</body>
-</html>"""
-
-
 def generate_all_marketing_templates(project: Path) -> dict[str, str]:
     """Synthesize complete marketing frame HTML files for the project."""
     profile = profile_of(project)
@@ -836,16 +683,14 @@ def generate_all_marketing_templates(project: Path) -> dict[str, str]:
         p1.write_text(html1)
         templates["01_hero"] = str(p1)
 
-    # Always generate standalone 512x512 icon and 1024x500 feature graphic
+    # A standalone 512x512 icon template. The 1024x500 feature graphic is NOT
+    # rendered here: the owner removed banner generation from the team on
+    # 2026-11-23 ("sirf feature graphics banner nahi banwana"), so the banner is
+    # supplied by the owner and recorded with `storefront-brand --adopt`.
     icon_html = build_icon_html(project_name=name, colors=colors)
     p_icon = templates_dir / "icon.html"
     p_icon.write_text(icon_html)
     templates["icon"] = str(p_icon)
-
-    fg_html = build_feature_graphic_html(project_name=name, vision=vision, colors=colors)
-    p_fg = templates_dir / "feature_graphic.html"
-    p_fg.write_text(fg_html)
-    templates["feature_graphic"] = str(p_fg)
 
     return templates
 
@@ -885,10 +730,10 @@ def render_storefront_assets(
         except Exception:
             previews_are_real = False
 
-    # Map templates to target PNG files and viewport sizes
+    # Map templates to target PNG files and viewport sizes. The feature graphic
+    # is deliberately absent: it is the owner's file, never a code render.
     render_tasks = [
         ("icon.html", img_dir / "icon.png", 512, 512),
-        ("feature_graphic.html", img_dir / "featureGraphic.png", 1024, 500),
     ]
 
     # Collect screenshot templates
