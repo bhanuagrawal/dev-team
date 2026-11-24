@@ -98,10 +98,14 @@ fi
 # only ever the ones this run started (see team/emulator.py).
 python3 "$TEAM/cli.py" emulators "$PROJECT" >> "$TEAM/logs/launchd.log" 2>&1
 
-# The owner's standing provision (owner ask 2026-11-17): an app the owner armed
-# promotes its newest release candidate once CI has put it on the internal track.
-# A no-op for every app without the provision, and an explicit `rc --no` on the
-# version still vetoes it — this runs the recorded ask, it does not create one.
+# The owner's standing promotion asks, executed every run:
+#   * per-app provision (2026-11-17): an armed app promotes its newest release
+#     candidate once CI has put it on the internal track;
+#   * weekly rule (2026-11-24): when production has not changed in more than 7
+#     days, the newest release candidate goes out even for an unarmed app. The
+#     age is read LIVE from Play (config/promote.json), never from state.json.
+# An explicit `rc --no` on the version still vetoes it — this runs the recorded
+# asks, it does not create one.
 python3 "$TEAM/cli.py" autopromote "$PROJECT" --run --yes >> "$TEAM/logs/launchd.log" 2>&1
 
 # staleness + CI reconciliation + issue filing (deterministic)

@@ -262,6 +262,15 @@ commands, in order, with the reasoning and the failure branches.
    never as a stray directory. On `blocked`, put the actual question in
    `--note` and name the branch; `main` is for what passed, so a paused attempt
    is never merged forward to "save" it.
+9b. `python3 <team>/cli.py autopromote <project> --run --yes` — the owner's
+    recorded promotion asks, executed (the nightly runs this after every run):
+    an armed app sends its newest release candidate once CI has put it on
+    `internal`, and the team-wide weekly rule (`config/promote.json`, owner ask
+    2026-11-24) sends the newest release candidate when production has not
+    changed in more than 7 days. The age is read LIVE from Play — production
+    track plus the store listing's own "Updated on" line — never from
+    `state.json`; an unknown age holds instead of guessing, and an explicit
+    `rc --no` on that version still vetoes it. Quote its decision in the banner.
 10. `python3 <team>/cli.py alarm <project>` — staleness/CI reconciliation;
     may file a GitHub Issue. Then report the OUTCOME BANNER to the user/feed,
     one of the three contract states — e.g. `✅ SHIPPED vX → internal testing`

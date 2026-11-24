@@ -98,6 +98,7 @@ The trigger for `main` is **the gates passed**, not "a human is about to look".
 | stopped for an owner ask | same as above, **plus** `record --result blocked --note "<the question>"` | yes — the ask itself |
 | a DEBUG build for testers | Firebase App Distribution, same tag as the release — the `debug-to-firebase` job inside the SAME workflow (rendered only when `profile.ci.firebase` is declared). Its upload is a `npx firebase-tools` run step, so it works on a hosted or a macOS runner, and a failed upload names itself in the run instead of leaving the job green | no |
 | the app is armed for promotion (owner ask `devteam autopromote --on`) | once CI has put the newest release candidate on `internal`, `devteam autopromote <project> --run --yes` promotes it. The nightly runs the same command; an agent that watches CI go green on an armed app runs it too. An explicit `rc --no` on that version holds it | no — the provision IS the ask |
+| production older than 7 days (owner ask 2026-11-24) | the same `devteam autopromote <project> --run --yes` also executes the team-wide weekly rule (`config/promote.json`): the newest release candidate goes out when production has not changed in more than 7 days. The age is read **live from Play** (production track + the listing's own "Updated on" line), never from `state.json`; an `rc --no` still holds it and an unknown age is not treated as fresh | no — the rule IS the ask |
 | CI cannot start (GitHub Actions billing) | `release` re-dispatches the SAME workflow on the machine the project declares (`ci.self_hosted`) — GitHub does not meter self-hosted runners, so Play internal testing is updated by the real signed AAB **and** the QA job notifies testers, both from that one run. With no machine declared the release is NOT delivered and says so. The next `release` REFUSES to allocate another version while that one is undelivered (it clears itself when **Play holds that versionCode**, whichever runner carried it, or when that run goes green) | only to change the billing settings — delivery does not need a human |
 | a project with no tester channel | `devteam firebase <project> --app-id <id> --groups qa` declares it (the app id is Firebase Console → App Distribution; the registered package must equal `ci.package_name`), then `devteam ci <project> --write` renders the QA job. `doctor` WARNs while it is missing: without it the debug apk stays a workflow artifact and nobody is notified | no — one-time setup |
 
@@ -215,7 +216,9 @@ still walks the app's own three journeys.
 made was walked on this diff, the walk reached its goal, and it showed the
 words the task declared — walks run against the real backend with the audit
 account in `.pipeline/audit-account.json`) → `release` delivered (CI green, internal
-testing updated) → `record` + `rc` + `alarm` printed → worktrees pruned → the report quotes the
+testing updated) → `record` + `rc` + `alarm` printed → the run's
+`autopromote --run` (the per-app provision and the owner's weekly rule) printed
+its decision → worktrees pruned → the report quotes the
 handover, the flags and the page URLs. Nothing sits uncommitted anywhere:
 `devteam doctor <project>` prints no `uncommitted: WARN` line, and `status`
 shows no `⏸ parked` attempt the report failed to mention.

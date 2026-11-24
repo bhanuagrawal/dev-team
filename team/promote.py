@@ -24,8 +24,10 @@ Promotion is never a side effect of building. It is a verb, invoked on an
 explicit owner request (or a provision recorded from one), and it refuses to run
 on its own:
   * CI never calls it (the generated release workflow uploads to `internal` only);
-  * `release`, `record`, `loop` and the nightly never call it — the nightly runs
-    `autopromote --run`, which does nothing for an app the owner never armed;
+  * `release`, `record` and `loop` never call it; the nightly's
+    `autopromote --run` calls it only under a recorded owner ask — a per-app
+    provision, or the team-wide weekly rule (production older than 7 days, read
+    live from Play);
   * it requires `--yes` AND the owner's words (`--requested-by`), and both are
     recorded with the edit id, so "who asked for this launch" is never a guess;
   * it only promotes a version that is ALREADY on an internal track — an
@@ -38,6 +40,8 @@ shorten it.
 from __future__ import annotations
 
 import json
+import re
+from datetime import date as date_cls
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -128,6 +132,88 @@ def _note(project: Path, notes_file: str | None) -> str:
         return p.read_text().strip()
     rel = profile_of(project).get("whatsnew_file")
     return (read_delivery_file(project, rel, fallback_to_checkout=True) or "").strip() if rel else ""
+
+
+STORE_URL = "https://play.google.com/store/apps/details"
+_STORE_UA = ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
+             "(KHTML, like Gecko) Chrome/130.0 Safari/537.36")
+
+
+def release_version(name: str) -> str:
+    """The app version inside a Play release name: '26014 (1.4.8)' → '1.4.8'."""
+    s = str(name or "").strip()
+    m = re.search(r"\(([^)]+)\)", s)
+    return (m.group(1) if m else s).strip().lstrip("v")
+
+
+def store_updated_on(package: str, project: Path) -> tuple[str, str]:
+    """When the STORE last changed, read live from the public listing.
+
+    Google's Developer API returns a production track's versionCodes but no
+    release timestamp, so the only live answer to "when did prod last change" is
+    the listing's own 'Updated on' line. It is fetched on every call: no ledger,
+    no snapshot, no cache — the same page a user sees decides.
+    """
+    if not package:
+        return "", "no package declared"
+    r = run(["curl", "-s", "-L", "-A", _STORE_UA,
+             f"{STORE_URL}?id={package}&hl=en&gl=US"], project, timeout=60)
+    body = r.stdout or ""
+    if r.returncode != 0 or not body:
+        return "", f"store page unreachable (curl rc={r.returncode})"
+    m = re.search(r"Updated on</div>\s*<div[^>]*>\s*"
+                  r"([A-Z][a-z]{2,8} \d{1,2}, \d{4})", body)
+    if not m:
+        return "", "the listing shows no 'Updated on' date (app not public yet?)"
+    try:
+        when = datetime.strptime(m.group(1), "%b %d, %Y").date()
+    except ValueError:
+        return "", f"could not parse the listing's date '{m.group(1)}'"
+    return when.isoformat(), ""
+
+
+def production_now(project: Path) -> dict:
+    """What production holds RIGHT NOW — read from Play, never from our ledger.
+
+    Returns `version`, `versionCodes`, `date` (the store's own live update date),
+    `days` (how long since that date) and `why` when Play could not answer. A
+    caller must treat an empty `date` as "unknown" and never as "fresh": an
+    unverifiable age cannot authorize a launch.
+    """
+    project = Path(project)
+    out: dict[str, Any] = {"version": "", "versionCodes": [], "date": "",
+                           "days": None, "package": "", "why": ""}
+    pkg, token, why = play_listing._play(project)
+    out["package"] = pkg
+    if not token:
+        out["why"] = f"Play auth unavailable: {(why or {}).get('why') or 'unknown'}"
+        return out
+
+    read_edit = ""
+    try:
+        read_edit = _edit(pkg, project, token)
+        tracks = _tracks(pkg, read_edit, project, token)
+    except RuntimeError as e:
+        out["why"] = str(e)
+        return out
+    finally:
+        if read_edit:
+            _discard(pkg, read_edit, project, token)
+
+    releases = _track(tracks, "production").get("releases") or []
+    rel = next((r for r in releases if str(r.get("status") or "") == "completed"),
+               releases[0] if releases else None)
+    if rel:
+        out["version"] = release_version(rel.get("name"))
+        out["versionCodes"] = [str(c) for c in (rel.get("versionCodes") or [])]
+
+    when, why = store_updated_on(pkg, project)
+    if when:
+        out["date"] = when
+        out["days"] = (date_cls.today() - date_cls.fromisoformat(when)).days
+    else:
+        out["why"] = why
+    return out
 
 
 def promote(project: Path, version: str, *, requested_by: str,

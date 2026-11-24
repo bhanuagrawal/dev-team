@@ -5,8 +5,9 @@ complete always — if release candidate — create a provision for doing this f
 app when user ask in dev team"):
 
   * `--on` cannot exist without the owner's words — a boolean alone is not an ask;
-  * an app with no provision is a no-op, so the nightly cannot promote an app the
-    owner never armed;
+  * an app with no provision is a no-op while production is fresh — the one
+    exception is the owner's team-wide weekly rule (2026-11-24), which promotes a
+    stale production from LIVE Play data and never from `state.json`;
   * an explicit `rc --no` call for the exact version is a VETO that the provision
     never overrules;
   * the version is the NEWEST shipped one, never a superseded build;
@@ -98,8 +99,14 @@ class RunTest(unittest.TestCase):
     def arm(self):
         autopromote.provision(self.project, on=True, requested_by=OWNER_WORDS)
 
-    def run_with(self, result, **kwargs):
+    def run_with(self, result, *, prod=None, **kwargs):
+        # A FRESH production by default: the weekly rule is not due, so these
+        # cases keep pinning the per-app provision's own guarantees.
+        fresh = {"version": "1.0.0", "versionCodes": ["100"],
+                 "date": "2026-11-23", "days": 1, "why": ""}
         with mock.patch.object(autopromote, "promote", return_value=result) as pr, \
+             mock.patch.object(autopromote, "production_now",
+                               return_value=prod if prod is not None else fresh), \
              mock.patch.object(autopromote, "save_state"):
             got = autopromote.run(self.project, **kwargs)
         return got, pr
@@ -167,6 +174,92 @@ class RunTest(unittest.TestCase):
         got, pr = self.run_with({"status": "promoted"})
         self.assertEqual(got["status"], "nothing-to-promote")
         pr.assert_not_called()
+
+
+class WeeklyRuleTest(unittest.TestCase):
+    """Owner ask 2026-11-24: on every run, a production older than 7 days gets
+    the newest release candidate — decided by LIVE Play data, no cache."""
+
+    STALE = {"version": "1.0.7", "versionCodes": ["107"],
+             "date": "2026-11-10", "days": 14, "why": ""}
+    FRESH = {"version": "1.0.7", "versionCodes": ["107"],
+             "date": "2026-11-22", "days": 2, "why": ""}
+    UNKNOWN = {"version": "", "versionCodes": [], "date": "", "days": None,
+               "why": "store page unreachable"}
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.project = Path(self.tmp.name) / "Demo"
+        (self.project / ".pipeline").mkdir(parents=True)
+        (self.project / ".pipeline" / "profile.json").write_text(
+            json.dumps({"name": "Demo"}))
+        self.state = {"shipped": [{"version": "1.0.8"}, {"version": "1.0.9"}],
+                      "release_candidates": [], "promotions": []}
+        self.save_state()
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def save_state(self):
+        (self.project / ".pipeline" / "state.json").write_text(json.dumps(self.state))
+
+    def run_with(self, result, prod, **kwargs):
+        with mock.patch.object(autopromote, "promote", return_value=result) as pr, \
+             mock.patch.object(autopromote, "production_now", return_value=prod), \
+             mock.patch.object(autopromote, "save_state"):
+            got = autopromote.run(self.project, **kwargs)
+        return got, pr
+
+    def test_a_stale_production_is_promoted_even_without_a_per_app_provision(self):
+        got, pr = self.run_with({"status": "DRY-RUN", "version": "1.0.9"},
+                                self.STALE, yes=False)
+        self.assertEqual(got["status"], "DRY-RUN")
+        self.assertEqual(got["rule"], "weekly")
+        self.assertEqual(pr.call_args.args[1], "1.0.9")
+        self.assertIn("weekly rule", pr.call_args.kwargs["requested_by"])
+        self.assertIn("2026-11-10", pr.call_args.kwargs["requested_by"])
+
+    def test_a_fresh_production_is_a_noop_for_an_unarmed_app(self):
+        got, pr = self.run_with({"status": "promoted"}, self.FRESH)
+        self.assertEqual(got["status"], "not-provisioned")
+        pr.assert_not_called()
+
+    def test_exactly_seven_days_is_not_more_than_seven(self):
+        seven = dict(self.STALE, date="2026-11-17", days=7)
+        got, pr = self.run_with({"status": "promoted"}, seven)
+        self.assertEqual(got["status"], "not-provisioned")
+        pr.assert_not_called()
+
+    def test_an_unknown_age_holds_instead_of_guessing(self):
+        got, pr = self.run_with({"status": "promoted"}, self.UNKNOWN)
+        self.assertEqual(got["status"], "not-provisioned")
+        self.assertIn("Play did not say", got["error"])
+        pr.assert_not_called()
+
+    def test_an_already_live_candidate_has_nothing_to_promote(self):
+        live = dict(self.STALE, version="1.0.9", versionCodes=["109"])
+        got, pr = self.run_with({"status": "promoted"}, live)
+        self.assertEqual(got["status"], "not-provisioned")
+        self.assertIn("already the live production build", got["error"])
+        pr.assert_not_called()
+
+    def test_the_weekly_rule_still_respects_an_rc_no_veto(self):
+        self.state["release_candidates"] = [{"version": "1.0.9", "rc": False,
+                                             "by": "agent", "why": "half-done"}]
+        self.save_state()
+        got, pr = self.run_with({"status": "promoted"}, self.STALE)
+        self.assertEqual(got["status"], "held")
+        pr.assert_not_called()
+
+    def test_a_promotion_recorded_on_disk_never_makes_production_look_fresh(self):
+        # The ledger says 1.0.9 shipped today; Play says production is 14 days
+        # old. The live answer wins — state.json is not the clock.
+        self.state["promotions"] = [{"version": "1.0.9", "at": "2026-11-24"}]
+        self.save_state()
+        got, pr = self.run_with({"status": "DRY-RUN"}, self.STALE, yes=False)
+        self.assertEqual(got["status"], "DRY-RUN")
+        self.assertEqual(got["rule"], "weekly")
+        pr.assert_called_once()
 
 
 class StatusLineTest(unittest.TestCase):

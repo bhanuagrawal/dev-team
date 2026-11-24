@@ -1031,7 +1031,10 @@ def cmd_run_orchestrator(args: argparse.Namespace) -> int:
         "one release) → pick the run it handed over → worktree-start (it prints "
         "the tree, the task spec and the develop skill) → implement the task "
         "YOURSELF in that tree, following skills/dev-team/references/develop.md, "
-        "then verify the worktree → release on green → record → alarm. "
+        "then verify the worktree → release on green → record → "
+        "autopromote --run --yes (the owner's recorded promotion asks: the "
+        "per-app provision and the weekly rule that promotes when production is "
+        "older than 7 days, read live from Play) → alarm. "
         "Do not spawn a developer subagent: the work is yours. "
         "Project: "
         f"{project.name} (absolute path: {project}). Report a compact summary of "
@@ -5013,7 +5016,11 @@ def cmd_autopromote(args: argparse.Namespace) -> int:
       * `--run` executes it now: newest shipped version, internal-track proof
         that CI delivered, an `rc --no` veto respected, then the ordinary
         `promote` path. The nightly runs the same command, so "after CI
-        completes" does not depend on anyone remembering.
+        completes" does not depend on anyone remembering. The same run also
+        executes the owner's team-wide weekly rule (`config/promote.json`):
+        when production has not changed in more than 7 days — read live from
+        Play, never from `state.json` — the newest release candidate goes out
+        even for an app nobody armed.
     """
     project = resolve_project(args.project)
     from team import autopromote
@@ -5040,25 +5047,40 @@ def cmd_autopromote(args: argparse.Namespace) -> int:
 
     if not args.run:
         print(autopromote.line(project))
-        block = autopromote.provision_of(project)
-        if block.get("after_ci"):
-            state = state_of(project)
-            target = autopromote.candidate(state)
-            if target:
-                call = autopromote.rc_call(state, target)
-                verdict = ("called NOT a release candidate — VETOED"
-                           if call is not None and not call.get("rc")
-                           else "release candidate" if call is not None
-                           else "no rc call recorded — provision decides")
-                print(f"  candidate: v{target} — {verdict}")
+        # The weekly rule's question is "when did production last change", and the
+        # only honest answer is Play's — so ask live, here, once.
+        try:
+            from team.promote import production_now
+            live = production_now(project)
+            if live.get("date"):
+                print(f"  weekly:   production v{live.get('version') or '?'} last changed "
+                      f"{live.get('date')} ({live.get('days')} days ago, read live from Play)")
             else:
-                print("  candidate: none — the ledger names no shipped version yet")
+                print(f"  weekly:   production age UNKNOWN — {live.get('why') or 'Play did not answer'}")
+        except Exception as e:      # a query command must not die on a network hiccup
+            print(f"  weekly:   production age unavailable ({e})")
+        state = state_of(project)
+        target = autopromote.candidate(state)
+        if target:
+            call = autopromote.rc_call(state, target)
+            verdict = ("called NOT a release candidate — VETOED"
+                       if call is not None and not call.get("rc")
+                       else "release candidate" if call is not None
+                       else "no rc call recorded — the standing ask decides")
+            print(f"  candidate: v{target} — {verdict}")
+        else:
+            print("  candidate: none — the ledger names no shipped version yet")
         return 0
 
     res = autopromote.run(project, version=args.version, yes=bool(args.yes), log=print)
     status = str(res.get("status") or "")
     if args.json:
         print(json.dumps(res, indent=2))
+    if res.get("rule") == "weekly":
+        prod = res.get("production_before") or {}
+        print(f"AUTOPROMOTE: WEEKLY — production v{prod.get('version') or '?'} last changed "
+              f"{prod.get('date') or '?'} ({prod.get('days')} days ago); the owner's "
+              f"weekly rule promotes v{res.get('version')}")
     if status == "not-provisioned":
         print(f"AUTOPROMOTE: not provisioned — {res.get('error')}")
         return 1

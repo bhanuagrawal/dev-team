@@ -1,0 +1,7 @@
+{
+  "_comment": "Standing owner rule (2026-11-24): on EVERY workflow run, check when production last changed; if it has been more than max_days, promote the newest release candidate to production. The age is read LIVE from Google Play on every check (production track + the store listing's own 'Updated on' line) — never from state.json or any other cache. This is a recorded owner ask, not an agent inference: `team/autopromote.py` carries `requested_by` into the promotion record.",
+  "max_days": 7,
+  "requested_by": "on every work flow run , check since when we promote a reelase candidate to prod, if its been more than 7 days , also promote to prod",
+  "recorded_at": "2026-11-24T00:00:00+00:00",
+  "note": "Applies to every app the team runs; an explicit `devteam rc <app> --version <v> --no` still vetoes that exact version."
+}

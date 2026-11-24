@@ -176,9 +176,12 @@ refuses.
    catch — say so in the handover when a task touches them.
 9. **Ask the owner only what no agent can decide** (freeze-worthy incidents,
    discard-vs-keep on their WIP, direction). Never ask about promotion — the
-   owner triggers it with their own words, or arms a per-app provision once
-   (`devteam autopromote --on`) that the nightly executes; the agent never
-   raises either. Whether an
+   owner triggers it with their own words, arms a per-app provision once
+   (`devteam autopromote --on`) that the nightly executes, or relies on the
+   team-wide weekly rule they recorded on 2026-11-24 (`config/promote.json`:
+   production older than 7 days → newest release candidate goes out, read LIVE
+   from Play and never from `state.json`); the agent never
+   raises any of them. Whether an
    ask is even the owner's is **decided by code, not by the agent's judgement**:
    `team/asks.py` classifies every ask/flag against a rule table and the tools this
    machine actually has, and `record`, `doctor` and `alarm` print the verdict

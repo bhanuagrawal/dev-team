@@ -50,8 +50,15 @@ missing kind/milestone) answers before anything executes.
    `devteam autopromote <project> --on --requested-by "<their words>"` records a
    per-app provision: the newest release candidate is promoted once CI has put
    it on the internal track, and an explicit `rc --no` on that version vetoes it.
-   Never by `release`, `record`, `loop` or CI, and never raised by an agent
-   without one of those two asks.
+   The owner's third ask is the team-wide weekly rule (2026-11-24): *"on every
+   workflow run, check since when we promote a release candidate to prod, if its
+   been more than 7 days, also promote to prod"* — recorded in
+   `config/promote.json`, executed by the same `autopromote --run` the nightly
+   already calls, for every app whether or not it was armed. Its age is read
+   LIVE from Google Play (production track + the listing's own "Updated on"
+   line) — **never from `state.json` or any cache** — and an unknown age holds
+   rather than guesses. Never by `release`, `record`, `loop` or CI, and never
+   raised by an agent without one of those recorded asks.
 4. **Nothing remains uncommitted, ever.** Every change ends in a commit on a
    pushed ref before your turn ends. "Clean tree" is not the test — **"does this
    exist anywhere but this disk"** is. Work you did not write (the owner's WIP) is
@@ -133,6 +140,8 @@ page or a dead link, so the map above cannot rot.
 
 ## Done means
 
-`verify` PASS → `release` delivered → `record` + `rc` + `alarm` printed →
-worktrees pruned → the report quotes the handover and the page URLs. No
-`uncommitted: WARN` from `doctor`, no `⏸ parked` attempt the report forgot.
+`verify` PASS → `release` delivered → `record` + `rc` printed → the run's
+`autopromote --run` (per-app provision + the weekly rule, decided from live Play
+data) printed its decision → `alarm` printed → worktrees pruned → the report
+quotes the handover and the page URLs. No `uncommitted: WARN` from `doctor`, no
+`⏸ parked` attempt the report forgot.

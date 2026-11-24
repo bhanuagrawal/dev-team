@@ -100,6 +100,7 @@ run `doctor` and a live probe (`research`, or the collector directly):
 | create-agent | skill (`skills/new-project/SKILL.md`) | delegated on MODE B |
 | developer | skill (`references/develop.md` + the task spec) | the orchestrator itself, directly in the worktree — no subagent |
 | research (product) | CODE collectors + ONE synthesis (`cli.py plan`, raw: `cli.py research`) | EVERY run, step 2 |
+| promotion | CODE (`cli.py autopromote`) | every run end (per-app provision + the weekly rule, age read live from Play) |
 | alarm | CODE (`cli.py alarm`) | nightly end + on demand |
 | verifier/gates | CODE (`cli.py verify`) | before every release |
 | release-agent | CODE (`cli.py release`) | after green gates |
