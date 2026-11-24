@@ -4038,6 +4038,20 @@ def cmd_storefront_scenes(args: argparse.Namespace) -> int:
             print(f"  ✗ {res.get('error')}")
             return 1
         print(f"  {res.get('count', 0)} frame(s) -> distribution/listing/en-US/images/phoneScreenshots")
+        # WHAT THIS PASS JUST DREW IS COMMITTED AS DRAWN. The baseline narrows the
+        # commit to the paths this command changed, but a frame can come out
+        # byte-equal to the lagging checkout's copy and still differ from the copy
+        # on origin/main (a release renders the same screen in another session) —
+        # the PNGs were then called "untouched" while `docs/storefront-frames.json`
+        # shipped their NEW hashes, leaving main with a fresh provenance line over
+        # older images and store-readiness blocked on "edited after it was drawn"
+        # (2026-11-24). The frame pass wrote these paths, so none of them is skipped.
+        if baseline is not None:
+            listing_rel = sfr.listing_dir(project).relative_to(project).as_posix()
+            for rel in list(baseline):
+                if (rel.startswith(listing_rel)
+                        or rel == sfr.REGISTRY_REL):
+                    baseline.pop(rel, None)
 
     if getattr(args, "status", False) or do_all:
         st = sp.preview_status(frame_root if (do_all or getattr(args, "frame", False)) else project)
