@@ -316,6 +316,7 @@ def tappables(xml: str, pkg: str = "") -> list[dict]:
         cls = str(attrs.get("class") or "")
         out.append({"label": label[:60], "x": (x1 + x2) // 2, "y": (y1 + y2) // 2,
                     "clickable": clickable,
+                    "package": str(attrs.get("package") or ""),
                     # A field that takes focus without repainting the screen is not a
                     # dead control; only a person can fill it, so the journey stops there.
                     "editable": ("EditText" in cls) or attrs.get("focusable") == "true"
@@ -346,6 +347,28 @@ def tappables(xml: str, pkg: str = "") -> list[dict]:
     kept += blank[:max(0, _TAP_CAP - len(kept))]
     kept.sort(key=lambda t: (t["y"], t["x"]))
     return kept
+
+
+# A SYSTEM FILE PICKER is another app's window, and for some apps it is the only
+# door there is: a PDF tool has nothing to show until a document is chosen, so
+# every journey starts in DocumentsUI. `tappables(..., pkg)` filters to the app's
+# own package, which left the walk holding an empty list while `one-page.pdf` sat
+# plainly on screen; the model answered the only index a person could invent ("tap
+# index 0") and the pass ended as a driver error instead of a product verdict
+# (2026-11-24, an app whose only way in is the document picker: the tool's own
+# journey ended as a driver error while the file it needed sat on screen). So when
+# the app's own window exposes
+# nothing to tap, the walk reads the picker's window instead. The package list is
+# deliberate: a walk may step into the document provider the app opened, never
+# into whatever else the phone happens to be showing.
+_PICKER_PKGS = ("com.google.android.documentsui", "com.android.documentsui",
+                "com.google.android.providers.media.module",
+                "com.android.providers.media.module")
+
+
+def picker_targets(xml: str) -> list[dict]:
+    """The tappables of a document/photo picker the app itself opened."""
+    return [t for t in tappables(xml) if t.get("package") in _PICKER_PKGS]
 
 
 def _pick_field(targets: list[dict], role: str) -> int | None:
@@ -811,6 +834,11 @@ def audit_flow(project: Path, flow: dict, serial: str, log=None,
                 break
         xml = ux_video._ui_xml(serial)
         targets = tappables(xml, pkg)
+        in_picker = False
+        if not targets:
+            shown = picker_targets(xml)
+            if shown:
+                targets, in_picker = shown, True
         # The screen's own words, deterministically — what `verify` matches a
         # task's declared observable against.
         for text in _screen_texts(xml, pkg):
@@ -823,6 +851,8 @@ def audit_flow(project: Path, flow: dict, serial: str, log=None,
             seen_texts[step] = opening_texts + [t for t in seen_texts[step]
                                                 if t not in opening_texts]
         screen = _window_title(serial, pkg)
+        if in_picker and not screen:
+            screen = "system file picker"
         if log and any(x.get("editable") for x in targets):
             log("~ ux-flow: fields on this screen: " + ", ".join(
                 f"{i}:{t['label'] or '(unlabelled)'}" for i, t in enumerate(targets)
@@ -848,10 +878,14 @@ def audit_flow(project: Path, flow: dict, serial: str, log=None,
                 + ", ".join(f"{k}={v}" for k, v in profile.items() if v)
                 + " — use action type with field=name/handle.\n"
             )
+        screen_line = f"Screen: {screen}" if screen else ""
+        if in_picker:
+            screen_line += ("\nThe app's SYSTEM FILE PICKER is open on top of it — this "
+                            "list is the chooser's own, so tap the file the goal names.")
         prompt = DECIDE_PROMPT.format(
             app=app, flow=fid, goal=goal, step=step, max_steps=cap,
             history=history, filled=(", ".join(sorted(filled)) or "(none yet)"),
-            screen=(f"Screen: {screen}" if screen else ""),
+            screen=screen_line,
             credentials=credentials,
             targets=_label_list(targets), dead=dead_line)
         model_calls += 1
