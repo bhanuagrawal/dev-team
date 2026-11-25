@@ -637,19 +637,29 @@ def cmd_rc(args: argparse.Namespace) -> None:
     project = resolve_project(args.project)
     if bool(args.yes) == bool(args.no):
         raise SystemExit("pass exactly one of --yes / --no")
+    if getattr(args, "critical", False) and args.no:
+        raise SystemExit("--critical only applies to --yes — a --no call stays a veto")
     state = state_of(project)
     version = str(args.version or latest_shipped_version(state))
     if not version:
         raise SystemExit("no shipped version to answer for — pass --version <ver>")
     by = "owner" if args.owner else "agent"
+    critical = bool(getattr(args, "critical", False)) and bool(args.yes)
     entry = {"version": version, "rc": bool(args.yes), "note": args.note or "",
              "why": args.note or "", "date": today(), "by": by}
+    if critical:
+        # The marker is the owner's critical-fix ask carried into the launch —
+        # never inferred from a commit message. A later rc call without it
+        # clears it (a later call wins); an rc --no stays a veto.
+        entry["critical"] = True
     state.setdefault("release_candidates", []).append(entry)
     save_state(project, state)
     _print_report_url(project)
     verdict = "a RELEASE CANDIDATE (✅)" if entry["rc"] else "NOT a release candidate"
     print(f"recorded ({by}): v{version} is {verdict}"
-          + (f" — {entry['note']}" if entry["note"] else ""))
+          + (f" — {entry['note']}" if entry["note"] else "")
+          + ("; CRITICAL FIX — eligible for production before the 7-day wait"
+             if critical else ""))
     # Reprint the COMPLETE handover: the block `record` printed said "NOT CALLED YET",
     # and the owner must never be handed a stale verdict beside a fresh one.
     print()
@@ -5020,7 +5030,9 @@ def cmd_autopromote(args: argparse.Namespace) -> int:
         executes the owner's team-wide weekly rule (`config/promote.json`):
         when production has not changed in more than 7 days — read live from
         Play, never from `state.json` — the newest release candidate goes out
-        even for an app nobody armed.
+        even for an app nobody armed. The same run also executes the 2026-11-25
+        critical-fix rule: an RC marked `rc --yes --critical` goes out inside
+        that week, carrying who marked it and why into the launch record.
     """
     project = resolve_project(args.project)
     from team import autopromote
@@ -5065,6 +5077,8 @@ def cmd_autopromote(args: argparse.Namespace) -> int:
             call = autopromote.rc_call(state, target)
             verdict = ("called NOT a release candidate — VETOED"
                        if call is not None and not call.get("rc")
+                       else "release candidate, CRITICAL FIX — eligible before the 7-day wait"
+                       if call is not None and call.get("critical")
                        else "release candidate" if call is not None
                        else "no rc call recorded — the standing ask decides")
             print(f"  candidate: v{target} — {verdict}")
@@ -6361,6 +6375,10 @@ def main() -> None:
     g.add_argument("--yes", action="store_true", help="this build IS a release candidate")
     g.add_argument("--no", action="store_true", help="this build is NOT a release candidate")
     rcp.add_argument("--note", help="the agent's one line of why")
+    rcp.add_argument("--critical", action="store_true",
+                     help="with --yes: this build is a crucial fix and may go to production "
+                          "before the 7-day weekly wait; who marked it and why are recorded "
+                          "and carried into the launch")
     rcp.add_argument("--owner", action="store_true",
                      help="mark this as the owner's own call rather than the agent's")
     rcp.set_defaults(fn=cmd_rc)

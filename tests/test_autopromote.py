@@ -10,6 +10,9 @@ app when user ask in dev team"):
     stale production from LIVE Play data and never from `state.json`;
   * an explicit `rc --no` call for the exact version is a VETO that the provision
     never overrules;
+  * a crucial fix must not wait out the week, but only when its RC was explicitly
+    marked `rc --yes --critical` — no inference from commits, and every weekly
+    guardrail (live Play age, veto, internal track) still holds;
   * the version is the NEWEST shipped one, never a superseded build;
   * every launch still goes through `promote()`, with the standing words carried
     into `requested_by`, so the record still names who asked.
@@ -258,6 +261,111 @@ class WeeklyRuleTest(unittest.TestCase):
         self.save_state()
         got, pr = self.run_with({"status": "DRY-RUN"}, self.STALE, yes=False)
         self.assertEqual(got["status"], "DRY-RUN")
+        self.assertEqual(got["rule"], "weekly")
+        pr.assert_called_once()
+
+
+class CriticalFixTest(unittest.TestCase):
+    """Owner ask 2026-11-25: an explicitly marked crucial fix goes out early.
+
+    The 7-day rule still owns the clock; the marker only opens the door inside
+    it. Nothing is inferred from commit or task text, and the weekly guardrails
+    (veto, internal track, live Play age, recorded words) do not move.
+    """
+
+    FRESH = {"version": "1.0.7", "versionCodes": ["107"],
+             "date": "2026-11-23", "days": 2, "why": ""}
+    SEVEN = dict(FRESH, date="2026-11-18", days=7)
+    STALE = dict(FRESH, date="2026-11-10", days=15)
+    UNKNOWN = {"version": "", "versionCodes": [], "date": "", "days": None,
+               "why": "store page unreachable"}
+    MARKED = {"version": "1.0.9", "rc": True, "critical": True, "by": "owner",
+              "why": "payment crash fix", "date": "2026-11-25"}
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.project = Path(self.tmp.name) / "Demo"
+        (self.project / ".pipeline").mkdir(parents=True)
+        (self.project / ".pipeline" / "profile.json").write_text(
+            json.dumps({"name": "Demo"}))
+        self.state = {"shipped": [{"version": "1.0.8"}, {"version": "1.0.9"}],
+                      "release_candidates": [dict(self.MARKED)], "promotions": []}
+        self.save_state()
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def save_state(self):
+        (self.project / ".pipeline" / "state.json").write_text(json.dumps(self.state))
+
+    def run_with(self, prod, **kwargs):
+        with mock.patch.object(autopromote, "promote",
+                               return_value={"status": "DRY-RUN", "version": "1.0.9"}) as pr, \
+             mock.patch.object(autopromote, "production_now", return_value=prod), \
+             mock.patch.object(autopromote, "save_state"):
+            got = autopromote.run(self.project, **kwargs)
+        return got, pr
+
+    def test_a_marked_critical_fix_goes_out_inside_the_week(self):
+        got, pr = self.run_with(self.FRESH, yes=False)
+        self.assertEqual(got["status"], "DRY-RUN")
+        self.assertEqual(got["rule"], "critical")
+        pr.assert_called_once()
+        words = pr.call_args.kwargs["requested_by"]
+        self.assertIn("payment crash fix", words)
+        self.assertIn("by owner", words)
+        self.assertIn("standing critical-fix rule", words)
+        self.assertEqual(got["critical"]["why"], "payment crash fix")
+
+    def test_exactly_seven_days_is_still_early_enough_for_a_critical_fix(self):
+        got, pr = self.run_with(self.SEVEN, yes=False)
+        self.assertEqual(got["rule"], "critical")
+        pr.assert_called_once()
+
+    def test_an_unmarked_release_candidate_waits_out_the_week(self):
+        self.state["release_candidates"] = [{"version": "1.0.9", "rc": True,
+                                             "by": "agent", "why": "tidy-up"}]
+        self.save_state()
+        got, pr = self.run_with(self.FRESH)
+        self.assertEqual(got["status"], "not-provisioned")
+        pr.assert_not_called()
+
+    def test_a_later_call_without_the_marker_clears_it(self):
+        self.state["release_candidates"] = [dict(self.MARKED),
+                                            {"version": "1.0.9", "rc": True,
+                                             "by": "agent", "why": "not urgent"}]
+        self.save_state()
+        got, pr = self.run_with(self.FRESH)
+        self.assertEqual(got["status"], "not-provisioned")
+        pr.assert_not_called()
+
+    def test_rc_no_still_vetoes_a_critical_fix(self):
+        # Armed, so the run reaches the veto check instead of stopping at
+        # "nothing due" — the marker must never survive a later --no.
+        autopromote.provision(self.project, on=True, requested_by="owner words")
+        self.state["release_candidates"] = [dict(self.MARKED),
+                                            {"version": "1.0.9", "rc": False,
+                                             "by": "owner", "why": "hold it"}]
+        self.save_state()
+        got, pr = self.run_with(self.FRESH)
+        self.assertEqual(got["status"], "held")
+        pr.assert_not_called()
+
+    def test_an_unknown_play_age_holds_a_critical_fix(self):
+        got, pr = self.run_with(self.UNKNOWN)
+        self.assertEqual(got["status"], "not-provisioned")
+        self.assertIn("Play did not say", got["error"])
+        pr.assert_not_called()
+
+    def test_an_already_live_critical_build_is_not_promoted_twice(self):
+        live = dict(self.FRESH, version="1.0.9", versionCodes=["109"])
+        got, pr = self.run_with(live)
+        self.assertEqual(got["status"], "not-provisioned")
+        self.assertIn("already the live production build", got["error"])
+        pr.assert_not_called()
+
+    def test_a_stale_production_still_uses_the_weekly_rule(self):
+        got, pr = self.run_with(self.STALE, yes=False)
         self.assertEqual(got["rule"], "weekly")
         pr.assert_called_once()
 

@@ -3,5 +3,11 @@
   "max_days": 7,
   "requested_by": "on every work flow run , check since when we promote a reelase candidate to prod, if its been more than 7 days , also promote to prod",
   "recorded_at": "2026-11-24T00:00:00+00:00",
-  "note": "Applies to every app the team runs; an explicit `devteam rc <app> --version <v> --no` still vetoes that exact version."
+  "note": "Applies to every app the team runs; an explicit `devteam rc <app> --version <v> --no` still vetoes that exact version.",
+  "critical_early": {
+    "_comment": "Owner rule 2026-11-25: a crucial fix must not wait out the 7 days. The signal is explicit — `devteam rc <app> --yes --critical --note \"<why>\"` marks the newest release candidate; no keyword guessing from commits. Every other guardrail stays: rc --no veto, internal-track proof, a LIVE Play answer (unknown age holds), and the ordinary promote() record carrying the marker's author and why.",
+    "enabled": true,
+    "requested_by": "our deaf team currently have a basically we push to production in case the last build was sent a week ago it needs light modification that it we need to intelligently determined whether a built should go when the one week has not passed in case it is a crucial fix in that has to be written mind integer in Delhi gently",
+    "recorded_at": "2026-11-25T00:00:00+00:00"
+  }
 }

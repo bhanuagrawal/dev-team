@@ -177,8 +177,9 @@ _RAW: list[tuple[str, str, str, str, str, bool]] = [
      "provision an app to promote its newest release candidate to production once CI has put it "
      "on internal — recorded from the owner's words, executed by the nightly and on demand; the "
      "same run also applies the team-wide weekly rule (production older than 7 days, read LIVE "
-     "from Play, never from state.json); an explicit `rc --no` vetoes that version",
-     ".pipeline/profile.json (promote.after_ci), config/promote.json (weekly rule), Play review, state",
+     "from Play, never from state.json) and the critical-fix rule (an RC marked `rc --yes "
+     "--critical` goes out inside that week); an explicit `rc --no` vetoes that version",
+     ".pipeline/profile.json (promote.after_ci), config/promote.json (weekly + critical rules), Play review, state",
      "--on with no --requested-by", True),
     ("ci", "deliver", "print or write the canonical release workflow",
      ".github/workflows/release.yml (with --write)", "no profile", True),

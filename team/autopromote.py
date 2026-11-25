@@ -20,6 +20,18 @@ per-app provision is still eligible: this rule is the owner's global answer, not
 an inference. An explicit `rc --no` for the exact version still vetoes it, and a
 date Play cannot verify holds the rule instead of guessing.
 
+THE CRITICAL-FIX EARLY LAUNCH (owner directive 2026-11-25)
+----------------------------------------------------------
+"…it needs light modification that we need to intelligently determine whether
+a build should go when the one week has not passed, in case it is a crucial
+fix…" — answered with an explicit marker, not an inference from commit text:
+`devteam rc <app> --yes --critical --note "<why>"` marks the newest release
+candidate as a crucial fix, and that marker alone shortens the wait. The
+marker's author, words and date are carried into `requested_by` so the launch
+still names a sentence somebody wrote. Nothing else moves: `rc --no` still
+vetoes, the build must be on internal, Play still has to answer (an unknown
+age holds), and every launch still goes through `promote()`.
+
 Until today `promote` was reachable only by naming the version in the same
 conversation: right for a one-off launch, wrong for an app whose owner has
 decided that every build the pipeline calls a release candidate, once CI has put
@@ -165,6 +177,12 @@ def weekly_rule() -> dict:
     return block if isinstance(block, dict) else {}
 
 
+def critical_rule() -> dict:
+    """The owner's 2026-11-25 early-launch rule for an explicitly critical RC."""
+    block = weekly_rule().get("critical_early")
+    return dict(block) if isinstance(block, dict) else {}
+
+
 def _code_of(state: dict, version: str) -> str:
     """The versionCode the shipped ledger gives a version ('' when unknown)."""
     want = str(version).lstrip("v")
@@ -172,6 +190,13 @@ def _code_of(state: dict, version: str) -> str:
         if str(row.get("version") or "").lstrip("v") == want and row.get("version_code"):
             return str(row["version_code"])
     return ""
+
+
+def _on_production(state: dict, target: str, live: dict) -> bool:
+    """Is the candidate already the live build, by version name or versionCode?"""
+    code = _code_of(state, target)
+    return (str(live.get("version") or "").lstrip("v") == str(target).lstrip("v")
+            or bool(code and code in [str(c) for c in (live.get("versionCodes") or [])]))
 
 
 def weekly_due(project: Path, *, target: str = "", state: dict | None = None) -> dict:
@@ -206,10 +231,7 @@ def weekly_due(project: Path, *, target: str = "", state: dict | None = None) ->
     if not target:
         return {"due": False, "production": live,
                 "why": "the ledger names no shipped version yet"}
-    code = _code_of(state, target)
-    on_prod = (str(live.get("version") or "").lstrip("v") == str(target).lstrip("v")
-               or bool(code and code in [str(c) for c in (live.get("versionCodes") or [])]))
-    if on_prod:
+    if _on_production(state, target, live):
         return {"due": False, "production": live,
                 "why": f"v{target} is already the live production build"}
     days = int(live.get("days") or 0)
@@ -229,6 +251,71 @@ def weekly_due(project: Path, *, target: str = "", state: dict | None = None) ->
     }
 
 
+def critical_due(project: Path, *, target: str = "", state: dict | None = None) -> dict:
+    """Does the owner's critical-fix rule allow a launch inside the 7-day wait?
+
+    Only an explicit `rc --yes --critical` marker on the NEWEST call for
+    `target` can open this door — no keyword scoring of commits or task text.
+    A later `rc` call without `--critical` clears the marker (a later call
+    wins), and an `rc --no` is still a veto that `run()` respects.
+
+    The age still comes from a LIVE Play read, for two reasons: an already-live
+    build must not be launched twice, and an unverifiable age holds rather
+    than guesses — the same fail-closed rule the weekly path uses.
+    """
+    rule = critical_rule()
+    if not rule.get("enabled"):
+        return {"due": False, "why": "no critical-fix early-launch rule declared"}
+    project = Path(project)
+    state = state if state is not None else state_of(project)
+    target = str(target or "").strip() or candidate(state)
+    if not target:
+        return {"due": False, "why": "the ledger names no shipped version yet"}
+    call = rc_call(state, target)
+    if not call or not bool(call.get("rc")) or not bool(call.get("critical")):
+        return {"due": False, "why": f"v{target} is not marked a critical fix"}
+    try:
+        live = production_now(project)
+    except Exception as e:
+        live = {"version": "", "versionCodes": [], "date": "", "days": None,
+                "why": str(e)}
+    if not live.get("date"):
+        return {"due": False, "production": live,
+                "why": ("Play did not say when production last changed"
+                        + (f" ({live.get('why')})" if live.get("why") else "")
+                        + " — the critical-fix rule holds rather than guess")}
+    if _on_production(state, target, live):
+        return {"due": False, "production": live,
+                "why": f"v{target} is already the live production build"}
+    days = int(live.get("days") or 0)
+    max_days = int(weekly_rule().get("max_days") or 0)
+    if days > max_days:
+        # Nothing to decide here: the weekly rule already authorizes this one.
+        return {"due": False, "production": live,
+                "why": (f"production last changed {days} day(s) ago "
+                        f"({live.get('date')}) — the weekly rule already covers it")}
+    by = str(call.get("by") or "the agent that made it").strip()
+    why = str(call.get("why") or call.get("note") or "").strip()
+    marked = f"v{target} marked critical by {by}"
+    if why:
+        marked += f": {why}"
+    at = str(call.get("date") or "").strip()
+    if at:
+        marked += f" (marked {at})"
+    words = str(rule.get("requested_by") or "").strip()
+    return {
+        "due": True,
+        "days": days,
+        "production": live,
+        "critical": {"version": target, "by": by, "why": why, "at": at},
+        "why": (f"{marked} — production last changed {live.get('date')} "
+                f"({days} days, inside the {max_days}-day wait); the owner's "
+                f"critical-fix rule promotes v{target}"),
+        "requested_by": (f"{words} — standing critical-fix rule ({marked}; "
+                         f"production last changed {live.get('date')}, {days} days)"),
+    }
+
+
 def _record(project: Path, state: dict, result: dict) -> None:
     """Keep an audit row for every attempt the provision makes by itself.
 
@@ -243,6 +330,7 @@ def _record(project: Path, state: dict, result: dict) -> None:
         "status": result.get("status") or "",
         "error": result.get("error") or "",
         "rule": result.get("rule") or "after-ci",
+        "critical_why": (result.get("critical") or {}).get("why", ""),
         "provisioned_by": (provision_of(project).get("requested_by") or ""),
     })
     state[LOG_KEY] = rows[-50:]
@@ -253,10 +341,11 @@ def run(project: Path, *, version: str = "", yes: bool = False,
         log=None) -> dict:
     """Execute the provision for one app.
 
-    Two recorded asks are executed here: the per-app `after_ci` provision, and
-    the team-wide weekly rule (`config/promote.json`) that fires when production
-    has not changed in more than seven days — the age read LIVE from Play, never
-    from `state.json`.
+    Three recorded asks are executed here: the per-app `after_ci` provision, the
+    team-wide weekly rule (`config/promote.json`) that fires when production has
+    not changed in more than seven days, and the critical-fix rule that lets an
+    explicitly marked RC (`rc --yes --critical`) go out inside that week — both
+    with the age read LIVE from Play, never from `state.json`.
 
     Benign no-ops are statuses, not failures: an unarmed app with fresh
     production, an app whose build is already live, and an app whose newest
@@ -273,16 +362,21 @@ def run(project: Path, *, version: str = "", yes: bool = False,
         return {"status": "nothing-to-promote",
                 "error": "the ledger names no shipped version yet"}
 
-    # The owner's weekly rule is a SECOND standing ask, and it applies whether or
-    # not this app was armed per app. Its age comes from Play live, never from
-    # `state.json` — see `weekly_due`.
+    # Two standing team-wide asks are executed here, and both apply whether or
+    # not this app was armed per app: the 7-day freshness rule, and the critical
+    # fix an owner/agent explicitly marked with `rc --yes --critical`. Both read
+    # the age from Play live, never from `state.json` — see `weekly_due` and
+    # `critical_due`.
     weekly = weekly_due(project, target=target, state=state)
-    if not prov.get("after_ci") and not weekly.get("due"):
+    critical = critical_due(project, target=target, state=state)
+    due = weekly if weekly.get("due") else (critical if critical.get("due") else None)
+    if not prov.get("after_ci") and not due:
         return {"status": "not-provisioned",
                 "error": ("this app has no owner provision for promotion after CI — "
                           f"`devteam autopromote {project.name} --on "
                           "--requested-by \"<the owner's words>\"` arms it; "
-                          f"weekly rule: {weekly.get('why') or 'not due'}")}
+                          f"weekly rule: {weekly.get('why') or 'not due'}; "
+                          f"critical fix: {critical.get('why') or 'not marked'}")}
 
     call = rc_call(state, target)
     if call is not None and not bool(call.get("rc")):
@@ -299,19 +393,26 @@ def run(project: Path, *, version: str = "", yes: bool = False,
         _record(project, state, result)
         return result
 
-    if weekly.get("due"):
-        # Live production is stale, so the weekly rule decides — including for an
-        # app nobody armed. The record still names the owner's sentence.
-        say(f"autopromote: production last changed {weekly.get('days')} day(s) ago "
-            f"({(weekly.get('production') or {}).get('date')}) — the weekly rule "
-            f"{'promotes' if yes else 'would promote'} v{target}")
-        result = promote(project, target, requested_by=weekly["requested_by"],
+    if due:
+        # A team-wide ask decides — including for an app nobody armed. The record
+        # still names the owner's sentence (and, for a critical fix, the marker's
+        # author and why), never just a boolean.
+        verb = "promotes" if yes else "would promote"
+        if due is critical:
+            say(f"autopromote: {critical['why']} — the critical-fix rule {verb} v{target}")
+        else:
+            say(f"autopromote: production last changed {weekly.get('days')} day(s) ago "
+                f"({(weekly.get('production') or {}).get('date')}) — the weekly rule "
+                f"{verb} v{target}")
+        result = promote(project, target, requested_by=due["requested_by"],
                          notes_file=None, dry_run=not yes, log=say)
-        result["rule"] = "weekly"
-        result["production_before"] = weekly.get("production") or {}
+        result["rule"] = "critical" if due is critical else "weekly"
+        result["production_before"] = due.get("production") or {}
+        if due is critical:
+            result["critical"] = critical.get("critical") or {}
     else:
         # `already_promoted` is a state-ledger shortcut for the armed path; the
-        # weekly path above already asked Play live, so it never needs it.
+        # two team-wide paths above already asked Play live, so they need it not.
         if already_promoted(state, target):
             return {"status": "already-promoted", "version": target,
                     "error": f"v{target} is already on production"}
@@ -339,6 +440,9 @@ def line(project: Path) -> str:
     weekly = (f"; weekly rule: newest release candidate goes out when production is "
               f"more than {rule.get('max_days')} days old (read live from Play)"
               if rule.get("max_days") else "")
+    if critical_rule().get("enabled"):
+        weekly += ("; critical fix: a release candidate marked `rc --yes --critical` "
+                   "goes out inside that week, with its author and why recorded")
     if prov.get("after_ci"):
         words = str(prov.get("requested_by") or "").strip()
         return (f"promote:    PROVISIONED after CI — newest release candidate goes to "
