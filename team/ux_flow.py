@@ -729,6 +729,32 @@ def _sheet(stills: list[Path], out: Path) -> Path | None:
     return out
 
 
+def _deterministic_decision(flow: dict, texts: list[str], step: int) -> dict:
+    """Judge a declared screen from the accessibility tree, with no model call.
+
+    A journey that needs no navigation can be proven without a vision model: the
+    words on the device are stronger evidence than a picture a model describes.
+    A flow opts in with `assert_text`; nothing reaches `done` until every declared
+    fact is read from the screen. This is an additive mode, never the default.
+    """
+    wanted = [str(x) for x in (flow.get("assert_text") or []) if str(x).strip()]
+    if not wanted:
+        raise SystemExit(
+            f"ux-flow: --via deterministic needs assert_text on flow {flow['id']}")
+    seen = " ".join(" ".join(str(t).split()).lower() for t in texts)
+    missing = [w for w in wanted if " ".join(w.split()).lower() not in seen]
+    if not missing:
+        return {"action": "done",
+                "why": "the screen itself states: " + "; ".join(wanted),
+                "reaction": {"line": "The declared facts are on screen: "
+                             + ", ".join(wanted), "kind": "clear"}}
+    if step < 3:
+        return {"action": "wait", "seconds": 3,
+                "why": "waiting for the declared facts to appear on screen"}
+    return {"action": "stuck",
+            "why": "the screen never showed: " + "; ".join(missing)}
+
+
 def audit_flow(project: Path, flow: dict, serial: str, log=None,
                max_steps: int | None = None, via: str = "api",
                commit: str = "") -> dict:
@@ -811,6 +837,7 @@ def audit_flow(project: Path, flow: dict, serial: str, log=None,
     filled: set[str] = set()
     frame_digests: list[str] = []
     model_calls = 0
+    step_no = 0
     live_reactions: list[dict] = []
     seen_texts: dict[int, list[str]] = {}
     typed = 0
@@ -821,6 +848,7 @@ def audit_flow(project: Path, flow: dict, serial: str, log=None,
     _write_record(project, {"flow": fid, "step": 0, "verdict": "", "state": "running"})
 
     for step in range(1, cap + 1):
+        step_no = step
         if time.monotonic() > deadline:
             outcome, reason = "timeout", f"the {int(flow.get('seconds') or DEFAULT_SECONDS)}s cap was reached"
             break
@@ -911,7 +939,8 @@ def audit_flow(project: Path, flow: dict, serial: str, log=None,
                                    daemon=True)
         watcher.start()
         try:
-            decision = _ask(cfg, prompt, still)
+            decision = (_deterministic_decision(flow, seen_texts[step], step)
+                        if via == "deterministic" else _ask(cfg, prompt, still))
         finally:
             stop.set()
             watcher.join(timeout=6)
@@ -1156,7 +1185,16 @@ def audit_flow(project: Path, flow: dict, serial: str, log=None,
     sheet_path = _sheet(stills, out_dir / f"{_slug(fid)}-trajectory.png")
     verdict = {"goal_reached": outcome == "done", "verdict": "", "reactions": [],
                "defects": [], "premium": []}
-    if outcome == "error":
+    if via == "deterministic":
+        # The accessibility tree is the evidence; no model is asked to describe a
+        # picture it cannot verify. An opt-in flow declared the facts up front.
+        verdict["goal_reached"] = outcome == "done"
+        verdict["verdict"] = (
+            "The screen itself stated every declared fact on the device: "
+            + "; ".join(str(x) for x in (flow.get("assert_text") or []))
+            if outcome == "done" else
+            f"the declared facts never appeared on screen: {reason}")
+    elif outcome == "error":
         # The DRIVER failed (a malformed decision, a tap it could not place). Asking
         # the judge to describe a journey that never happened produced invented
         # P0s from a single screenshot, so the error is reported as itself.
@@ -1330,7 +1368,7 @@ def store(project: Path, result: dict, log=None) -> dict:
 # --------------------------------------------------------------------------- #
 def run(project: Path, only: str | None = None, log=None, avd: str | None = None,
         keep_emulator: bool = False, max_steps: int | None = None,
-        worktree: Path | None = None) -> dict:
+        worktree: Path | None = None, via: str = "api") -> dict:
     """Audit every goal-declared flow (or one), on a device this pass owns."""
     from . import emulator
 
@@ -1389,7 +1427,7 @@ def run(project: Path, only: str | None = None, log=None, avd: str | None = None
             try:
                 res = audit_flow(
                     project, flow, serial, log=log, max_steps=max_steps,
-                    commit=walked_commit)
+                    via=via, commit=walked_commit)
             except SystemExit as exc:
                 failed.append({"id": fid, "reason": str(exc)[:300]})
                 continue

@@ -2812,6 +2812,7 @@ def cmd_ux_flow(args: argparse.Namespace) -> int:
                       avd=getattr(args, "avd", None),
                       keep_emulator=getattr(args, "keep_emulator", False),
                       max_steps=getattr(args, "max_steps", None),
+                      via=getattr(args, "via", "api"),
                       worktree=(Path(args.worktree).expanduser()
                                 if getattr(args, "worktree", None) else None))
     if not res["planned"]:
@@ -6633,9 +6634,10 @@ def main() -> None:
     uf.add_argument("--worktree", metavar="PATH",
                     help="audit THIS task worktree instead of origin/main — the point is "
                          "to walk a change before it is merged (and before CI)")
-    uf.add_argument("--via", choices=["api"], default="api",
-                    help="the vision model that navigates (the API; browser Gemini is "
-                         "the asset maker, not a navigator)")
+    uf.add_argument("--via", choices=["api", "deterministic"], default="api",
+                    help="api: a vision model navigates; deterministic: a flow that "
+                         "declares assert_text is judged from the device's own "
+                         "accessibility tree, with no model call")
     uf.add_argument("--camera-poster", metavar="IMAGE",
                     help="put this image on the emulator's virtual-scene wall so a "
                          "camera-only journey (e.g. a shelf photo) has a real frame to "

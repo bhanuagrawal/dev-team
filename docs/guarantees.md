@@ -58,6 +58,13 @@ refuses.
    predates their screen — advisory, because the gate only needs the change
    walked. `ux-audit` stills, `ux-video` replays, storefront review and
    design drift are **advisory**: they inform the run, they never gate a release.
+   **A journey that needs no navigation may be judged without a vision model**
+   (2026-11-26, when the configured vision provider hit its monthly quota mid-run):
+   `devteam ux-flow <project> --via deterministic` is an OPT-IN mode for a flow
+   that declares `assert_text` — the walk launches the journey on the real device,
+   reads the accessibility tree and reaches `done` only when every declared fact
+   is on screen. It is never the default and it cannot judge a journey that needs
+   model-driven taps; it changes who reads the screen, not what counts as evidence.
    **THE SCREEN IS NOT THE SERVER** (2026-11-22). A walk proves what the app drew,
    and an app draws what the deployed backend sent: 1.0.89-rc.2 shipped a deal
    panel whose feedback routes did not exist on the live service and whose offer
