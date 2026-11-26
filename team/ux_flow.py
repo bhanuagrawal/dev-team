@@ -527,13 +527,29 @@ def audit_account(project: Path, root: Path | None = None) -> dict:
             "profile": dict(data.get("profile") or {})}
 
 
-def _launch(serial: str, pkg: str) -> None:
+def _launch(serial: str, pkg: str, flow: dict | None = None) -> None:
     """Open the app the way a reader does — no base URL, no seated reader.
 
     An audit runs against the backend the build ships with, so there is nothing
     to point anywhere: the app's own origin answers. Signing in is the walk's
     own work (the debug build's email/password door), using the audit account.
+
+    A journey that begins OUTSIDE the app (an "Open with" file, a deep link, a
+    share-sheet hand-off) cannot be reached through the launcher. A flow may
+    declare `launch_command`: a list of raw `adb` arguments that put the app in
+    that journey's starting state. It is generic (no app name in team code) and
+    runs instead of the monkey launch; the rest of the walk is unchanged. A
+    malformed command is refused rather than silently falling back to the
+    launcher, because a walk that started on the wrong screen proves nothing.
     """
+    command = (flow or {}).get("launch_command")
+    if command is not None:
+        if (not isinstance(command, list) or not command
+                or not all(isinstance(x, str) for x in command)):
+            raise SystemExit(
+                "ux-flow: launch_command must be a non-empty list of adb arguments")
+        _adb(serial, command, timeout=45)
+        return
     _adb(serial, ["shell", "monkey", "-p", pkg, "-c",
                   "android.intent.category.LAUNCHER", "1"], timeout=45)
 
@@ -746,7 +762,7 @@ def audit_flow(project: Path, flow: dict, serial: str, log=None,
     # the app asks for it, or the audit meets a system dialog it cannot tap.
     for permission in ("android.permission.CAMERA",):
         _adb(serial, ["shell", "pm", "grant", pkg, permission], timeout=30)
-    _launch(serial, pkg)
+    _launch(serial, pkg, flow)
     opening_texts: list[str] = []
     settled, waited = _settle(serial, pkg, seen=opening_texts)
     if not settled:
@@ -756,7 +772,7 @@ def audit_flow(project: Path, flow: dict, serial: str, log=None,
         # second attempt is the same launch; only the patience changes.
         if log:
             log(f"~ ux-flow: '{fid}' did not settle in {waited:.1f}s — relaunching once")
-        _launch(serial, pkg)
+        _launch(serial, pkg, flow)
         settled, waited = _settle(serial, pkg, timeout=30.0, seen=opening_texts)
     if log:
         log(f"~ ux-flow: '{fid}' launch screen settled after {waited:.1f}s"
